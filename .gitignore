@@ -3,6 +3,7 @@
 *.so
 *.dSYM/
 rfs
+/raf
 /redis-qmd
 mount/agent-filesystem-mount
 mount/agent-filesystem-nfs
