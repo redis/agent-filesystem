@@ -81,12 +81,6 @@ If you want a second line of work:
 ./raf workspace fork my-repo my-repo-experiment
 ```
 
-And if you want the command-oriented workflow instead of a mounted folder:
-
-```bash
-./raf workspace run my-repo -- bash
-```
-
 ## The Basic Model
 
 RAF has two main concepts:
@@ -122,28 +116,6 @@ On macOS RAF uses NFS. On Linux RAF uses FUSE.
 
 If no workspace exists yet, setup will ask for one and create it before mounting.
 
-## `workspace run`
-
-`raf workspace run` is the command-oriented workflow.
-
-It:
-
-- makes sure the workspace exists locally
-- runs your command with that workspace as the current working directory
-- captures any changes and saves them back to Redis when the command exits
-
-So this:
-
-```bash
-./raf workspace run my-repo -- go test ./...
-```
-
-means:
-
-- open the workspace locally
-- run `go test ./...` inside it
-- save any file changes back to the workspace state
-
 ## Most Useful Commands
 
 ```bash
@@ -174,10 +146,22 @@ For command help:
 ## What Gets Stored Where
 
 - Redis stores the saved workspace state
-- RAF creates local working copies under `~/.raf/workspaces`
+- your chosen mountpoint is the live local folder in mounted filesystem mode
+- RAF creates local working copies under `~/.raf/workspaces` only for `workspace run`
 - `raf.config.json` stores local CLI configuration next to the `raf` binary
 
-You can think of Redis as the saved source of truth, and the local working copy as the place where real tools run.
+You can think of Redis as the saved source of truth.
+
+In mounted filesystem mode:
+
+- you work in your chosen mountpoint
+- you can mostly ignore `~/.raf/workspaces`
+
+In `workspace run` mode:
+
+- RAF materializes a local working copy under `~/.raf/workspaces`
+- your command runs there
+- RAF saves changes back to Redis when the command exits
 
 ## Build
 
@@ -206,6 +190,33 @@ make module
 make mount
 make clean
 make uninstall
+```
+
+## Alternative: `workspace run`
+
+If you do not want a mounted filesystem, RAF also has a command-oriented mode:
+
+```bash
+./raf workspace run my-repo -- bash
+```
+
+This is useful when:
+
+- you want to run one command and save the results back automatically
+- you are driving RAF from another agent or script
+- you do not want to keep a mounted directory around
+- you want a more explicit “open, run, save” workflow
+
+`workspace run`:
+
+- makes sure the workspace exists locally
+- runs your command with that workspace as the current working directory
+- captures any changes and saves them back to Redis when the command exits
+
+For example:
+
+```bash
+./raf workspace run my-repo -- go test ./...
 ```
 
 ## Repo Contents
