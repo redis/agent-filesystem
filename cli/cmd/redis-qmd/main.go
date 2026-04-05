@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/redis-fs/cli/qmd"
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/cli/qmd"
 )
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:6379", "Redis host:port")
 	db := flag.Int("db", 0, "Redis DB")
-	key := flag.String("key", "", "redis-fs key name (required)")
+	key := flag.String("key", "", "agent-filesystem key name (required)")
 	index := flag.String("index", "", "RediSearch index name (default: rfs_idx:{<key>})")
 	flag.Parse()
 

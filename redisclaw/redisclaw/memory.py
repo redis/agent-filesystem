@@ -1,7 +1,7 @@
 """
 Memory Manager for RedisClaw - OpenClaw-style markdown memory system.
 
-Memory files stored in Redis-FS:
+Memory files stored in Agent Filesystem:
 - /memory/MEMORY.md     - Long-term curated memory (always in context)
 - /memory/SOUL.md       - AI personality, rules, tone
 - /memory/USER.md       - User preferences, patterns, info
@@ -95,7 +95,7 @@ I am RedisClaw, a coding assistant with persistent memory.
 ## Role
 
 I help with coding tasks, file management, and shell operations
-in a sandboxed environment backed by Redis-FS.
+in a sandboxed environment backed by Agent Filesystem.
 
 ## Capabilities
 
@@ -151,14 +151,14 @@ DEFAULTS = {
 
 @dataclass
 class MemoryManager:
-    """Manages markdown memory files stored in Redis-FS."""
+    """Manages markdown memory files stored in Agent Filesystem."""
 
     redis_client: redis.Redis
     redis_key: str = "sandbox"
     _cache: dict = field(default_factory=dict)
 
     def _fs_cmd(self, *args) -> Any:
-        """Execute a Redis-FS command."""
+        """Execute a Agent Filesystem command."""
         return self.redis_client.execute_command(*args)
 
     def _ensure_memory_dir(self) -> None:
@@ -169,7 +169,7 @@ class MemoryManager:
             pass  # Directory already exists
 
     def _file_exists(self, path: str) -> bool:
-        """Check if a file exists in Redis-FS."""
+        """Check if a file exists in Agent Filesystem."""
         try:
             self._fs_cmd("FS.STAT", self.redis_key, path)
             return True
@@ -177,7 +177,7 @@ class MemoryManager:
             return False
 
     def read_file(self, path: str) -> str | None:
-        """Read a file from Redis-FS."""
+        """Read a file from Agent Filesystem."""
         try:
             content = self._fs_cmd("FS.CAT", self.redis_key, path)
             return content.decode() if isinstance(content, bytes) else content
@@ -185,7 +185,7 @@ class MemoryManager:
             return None
 
     def write_file(self, path: str, content: str) -> bool:
-        """Write content to a file in Redis-FS."""
+        """Write content to a file in Agent Filesystem."""
         try:
             self._ensure_memory_dir()
             self._fs_cmd("FS.ECHO", self.redis_key, path, content)

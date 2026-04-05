@@ -1,4 +1,4 @@
-"""Redis-FS MCP Server - Expose Redis-FS as MCP tools."""
+"""Agent Filesystem MCP Server - Expose Agent Filesystem as MCP tools."""
 
 from mcp_server.server import main, create_server
 

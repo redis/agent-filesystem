@@ -1,14 +1,14 @@
-# Task 003: MCP Server (redis-fs-mcp)
+# Task 003: MCP Server (agent-filesystem-mcp)
 
 ## Overview
 
-Create an MCP (Model Context Protocol) server that exposes Redis-FS operations as tools for Claude and other MCP-compatible agents. This provides native tool integration without requiring the agent to use redis-cli.
+Create an MCP (Model Context Protocol) server that exposes Agent Filesystem operations as tools for Claude and other MCP-compatible agents. This provides native tool integration without requiring the agent to use redis-cli.
 
 ## Design Goals
 
-1. **Uses Python library**: Built on top of `redis_fs` package (Task 002)
+1. **Uses Python library**: Built on top of `agent_filesystem` package (Task 002)
 2. **Standard MCP protocol**: Compatible with Claude Desktop, Claude Code, and other MCP clients
-3. **Complete coverage**: Exposes all useful Redis-FS operations as tools
+3. **Complete coverage**: Exposes all useful Agent Filesystem operations as tools
 4. **Clear documentation**: Each tool has a description that helps the agent understand when to use it
 
 ## Tool Definitions
@@ -89,15 +89,15 @@ mcp_server/
 ```python
 # server.py
 from mcp.server import Server
-from redis_fs import RedisFS
+from agent_filesystem import AgentFilesystem
 import redis
 
-app = Server("redis-fs")
+app = Server("agent-filesystem")
 
 @app.tool()
 async def fs_read(key: str, path: str) -> str:
-    """Read entire file content from Redis-FS."""
-    fs = RedisFS(redis.Redis(), key)
+    """Read entire file content from Agent Filesystem."""
+    fs = AgentFilesystem(redis.Redis(), key)
     content = fs.read(path)
     return content if content else ""
 
@@ -114,7 +114,7 @@ Create `examples/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "redis-fs": {
+    "agent-filesystem": {
       "command": "python",
       "args": ["-m", "mcp_server"],
       "env": {
@@ -131,7 +131,7 @@ Create `examples/claude_desktop_config.json`:
 mcp = ["mcp>=1.0.0"]
 
 [project.scripts]
-redis-fs-mcp = "mcp_server:main"
+agent-filesystem-mcp = "mcp_server:main"
 ```
 
 ## Usage
@@ -141,8 +141,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
-    "redis-fs": {
-      "command": "redis-fs-mcp",
+    "agent-filesystem": {
+      "command": "agent-filesystem-mcp",
       "env": {"REDIS_URL": "redis://localhost:6379"}
     }
   }
@@ -155,7 +155,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 python -m mcp_server
 
 # Or if installed
-redis-fs-mcp
+agent-filesystem-mcp
 ```
 
 ## Success Criteria
@@ -164,4 +164,3 @@ redis-fs-mcp
 - [ ] Tools delegate to Python library correctly
 - [ ] Example config works with Claude Desktop
 - [ ] Tests pass for all tool invocations
-

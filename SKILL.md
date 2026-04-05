@@ -1,8 +1,8 @@
-# Redis-FS
+# Agent Filesystem
 
-Redis-FS is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
+Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
 
-**Why Redis-FS:**
+**Why Agent Filesystem:**
 - **Persistence** — data survives process restarts via RDB/AOF
 - **Multi-client access** — any Redis client can read/write the same volume concurrently
 - **Atomic operations** — every FS.* command is atomic, no partial writes
@@ -14,8 +14,8 @@ Redis-FS is a Redis module that provides a complete POSIX-like filesystem as a n
 ## Build
 
 ```bash
-cd /home/ubuntu/git/redis-fs
-make          # builds module/fs.so + mount/redis-fs-mount + rfs
+cd /home/ubuntu/git/agent-filesystem
+make          # builds module/fs.so + mount/agent-filesystem-mount + rfs
 make module   # builds only the Redis module (module/fs.so)
 make mount    # builds only the FUSE mount binary
 make cli      # builds only the rfs CLI
@@ -45,20 +45,20 @@ Skip the interactive wizard by writing the config file directly.
 ### 1. Build
 
 ```bash
-cd /home/ubuntu/git/redis-fs && make
+cd /home/ubuntu/git/agent-filesystem && make
 ```
 
 ### 2. Write config
 
 ```bash
-cat > /home/ubuntu/git/redis-fs/raf.config.json << 'EOF'
+cat > /home/ubuntu/git/agent-filesystem/raf.config.json << 'EOF'
 {
   "useExistingRedis": false,
   "redisAddr": "localhost:6379",
   "redisPassword": "",
   "redisDB": 0,
   "currentWorkspace": "my-workspace",
-  "mountpoint": "/home/ubuntu/redis-fs",
+  "mountpoint": "/home/ubuntu/agent-filesystem",
   "readOnly": false,
   "allowOther": false,
   "redisServerBin": "",
@@ -82,7 +82,7 @@ Empty strings for `redisServerBin`, `modulePath`, and `mountBin` are auto-detect
 
 ```bash
 ./raf status
-ls ~/redis-fs
+ls ~/agent-filesystem
 ```
 
 ## Configuration Reference
@@ -101,7 +101,7 @@ File: `raf.config.json` (next to the `raf` binary in the repo root)
 | `allowOther` | bool | `false` | Allow other system users to access the mount |
 | `redisServerBin` | string | auto | Path to `redis-server` (only used when `useExistingRedis` is `false`) |
 | `modulePath` | string | auto | Path to `fs.so` module |
-| `mountBin` | string | auto | Path to `redis-fs-mount` binary |
+| `mountBin` | string | auto | Path to `agent-filesystem-mount` binary |
 | `redisLog` | string | `"/tmp/rfs-redis.log"` | Log file for managed Redis |
 | `mountLog` | string | `"/tmp/rfs-mount.log"` | Log file for mount daemon |
 
@@ -140,7 +140,7 @@ Replace `vol` below with your chosen key name.
 
 ### Quick reference
 
-| Unix command | Redis-FS equivalent | Notes |
+| Unix command | Agent Filesystem equivalent | Notes |
 |---|---|---|
 | `echo "text" > file` | `FS.ECHO vol /file "text"` | Creates parents automatically |
 | `echo "text" >> file` | `FS.ECHO vol /file "text" APPEND` | Also `FS.APPEND` |
@@ -279,6 +279,6 @@ redis-cli RENAME staging production   # rename a volume
 | `no configuration found` | Run `rfs setup` or create `rfs.config.json` next to the binary |
 | `module not loaded` | Load with: `redis-cli MODULE LOAD /path/to/module/fs.so` |
 | `cannot find redis-server` | Install Redis, or set `useExistingRedis: true` |
-| `cannot find redis-fs-mount` | Run `make mount` in the repo root |
+| `cannot find agent-filesystem-mount` | Run `make mount` in the repo root |
 | `mount did not become ready` | Check `mountLog` path for errors |
-| `redis-fs is already running` | Run `rfs down` first |
+| `agent-filesystem is already running` | Run `rfs down` first |

@@ -1,12 +1,12 @@
-all: redis-fs-mount redis-fs-nfs
+all: agent-filesystem-mount agent-filesystem-nfs
 
-redis-fs-mount:
-	go build -o redis-fs-mount ./cmd/redis-fs-mount
+agent-filesystem-mount:
+	go build -o agent-filesystem-mount ./cmd/agent-filesystem-mount
 
-redis-fs-nfs:
-	go build -o redis-fs-nfs ./cmd/redis-fs-nfs
+agent-filesystem-nfs:
+	go build -o agent-filesystem-nfs ./cmd/agent-filesystem-nfs
 
 clean:
-	rm -f redis-fs-mount redis-fs-nfs
+	rm -f agent-filesystem-mount agent-filesystem-nfs
 
-.PHONY: all clean redis-fs-mount redis-fs-nfs
+.PHONY: all clean agent-filesystem-mount agent-filesystem-nfs

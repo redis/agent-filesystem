@@ -1,4 +1,4 @@
-// Command sandbox runs the Redis-FS sandbox server.
+// Command sandbox runs the Agent Filesystem sandbox server.
 package main
 
 import (
@@ -11,8 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/redis-fs/sandbox/internal/api"
-	"github.com/redis-fs/sandbox/internal/executor"
+	"github.com/rowantrollope/agent-filesystem/sandbox/internal/api"
+	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
 )
 
 func main() {
@@ -65,4 +65,3 @@ func main() {
 		log.Fatalf("Server error: %v", err)
 	}
 }
-

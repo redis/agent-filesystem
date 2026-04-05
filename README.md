@@ -400,8 +400,8 @@ There is no automated end-to-end test suite yet for the native Redis module side
 The repository still contains:
 
 - `module/fs.c`: Redis module implementing the original `FS.*` command family
-- `mount/redis-fs-mount`: FUSE daemon
-- `mount/redis-fs-nfs`: NFS daemon
+- `mount/agent-filesystem-mount`: FUSE daemon
+- `mount/agent-filesystem-nfs`: NFS daemon
 - `raf up/down/status/migrate`: the original runtime and migration flow
 
 Those pieces remain useful, but RAF is now the main workspace-oriented interface for branching, savepoints, rollback, and shell-first execution.

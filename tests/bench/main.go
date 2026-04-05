@@ -1,10 +1,10 @@
-// redis-fs benchmark suite.
+// agent-filesystem benchmark suite.
 //
 // Usage:
 //
-//	go run . --mount /path/to/redis-fs-mount [--rounds 10] [--keep]
+//	go run . --mount /path/to/agent-filesystem-mount [--rounds 10] [--keep]
 //
-// Creates a synthetic corpus in a local temp dir and in the mounted redis-fs
+// Creates a synthetic corpus in a local temp dir and in the mounted agent-filesystem
 // path, then times identical OS-level operations against both, printing a
 // comparison table.
 package main
@@ -378,7 +378,7 @@ func generateCorpus() []fileSpec {
 
 	// Large binary-ish file (200KB of repeated pattern)
 	const largeSize = 200 * 1024
-	pattern := strings.Repeat("redis-fs-bench-data-padding-0123456789abcdef\n", 1)
+	pattern := strings.Repeat("agent-filesystem-bench-data-padding-0123456789abcdef\n", 1)
 	var large strings.Builder
 	for large.Len() < largeSize {
 		large.WriteString(pattern)
@@ -691,11 +691,11 @@ func benchMkdirRmdir(root string) func() error {
 // ── reporting ─────────────────────────────────────────────────────────────────
 
 type result struct {
-	name       string
-	localMed   float64
-	localMax   float64
-	mountMed   float64
-	mountMax   float64
+	name     string
+	localMed float64
+	localMax float64
+	mountMed float64
+	mountMax float64
 }
 
 func (r result) ratio() float64 {
@@ -740,7 +740,7 @@ func printResults(results []result) {
 // ── main ──────────────────────────────────────────────────────────────────────
 
 func main() {
-	mountPath := flag.String("mount", "", "path to redis-fs mountpoint (required)")
+	mountPath := flag.String("mount", "", "path to agent-filesystem mountpoint (required)")
 	rounds := flag.Int("rounds", 10, "benchmark repetitions per operation")
 	keep := flag.Bool("keep", false, "do not delete corpus after run")
 	flag.Parse()

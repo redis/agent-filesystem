@@ -450,7 +450,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	if mountDefault != "" {
 		promptHint = "  " + clr(ansiDim, "Press enter to keep "+mountDefault+", or type none for no mounted filesystem")
 	} else if strings.TrimSpace(cfg.CurrentWorkspace) == "" {
-		promptHint = "  " + clr(ansiDim, "Leave empty for no mounted filesystem. Select a workspace first with '"+filepath.Base(os.Args[0])+" workspace use <workspace>'.")
+		promptHint = "  " + clr(ansiDim, "Leave empty for no mounted filesystem. If you continue, RAF will ask for a workspace name and create it if needed.")
 	}
 	mp, err := promptString(r, out,
 		"  Choose local mount point\n"+promptHint, mountDefault)
@@ -464,7 +464,24 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		return "", nil
 	}
 	if strings.TrimSpace(cfg.CurrentWorkspace) == "" {
-		return "", fmt.Errorf("select a current workspace first with '%s workspace use <workspace>' before enabling a mounted filesystem", filepath.Base(os.Args[0]))
+		workspaceDefault := strings.TrimSpace(filepath.Base(mp))
+		if workspaceDefault == "." || workspaceDefault == string(os.PathSeparator) {
+			workspaceDefault = ""
+		}
+		workspace, err := promptString(r, out,
+			"\n  Workspace name\n"+
+				"  "+clr(ansiDim, "RAF will create this workspace before mounting if it does not already exist"), workspaceDefault)
+		if err != nil {
+			return "", err
+		}
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			return "", fmt.Errorf("workspace name cannot be empty when enabling a mounted filesystem")
+		}
+		if err := validateRAFName("workspace", workspace); err != nil {
+			return "", err
+		}
+		cfg.CurrentWorkspace = workspace
 	}
 	cfg.Mountpoint, err = expandPath(mp)
 	if err != nil {
@@ -583,7 +600,7 @@ func cleanupStaleMount(cfg config) error {
 
 func isRedisFSMountEntry(entry string) bool {
 	v := strings.ToLower(entry)
-	return strings.Contains(v, "fuse.redis-fs") || strings.Contains(v, "redis-fs on ") || strings.Contains(v, " redis-fs ")
+	return strings.Contains(v, "fuse.agent-filesystem") || strings.Contains(v, "agent-filesystem on ") || strings.Contains(v, " agent-filesystem ")
 }
 
 // ---------------------------------------------------------------------------
@@ -1651,13 +1668,13 @@ func resolveConfigPaths(cfg *config) error {
 		switch backendName {
 		case mountBackendFuse:
 			if cfg.MountBin == "" {
-				defMountBin := filepath.Join(dir, "mount", "redis-fs-mount")
+				defMountBin := filepath.Join(dir, "mount", "agent-filesystem-mount")
 				if _, err := os.Stat(defMountBin); err != nil {
-					defMountBin = "redis-fs-mount"
+					defMountBin = "agent-filesystem-mount"
 				}
 				resolved, err := resolveBinary(defMountBin)
 				if err != nil {
-					return fmt.Errorf("cannot find redis-fs-mount binary\n  Build it with: make mount")
+					return fmt.Errorf("cannot find agent-filesystem-mount binary\n  Build it with: make mount")
 				}
 				cfg.MountBin = resolved
 			}
@@ -1669,13 +1686,13 @@ func resolveConfigPaths(cfg *config) error {
 				cfg.NFSPort = 20490
 			}
 			if cfg.NFSBin == "" {
-				defNFSBin := filepath.Join(dir, "mount", "redis-fs-nfs")
+				defNFSBin := filepath.Join(dir, "mount", "agent-filesystem-nfs")
 				if _, err := os.Stat(defNFSBin); err != nil {
-					defNFSBin = "redis-fs-nfs"
+					defNFSBin = "agent-filesystem-nfs"
 				}
 				resolved, err := resolveBinary(defNFSBin)
 				if err != nil {
-					return fmt.Errorf("cannot find redis-fs-nfs binary\n  Build it with: make mount")
+					return fmt.Errorf("cannot find agent-filesystem-nfs binary\n  Build it with: make mount")
 				}
 				cfg.NFSBin = resolved
 			}

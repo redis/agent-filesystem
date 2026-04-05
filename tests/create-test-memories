@@ -30,7 +30,7 @@ BODIES=(
   "Ran load tests against the filesystem module with 50k files across 200 directories. P99 read latency was 0.8ms, write latency 1.2ms. Bloom filter grep showed 40x speedup over naive scan on a 10GB dataset."
   "Documented the blue-green deployment process. Redis key migration happens via DUMP/RESTORE across instances. Rollback window is 15 minutes. Health checks must pass for 60 seconds before traffic cutover."
   "Established conventions: PRs require at least one approval, tests must cover happy path and one error case, no commented-out code in main branch. Linter config was unified across all services."
-  "Migration from PostgreSQL to Redis-FS will proceed in three phases. Phase 1 migrates read-only reference data. Phase 2 handles user-generated content with dual-write. Phase 3 cuts over and decommissions the old schema."
+  "Migration from PostgreSQL to Agent Filesystem will proceed in three phases. Phase 1 migrates read-only reference data. Phase 2 handles user-generated content with dual-write. Phase 3 cuts over and decommissions the old schema."
   "Penetration testing revealed two medium-severity issues: an SSRF vector in the webhook handler and insufficient input validation on file paths. Both patched and verified. No critical findings."
   "Highlights from this week: auth service hit 99.99% uptime, new caching layer reduced API response times by 35%, and the intern shipped their first production feature (congrats!). Blockers: CI pipeline needs GPU runners for ML tests."
   "Monthly cloud spend came in at \$4,200, down 12% from last month. Biggest savings from right-sizing Redis instances and switching to reserved capacity. Spot instances for batch jobs saved another \$300."

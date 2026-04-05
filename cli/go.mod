@@ -1,10 +1,10 @@
-module github.com/redis-fs/cli
+module github.com/rowantrollope/agent-filesystem/cli
 
 go 1.22.2
 
 require github.com/redis/go-redis/v9 v9.18.0
 
-require github.com/redis-fs/mount v0.0.0
+require github.com/rowantrollope/agent-filesystem/mount v0.0.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0 // indirect
@@ -15,4 +15,4 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 )
 
-replace github.com/redis-fs/mount => ../mount
+replace github.com/rowantrollope/agent-filesystem/mount => ../mount

@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/redis-fs/mount/internal/cache"
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/cache"
 )
 
 const maxSymlinkDepth = 40
@@ -1107,7 +1107,7 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	fields := map[string]interface{}{
 		"type": inode.Type, "mode": inode.Mode,
 		"uid": inode.UID, "gid": inode.GID,
-		"size": inode.Size,
+		"size":     inode.Size,
 		"ctime_ms": inode.CtimeMs, "mtime_ms": inode.MtimeMs, "atime_ms": inode.AtimeMs,
 		"content": inode.Content,
 	}
@@ -1156,7 +1156,7 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	fields := map[string]interface{}{
 		"type": inode.Type, "mode": inode.Mode,
 		"uid": inode.UID, "gid": inode.GID,
-		"size": inode.Size,
+		"size":     inode.Size,
 		"ctime_ms": inode.CtimeMs, "mtime_ms": inode.MtimeMs, "atime_ms": inode.AtimeMs,
 		"content": inode.Content,
 	}
@@ -1177,7 +1177,7 @@ func (c *nativeClient) createFile(ctx context.Context, p string, content string,
 	fields := map[string]interface{}{
 		"type": "file", "mode": mode,
 		"uid": uint32(0), "gid": uint32(0),
-		"size": int64(len(content)),
+		"size":     int64(len(content)),
 		"ctime_ms": now, "mtime_ms": now, "atime_ms": now,
 		"content": content,
 	}
@@ -1205,7 +1205,7 @@ func (c *nativeClient) createDirNoParents(ctx context.Context, p string, mode ui
 	fields := map[string]interface{}{
 		"type": "dir", "mode": mode,
 		"uid": uint32(0), "gid": uint32(0),
-		"size": int64(0),
+		"size":     int64(0),
 		"ctime_ms": now, "mtime_ms": now, "atime_ms": now,
 	}
 	c.invalidateInode(p)
@@ -1405,7 +1405,7 @@ func (c *nativeClient) saveInodeMeta(ctx context.Context, p string, inode *inode
 	fields := map[string]interface{}{
 		"type": inode.Type, "mode": inode.Mode,
 		"uid": inode.UID, "gid": inode.GID,
-		"size": inode.Size,
+		"size":     inode.Size,
 		"ctime_ms": inode.CtimeMs, "mtime_ms": inode.MtimeMs, "atime_ms": inode.AtimeMs,
 	}
 	if inode.Type == "symlink" {

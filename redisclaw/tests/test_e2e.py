@@ -68,7 +68,7 @@ class TestSandboxConnection:
 
 
 class TestRedisConnection:
-    """Test Redis-FS connectivity."""
+    """Test Agent Filesystem connectivity."""
     
     def test_ping(self, redis_client):
         """Redis responds to ping."""
@@ -108,7 +108,7 @@ print(2 + 2)
     def test_json_file(self, tools, redis_client):
         """Write JSON via Redis, parse in sandbox."""
         import json
-        data = {"name": "RedisClaw", "version": "1.0", "features": ["sandbox", "redis-fs"]}
+        data = {"name": "RedisClaw", "version": "1.0", "features": ["sandbox", "agent-filesystem"]}
         redis_client.execute_command("FS.ECHO", FS_KEY, "/config.json", json.dumps(data))
         
         result = tools.execute("run_command", {

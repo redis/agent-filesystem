@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Client wraps RedisSearch operations for redis-fs keys.
+// Client wraps RedisSearch operations for agent-filesystem keys.
 type Client struct {
 	rdb       *redis.Client
 	fsKey     string

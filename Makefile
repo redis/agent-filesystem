@@ -34,25 +34,25 @@ test: module
 
 # Install skill to all detected agents (requires Node.js/npx)
 install-skill:
-	@echo "Installing redis-fs skill to all detected agents..."
-	npx skills add . --skill redis-fs -g -y
+	@echo "Installing agent-filesystem skill to all detected agents..."
+	npx skills add . --skill agent-filesystem -g -y
 
 # Install skill to Claude Code only (no Node.js required)
 install-skill-local:
-	@mkdir -p ~/.claude/skills/redis-fs
-	@ln -sf $(PWD)/skills/redis-fs/SKILL.md ~/.claude/skills/redis-fs/SKILL.md
-	@echo "Installed redis-fs skill to ~/.claude/skills/redis-fs/"
+	@mkdir -p ~/.claude/skills/agent-filesystem
+	@ln -sf $(PWD)/skills/agent-filesystem/SKILL.md ~/.claude/skills/agent-filesystem/SKILL.md
+	@echo "Installed agent-filesystem skill to ~/.claude/skills/agent-filesystem/"
 
 # Uninstall skill from Claude Code
 uninstall-skill-local:
-	@rm -rf ~/.claude/skills/redis-fs
-	@echo "Uninstalled redis-fs skill from ~/.claude/skills/"
+	@rm -rf ~/.claude/skills/agent-filesystem
+	@echo "Uninstalled agent-filesystem skill from ~/.claude/skills/"
 
 # Build and start MCP server (HTTP) with Redis
 mcp-up:
 	docker-compose up -d --build
 	@echo ""
-	@echo "Redis-FS MCP server running at http://localhost:8089/sse"
+	@echo "Agent Filesystem MCP server running at http://localhost:8089/sse"
 	@echo "Health check: http://localhost:8089/health"
 	@echo ""
 	@echo "To add to Auggie, run: make install-mcp-auggie"
@@ -67,10 +67,10 @@ mcp-logs:
 
 # Add MCP server to Auggie CLI (HTTP transport)
 install-mcp-auggie:
-	auggie mcp add-json --replace redis-fs '{"type":"sse","url":"http://localhost:8089/sse"}'
-	@echo "Added redis-fs MCP server to Auggie (HTTP/SSE)"
+	auggie mcp add-json --replace agent-filesystem '{"type":"sse","url":"http://localhost:8089/sse"}'
+	@echo "Added agent-filesystem MCP server to Auggie (HTTP/SSE)"
 
 # Remove MCP server from Auggie CLI
 uninstall-mcp-auggie:
-	auggie mcp remove redis-fs
-	@echo "Removed redis-fs MCP server from Auggie"
+	auggie mcp remove agent-filesystem
+	@echo "Removed agent-filesystem MCP server from Auggie"

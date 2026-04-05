@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Redis-FS Sandbox Starting ==="
+echo "=== Agent Filesystem Sandbox Starting ==="
 echo "Redis: ${REDIS_ADDR}"
 echo "Key: ${REDIS_KEY}"
 echo "Mount: ${MOUNT_POINT}"
@@ -23,7 +23,7 @@ done
 
 # Mount the Redis FS in background
 echo "Mounting Redis FS key '${REDIS_KEY}' at ${MOUNT_POINT}..."
-redis-fs-mount --redis "${REDIS_ADDR}" --allow-other "${REDIS_KEY}" "${MOUNT_POINT}" &
+agent-filesystem-mount --redis "${REDIS_ADDR}" --allow-other "${REDIS_KEY}" "${MOUNT_POINT}" &
 MOUNT_PID=$!
 
 # Wait for mount to be ready - check /proc/mounts for FUSE
@@ -43,7 +43,7 @@ done
 if [ "$MOUNT_READY" -ne 1 ]; then
     echo "ERROR: Failed to mount Redis FS after 30 seconds"
     echo "Mount process:"
-    ps aux | grep redis-fs-mount || true
+    ps aux | grep agent-filesystem-mount || true
     echo "Current mounts:"
     cat /proc/mounts | grep -E "fuse|workspace" || echo "No relevant mounts found"
     exit 1

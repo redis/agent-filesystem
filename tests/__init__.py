@@ -1,2 +1,2 @@
-"""Redis-FS tests."""
+"""Agent Filesystem tests."""
 

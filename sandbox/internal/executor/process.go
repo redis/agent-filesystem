@@ -147,4 +147,3 @@ func (m *Manager) Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult
 
 	return result, nil
 }
-

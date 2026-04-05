@@ -1,4 +1,4 @@
-# Redis-FS Engineering Backlog
+# Agent Filesystem Engineering Backlog
 
 This backlog translates the review into an implementation plan with clear tickets and acceptance criteria.
 

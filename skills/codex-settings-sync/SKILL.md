@@ -1,11 +1,11 @@
 ---
 name: codex-settings-sync
-description: Use when the user wants to migrate Codex state in ~/.codex into Redis-FS and mount the same shared Codex memory/settings across multiple computers. Recommends a .rfsignore before migration and defaults to excluding worktrees, caches, logs, and temporary files.
+description: Use when the user wants to migrate Codex state in ~/.codex into Agent Filesystem and mount the same shared Codex memory/settings across multiple computers. Recommends a .rfsignore before migration and defaults to excluding worktrees, caches, logs, and temporary files.
 ---
 
 # Codex Settings Sync
 
-Use this skill when the goal is to share Codex state across machines by moving `~/.codex` into Redis-FS, then mounting that same Redis-backed volume on other computers.
+Use this skill when the goal is to share Codex state across machines by moving `~/.codex` into Agent Filesystem, then mounting that same Redis-backed volume on other computers.
 
 ## Default stance
 
@@ -19,7 +19,7 @@ Open the bundled starter ignore file at [assets/.rfsignore](assets/.rfsignore) a
 ## Migration workflow
 
 1. Ask the user to stop Codex on the machines involved, or verify that it is already closed.
-2. Ensure `redis-fs` is built with `make`.
+2. Ensure `agent-filesystem` is built with `make`.
 3. Configure `rfs` to point at the shared Redis instance.
 4. Create or update `~/.codex/.rfsignore` before migration.
 5. On the source machine, run `./raf migrate ~/.codex`.

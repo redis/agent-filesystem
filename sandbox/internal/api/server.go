@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/redis-fs/sandbox/internal/executor"
+	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
 )
 
 // Server handles HTTP requests for the sandbox.
@@ -137,4 +137,3 @@ func (s *Server) handleKill(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "killed"})
 }
-

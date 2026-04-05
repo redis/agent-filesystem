@@ -1,13 +1,13 @@
 # RedisClaw 🦀
 
-An OpenClaw-style task-solving coding agent with Redis-FS backed persistent sandbox.
+An OpenClaw-style task-solving coding agent with Agent Filesystem backed persistent sandbox.
 
 ## Features
 
 - **Task-Solving Agent Loop**: Iterates until the task is complete (like OpenClaw/Pi)
 - **Minimal Tool Set**: Bash, Read, Write, Edit, Glob, Grep, TodoWrite
 - **Session Management**: Persist and resume conversations
-- **Redis-FS Storage**: Persistent filesystem backed by Redis
+- **Agent Filesystem Storage**: Persistent filesystem backed by Redis
 - **Sandboxed Execution**: Code runs in isolated Docker container
 
 ## Quick Start
@@ -53,7 +53,7 @@ redisclaw --ls /workspace
         │                           │
         ▼                           ▼
 ┌───────────────┐          ┌───────────────┐
-│    Sandbox    │          │   Redis-FS    │
+│    Sandbox    │          │   Agent Filesystem    │
 │  (Docker)     │          │  (Storage)    │
 │               │◄────────►│               │
 │ /workspace    │   FUSE   │ Key: sandbox  │

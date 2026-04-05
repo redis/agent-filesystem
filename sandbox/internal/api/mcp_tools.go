@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/redis-fs/sandbox/internal/executor"
+	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
 )
 
 func (s *MCPServer) callTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
@@ -101,4 +101,3 @@ func (s *MCPServer) toolList() (string, error) {
 	out, _ := json.MarshalIndent(procs, "", "  ")
 	return string(out), nil
 }
-

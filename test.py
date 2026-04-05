@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test framework for Redis-FS module.
+Test framework for Agent Filesystem module.
 
 Follows the conventions of the Redis vector-sets test suite:
   - Custom TestCase base class with auto-discovery
@@ -71,7 +71,7 @@ def check_module_loaded(r):
 # ---------------------------------------------------------------------------
 
 class TestCase:
-    """Base class for all Redis-FS tests."""
+    """Base class for all Agent Filesystem tests."""
 
     def __init__(self, port):
         self.port = port
@@ -181,13 +181,13 @@ def main():
         sys.path.insert(0, project_dir)
     sys.modules["test"] = sys.modules[__name__]
 
-    parser = argparse.ArgumentParser(description="Redis-FS test runner")
+    parser = argparse.ArgumentParser(description="Agent Filesystem test runner")
     parser.add_argument("--port", type=int, default=6379,
                         help="Redis port (default 6379)")
     args = parser.parse_args()
 
     print("=" * 56)
-    print("  Redis-FS Test Suite")
+    print("  Agent Filesystem Test Suite")
     print(f"  Redis at 127.0.0.1:{args.port}, DB 9")
     print("=" * 56)
 

@@ -6,7 +6,7 @@ import (
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/redis-fs/mount/internal/client"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 // FileHandle manages buffered I/O for an open file.

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/redis-fs/sandbox/internal/executor"
+	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
 )
 
 // MCP JSON-RPC types
@@ -65,7 +65,7 @@ func (s *MCPServer) handleRequest(ctx context.Context, req *MCPRequest) *MCPResp
 		resp.Result = map[string]interface{}{
 			"protocolVersion": "2024-11-05",
 			"capabilities":    map[string]interface{}{"tools": map[string]bool{}},
-			"serverInfo":      map[string]string{"name": "redis-fs-sandbox", "version": "1.0.0"},
+			"serverInfo":      map[string]string{"name": "agent-filesystem-sandbox", "version": "1.0.0"},
 		}
 
 	case "tools/list":
@@ -147,4 +147,3 @@ func (s *MCPServer) getTools() []map[string]interface{} {
 		},
 	}
 }
-

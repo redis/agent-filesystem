@@ -125,7 +125,7 @@ func TestLoadConfigForUpAppliesOverridesWithoutSaving(t *testing.T) {
 	base.RedisDB = 0
 	base.CurrentWorkspace = "alpha"
 	base.MountBackend = mountBackendNone
-	base.NFSBin = filepath.Join(t.TempDir(), "redis-fs-nfs")
+	base.NFSBin = filepath.Join(t.TempDir(), "agent-filesystem-nfs")
 	saveTempConfig(t, base)
 
 	cfg, err := loadConfigForUp([]string{

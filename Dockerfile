@@ -1,11 +1,11 @@
-# Redis-FS Docker image
+# Agent Filesystem Docker image
 # Includes: Redis with fs.so module + Python library + MCP server
 
 FROM python:3.12-slim AS python-deps
 
 WORKDIR /app
 COPY pyproject.toml .
-COPY redis_fs/ redis_fs/
+COPY agent_filesystem/ agent_filesystem/
 COPY mcp_server/ mcp_server/
 
 RUN pip install --no-cache-dir ".[mcp]"
@@ -29,9 +29,9 @@ RUN make
 
 # Copy Python package
 COPY --from=python-deps /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/dist-packages
-COPY --from=python-deps /usr/local/bin/redis-fs /usr/local/bin/
-COPY --from=python-deps /usr/local/bin/redis-fs-mcp /usr/local/bin/
-COPY redis_fs/ /app/redis_fs/
+COPY --from=python-deps /usr/local/bin/agent-filesystem /usr/local/bin/
+COPY --from=python-deps /usr/local/bin/agent-filesystem-mcp /usr/local/bin/
+COPY agent_filesystem/ /app/agent_filesystem/
 COPY mcp_server/ /app/mcp_server/
 
 # Create startup script
@@ -48,5 +48,5 @@ EXPOSE 6379
 
 # Default: start Redis and run MCP server
 ENTRYPOINT ["/app/start.sh"]
-CMD ["redis-fs-mcp"]
+CMD ["agent-filesystem-mcp"]
 

@@ -120,7 +120,7 @@ Because there are effectively no users, do the rename early.
 - binary name: `rfs` -> `raf`
 - config file: `rfs.config.json` -> `raf.config.json`
 - state dir: `~/.rfs` -> `~/.raf`
-- user-facing docs: `Redis-FS` -> `Redis Agent Filesystem` where appropriate
+- user-facing docs: `Agent Filesystem` -> `Redis Agent Filesystem` where appropriate
 
 ### Keep for now
 
@@ -133,11 +133,11 @@ This keeps the rename focused on product surface first.
 
 ## Existing files to modify
 
-- [cli/main.go](/Users/rowantrollope/git/redis-fs/cli/main.go)
-- [cli/ui.go](/Users/rowantrollope/git/redis-fs/cli/ui.go)
-- [cli/Makefile](/Users/rowantrollope/git/redis-fs/cli/Makefile)
-- [Makefile](/Users/rowantrollope/git/redis-fs/Makefile)
-- [README.md](/Users/rowantrollope/git/redis-fs/README.md)
+- [cli/main.go](/Users/rowantrollope/git/agent-filesystem/cli/main.go)
+- [cli/ui.go](/Users/rowantrollope/git/agent-filesystem/cli/ui.go)
+- [cli/Makefile](/Users/rowantrollope/git/agent-filesystem/cli/Makefile)
+- [Makefile](/Users/rowantrollope/git/agent-filesystem/Makefile)
+- [README.md](/Users/rowantrollope/git/agent-filesystem/README.md)
 
 ## New files to add
 
@@ -158,7 +158,7 @@ This avoids package churn during the first implementation.
 
 ## Config
 
-Extend the existing config in [cli/main.go](/Users/rowantrollope/git/redis-fs/cli/main.go#L23) with RAF-native fields:
+Extend the existing config in [cli/main.go](/Users/rowantrollope/git/agent-filesystem/cli/main.go#L23) with RAF-native fields:
 
 ```go
 type config struct {
@@ -565,9 +565,9 @@ We can improve later with:
 
 Concrete repo changes:
 
-1. update [cli/Makefile](/Users/rowantrollope/git/redis-fs/cli/Makefile) to build `raf`
-2. update [Makefile](/Users/rowantrollope/git/redis-fs/Makefile) to place `raf` at repo root
-3. update usage strings in [cli/main.go](/Users/rowantrollope/git/redis-fs/cli/main.go)
+1. update [cli/Makefile](/Users/rowantrollope/git/agent-filesystem/cli/Makefile) to build `raf`
+2. update [Makefile](/Users/rowantrollope/git/agent-filesystem/Makefile) to place `raf` at repo root
+3. update usage strings in [cli/main.go](/Users/rowantrollope/git/agent-filesystem/cli/main.go)
 4. rename config/state defaults to `raf.config.json` and `~/.raf`
 5. keep existing current logic for `setup/up/down/status` as much as possible
 
@@ -604,7 +604,7 @@ This is the foundation for `run` and `rollback`.
 
 ## Slice 3: `raf import`, `inspect`, `sessions`, `saves`
 
-- wire command parsing in [cli/main.go](/Users/rowantrollope/git/redis-fs/cli/main.go)
+- wire command parsing in [cli/main.go](/Users/rowantrollope/git/agent-filesystem/cli/main.go)
 - implement workspace bootstrap and listing
 
 This gives visibility into the stored model early.

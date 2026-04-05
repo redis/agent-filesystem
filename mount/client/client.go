@@ -1,8 +1,8 @@
 package client
 
 import (
-	internal "github.com/redis-fs/mount/internal/client"
 	"github.com/redis/go-redis/v9"
+	internal "github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 type Client = internal.Client

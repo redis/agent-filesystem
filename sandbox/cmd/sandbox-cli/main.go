@@ -165,4 +165,3 @@ func printJSON(r io.Reader) error {
 	fmt.Println(string(out))
 	return nil
 }
-

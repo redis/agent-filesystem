@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/go-git/go-billy/v5"
-	"github.com/redis-fs/mount/internal/client"
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 var _ billy.Filesystem = (*FS)(nil)
@@ -249,7 +249,7 @@ func (f *FS) Chmod(name string, mode os.FileMode) error {
 }
 
 func (f *FS) Lchown(name string, uid, gid int) error {
-	// Redis-FS stores ownership per path; symlink-vs-target semantics are not distinguished.
+	// Agent Filesystem stores ownership per path; symlink-vs-target semantics are not distinguished.
 	return f.Chown(name, uid, gid)
 }
 

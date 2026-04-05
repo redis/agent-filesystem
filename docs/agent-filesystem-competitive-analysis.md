@@ -22,7 +22,7 @@ The current landscape falls into a few distinct patterns:
 - Tool-level filesystem APIs exposed to agents through MCP or SDKs.
 - Plain "just give the agent a bash shell in a repo" approaches.
 
-`redis-fs` already covers important ground:
+`agent-filesystem` already covers important ground:
 
 - shared durable state in Redis,
 - filesystem semantics,
@@ -31,7 +31,7 @@ The current landscape falls into a few distinct patterns:
 - strong text-first affordances like `GREP` and BM25 search,
 - easy cleanup and multi-client access.
 
-But against the broader market problem, `redis-fs` is still incomplete:
+But against the broader market problem, `agent-filesystem` is still incomplete:
 
 - it is a storage layer more than a complete agent workspace product,
 - it does not yet make snapshotting, branching, diffing, and replay first-class,
@@ -41,7 +41,7 @@ But against the broader market problem, `redis-fs` is still incomplete:
 
 My main conclusion:
 
-`redis-fs` should not try to out-E2B or out-Daytona as a generic secure compute platform. Its best path is to become the best shared, queryable, branchable agent workspace layer, and then pair with shells, containers, or microVM sandboxes where needed.
+`agent-filesystem` should not try to out-E2B or out-Daytona as a generic secure compute platform. Its best path is to become the best shared, queryable, branchable agent workspace layer, and then pair with shells, containers, or microVM sandboxes where needed.
 
 The most important strategic move is to add an overlay/session model:
 
@@ -51,7 +51,7 @@ The most important strategic move is to add an overlay/session model:
 - durable audit log,
 - `diff` and `apply` back to Git or a host directory.
 
-That would let `redis-fs` compete much more directly with AgentFS while keeping its own advantages in distribution, shared state, and queryability.
+That would let `agent-filesystem` compete much more directly with AgentFS while keeping its own advantages in distribution, shared state, and queryability.
 
 ## The Problem These Projects Are Actually Solving
 
@@ -271,7 +271,7 @@ Where it breaks:
 Representative examples:
 
 - filesystem MCP servers
-- `redis-fs` MCP mode
+- `agent-filesystem` MCP mode
 
 How it works:
 
@@ -322,15 +322,15 @@ Weaknesses:
 - more specialized than a plain filesystem,
 - likely less mature than mainstream sandboxes for arbitrary heavy compute.
 
-Threat to `redis-fs`:
+Threat to `agent-filesystem`:
 
 - This is the closest conceptual competitor.
 - AgentFS is not just "storage for files"; it is a product thesis for agent workspaces.
 
-Opportunity for `redis-fs`:
+Opportunity for `agent-filesystem`:
 
 - Redis could provide better multi-client sharing, networked collaboration, and queryable operational state than a local SQLite-centric design.
-- `redis-fs` can borrow the session and overlay model without copying the entire architecture.
+- `agent-filesystem` can borrow the session and overlay model without copying the entire architecture.
 
 ### E2B
 
@@ -361,11 +361,11 @@ Weaknesses:
 - branching, overlaying a repo, and durable audit trails are not the main abstraction,
 - volumes are still a platform storage primitive rather than an agent-native workspace model.
 
-Threat to `redis-fs`:
+Threat to `agent-filesystem`:
 
 - If the user wants safe execution first, E2B is a stronger answer.
 
-Opportunity for `redis-fs`:
+Opportunity for `agent-filesystem`:
 
 - Pair with an E2B-like sandbox model instead of competing head-on.
 - Let Redis back the workspace state, search, diffs, and collaboration layer.
@@ -398,11 +398,11 @@ Weaknesses:
 - storage is a platform primitive, not obviously an agent-audit-first filesystem design,
 - branching and review semantics are still less native than in an overlay-first system.
 
-Threat to `redis-fs`:
+Threat to `agent-filesystem`:
 
 - For organizations asking "how do I run thousands of agent sandboxes," Daytona is much more complete today.
 
-Opportunity for `redis-fs`:
+Opportunity for `agent-filesystem`:
 
 - Be the workspace substrate or collaboration layer for a Daytona-like runtime, rather than the runtime itself.
 
@@ -433,11 +433,11 @@ Weaknesses:
 - explicit commit/reload creates a different developer model than normal POSIX,
 - not especially agent-specific at the filesystem layer.
 
-Threat to `redis-fs`:
+Threat to `agent-filesystem`:
 
 - Strong platform option for teams that want storage plus compute with less custom infra.
 
-Opportunity for `redis-fs`:
+Opportunity for `agent-filesystem`:
 
 - Differentiate on agent-specific semantics, not generic distributed storage.
 
@@ -595,11 +595,11 @@ Weaknesses:
 - weaker for build/test workflows,
 - not naturally persistent or collaborative.
 
-These are complements to `redis-fs`, not replacements.
+These are complements to `agent-filesystem`, not replacements.
 
-## Where `redis-fs` Sits Today
+## Where `agent-filesystem` Sits Today
 
-From this repo today, `redis-fs` is more than one thing:
+From this repo today, `agent-filesystem` is more than one thing:
 
 - a Redis-backed filesystem stored in standard Redis keys,
 - an optional native module for `FS.*` commands,
@@ -617,13 +617,13 @@ The most important local facts:
 - File content is inline, not chunked.
 - The repo already recognizes range I/O, inode IDs, chunking, and integrity tooling as future work.
 
-That makes `redis-fs` unusually broad compared with most competitors. It already has more access modes than AgentFS, and a more explicit shared-storage story than many sandbox products.
+That makes `agent-filesystem` unusually broad compared with most competitors. It already has more access modes than AgentFS, and a more explicit shared-storage story than many sandbox products.
 
-## Strengths of `redis-fs`
+## Strengths of `agent-filesystem`
 
 ### 1. Shared state is first-class
 
-Unlike purely local overlays, `redis-fs` naturally supports:
+Unlike purely local overlays, `agent-filesystem` naturally supports:
 
 - multiple clients,
 - remote access,
@@ -641,7 +641,7 @@ This is a meaningful operational strength.
 
 ### 3. Multiple interfaces already exist
 
-`redis-fs` can be reached through:
+`agent-filesystem` can be reached through:
 
 - `FS.*`,
 - FUSE,
@@ -669,11 +669,11 @@ Redis gives:
 
 Those are underused strategic assets here.
 
-## Weaknesses of `redis-fs`
+## Weaknesses of `agent-filesystem`
 
 ### 1. It only partially solves the core agent workspace problem
 
-`redis-fs` stores files well enough, but safe execution, branching, human review, and time-travel are not yet first-class product concepts.
+`agent-filesystem` stores files well enough, but safe execution, branching, human review, and time-travel are not yet first-class product concepts.
 
 That matters because those are exactly what the strongest competitors lead with.
 
@@ -709,11 +709,11 @@ It is:
 - share or inspect a session,
 - audit everything.
 
-`redis-fs` does not yet have a comparable repo-overlay workflow.
+`agent-filesystem` does not yet have a comparable repo-overlay workflow.
 
 ### 4. Safety is adjacent, not intrinsic
 
-The sandbox work in this repo is promising, but `redis-fs` itself is not yet the answer to "how do I safely run an agent against this workspace?"
+The sandbox work in this repo is promising, but `agent-filesystem` itself is not yet the answer to "how do I safely run an agent against this workspace?"
 
 ### 5. Product messaging is still split
 
@@ -736,15 +736,15 @@ This table is intentionally directional, not a benchmark.
 | Daytona / Modal / volume platforms | High | High | High | Medium to High | Medium | Medium | Medium to High |
 | AgentFS overlay model | Medium to High | Medium to High | High | High | High | High | Medium |
 | Filesystem MCP | High | Low | Medium | Medium | Low | Medium | Low |
-| `redis-fs` today | Medium | Medium to High | High | Low to Medium | High | Medium to High | Medium |
+| `agent-filesystem` today | Medium | Medium to High | High | Low to Medium | High | Medium to High | Medium |
 
-The biggest gap for `redis-fs` is obvious:
+The biggest gap for `agent-filesystem` is obvious:
 
 - persistence is good,
 - sharing is good,
 - but branch/rollback/audit/session semantics lag behind the best agent-native designs.
 
-## Strategic Options for `redis-fs`
+## Strategic Options for `agent-filesystem`
 
 ### Option A: Double down on memory, docs, and text-state
 
@@ -787,19 +787,19 @@ Pros:
 
 - directly attacks the most interesting category,
 - builds on Redis strengths,
-- gives `redis-fs` a crisp product story.
+- gives `agent-filesystem` a crisp product story.
 
 Cons:
 
 - materially more implementation work,
 - requires data-model evolution and careful FUSE semantics.
 
-### Option C: Use `redis-fs` as the control-plane/data-plane split
+### Option C: Use `agent-filesystem` as the control-plane/data-plane split
 
 Positioning:
 
 - real code execution happens in a shell/container/microVM,
-- `redis-fs` stores the durable shared overlay, logs, search index, and session state.
+- `agent-filesystem` stores the durable shared overlay, logs, search index, and session state.
 
 What this means:
 
@@ -811,7 +811,7 @@ Pros:
 
 - strongest fit with the actual market,
 - avoids fighting better-funded compute platforms on their own terms,
-- lets `redis-fs` pair with "just-bash" rather than rejecting it.
+- lets `agent-filesystem` pair with "just-bash" rather than rejecting it.
 
 Cons:
 
@@ -861,7 +861,7 @@ Record:
 - session identity,
 - before/after metadata where cheap.
 
-This would give `redis-fs` something very few systems have natively: operational replay and workspace analytics.
+This would give `agent-filesystem` something very few systems have natively: operational replay and workspace analytics.
 
 ### 4. Build a repo overlay mode
 
@@ -944,7 +944,7 @@ My recommendation:
 
 That is stronger than trying to replace the shell with only filesystem tools.
 
-## Alternative Approaches That Might Beat `redis-fs` for Some Use Cases
+## Alternative Approaches That Might Beat `agent-filesystem` for Some Use Cases
 
 ### 1. Just bash plus a sandbox
 
@@ -961,13 +961,13 @@ Best implementation:
 - snapshots if needed,
 - logs outside the workspace.
 
-Why it can beat `redis-fs`:
+Why it can beat `agent-filesystem`:
 
 - least impedance mismatch,
 - fewer custom semantics,
 - great developer ergonomics.
 
-Why `redis-fs` can still matter:
+Why `agent-filesystem` can still matter:
 
 - shared memory,
 - audit trail,
@@ -985,7 +985,7 @@ Best when:
 
 This is often the right default for coding agents.
 
-`redis-fs` should consider integrating with this model instead of fighting it.
+`agent-filesystem` should consider integrating with this model instead of fighting it.
 
 ### 3. OverlayFS on local disk
 
@@ -1010,7 +1010,7 @@ This is where E2B, Daytona, Arrakis, and similar systems are strongest.
 
 ## Recommended Product Direction
 
-If the goal is to make `redis-fs` a more thorough and well thought through solution, I would recommend this thesis:
+If the goal is to make `agent-filesystem` a more thorough and well thought through solution, I would recommend this thesis:
 
 `Redis Agent Filesystem` should become the shared, queryable, branchable workspace layer for agents, not merely a filesystem stored in Redis.
 

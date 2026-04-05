@@ -181,4 +181,3 @@ func (m *Manager) Wait(ctx context.Context, id string) (*ReadResult, error) {
 
 	return m.Read(id)
 }
-

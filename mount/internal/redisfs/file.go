@@ -135,7 +135,7 @@ func (n *FSNode) Unlink(ctx context.Context, name string) syscall.Errno {
 	return 0
 }
 
-// Link implements fs.NodeLinker — returns ENOTSUP (no hard links in Redis-FS).
+// Link implements fs.NodeLinker — returns ENOTSUP (no hard links in Agent Filesystem).
 func (n *FSNode) Link(ctx context.Context, target fs.InodeEmbedder, name string, out *fuse.EntryOut) (*fs.Inode, syscall.Errno) {
 	return nil, syscall.ENOTSUP
 }

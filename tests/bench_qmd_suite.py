@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Benchmark redis-fs (mount + direct Redis) vs local filesystem, with optional redis-qmd.
+"""Benchmark agent-filesystem (mount + direct Redis) vs local filesystem, with optional redis-qmd.
 
 This suite:
 1) Generates realistic markdown-heavy chat, session, incident, memory, and log data.
-2) Writes identical corpora to a mounted redis-fs path and a temporary local path.
+2) Writes identical corpora to a mounted agent-filesystem path and a temporary local path.
 3) Benchmarks:
    - mounted filesystem IO
    - local filesystem IO
    - GNU grep over local and mounted filesystems
-   - direct Redis commands over redis-fs inode HASH keys
+   - direct Redis commands over agent-filesystem inode HASH keys
    - redis-qmd search/query over the mounted corpus (when RediSearch is available)
 4) Compares result sets and timing summaries across all search backends.
 
@@ -169,7 +169,7 @@ def _render_doc(kind: str, team: str, i: int, rng: random.Random) -> list[str]:
             f"session_id: sess-{i:06d}",
             "model: gpt-5.4-mini",
             f"started_at: 2026-03-{day:02d}T10:{i % 60:02d}:00Z",
-            "tags: redis-fs,qmd,session,benchmark",
+            "tags: agent-filesystem,qmd,session,benchmark",
             "---",
             "",
             "# Agent Session Log",
@@ -205,7 +205,7 @@ def _render_doc(kind: str, team: str, i: int, rng: random.Random) -> list[str]:
             "doc_type: customer-chat",
             f"team: {team}",
             f"chat_id: chat-{i:06d}",
-            "tags: redis-fs,qmd,chat,benchmark",
+            "tags: agent-filesystem,qmd,chat,benchmark",
             "---",
             "",
             "# Support Chat Transcript",
@@ -225,7 +225,7 @@ def _render_doc(kind: str, team: str, i: int, rng: random.Random) -> list[str]:
             "doc_type: memory-snapshot",
             f"team: {team}",
             f"memory_id: mem-{i:06d}",
-            "tags: redis-fs,qmd,memory,benchmark",
+            "tags: agent-filesystem,qmd,memory,benchmark",
             "---",
             "",
             "# Agent Memory Snapshot",
@@ -248,7 +248,7 @@ def _render_doc(kind: str, team: str, i: int, rng: random.Random) -> list[str]:
             f"team: {team}",
             f"incident_id: inc-{i:06d}",
             "severity: SEV-2",
-            "tags: redis-fs,qmd,incident,benchmark",
+            "tags: agent-filesystem,qmd,incident,benchmark",
             "---",
             "",
             "# Incident Review",
@@ -692,9 +692,9 @@ def print_capabilities(qmd_ok: bool) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="redis-fs vs local filesystem benchmark suite")
-    p.add_argument("--redis-key", required=True, help="redis-fs key name")
-    p.add_argument("--redis-mount", required=True, help="mounted redis-fs path")
+    p = argparse.ArgumentParser(description="agent-filesystem vs local filesystem benchmark suite")
+    p.add_argument("--redis-key", required=True, help="agent-filesystem key name")
+    p.add_argument("--redis-mount", required=True, help="mounted agent-filesystem path")
     p.add_argument("--local-root", default="/tmp/rfs-local-bench", help="root for local benchmark corpus")
     p.add_argument("--addr", default="127.0.0.1:6379", help="Redis host:port")
     p.add_argument("--db", type=int, default=0, help="Redis DB")
@@ -877,9 +877,9 @@ def main() -> None:
     print("\nPerformance (ms)")
     print("---------------")
     print(f"local write corpus                 median={local_write_ms:.2f}  max={local_write_ms:.2f}")
-    print(f"mounted redis-fs write corpus      median={mount_write_ms:.2f}  max={mount_write_ms:.2f}")
+    print(f"mounted agent-filesystem write corpus      median={mount_write_ms:.2f}  max={mount_write_ms:.2f}")
     print(f"local read corpus                  median={local_read_med:.2f}  max={local_read_max:.2f}")
-    print(f"mounted redis-fs read corpus       median={mount_read_med:.2f}  max={mount_read_max:.2f}")
+    print(f"mounted agent-filesystem read corpus       median={mount_read_med:.2f}  max={mount_read_max:.2f}")
     print(f"direct Redis HGET batch            median={redis_hget_med:.2f}  max={redis_hget_max:.2f}")
     print(f"direct Redis HSET batch            median={redis_hset_med:.2f}  max={redis_hset_max:.2f}")
     print(f"direct Redis naive grep (Lua)      median={redis_scan_grep_med:.2f}  max={redis_scan_grep_max:.2f}")

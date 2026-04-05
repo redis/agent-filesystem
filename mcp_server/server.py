@@ -1,4 +1,4 @@
-"""Redis-FS MCP Server implementation."""
+"""Agent Filesystem MCP Server implementation."""
 
 import os
 import asyncio
@@ -9,7 +9,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 import redis
 
-from redis_fs import RedisFS
+from agent_filesystem import AgentFilesystem
 
 # Default port for HTTP transport
 DEFAULT_HTTP_PORT = 8089
@@ -29,11 +29,11 @@ def get_redis() -> redis.Redis:
 
 def create_server() -> Server:
     """Create and configure the MCP server."""
-    server = Server("redis-fs")
+    server = Server("agent-filesystem")
     r = get_redis()
 
-    def get_fs(key: str) -> RedisFS:
-        return RedisFS(r, key)
+    def get_fs(key: str) -> AgentFilesystem:
+        return AgentFilesystem(r, key)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -41,7 +41,7 @@ def create_server() -> Server:
         return [
             Tool(
                 name="fs_read",
-                description="Read entire file content from Redis-FS",
+                description="Read entire file content from Agent Filesystem",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -53,7 +53,7 @@ def create_server() -> Server:
             ),
             Tool(
                 name="fs_write",
-                description="Write content to file in Redis-FS (creates parents)",
+                description="Write content to file in Agent Filesystem (creates parents)",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -66,7 +66,7 @@ def create_server() -> Server:
             ),
             Tool(
                 name="fs_append",
-                description="Append content to file in Redis-FS",
+                description="Append content to file in Agent Filesystem",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -331,7 +331,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = DEFAULT_HTTP_PORT):
         await sse.handle_post_message(request.scope, request.receive, request._send)
 
     async def health(request):
-        return JSONResponse({"status": "ok", "server": "redis-fs-mcp"})
+        return JSONResponse({"status": "ok", "server": "agent-filesystem-mcp"})
 
     app = Starlette(
         routes=[
@@ -341,7 +341,7 @@ async def run_http_server(host: str = "0.0.0.0", port: int = DEFAULT_HTTP_PORT):
         ]
     )
 
-    print(f"Starting Redis-FS MCP server on http://{host}:{port}")
+    print(f"Starting Agent Filesystem MCP server on http://{host}:{port}")
     print(f"  SSE endpoint: http://{host}:{port}/sse")
     print(f"  Health check: http://{host}:{port}/health")
 
@@ -354,7 +354,7 @@ def main():
     """Entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Redis-FS MCP Server")
+    parser = argparse.ArgumentParser(description="Agent Filesystem MCP Server")
     parser.add_argument(
         "--transport", "-t",
         choices=["stdio", "http"],
@@ -383,4 +383,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

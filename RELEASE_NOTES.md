@@ -1,12 +1,12 @@
 # Add agent integration: Python library, MCP server, and skill
 
-This PR adds comprehensive agent integration for Redis-FS, enabling AI agents to use Redis-backed filesystem storage for memories, documents, state, and tasks.
+This PR adds comprehensive agent integration for Agent Filesystem, enabling AI agents to use Redis-backed filesystem storage for memories, documents, state, and tasks.
 
 ## Features
 
-### Python Library (`redis_fs/`)
-- `RedisFS` client class wrapping all FS.* commands with Pythonic API
-- `redis-fs` CLI with Unix-like commands (cat, ls, grep, replace, etc.)
+### Python Library (`agent_filesystem/`)
+- `AgentFilesystem` client class wrapping all FS.* commands with Pythonic API
+- `agent-filesystem` CLI with Unix-like commands (cat, ls, grep, replace, etc.)
 - Full type hints and pip-installable via `pyproject.toml`
 
 ### MCP Server (`mcp_server/`)
@@ -14,7 +14,7 @@ This PR adds comprehensive agent integration for Redis-FS, enabling AI agents to
 - 13 tools: `fs_read`, `fs_write`, `fs_replace`, `fs_insert`, `fs_grep`, etc.
 - Health check endpoint at `/health`
 
-### Agent Skill (`skills/redis-fs/`)
+### Agent Skill (`skills/agent-filesystem/`)
 - Compatible with `npx skills add` for 37+ agents
 - Documents use cases (memories, markdown, state) and anti-patterns (binaries, scripts)
 - Complete command reference with examples
@@ -30,4 +30,3 @@ make mcp-up              # Start Redis + MCP server
 make install-mcp-auggie  # Add to Auggie CLI
 make install-skill-local # Install skill to Claude Code
 ```
-

@@ -180,11 +180,11 @@ TOOLS = [
 
 class ToolExecutor:
     """
-    Executes tools against the sandbox and Redis-FS.
+    Executes tools against the sandbox and Agent Filesystem.
 
     The sandbox provides isolated command execution.
-    Redis-FS provides persistent file storage.
-    Files written to Redis-FS are immediately visible in the sandbox at /workspace.
+    Agent Filesystem provides persistent file storage.
+    Files written to Agent Filesystem are immediately visible in the sandbox at /workspace.
     """
 
     def __init__(self, sandbox_url: str, redis_url: str, fs_key: str):
@@ -220,7 +220,7 @@ class ToolExecutor:
             return f"Error: {e}"
 
     def _normalize_path(self, path: str) -> str:
-        """Normalize path to absolute form for Redis-FS."""
+        """Normalize path to absolute form for Agent Filesystem."""
         if not path.startswith("/"):
             path = "/" + path
         return path
@@ -252,7 +252,7 @@ class ToolExecutor:
         return "\n".join(output_parts) if output_parts else "(no output)"
 
     def _read(self, args: dict) -> str:
-        """Read a file via Redis-FS."""
+        """Read a file via Agent Filesystem."""
         path = self._normalize_path(args["path"])
         result = self.redis.execute_command("FS.CAT", self.fs_key, path)
         if result is None:
@@ -260,7 +260,7 @@ class ToolExecutor:
         return result.decode() if isinstance(result, bytes) else str(result)
 
     def _write(self, args: dict) -> str:
-        """Write a file via Redis-FS."""
+        """Write a file via Agent Filesystem."""
         path = self._normalize_path(args["path"])
         content = args["content"]
         self.redis.execute_command("FS.ECHO", self.fs_key, path, content)
@@ -320,7 +320,7 @@ class ToolExecutor:
         return "\n".join(lines)
 
     def _grep(self, args: dict) -> str:
-        """Search for pattern in files using Redis-FS GREP."""
+        """Search for pattern in files using Agent Filesystem GREP."""
         pattern = args["pattern"]
         path = args.get("path", "/")
         include = args.get("include", "*")
@@ -376,7 +376,7 @@ class ToolExecutor:
 
     # Legacy tool implementations for backwards compatibility
     def _list_files(self, args: dict) -> str:
-        """List files via Redis-FS."""
+        """List files via Agent Filesystem."""
         path = self._normalize_path(args.get("path", "/"))
         result = self.redis.execute_command("FS.LS", self.fs_key, path)
         if not result:
@@ -385,7 +385,7 @@ class ToolExecutor:
         return "\n".join(files)
 
     def _delete_file(self, args: dict) -> str:
-        """Delete a file via Redis-FS."""
+        """Delete a file via Agent Filesystem."""
         path = self._normalize_path(args["path"])
         self.redis.execute_command("FS.RM", self.fs_key, path)
         return f"Deleted {path}"

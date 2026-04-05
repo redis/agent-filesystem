@@ -1,6 +1,6 @@
-# Share Codex State Across Computers with Redis-FS
+# Share Codex State Across Computers with Agent Filesystem
 
-This guide shows how to migrate `~/.codex` into Redis-FS on one computer, then mount that same shared state on other computers so Codex keeps the same memory and settings everywhere.
+This guide shows how to migrate `~/.codex` into Agent Filesystem on one computer, then mount that same shared state on other computers so Codex keeps the same memory and settings everywhere.
 
 Use this when:
 
@@ -12,7 +12,7 @@ Important behavior:
 
 - `./raf migrate ~/.codex` imports the directory into Redis
 - the original directory is renamed to `~/.codex.archive`
-- Redis-FS is mounted back at `~/.codex`
+- Agent Filesystem is mounted back at `~/.codex`
 - the Redis key becomes `.codex`, because `rfs migrate` uses the source directory basename
 - if `~/.codex/.rfsignore` exists, matching files and directories are skipped during import
 
@@ -49,10 +49,10 @@ Because `.rfsignore` uses `.gitignore`-style rules, you can also re-include a sp
 
 ## Machine 1: migrate the existing `~/.codex`
 
-Build `redis-fs`:
+Build `agent-filesystem`:
 
 ```bash
-cd /path/to/redis-fs
+cd /path/to/agent-filesystem
 make
 ```
 
@@ -96,7 +96,7 @@ ls -la ~/.codex
 
 On each additional computer:
 
-1. Build `redis-fs`.
+1. Build `agent-filesystem`.
 2. Point `rfs` at the same shared Redis instance.
 3. Use the same Redis key, `.codex`.
 4. Mount it at the local path `~/.codex`.
@@ -147,7 +147,7 @@ If you want an agent to perform this, the agent should:
 1. Confirm Codex is not currently running on the machines involved.
 2. Recommend creating `~/.codex/.rfsignore` before migration.
 3. Suggest excluding `worktrees/` by default, unless the user explicitly wants local checkout state shared.
-4. Build `redis-fs` with `make`.
+4. Build `agent-filesystem` with `make`.
 5. Configure `rfs` to use the shared Redis instance.
 6. On the first machine, run `./raf migrate ~/.codex`.
 7. On later machines, back up any existing `~/.codex`, configure `redisKey` as `.codex`, then run `./raf up`.

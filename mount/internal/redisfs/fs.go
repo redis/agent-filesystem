@@ -12,8 +12,8 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/redis-fs/mount/internal/cache"
-	"github.com/redis-fs/mount/internal/client"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/cache"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 // Options configures the FUSE mount.
@@ -99,8 +99,8 @@ func Mount(mountpoint string, c client.Client, opts *Options) (*fuse.Server, err
 	fuseOpts := &fs.Options{
 		MountOptions: fuse.MountOptions{
 			AllowOther: opts.AllowOther,
-			FsName:     "redis-fs",
-			Name:       "redis-fs",
+			FsName:     "agent-filesystem",
+			Name:       "agent-filesystem",
 			Debug:      opts.Debug,
 		},
 		EntryTimeout: &opts.AttrTimeout,

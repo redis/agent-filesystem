@@ -4,8 +4,8 @@
 *.dSYM/
 rfs
 /redis-qmd
-mount/redis-fs-mount
-mount/redis-fs-nfs
+mount/agent-filesystem-mount
+mount/agent-filesystem-nfs
 sandbox/sandbox
 sandbox/sandbox-cli
 *.rdb

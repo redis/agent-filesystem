@@ -10,7 +10,7 @@ clean:
 	rm -f sandbox sandbox-cli
 
 docker:
-	cd .. && docker build -f sandbox/Dockerfile -t redis-fs-sandbox .
+	cd .. && docker build -f sandbox/Dockerfile -t agent-filesystem-sandbox .
 
 test:
 	go test ./...

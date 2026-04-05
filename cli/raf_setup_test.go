@@ -209,7 +209,7 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	}
 }
 
-func TestRunSetupWizardMountWithoutCurrentWorkspaceExplainsWorkspaceCommand(t *testing.T) {
+func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
@@ -220,15 +220,25 @@ func TestRunSetupWizardMountWithoutCurrentWorkspaceExplainsWorkspaceCommand(t *t
 	input := stringsJoinLines(
 		"2",        // filesystem mount only
 		"/tmp/raf", // requested mountpoint
+		"newfiles", // workspace name to create/use
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
-	_, _, err := runSetupWizard(reader, ioDiscard{}, existing, false)
-	if err == nil {
-		t.Fatal("runSetupWizard() = nil, want error")
+	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "workspace use <workspace>") {
-		t.Fatalf("runSetupWizard() error = %q, want workspace use guidance", err)
+	if migrateDir != "" {
+		t.Fatalf("migrateDir = %q, want empty", migrateDir)
+	}
+	if cfg.CurrentWorkspace != "newfiles" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "newfiles")
+	}
+	if cfg.Mountpoint != "/tmp/raf" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/raf")
+	}
+	if cfg.MountBackend != defaultMountBackend() {
+		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
 	}
 }
 

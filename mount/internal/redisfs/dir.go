@@ -6,7 +6,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/redis-fs/mount/internal/client"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 // Lookup implements fs.NodeLookuper.
@@ -104,13 +104,13 @@ func lsEntryToAttr(e *client.LsEntry, uid, gid uint32) fuse.Attr {
 	}
 
 	return fuse.Attr{
-		Mode:  mode,
-		Nlink: nlink,
-		Size:  size,
-		Owner: fuse.Owner{Uid: uid, Gid: gid},
-		Mtime: uint64(e.Mtime / 1000),
+		Mode:      mode,
+		Nlink:     nlink,
+		Size:      size,
+		Owner:     fuse.Owner{Uid: uid, Gid: gid},
+		Mtime:     uint64(e.Mtime / 1000),
 		Mtimensec: uint32((e.Mtime % 1000) * 1_000_000),
-		Blocks: (size + 511) / 512,
+		Blocks:    (size + 511) / 512,
 	}
 }
 

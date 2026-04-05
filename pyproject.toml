@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "redis-fs"
+name = "agent-filesystem"
 version = "0.1.0"
-description = "Python client and CLI for Redis-FS filesystem module"
+description = "Python client, CLI, and MCP server for Agent Filesystem"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.8"
@@ -37,17 +37,16 @@ mcp = [
 ]
 
 [project.scripts]
-redis-fs = "redis_fs.cli:main"
-redis-fs-mcp = "mcp_server:main"
+agent-filesystem = "agent_filesystem.cli:main"
+agent-filesystem-mcp = "mcp_server:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/redis-fs"
-Repository = "https://github.com/yourusername/redis-fs"
+Homepage = "https://github.com/rowantrollope/agent-filesystem"
+Repository = "https://github.com/rowantrollope/agent-filesystem"
 
 [tool.setuptools.packages.find]
-include = ["redis_fs*", "mcp_server*"]
+include = ["agent_filesystem*", "mcp_server*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-

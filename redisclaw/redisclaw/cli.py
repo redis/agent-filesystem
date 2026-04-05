@@ -32,7 +32,7 @@ def print_welcome(session_id: str | None = None):
     console.print(Panel.fit(
         "[bold cyan]🦀 RedisClaw[/bold cyan]\n"
         "An OpenClaw-style task-solving coding agent\n"
-        "with Redis-FS backed persistent sandbox" + session_info + "\n\n"
+        "with Agent Filesystem backed persistent sandbox" + session_info + "\n\n"
         "[dim]Commands:[/dim]\n"
         "  /task <desc>   - Give the agent a task to solve\n"
         "  /bash <cmd>    - Run a shell command directly\n"

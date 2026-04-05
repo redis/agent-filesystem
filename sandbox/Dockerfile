@@ -1,14 +1,14 @@
-# Redis-FS Sandbox - Code execution environment with FUSE-mounted Redis FS
+# Agent Filesystem Sandbox - Code execution environment with FUSE-mounted Redis FS
 # Requires --privileged or --cap-add SYS_ADMIN --device /dev/fuse to run
 
 FROM golang:1.21-bookworm AS builder
 
-# Build redis-fs-mount
+# Build agent-filesystem-mount
 WORKDIR /build/mount
 COPY mount/go.mod mount/go.sum ./
 RUN go mod download
 COPY mount/ ./
-RUN CGO_ENABLED=0 go build -o /redis-fs-mount ./cmd/redis-fs-mount
+RUN CGO_ENABLED=0 go build -o /agent-filesystem-mount ./cmd/agent-filesystem-mount
 
 # Build sandbox server
 WORKDIR /build/sandbox
@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN echo "user_allow_other" >> /etc/fuse.conf
 
 # Copy binaries
-COPY --from=builder /redis-fs-mount /usr/local/bin/
+COPY --from=builder /agent-filesystem-mount /usr/local/bin/
 COPY --from=builder /sandbox /usr/local/bin/
 COPY --from=builder /sandbox-cli /usr/local/bin/
 

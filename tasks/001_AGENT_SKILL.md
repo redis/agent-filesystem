@@ -2,11 +2,11 @@
 
 ## Overview
 
-Create an installable agent skill that teaches AI agents how to use Redis-FS for persistent storage of text-based content like memories, markdown documents, state, and task lists.
+Create an installable agent skill that teaches AI agents how to use Agent Filesystem for persistent storage of text-based content like memories, markdown documents, state, and task lists.
 
 ## Key Points for the Skill
 
-### What Redis-FS IS For
+### What Agent Filesystem IS For
 - **Memories**: Store and retrieve agent memories, conversation history, learned facts
 - **Markdown documents**: Notes, documentation, READMEs, plans
 - **State**: Configuration, preferences, session state as JSON/YAML
@@ -14,22 +14,22 @@ Create an installable agent skill that teaches AI agents how to use Redis-FS for
 - **Logs**: Append-only logs, audit trails, activity history
 - **Text-based data**: Any UTF-8 content that benefits from filesystem semantics
 
-### What Redis-FS is NOT For
+### What Agent Filesystem is NOT For
 - **Binaries**: Cannot execute programs (not a real filesystem)
 - **Scripts**: Cannot run shell scripts, Python, etc.
 - **Large media files**: Not optimized for images, videos, audio
 - **System files**: No `/etc`, `/bin`, `/usr` semantics
 
 ### Integration Methods
-The skill should guide agents to use Redis-FS via:
+The skill should guide agents to use Agent Filesystem via:
 1. **MCP Server** (preferred if available): Native tool calls like `fs_read`, `fs_write`, `fs_replace`
-2. **Python library** (for Python agents): `from redis_fs import RedisFS`
+2. **Python library** (for Python agents): `from agent_filesystem import AgentFilesystem`
 3. **Direct redis-cli** (fallback): `redis-cli FS.CAT myfs /path/to/file.txt`
 
 ## Subtasks
 
 ### 1. Restructure skill directory layout
-- [ ] Create `skills/redis-fs/` directory
+- [ ] Create `skills/agent-filesystem/` directory
 - [ ] Move/create `SKILL.md` in that location
 - [ ] Ensure compatible with `npx skills add` discovery
 
@@ -37,7 +37,7 @@ The skill should guide agents to use Redis-FS via:
 Required YAML frontmatter per agent skills spec:
 ```yaml
 ---
-name: redis-fs
+name: agent-filesystem
 description: Persistent filesystem storage in Redis for agent memories, documents, state, and tasks. Use via MCP tools, Python library, or redis-cli.
 ---
 ```
@@ -61,20 +61,20 @@ Include sections for:
 Uses Vercel's npx skills CLI to install to ALL detected agents (Claude Code, Cursor, Codex, Windsurf, etc.):
 ```makefile
 install-skill:
-	npx skills add . --skill redis-fs -g -y
+	npx skills add . --skill agent-filesystem -g -y
 ```
 
 ### 5. Add install-skill-local target to Makefile
 Manual symlink for Claude Code only (no Node.js required):
 ```makefile
 install-skill-local:
-	@mkdir -p ~/.claude/skills/redis-fs
-	@ln -sf $(PWD)/skills/redis-fs/SKILL.md ~/.claude/skills/redis-fs/SKILL.md
-	@echo "Installed redis-fs skill to ~/.claude/skills/redis-fs/"
+	@mkdir -p ~/.claude/skills/agent-filesystem
+	@ln -sf $(PWD)/skills/agent-filesystem/SKILL.md ~/.claude/skills/agent-filesystem/SKILL.md
+	@echo "Installed agent-filesystem skill to ~/.claude/skills/agent-filesystem/"
 ```
 
 ### 6. Test skill installation
-- [ ] Test `npx skills add . --skill redis-fs --list`
+- [ ] Test `npx skills add . --skill agent-filesystem --list`
 - [ ] Test `make install-skill-local`
 - [ ] Verify skill appears in agent's skill list
 
@@ -83,4 +83,3 @@ install-skill-local:
 - [ ] `make install-skill` and `make install-skill-local` work
 - [ ] Skill content clearly explains use cases and anti-patterns
 - [ ] Skill references MCP server and Python library as integration options
-
