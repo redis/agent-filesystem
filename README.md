@@ -12,10 +12,10 @@ Filesystems are a great interface for agents because they already know how to re
 RAF fixes that by:
 
 - storing workspace state in Redis
+- exposing the current workspace as a normal local filesystem
 - materializing a real local working copy when you run commands
 - letting you checkpoint and restore workspaces
 - letting you fork a workspace for parallel work
-- optionally mounting the current workspace as a normal local filesystem
 
 If you want the short version, RAF is:
 
@@ -37,45 +37,54 @@ Run setup:
 ./raf setup
 ```
 
-Then do one of these:
+The default path is to mount a workspace and use it like a normal folder.
 
-Create an empty workspace:
+During setup:
+
+- choose your Redis connection
+- choose a workspace name
+- choose a local mountpoint like `~/raf`
+
+When setup finishes, RAF mounts that workspace for you. Then you can just use the folder:
 
 ```bash
-./raf workspace create scratch
-./raf workspace run scratch -- bash
+cd ~/raf
+ls
+echo "# Notes" > notes.md
 ```
 
-Import an existing folder:
+If you want to remount it later:
+
+```bash
+./raf up
+./raf status
+./raf down
+```
+
+If you want to bring an existing folder into RAF:
 
 ```bash
 ./raf workspace import my-repo ./repo
-./raf workspace run my-repo -- bash
+./raf workspace use my-repo
+./raf up
 ```
 
-Create a checkpoint before a risky change:
+If you want to save a known-good point:
 
 ```bash
 ./raf checkpoint create my-repo before-refactor
 ```
 
-Restore that checkpoint later:
-
-```bash
-./raf checkpoint restore my-repo before-refactor
-```
-
-Fork a workspace for parallel work:
+If you want a second line of work:
 
 ```bash
 ./raf workspace fork my-repo my-repo-experiment
-./raf workspace run my-repo-experiment -- bash
 ```
 
-Clone a workspace into a normal local directory:
+And if you want the command-oriented workflow instead of a mounted folder:
 
 ```bash
-./raf workspace clone my-repo ./my-repo-copy
+./raf workspace run my-repo -- bash
 ```
 
 ## The Basic Model
@@ -88,14 +97,34 @@ RAF has two main concepts:
 Typical flow:
 
 1. Put a workspace into RAF with `workspace create` or `workspace import`
-2. Work inside it with `workspace run`
+2. Mount it and use it like a normal directory
 3. Save stable moments with `checkpoint create`
 4. Fork it when you want a second line of work
 5. Restore a checkpoint if you want to go back
 
-## How `workspace run` Works
+## Mounted Filesystem
 
-`raf workspace run` is the heart of the tool.
+The simplest way to think about RAF is:
+
+- Redis stores the workspace state
+- RAF mounts the current workspace into a local folder
+- your editor, shell, and tools use that folder like any other directory
+
+The main mount commands are:
+
+```bash
+./raf up
+./raf status
+./raf down
+```
+
+On macOS RAF uses NFS. On Linux RAF uses FUSE.
+
+If no workspace exists yet, setup will ask for one and create it before mounting.
+
+## `workspace run`
+
+`raf workspace run` is the command-oriented workflow.
 
 It:
 
@@ -114,29 +143,6 @@ means:
 - open the workspace locally
 - run `go test ./...` inside it
 - save any file changes back to the workspace state
-
-## Optional Filesystem Mount
-
-Some tools want a stable mounted directory instead of a one-shot command run.
-
-RAF can do that too.
-
-During `./raf setup`, you can:
-
-- leave the mountpoint empty and just use workspace commands
-- choose a mountpoint and RAF will mount the current workspace there
-
-If no workspace is selected yet, setup will ask for one and create it before mounting.
-
-Then you can use:
-
-```bash
-./raf up
-./raf status
-./raf down
-```
-
-On macOS RAF uses NFS. On Linux RAF uses FUSE.
 
 ## Most Useful Commands
 
@@ -216,6 +222,5 @@ But if you are brand new here, start with:
 ```bash
 make cli
 ./raf setup
-./raf workspace import my-repo ./repo
-./raf workspace run my-repo -- bash
+cd <your-mountpoint>
 ```
