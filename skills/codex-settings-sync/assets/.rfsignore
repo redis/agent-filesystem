@@ -1,0 +1,13 @@
+# High-churn caches
+cache/
+tmp/
+
+# Local checkout state
+worktrees/
+
+# Local logs and temp files
+logs/
+*.log
+*.tmp
+*.pid
+*.sock

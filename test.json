@@ -1,0 +1,19 @@
+{
+  "useExistingRedis": true,
+  "redisAddr": "localhost:6379",
+  "redisPassword": "",
+  "redisDB": 0,
+  "redisKey": "memories",
+  "mountpoint": "~/memories",
+  "mountBackend": "auto",
+  "readOnly": false,
+  "allowOther": false,
+  "redisServerBin": "",
+  "modulePath": "",
+  "mountBin": "",
+  "nfsBin": "~/git/redis-fs/mount/redis-fs-nfs",
+  "nfsHost": "127.0.0.1",
+  "nfsPort": 20490,
+  "redisLog": "/tmp/rfs-redis.log",
+  "mountLog": "/tmp/rfs-mount.log"
+}

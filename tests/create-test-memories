@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="${1:-./memory}"
+
+mkdir -p "$BASE"
+
+DATES=("01-01-2026" "01-02-2026" "01-03-2026" "01-04-2026" "01-05-2026" "01-06-2026")
+
+TITLES=(
+  "Project kickoff meeting"
+  "Architecture review session"
+  "Sprint retrospective notes"
+  "API design decisions"
+  "Performance benchmarking results"
+  "Deployment runbook draft"
+  "Code review guidelines"
+  "Database migration plan"
+  "Security audit findings"
+  "Team standup highlights"
+  "Infrastructure cost analysis"
+  "Feature flag rollout plan"
+)
+
+BODIES=(
+  "Discussed the high-level goals for Q1. The team agreed on a microservices approach with Redis as the primary data store. Key risks include latency under load and schema evolution across services. Action items were assigned to each lead."
+  "Reviewed three candidate architectures. Option B (event-driven with CQRS) won consensus. Trade-offs around eventual consistency were debated at length. We will prototype the write path first and measure throughput before committing."
+  "Velocity has been steady at 34 points per sprint. The biggest blocker this cycle was flaky integration tests — root cause traced to shared state in the test Redis instance. Agreed to isolate test databases going forward."
+  "Settled on REST for external APIs and gRPC for inter-service calls. Pagination will use cursor-based tokens. Rate limiting at the gateway level with per-tenant quotas stored in Redis sorted sets."
+  "Ran load tests against the filesystem module with 50k files across 200 directories. P99 read latency was 0.8ms, write latency 1.2ms. Bloom filter grep showed 40x speedup over naive scan on a 10GB dataset."
+  "Documented the blue-green deployment process. Redis key migration happens via DUMP/RESTORE across instances. Rollback window is 15 minutes. Health checks must pass for 60 seconds before traffic cutover."
+  "Established conventions: PRs require at least one approval, tests must cover happy path and one error case, no commented-out code in main branch. Linter config was unified across all services."
+  "Migration from PostgreSQL to Redis-FS will proceed in three phases. Phase 1 migrates read-only reference data. Phase 2 handles user-generated content with dual-write. Phase 3 cuts over and decommissions the old schema."
+  "Penetration testing revealed two medium-severity issues: an SSRF vector in the webhook handler and insufficient input validation on file paths. Both patched and verified. No critical findings."
+  "Highlights from this week: auth service hit 99.99% uptime, new caching layer reduced API response times by 35%, and the intern shipped their first production feature (congrats!). Blockers: CI pipeline needs GPU runners for ML tests."
+  "Monthly cloud spend came in at \$4,200, down 12% from last month. Biggest savings from right-sizing Redis instances and switching to reserved capacity. Spot instances for batch jobs saved another \$300."
+  "Feature flags for the new editor will roll out in three tiers: internal dogfood (week 1), beta users (week 2), general availability (week 3). Kill switch is wired to the ops dashboard. Metrics tracked: crash rate, latency, adoption."
+)
+
+TAGS=(
+  "meeting planning strategy"
+  "architecture design technical"
+  "retrospective process team"
+  "api design technical"
+  "performance testing benchmarks"
+  "devops deployment operations"
+  "process standards engineering"
+  "database migration planning"
+  "security audit compliance"
+  "standup team updates"
+  "infrastructure costs cloud"
+  "features rollout planning"
+)
+
+idx=0
+for date in "${DATES[@]}"; do
+  dir="$BASE/$date"
+  mkdir -p "$dir"
+
+  # Two files per directory
+  for j in 0 1; do
+    ti=$(( (idx + j) % ${#TITLES[@]} ))
+    title="${TITLES[$ti]}"
+    body="${BODIES[$ti]}"
+    tag="${TAGS[$ti]}"
+    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    file="$dir/${slug}.md"
+
+    cat > "$file" <<MD
+# ${title}
+
+**Date:** ${date//-/\/}
+**Tags:** ${tag}
+
+## Summary
+
+${body}
+
+## Notes
+
+- Follow up scheduled for next week
+- Related documents linked in the shared drive
+- Action items tracked in the project board
+
+## Context
+
+This memory was recorded during a working session focused on ${tag%% *}
+topics. The discussion involved multiple team members and produced
+several actionable outcomes that are being tracked separately.
+
+---
+*Last updated: ${date//-/\/}*
+MD
+
+  done
+  idx=$(( idx + 2 ))
+done
+
+total=$(find "$BASE" -name '*.md' | wc -l)
+echo "Created $total memory files in $BASE/"
+find "$BASE" -name '*.md' | sort

@@ -1,0 +1,82 @@
+---
+name: codex-settings-sync
+description: Use when the user wants to migrate Codex state in ~/.codex into Redis-FS and mount the same shared Codex memory/settings across multiple computers. Recommends a .rfsignore before migration and defaults to excluding worktrees, caches, logs, and temporary files.
+---
+
+# Codex Settings Sync
+
+Use this skill when the goal is to share Codex state across machines by moving `~/.codex` into Redis-FS, then mounting that same Redis-backed volume on other computers.
+
+## Default stance
+
+- Recommend a root `~/.codex/.rfsignore` before migration.
+- Default to excluding `worktrees/`.
+- Treat `cache/`, `tmp/`, `logs/`, `*.log`, `*.tmp`, `*.pid`, and `*.sock` as good default exclusions.
+- If the user appears to care about restoring local checkout state inside Codex, call out `worktrees/` as a choice point before migrating.
+
+Open the bundled starter ignore file at [assets/.rfsignore](assets/.rfsignore) and adapt it to the user's needs.
+
+## Migration workflow
+
+1. Ask the user to stop Codex on the machines involved, or verify that it is already closed.
+2. Ensure `redis-fs` is built with `make`.
+3. Configure `rfs` to point at the shared Redis instance.
+4. Create or update `~/.codex/.rfsignore` before migration.
+5. On the source machine, run `./raf migrate ~/.codex`.
+6. Explain that the original directory becomes `~/.codex.archive`, the mount returns at `~/.codex`, and the Redis key becomes `.codex`.
+7. On each additional machine, move aside any existing `~/.codex`, configure `redisKey` as `.codex`, set `mountpoint` to that machine's `~/.codex`, then run `./raf up`.
+8. Verify with `./raf status` and `ls -la ~/.codex`.
+
+## Secondary machine config
+
+Use a config like:
+
+```json
+{
+  "useExistingRedis": true,
+  "redisAddr": "YOUR_SHARED_REDIS_HOST:6379",
+  "redisPassword": "",
+  "redisDB": 0,
+  "redisKey": ".codex",
+  "mountpoint": "/Users/YOUR_USER/.codex",
+  "mountBackend": "auto",
+  "readOnly": false,
+  "allowOther": false,
+  "redisServerBin": "",
+  "modulePath": "",
+  "mountBin": "",
+  "nfsBin": "",
+  "nfsHost": "127.0.0.1",
+  "nfsPort": 20490,
+  "redisLog": "/tmp/rfs-redis.log",
+  "mountLog": "/tmp/rfs-mount.log"
+}
+```
+
+If `auto` is problematic on macOS, switch `mountBackend` to `"nfs"`.
+
+## Notes to surface
+
+- `rfs migrate` honors `~/.codex/.rfsignore` if present.
+- `.rfsignore` uses `.gitignore`-style pattern syntax.
+- Excluding a directory like `worktrees/` is usually safer than syncing it.
+- Avoid using the same shared `~/.codex` from multiple active computers at the same time.
+- Keep `~/.codex.archive` and any `.local-backup` directories until the setup is stable.
+
+## Rollback
+
+Source machine rollback:
+
+```bash
+./raf down
+rm -rf ~/.codex
+mv ~/.codex.archive ~/.codex
+```
+
+Secondary machine rollback:
+
+```bash
+./raf down
+rm -rf ~/.codex
+mv ~/.codex.local-backup ~/.codex
+```

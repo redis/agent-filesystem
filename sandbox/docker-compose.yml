@@ -1,0 +1,43 @@
+services:
+  # Redis server with fs.so module
+  redis:
+    build:
+      context: ..
+      dockerfile: Dockerfile.redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Sandbox with FUSE-mounted Redis FS
+  sandbox:
+    build:
+      context: ..
+      dockerfile: sandbox/Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      - REDIS_ADDR=redis:6379
+      - REDIS_KEY=sandbox
+      - MOUNT_POINT=/workspace
+      - SANDBOX_PORT=8090
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Required for FUSE
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+
+volumes:
+  redis-data:
+

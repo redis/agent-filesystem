@@ -1,0 +1,20 @@
+# MCP Server for Redis-FS (HTTP transport)
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY pyproject.toml .
+COPY redis_fs/ redis_fs/
+COPY mcp_server/ mcp_server/
+
+RUN pip install --no-cache-dir ".[mcp]"
+
+ENV REDIS_URL=redis://localhost:6379/0
+ENV MCP_PORT=8089
+
+EXPOSE 8089
+
+# Run MCP server with HTTP transport
+CMD ["redis-fs-mcp", "--transport", "http", "--port", "8089"]
+

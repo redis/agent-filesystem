@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "redis-fs": {
+      "command": "redis-fs-mcp",
+      "env": {
+        "REDIS_URL": "redis://localhost:6379/0"
+      }
+    }
+  }
+}
+

@@ -1,0 +1,19 @@
+# Redis server with fs.so module
+FROM redis:7-bookworm
+
+# Install build tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy module source (now in module/ directory)
+COPY module/ ./
+
+# Clean and rebuild for Linux
+RUN make clean && make
+
+# Configure Redis to load the module
+CMD ["redis-server", "--loadmodule", "/app/fs.so"]
+
