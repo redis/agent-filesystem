@@ -12,15 +12,15 @@ import (
 	"github.com/alicebob/miniredis/v2"
 )
 
-func TestCmdRunUsesSessionTreeAndAutoSaves(t *testing.T) {
+func TestWorkspaceRunUsesWorkspaceTreeAndAutoSaves(t *testing.T) {
 	t.Helper()
 
 	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
 	defer closeStore()
 
-	err := cmdRun([]string{"run", "repo", "--session", "main", "--", "/bin/sh", "-c", "pwd > cwd.txt && printf 'hello\n' > generated.txt"})
+	err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "pwd > cwd.txt && printf 'hello\n' > generated.txt"})
 	if err != nil {
-		t.Fatalf("cmdRun() returned error: %v", err)
+		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
 	cwdBytes, err := os.ReadFile(filepath.Join(treePath, "cwd.txt"))
@@ -44,7 +44,7 @@ func TestCmdRunUsesSessionTreeAndAutoSaves(t *testing.T) {
 		t.Fatalf("generated.txt = %q, want %q", string(generated), "hello\n")
 	}
 
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
+	localState, err := loadRAFLocalState(cfg, "repo")
 	if err != nil {
 		t.Fatalf("loadRAFLocalState() returned error: %v", err)
 	}
@@ -52,30 +52,30 @@ func TestCmdRunUsesSessionTreeAndAutoSaves(t *testing.T) {
 		t.Fatal("expected local state to be clean after auto-save")
 	}
 	if localState.HeadSavepoint == "initial" {
-		t.Fatal("expected cmdRun to advance the head savepoint")
+		t.Fatal("expected workspace run to advance the head savepoint")
 	}
 
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
+	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
 	}
-	if sessionMeta.HeadSavepoint != localState.HeadSavepoint {
-		t.Fatalf("session head = %q, want %q", sessionMeta.HeadSavepoint, localState.HeadSavepoint)
+	if workspaceMeta.HeadSavepoint != localState.HeadSavepoint {
+		t.Fatalf("workspace head = %q, want %q", workspaceMeta.HeadSavepoint, localState.HeadSavepoint)
 	}
 }
 
-func TestCmdRunReadonlyLeavesChangesUnsaved(t *testing.T) {
+func TestWorkspaceRunReadonlyLeavesChangesUnsaved(t *testing.T) {
 	t.Helper()
 
 	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
 	defer closeStore()
 
-	err := cmdRun([]string{"run", "repo", "--session", "main", "--readonly", "--", "/bin/sh", "-c", "printf 'hello\n' > generated.txt"})
+	err := cmdWorkspace([]string{"workspace", "run", "repo", "--readonly", "--", "/bin/sh", "-c", "printf 'hello\n' > generated.txt"})
 	if err != nil {
-		t.Fatalf("cmdRun() returned error: %v", err)
+		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
+	localState, err := loadRAFLocalState(cfg, "repo")
 	if err != nil {
 		t.Fatalf("loadRAFLocalState() returned error: %v", err)
 	}
@@ -86,111 +86,85 @@ func TestCmdRunReadonlyLeavesChangesUnsaved(t *testing.T) {
 		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, "initial")
 	}
 
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
+	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
 	}
-	if sessionMeta.HeadSavepoint != "initial" {
-		t.Fatalf("session HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "initial")
+	if workspaceMeta.HeadSavepoint != "initial" {
+		t.Fatalf("workspace HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
 	if _, err := os.Stat(filepath.Join(treePath, "generated.txt")); err != nil {
 		t.Fatalf("expected generated.txt to remain in working copy: %v", err)
 	}
 }
 
-func TestCmdDiffAndSaveLifecycle(t *testing.T) {
+func TestCheckpointCreateNoChangesIsANoop(t *testing.T) {
+	t.Helper()
+
+	cfg, _, store, closeStore := importRAFWorkspaceForTest(t)
+	defer closeStore()
+
+	output, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "create", "repo"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(create) returned error: %v", err)
+	}
+	if !strings.Contains(output, "No changes to checkpoint") {
+		t.Fatalf("cmdCheckpoint(create) output = %q, want no changes message", output)
+	}
+
+	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
+	}
+	if workspaceMeta.HeadSavepoint != "initial" {
+		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
+	}
+
+	localState, err := loadRAFLocalState(cfg, "repo")
+	if err != nil {
+		t.Fatalf("loadRAFLocalState() returned error: %v", err)
+	}
+	if localState.Dirty {
+		t.Fatal("expected local state to remain clean after no-op checkpoint")
+	}
+}
+
+func TestCheckpointCreateDetectsWorkspaceHeadConflict(t *testing.T) {
 	t.Helper()
 
 	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
 	defer closeStore()
 
-	targetFile := filepath.Join(treePath, "main.go")
-	if err := os.WriteFile(targetFile, []byte("package updated\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(main.go) returned error: %v", err)
-	}
-
-	diffOutput, err := captureStdout(t, func() error {
-		return cmdDiff([]string{"diff", "repo", "--session", "main"})
-	})
-	if err != nil {
-		t.Fatalf("cmdDiff() returned error: %v", err)
-	}
-	if !strings.Contains(diffOutput, "M main.go") {
-		t.Fatalf("cmdDiff() output = %q, want modified main.go", diffOutput)
-	}
-
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
-	if err != nil {
-		t.Fatalf("loadRAFLocalState() returned error: %v", err)
-	}
-	if !localState.Dirty {
-		t.Fatal("expected local state to be dirty after cmdDiff detects changes")
-	}
-
-	if err := cmdSave([]string{"save", "repo", "--session", "main", "after-edit"}); err != nil {
-		t.Fatalf("cmdSave() returned error: %v", err)
-	}
-
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
-	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
-	}
-	if sessionMeta.HeadSavepoint != "after-edit" {
-		t.Fatalf("HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "after-edit")
-	}
-
-	localState, err = loadRAFLocalState(cfg, "repo", "main")
-	if err != nil {
-		t.Fatalf("loadRAFLocalState() returned error: %v", err)
-	}
-	if localState.Dirty {
-		t.Fatal("expected local state to be clean after cmdSave")
-	}
-	if localState.HeadSavepoint != "after-edit" {
-		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, "after-edit")
-	}
-
-	postSaveDiff, err := captureStdout(t, func() error {
-		return cmdDiff([]string{"diff", "repo", "--session", "main"})
-	})
-	if err != nil {
-		t.Fatalf("cmdDiff(post-save) returned error: %v", err)
-	}
-	if !strings.Contains(postSaveDiff, "No changes") {
-		t.Fatalf("cmdDiff(post-save) output = %q, want no changes", postSaveDiff)
-	}
-}
-
-func TestCmdSaveDetectsRemoteHeadConflict(t *testing.T) {
-	t.Helper()
-
-	_, treePath, store, closeStore := importRAFWorkspaceForTest(t)
-	defer closeStore()
-
 	if err := os.WriteFile(filepath.Join(treePath, "main.go"), []byte("package dirty\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(main.go) returned error: %v", err)
 	}
-	if _, err := captureStdout(t, func() error {
-		return cmdDiff([]string{"diff", "repo", "--session", "main"})
-	}); err != nil {
-		t.Fatalf("cmdDiff() returned error: %v", err)
+
+	localState, err := loadRAFLocalState(cfg, "repo")
+	if err != nil {
+		t.Fatalf("loadRAFLocalState() returned error: %v", err)
+	}
+	localState.Dirty = true
+	if err := saveRAFLocalState(cfg, localState); err != nil {
+		t.Fatalf("saveRAFLocalState() returned error: %v", err)
 	}
 
-	currentSession, err := store.getSessionMeta(context.Background(), "repo", "main")
+	currentWorkspace, err := store.getWorkspaceMeta(context.Background(), "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
 	}
-	currentManifest, err := store.getManifest(context.Background(), "repo", currentSession.HeadSavepoint)
+	currentManifest, err := store.getManifest(context.Background(), "repo", currentWorkspace.HeadSavepoint)
 	if err != nil {
 		t.Fatalf("getManifest() returned error: %v", err)
 	}
+
 	remoteMeta := savepointMeta{
 		Version:         rafFormatVersion,
 		ID:              "remote-head",
 		Name:            "remote-head",
 		Workspace:       "repo",
-		Session:         "main",
-		ParentSavepoint: currentSession.HeadSavepoint,
+		ParentSavepoint: currentWorkspace.HeadSavepoint,
 		CreatedAt:       time.Now().UTC(),
 	}
 	remoteHash, err := hashManifest(currentManifest)
@@ -204,85 +178,23 @@ func TestCmdSaveDetectsRemoteHeadConflict(t *testing.T) {
 	if err := store.putSavepoint(context.Background(), remoteMeta, currentManifest); err != nil {
 		t.Fatalf("putSavepoint(remote) returned error: %v", err)
 	}
-	currentSession.HeadSavepoint = "remote-head"
-	currentSession.UpdatedAt = time.Now().UTC()
-	if err := store.putSessionMeta(context.Background(), currentSession); err != nil {
-		t.Fatalf("putSessionMeta(remote head) returned error: %v", err)
+
+	currentWorkspace.HeadSavepoint = "remote-head"
+	currentWorkspace.UpdatedAt = time.Now().UTC()
+	if err := store.putWorkspaceMeta(context.Background(), currentWorkspace); err != nil {
+		t.Fatalf("putWorkspaceMeta(remote head) returned error: %v", err)
 	}
 
-	err = cmdSave([]string{"save", "repo", "--session", "main", "should-conflict"})
+	err = cmdCheckpoint([]string{"checkpoint", "create", "repo", "should-conflict"})
 	if err == nil {
-		t.Fatal("expected cmdSave() to fail with a conflict")
+		t.Fatal("expected cmdCheckpoint(create) to fail with a conflict")
 	}
 	if !strings.Contains(err.Error(), "moved") && !strings.Contains(err.Error(), "conflict") {
-		t.Fatalf("cmdSave() error = %q, want conflict message", err.Error())
+		t.Fatalf("cmdCheckpoint(create) error = %q, want conflict message", err.Error())
 	}
 }
 
-func TestCmdSaveNoChangesIsANoop(t *testing.T) {
-	t.Helper()
-
-	cfg, _, store, closeStore := importRAFWorkspaceForTest(t)
-	defer closeStore()
-
-	output, err := captureStdout(t, func() error {
-		return cmdSave([]string{"save", "repo", "--session", "main"})
-	})
-	if err != nil {
-		t.Fatalf("cmdSave() returned error: %v", err)
-	}
-	if !strings.Contains(output, "No changes to save") {
-		t.Fatalf("cmdSave() output = %q, want no changes", output)
-	}
-
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
-	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
-	}
-	if sessionMeta.HeadSavepoint != "initial" {
-		t.Fatalf("HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "initial")
-	}
-
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
-	if err != nil {
-		t.Fatalf("loadRAFLocalState() returned error: %v", err)
-	}
-	if localState.Dirty {
-		t.Fatal("expected local state to remain clean after no-op save")
-	}
-}
-
-func TestCmdForkReusesCurrentHeadSavepoint(t *testing.T) {
-	t.Helper()
-
-	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
-	defer closeStore()
-
-	if err := os.WriteFile(filepath.Join(treePath, "main.go"), []byte("package branch\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(main.go) returned error: %v", err)
-	}
-	if err := cmdSave([]string{"save", "repo", "--session", "main", "after-edit"}); err != nil {
-		t.Fatalf("cmdSave() returned error: %v", err)
-	}
-
-	if err := cmdFork([]string{"fork", "repo", "main", "feature-x"}); err != nil {
-		t.Fatalf("cmdFork() returned error: %v", err)
-	}
-
-	forked, err := store.getSessionMeta(context.Background(), "repo", "feature-x")
-	if err != nil {
-		t.Fatalf("getSessionMeta(feature-x) returned error: %v", err)
-	}
-	if forked.HeadSavepoint != "after-edit" {
-		t.Fatalf("forked HeadSavepoint = %q, want %q", forked.HeadSavepoint, "after-edit")
-	}
-
-	if _, err := os.Stat(rafSessionTreePath(cfg, "repo", "feature-x")); !os.IsNotExist(err) {
-		t.Fatalf("expected forked session tree to be absent before first materialization, got err=%v", err)
-	}
-}
-
-func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
+func TestCheckpointRestoreArchivesAndRematerializesWorkspace(t *testing.T) {
 	t.Helper()
 
 	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
@@ -291,8 +203,8 @@ func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(treePath, "main.go"), []byte("package saved\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(main.go) returned error: %v", err)
 	}
-	if err := cmdSave([]string{"save", "repo", "--session", "main", "after-edit"}); err != nil {
-		t.Fatalf("cmdSave() returned error: %v", err)
+	if err := cmdCheckpoint([]string{"checkpoint", "create", "repo", "after-edit"}); err != nil {
+		t.Fatalf("cmdCheckpoint(create) returned error: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(treePath, "main.go"), []byte("package dirty\n"), 0o644); err != nil {
@@ -302,24 +214,24 @@ func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
 		t.Fatalf("WriteFile(scratch.txt) returned error: %v", err)
 	}
 
-	if err := cmdRollback([]string{"rollback", "repo", "--session", "main", "initial"}); err != nil {
-		t.Fatalf("cmdRollback() returned error: %v", err)
+	if err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "initial"}); err != nil {
+		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
 	}
 
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
+	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
 	}
-	if sessionMeta.HeadSavepoint != "initial" {
-		t.Fatalf("HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "initial")
+	if workspaceMeta.HeadSavepoint != "initial" {
+		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
 
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
+	localState, err := loadRAFLocalState(cfg, "repo")
 	if err != nil {
 		t.Fatalf("loadRAFLocalState() returned error: %v", err)
 	}
 	if localState.Dirty {
-		t.Fatal("expected local state to be clean after rollback")
+		t.Fatal("expected local state to be clean after restore")
 	}
 	if localState.HeadSavepoint != "initial" {
 		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, "initial")
@@ -330,10 +242,10 @@ func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
 		t.Fatalf("ReadFile(main.go) returned error: %v", err)
 	}
 	if string(mainBytes) != "package main\n" {
-		t.Fatalf("main.go after rollback = %q, want %q", string(mainBytes), "package main\n")
+		t.Fatalf("main.go after restore = %q, want %q", string(mainBytes), "package main\n")
 	}
 	if _, err := os.Stat(filepath.Join(treePath, "scratch.txt")); !os.IsNotExist(err) {
-		t.Fatalf("expected scratch.txt to be removed after rollback, got err=%v", err)
+		t.Fatalf("expected scratch.txt to be removed after restore, got err=%v", err)
 	}
 
 	archiveDir := rafWorkspaceArchiveDir(cfg, "repo")
@@ -342,7 +254,7 @@ func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
 		t.Fatalf("ReadDir(archive) returned error: %v", err)
 	}
 	if len(entries) == 0 {
-		t.Fatal("expected rollback to create an archive entry")
+		t.Fatal("expected restore to create an archive entry")
 	}
 
 	foundScratch := false
@@ -355,64 +267,6 @@ func TestCmdRollbackArchivesAndRematerializes(t *testing.T) {
 	}
 	if !foundScratch {
 		t.Fatal("expected archived tree to contain scratch.txt")
-	}
-}
-
-func TestCmdSessionCurrentWorkspaceCoversRunSaveForkAndRollback(t *testing.T) {
-	t.Helper()
-
-	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
-	defer closeStore()
-
-	if err := cmdRun([]string{"run", "--", "/bin/sh", "-c", "printf 'hello\n' > generated.txt"}); err != nil {
-		t.Fatalf("cmdRun() returned error: %v", err)
-	}
-
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
-	if err != nil {
-		t.Fatalf("getSessionMeta(main) returned error: %v", err)
-	}
-	if sessionMeta.HeadSavepoint == "initial" {
-		t.Fatal("expected cmdRun() to auto-save when workspace is defaulted")
-	}
-
-	if err := os.WriteFile(filepath.Join(treePath, "main.go"), []byte("package changed\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(main.go) returned error: %v", err)
-	}
-	if err := cmdSave([]string{"save", "after-edit"}); err != nil {
-		t.Fatalf("cmdSave() returned error: %v", err)
-	}
-
-	sessionMeta, err = store.getSessionMeta(context.Background(), "repo", "main")
-	if err != nil {
-		t.Fatalf("getSessionMeta(main after save) returned error: %v", err)
-	}
-	if sessionMeta.HeadSavepoint != "after-edit" {
-		t.Fatalf("HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "after-edit")
-	}
-
-	if err := cmdFork([]string{"fork", "main", "feature-x"}); err != nil {
-		t.Fatalf("cmdFork() returned error: %v", err)
-	}
-
-	forked, err := store.getSessionMeta(context.Background(), "repo", "feature-x")
-	if err != nil {
-		t.Fatalf("getSessionMeta(feature-x) returned error: %v", err)
-	}
-	if forked.HeadSavepoint != "after-edit" {
-		t.Fatalf("forked HeadSavepoint = %q, want %q", forked.HeadSavepoint, "after-edit")
-	}
-
-	if err := cmdRollback([]string{"rollback", "initial"}); err != nil {
-		t.Fatalf("cmdRollback() returned error: %v", err)
-	}
-
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
-	if err != nil {
-		t.Fatalf("loadRAFLocalState() returned error: %v", err)
-	}
-	if localState.HeadSavepoint != "initial" {
-		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, "initial")
 	}
 }
 
@@ -443,7 +297,7 @@ func importRAFWorkspaceForTest(t *testing.T) (config, string, *rafStore, func())
 	if err != nil {
 		t.Fatalf("openRAFStore() returned error: %v", err)
 	}
-	return loadedCfg, rafSessionTreePath(loadedCfg, "repo", "main"), store, closeStore
+	return loadedCfg, rafWorkspaceTreePath(loadedCfg, "repo"), store, closeStore
 }
 
 func captureStdout(t *testing.T, fn func() error) (string, error) {

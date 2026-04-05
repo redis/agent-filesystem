@@ -14,6 +14,6 @@
   "nfsBin": "~/git/agent-filesystem/mount/agent-filesystem-nfs",
   "nfsHost": "127.0.0.1",
   "nfsPort": 20490,
-  "redisLog": "/tmp/rfs-redis.log",
-  "mountLog": "/tmp/rfs-mount.log"
+  "redisLog": "/tmp/afs-redis.log",
+  "mountLog": "/tmp/afs-mount.log"
 }

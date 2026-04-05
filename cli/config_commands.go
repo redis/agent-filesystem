@@ -285,7 +285,7 @@ func configPathUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s config path
 
-Print the config file path RAF is using.
+Print the config file path AFS is using.
 `, bin)
 }
 
@@ -304,7 +304,7 @@ Output:
 
 Notes:
   Current workspace is not configured here. Use '%s workspace use <workspace>'.
-  Advanced fields like runtime paths stay available in raf.config.json if needed.
+  Advanced fields like runtime paths stay available in afs.config.json if needed.
 
 Examples:
   %s config set --redis-url rediss://user:pass@redis.example:6379/4
@@ -317,7 +317,7 @@ func upUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s up [flags...]
 
-Start RAF using the saved config, with optional one-shot overrides.
+Start AFS using the saved config, with optional one-shot overrides.
 These flags apply to the current run only and do not rewrite %s.
 
 Basics:
@@ -328,7 +328,7 @@ Basics:
 
 Notes:
   Current workspace is not set here. Use '%s workspace use <workspace>'.
-  Advanced fields like runtime paths stay available in raf.config.json if needed.
+  Advanced fields like runtime paths stay available in afs.config.json if needed.
 
 Examples:
   %s up --redis-url rediss://user:pass@redis.example:6379/4

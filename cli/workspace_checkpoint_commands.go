@@ -14,16 +14,8 @@ import (
 )
 
 const (
-	rafPrimaryStateName      = "main"
 	rafInitialCheckpointName = "initial"
 )
-
-func primaryStateName(cfg config) string {
-	if strings.TrimSpace(cfg.DefaultSession) != "" {
-		return cfg.DefaultSession
-	}
-	return rafPrimaryStateName
-}
 
 func cloneManifest(source manifest) manifest {
 	cloned := manifest{
@@ -129,7 +121,6 @@ func cmdWorkspaceCreate(args []string) error {
 
 func createEmptyWorkspace(ctx context.Context, cfg config, store *rafStore, workspace string) error {
 	now := time.Now().UTC()
-	stateName := primaryStateName(cfg)
 
 	rootManifest := manifest{
 		Version:   rafFormatVersion,
@@ -153,23 +144,15 @@ func createEmptyWorkspace(ctx context.Context, cfg config, store *rafStore, work
 		Version:          rafFormatVersion,
 		Name:             workspace,
 		CreatedAt:        now,
-		DefaultSession:   stateName,
+		UpdatedAt:        now,
+		HeadSavepoint:    rafInitialCheckpointName,
 		DefaultSavepoint: rafInitialCheckpointName,
-	}
-	stateMeta := sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     workspace,
-		Name:          stateName,
-		HeadSavepoint: rafInitialCheckpointName,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
 	checkpointMeta := savepointMeta{
 		Version:      rafFormatVersion,
 		ID:           rafInitialCheckpointName,
 		Name:         rafInitialCheckpointName,
 		Workspace:    workspace,
-		Session:      stateName,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    0,
@@ -183,10 +166,7 @@ func createEmptyWorkspace(ctx context.Context, cfg config, store *rafStore, work
 	if err := store.putSavepoint(ctx, checkpointMeta, rootManifest); err != nil {
 		return err
 	}
-	if err := store.putSessionMeta(ctx, stateMeta); err != nil {
-		return err
-	}
-	return store.audit(ctx, workspace, stateName, "workspace_create", map[string]any{
+	return store.audit(ctx, workspace, "workspace_create", map[string]any{
 		"checkpoint": rafInitialCheckpointName,
 	})
 }
@@ -199,7 +179,8 @@ func cmdWorkspaceList(args []string) error {
 	if len(args) != 2 {
 		return fmt.Errorf("%s", workspaceListUsageText(filepath.Base(os.Args[0])))
 	}
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+
+	_, store, closeStore, err := openRAFStore(context.Background())
 	if err != nil {
 		return err
 	}
@@ -213,7 +194,7 @@ func cmdWorkspaceList(args []string) error {
 
 	rows := make([]boxRow, 0, len(workspaces))
 	for _, meta := range workspaces {
-		checkpoints, err := store.listSavepoints(ctx, meta.Name, primaryStateName(cfg), 0)
+		checkpoints, err := store.listSavepoints(ctx, meta.Name, 0)
 		if err != nil {
 			return err
 		}
@@ -304,9 +285,6 @@ func cmdWorkspaceRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if parsed.session != "" {
-		return fmt.Errorf("workspace run does not accept --session")
-	}
 	if len(parsed.positionals) > 1 {
 		return fmt.Errorf("%s", workspaceRunUsageText(filepath.Base(os.Args[0])))
 	}
@@ -329,12 +307,8 @@ func cmdWorkspaceRun(args []string) error {
 		return err
 	}
 
-	stateName := primaryStateName(cfg)
-	if err := validateRAFName("session", stateName); err != nil {
-		return err
-	}
-	if err := runRAFCommand(context.Background(), cfg, store, workspace, stateName, childArgs, parsed.readonly); err != nil {
-		if errors.Is(err, errRAFSessionConflict) {
+	if err := runRAFCommand(context.Background(), cfg, store, workspace, childArgs, parsed.readonly); err != nil {
+		if errors.Is(err, errRAFWorkspaceConflict) {
 			return fmt.Errorf("workspace %q moved since this working copy was materialized; inspect it before running again", workspace)
 		}
 		return err
@@ -504,12 +478,7 @@ func forkWorkspace(ctx context.Context, cfg config, store *rafStore, sourceWorks
 	if err != nil {
 		return err
 	}
-	stateName := primaryStateName(cfg)
-	sourceState, err := store.getSessionMeta(ctx, sourceWorkspace, sourceMeta.DefaultSession)
-	if err != nil {
-		return err
-	}
-	sourceManifest, err := store.getManifest(ctx, sourceWorkspace, sourceState.HeadSavepoint)
+	sourceManifest, err := store.getManifest(ctx, sourceWorkspace, sourceMeta.HeadSavepoint)
 	if err != nil {
 		return err
 	}
@@ -538,32 +507,25 @@ func forkWorkspace(ctx context.Context, cfg config, store *rafStore, sourceWorks
 		return err
 	}
 
+	stats := manifestImportStats(newManifest)
 	workspaceMeta := workspaceMeta{
 		Version:          rafFormatVersion,
 		Name:             newWorkspace,
 		CreatedAt:        now,
-		DefaultSession:   stateName,
+		UpdatedAt:        now,
+		HeadSavepoint:    rafInitialCheckpointName,
 		DefaultSavepoint: rafInitialCheckpointName,
-	}
-	stateMeta := sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     newWorkspace,
-		Name:          stateName,
-		HeadSavepoint: rafInitialCheckpointName,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
 	checkpointMeta := savepointMeta{
 		Version:      rafFormatVersion,
 		ID:           rafInitialCheckpointName,
 		Name:         rafInitialCheckpointName,
 		Workspace:    newWorkspace,
-		Session:      stateName,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
-		FileCount:    manifestImportStats(newManifest).Files,
-		DirCount:     manifestImportStats(newManifest).Dirs,
-		TotalBytes:   manifestImportStats(newManifest).Bytes,
+		FileCount:    stats.Files,
+		DirCount:     stats.Dirs,
+		TotalBytes:   stats.Bytes,
 	}
 
 	if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
@@ -572,12 +534,9 @@ func forkWorkspace(ctx context.Context, cfg config, store *rafStore, sourceWorks
 	if err := store.putSavepoint(ctx, checkpointMeta, newManifest); err != nil {
 		return err
 	}
-	if err := store.putSessionMeta(ctx, stateMeta); err != nil {
-		return err
-	}
-	return store.audit(ctx, newWorkspace, stateName, "workspace_fork", map[string]any{
+	return store.audit(ctx, newWorkspace, "workspace_fork", map[string]any{
 		"source_workspace":  sourceWorkspace,
-		"source_checkpoint": sourceState.HeadSavepoint,
+		"source_checkpoint": sourceMeta.HeadSavepoint,
 	})
 }
 
@@ -629,7 +588,7 @@ func cloneWorkspaceAtSource(workspace, sourceDir string) error {
 		return fmt.Errorf("%s is not a directory", targetDir)
 	}
 
-	backupDir := targetDir + ".pre-raf"
+	backupDir := targetDir + ".pre-afs"
 	if _, err := os.Stat(backupDir); err == nil {
 		return fmt.Errorf("backup path %s already exists; move it aside before mounting at source", backupDir)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -659,12 +618,11 @@ func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targ
 	}
 	defer closeStore()
 
-	stateName := primaryStateName(cfg)
-	stateMeta, err := store.getSessionMeta(ctx, workspace, stateName)
+	workspaceMeta, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return err
 	}
-	m, err := store.getManifest(ctx, workspace, stateMeta.HeadSavepoint)
+	m, err := store.getManifest(ctx, workspace, workspaceMeta.HeadSavepoint)
 	if err != nil {
 		return err
 	}
@@ -695,13 +653,13 @@ func cmdCheckpointList(args []string) error {
 		return err
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	_, store, closeStore, err := openRAFStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	checkpoints, err := store.listSavepoints(context.Background(), workspace, primaryStateName(cfg), 100)
+	checkpoints, err := store.listSavepoints(context.Background(), workspace, 100)
 	if err != nil {
 		return err
 	}
@@ -745,7 +703,7 @@ func cmdCheckpointCreate(args []string) error {
 	}
 	defer closeStore()
 
-	saved, err := saveRAFSession(context.Background(), cfg, store, workspace, primaryStateName(cfg), checkpointID, false)
+	saved, err := saveRAFWorkspace(context.Background(), cfg, store, workspace, checkpointID, false)
 	if err != nil {
 		return err
 	}
@@ -788,7 +746,6 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	}
 	defer closeStore()
 
-	stateName := primaryStateName(cfg)
 	exists, err := store.savepointExists(ctx, workspace, checkpointID)
 	if err != nil {
 		return err
@@ -797,15 +754,15 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 		return fmt.Errorf("checkpoint %q does not exist", checkpointID)
 	}
 
-	resetResult, err := resetRAFSessionHead(ctx, cfg, store, workspace, stateName, checkpointID)
+	resetResult, err := resetRAFWorkspaceHead(ctx, cfg, store, workspace, checkpointID)
 	if err != nil {
-		if err == redis.TxFailedErr {
+		if err == redis.TxFailedErr || errors.Is(err, errRAFWorkspaceConflict) {
 			return fmt.Errorf("checkpoint restore conflict while restoring %q", checkpointID)
 		}
 		return err
 	}
 
-	if err := store.audit(ctx, workspace, stateName, "checkpoint_restore", map[string]any{
+	if err := store.audit(ctx, workspace, "checkpoint_restore", map[string]any{
 		"checkpoint": checkpointID,
 		"archive":    resetResult.archivePath,
 	}); err != nil {
@@ -875,9 +832,8 @@ Materialize the workspace locally, run a command with that workspace as the cwd,
 and save changes back to Redis unless --readonly is set.
 
 Notes:
-  If <workspace> is omitted, RAF uses the current workspace selected with
+  If <workspace> is omitted, AFS uses the current workspace selected with
   '%s workspace use <workspace>'.
-  workspace run does not accept --session.
 
 Examples:
   %s workspace run demo -- /bin/sh
@@ -889,7 +845,7 @@ func workspaceCurrentUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s workspace current
 
-Show the current workspace selection RAF will use when a workspace argument is omitted.
+Show the current workspace selection AFS will use when a workspace argument is omitted.
 `, bin)
 }
 
@@ -897,7 +853,7 @@ func workspaceUseUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s workspace use <workspace>
 
-Set the current workspace RAF will use when a workspace argument is omitted.
+Set the current workspace AFS will use when a workspace argument is omitted.
 `, bin)
 }
 
@@ -935,7 +891,7 @@ Import a local directory into a workspace.
 Options:
   --force            Replace an existing workspace
   --clone-at-source  Replace the source directory with a materialized workspace copy
-                     and keep the original directory as <directory>.pre-raf
+                     and keep the original directory as <directory>.pre-afs
 `, bin)
 }
 
@@ -970,7 +926,7 @@ func checkpointCreateUsageText(bin string) string {
   %s checkpoint create <workspace> [checkpoint]
 
 Create a checkpoint from the workspace's current local working copy.
-If [checkpoint] is omitted, RAF generates a timestamped name.
+If [checkpoint] is omitted, AFS generates a timestamped name.
 `, bin)
 }
 
@@ -978,7 +934,6 @@ func checkpointRestoreUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s checkpoint restore <workspace> <checkpoint>
 
-Restore a workspace to a checkpoint and rematerialize the local working copy.
-The previous local tree is archived if one exists.
+Restore the workspace working copy to the selected checkpoint.
 `, bin)
 }

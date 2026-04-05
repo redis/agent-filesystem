@@ -3,13 +3,14 @@
 *.so
 *.dSYM/
 rfs
-/raf
+/afs
 /redis-qmd
 mount/agent-filesystem-mount
 mount/agent-filesystem-nfs
 sandbox/sandbox
 sandbox/sandbox-cli
 *.rdb
+afs.config.json
 raf.config.json
 
 # Python

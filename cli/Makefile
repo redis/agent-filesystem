@@ -1,12 +1,12 @@
-all: raf redis-qmd
+all: afs redis-qmd
 
-raf:
-	go build -o ../raf .
+afs:
+	go build -o ../afs .
 
 redis-qmd:
 	go build -o ../redis-qmd ./cmd/redis-qmd
 
 clean:
-	rm -f ../raf ../redis-qmd
+	rm -f ../afs ../redis-qmd
 
-.PHONY: all clean raf redis-qmd
+.PHONY: all clean afs redis-qmd

@@ -95,15 +95,15 @@ func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 		t.Fatal("expected mounted workspace sync to create a new savepoint")
 	}
 
-	sessionMeta, err := store.getSessionMeta(ctx, "repo", "main")
+	workspaceMeta, err := store.getWorkspaceMeta(ctx, "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta(repo, main) returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta(repo) returned error: %v", err)
 	}
-	if sessionMeta.HeadSavepoint == head {
-		t.Fatalf("HeadSavepoint = %q, want a new savepoint after mounted edits", sessionMeta.HeadSavepoint)
+	if workspaceMeta.HeadSavepoint == head {
+		t.Fatalf("HeadSavepoint = %q, want a new savepoint after mounted edits", workspaceMeta.HeadSavepoint)
 	}
 
-	data, err := os.ReadFile(filepath.Join(rafSessionTreePath(cfg, "repo", "main"), "mounted.txt"))
+	data, err := os.ReadFile(filepath.Join(rafWorkspaceTreePath(cfg, "repo"), "mounted.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(mounted.txt) returned error: %v", err)
 	}
@@ -140,12 +140,12 @@ func TestSyncMountedWorkspaceBackIgnoresMountedSystemArtifacts(t *testing.T) {
 		t.Fatal("expected mounted system artifacts to be ignored during sync")
 	}
 
-	sessionMeta, err := store.getSessionMeta(ctx, "repo", "main")
+	workspaceMeta, err := store.getWorkspaceMeta(ctx, "repo")
 	if err != nil {
-		t.Fatalf("getSessionMeta(repo, main) returned error: %v", err)
+		t.Fatalf("getWorkspaceMeta(repo) returned error: %v", err)
 	}
-	if sessionMeta.HeadSavepoint != head {
-		t.Fatalf("HeadSavepoint = %q, want %q when only ignored mount artifacts changed", sessionMeta.HeadSavepoint, head)
+	if workspaceMeta.HeadSavepoint != head {
+		t.Fatalf("HeadSavepoint = %q, want %q when only ignored mount artifacts changed", workspaceMeta.HeadSavepoint, head)
 	}
 }
 

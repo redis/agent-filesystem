@@ -2,7 +2,6 @@ import type {
   RAFActivityEvent,
   RAFFile,
   RAFSavepoint,
-  RAFSession,
   RAFState,
   RAFWorkspace,
 } from "../types/raf";
@@ -40,24 +39,6 @@ function buildSavepoint(
   };
 }
 
-function buildSession(
-  session: Omit<RAFSession, "savepoints" | "headSavepointId"> & {
-    savepoints: RAFSavepoint[];
-    headSavepointName: string;
-  },
-): RAFSession {
-  const [firstSavepoint] = session.savepoints;
-  const currentSavepoint = session.savepoints.find(
-    (savepoint) => savepoint.name === session.headSavepointName,
-  );
-
-  return {
-    ...session,
-    headSavepointId: currentSavepoint == null ? firstSavepoint.id : currentSavepoint.id,
-    savepoints: session.savepoints,
-  };
-}
-
 function buildActivity(
   id: string,
   createdAt: string,
@@ -78,7 +59,43 @@ function buildActivity(
   };
 }
 
-const paymentsMainFiles: RAFFile[] = [
+const paymentsCurrentFiles: RAFFile[] = [
+  {
+    path: "README.md",
+    language: "markdown",
+    modifiedAt: "2026-04-03T10:40:00Z",
+    content: `# Payments Workspace
+
+This workspace is validating browser editing and checkpoint restore behavior.
+
+- active checkpoint: before-refactor
+- editor draft: dirty
+- next milestone: cloud control-plane hookup`,
+  },
+  {
+    path: "src/app.tsx",
+    language: "typescript",
+    modifiedAt: "2026-04-03T10:44:00Z",
+    content: `export function App() {
+  return {
+    workspace: "payments-portal",
+    mode: "editor-pass",
+    checkpoint: "before-refactor"
+  };
+}`,
+  },
+  {
+    path: "src/routes/editor.tsx",
+    language: "typescript",
+    modifiedAt: "2026-04-03T10:48:00Z",
+    content: `export const editorRoute = {
+  id: "payments-editor",
+  state: "dirty"
+};`,
+  },
+];
+
+const paymentsBaselineFiles: RAFFile[] = [
   {
     path: "README.md",
     language: "markdown",
@@ -87,9 +104,8 @@ const paymentsMainFiles: RAFFile[] = [
 
 This workspace tracks the checkout hardening effort for Redis Cloud hosted agents.
 
-- default session: main
-- active savepoint: baseline-ui
-- next milestone: browser-based session import`,
+- active checkpoint: baseline-ui
+- next milestone: browser editing`,
   },
   {
     path: "src/app.tsx",
@@ -102,55 +118,9 @@ This workspace tracks the checkout hardening effort for Redis Cloud hosted agent
   };
 }`,
   },
-  {
-    path: "notes/session-plan.md",
-    language: "markdown",
-    modifiedAt: "2026-04-03T09:20:00Z",
-    content: `## Session plan
-
-1. Import repository into RAF
-2. Fork a review session
-3. Save checkpoints before risky changes`,
-  },
 ];
 
-const paymentsFixFiles: RAFFile[] = [
-  {
-    path: "README.md",
-    language: "markdown",
-    modifiedAt: "2026-04-03T10:40:00Z",
-    content: `# Payments Workspace
-
-Fix-login session is validating session import and rollback behavior.
-
-- checkpoint before refactor
-- file browser wired
-- editor draft dirty`,
-  },
-  {
-    path: "src/app.tsx",
-    language: "typescript",
-    modifiedAt: "2026-04-03T10:44:00Z",
-    content: `export function App() {
-  return {
-    workspace: "payments-portal",
-    mode: "fix-login",
-    savepoint: "before-refactor"
-  };
-}`,
-  },
-  {
-    path: "src/routes/session.tsx",
-    language: "typescript",
-    modifiedAt: "2026-04-03T10:48:00Z",
-    content: `export const sessionRoute = {
-  id: "fix-login",
-  status: "dirty"
-};`,
-  },
-];
-
-const memoryMainFiles: RAFFile[] = [
+const memoryFiles: RAFFile[] = [
   {
     path: "memories/customer-a.md",
     language: "markdown",
@@ -166,7 +136,7 @@ const memoryMainFiles: RAFFile[] = [
     modifiedAt: "2026-04-02T16:11:00Z",
     content: `# Customer B
 
-- session import requested
+- import review requested
 - editor permissions pending`,
   },
 ];
@@ -181,7 +151,7 @@ workspace: support-sandbox
 allow:
   - shell
   - editor
-  - session-import`,
+  - checkpoints`,
   },
   {
     path: "scripts/bootstrap.sh",
@@ -193,14 +163,14 @@ echo "Preparing support sandbox"`,
   },
 ];
 
-const paymentsMainSavepoints = [
+const paymentsSavepoints = [
   buildSavepoint(
-    "sp-payments-initial",
-    "initial",
-    "2026-04-02T18:15:00Z",
-    "rafa",
-    "Imported baseline checkout repo into RAF.",
-    paymentsMainFiles,
+    "sp-payments-before-refactor",
+    "before-refactor",
+    "2026-04-03T10:36:00Z",
+    "maya",
+    "Captured a recovery point before the editor refactor.",
+    paymentsBaselineFiles,
   ),
   buildSavepoint(
     "sp-payments-baseline-ui",
@@ -208,26 +178,7 @@ const paymentsMainSavepoints = [
     "2026-04-03T09:22:00Z",
     "rafa",
     "Prepared the workspace for Redis Cloud Web UI review.",
-    paymentsMainFiles,
-  ),
-];
-
-const paymentsFixSavepoints = [
-  buildSavepoint(
-    "sp-fix-login-forked",
-    "forked-from-main",
-    "2026-04-03T10:15:00Z",
-    "maya",
-    "Forked from main after import review.",
-    paymentsMainFiles,
-  ),
-  buildSavepoint(
-    "sp-fix-login-before-refactor",
-    "before-refactor",
-    "2026-04-03T10:36:00Z",
-    "maya",
-    "Captured session state before editor refactor.",
-    paymentsFixFiles,
+    paymentsBaselineFiles,
   ),
 ];
 
@@ -238,7 +189,7 @@ const memorySavepoints = [
     "2026-04-02T16:15:00Z",
     "anika",
     "Imported customer memory workspace.",
-    memoryMainFiles,
+    memoryFiles,
   ),
 ];
 
@@ -256,57 +207,30 @@ const sandboxSavepoints = [
 const paymentsWorkspace: RAFWorkspace = {
   id: "payments-portal",
   name: "payments-portal",
-  description: "Checkout debugging workspace mirrored into RAF for collaborative agent sessions.",
+  description: "Checkout debugging workspace mirrored into AFS for browser editing and checkpoint recovery.",
   cloudAccount: "Redis Cloud / Customer Success",
   databaseId: "db-payments-portal",
   databaseName: "payments-portal-us-east-1",
-  redisKey: "raf:payments-portal",
+  redisKey: "afs:payments-portal",
   region: "us-east-1",
-  mountedPath: "~/.raf/workspaces/payments-portal",
+  mountedPath: "~/.afs/workspaces/payments-portal",
   status: "healthy",
   source: "git-import",
   createdAt: "2026-04-02T18:15:00Z",
   updatedAt: "2026-04-03T10:48:00Z",
-  defaultSessionId: "session-main",
+  draftState: "dirty",
+  headSavepointId: "sp-payments-before-refactor",
   tags: ["production", "frontend", "cloud"],
-  sessions: [
-    buildSession({
-      id: "session-main",
-      name: "main",
-      description: "Canonical saved branch for checkout UI exploration.",
-      author: "rafa",
-      createdAt: "2026-04-02T18:15:00Z",
-      updatedAt: "2026-04-03T09:22:00Z",
-      lastRunAt: "2026-04-03T09:24:00Z",
-      status: "clean",
-      kind: "main",
-      files: paymentsMainFiles,
-      savepoints: paymentsMainSavepoints,
-      headSavepointName: "baseline-ui",
-    }),
-    buildSession({
-      id: "session-fix-login",
-      name: "fix-login",
-      description: "Scratch session validating the browser editor flow.",
-      author: "maya",
-      createdAt: "2026-04-03T10:15:00Z",
-      updatedAt: "2026-04-03T10:48:00Z",
-      lastRunAt: "2026-04-03T10:42:00Z",
-      status: "dirty",
-      kind: "branch",
-      files: paymentsFixFiles,
-      savepoints: paymentsFixSavepoints,
-      headSavepointName: "before-refactor",
-    }),
-  ],
+  files: paymentsCurrentFiles,
+  savepoints: paymentsSavepoints,
   activity: [
     buildActivity(
       "evt-payments-1",
       "2026-04-03T10:48:00Z",
       "maya",
       "file.updated",
-      "session",
-      "Edited src/routes/session.tsx",
+      "file",
+      "Edited src/routes/editor.tsx",
       "Saved draft changes inside the Web UI editor.",
     ),
     buildActivity(
@@ -318,15 +242,6 @@ const paymentsWorkspace: RAFWorkspace = {
       "Created before-refactor",
       "Captured a recovery point before the refactor.",
     ),
-    buildActivity(
-      "evt-payments-3",
-      "2026-04-03T10:15:00Z",
-      "maya",
-      "session.forked",
-      "session",
-      "Forked fix-login",
-      "New branch session created from main.",
-    ),
   ],
 };
 
@@ -337,31 +252,18 @@ const memoryWorkspace: RAFWorkspace = {
   cloudAccount: "Redis Cloud / Solutions",
   databaseId: "db-customer-memory",
   databaseName: "customer-memory-eu-west-1",
-  redisKey: "raf:customer-memory",
+  redisKey: "afs:customer-memory",
   region: "eu-west-1",
-  mountedPath: "~/.raf/workspaces/customer-memory",
+  mountedPath: "~/.afs/workspaces/customer-memory",
   status: "syncing",
   source: "cloud-import",
   createdAt: "2026-04-02T16:15:00Z",
   updatedAt: "2026-04-02T16:15:00Z",
-  defaultSessionId: "session-memory-main",
+  draftState: "clean",
+  headSavepointId: "sp-memory-initial",
   tags: ["memory", "shared"],
-  sessions: [
-    buildSession({
-      id: "session-memory-main",
-      name: "main",
-      description: "Primary memory lane with review-only access.",
-      author: "anika",
-      createdAt: "2026-04-02T16:15:00Z",
-      updatedAt: "2026-04-02T16:15:00Z",
-      lastRunAt: "2026-04-02T16:18:00Z",
-      status: "clean",
-      kind: "imported",
-      files: memoryMainFiles,
-      savepoints: memorySavepoints,
-      headSavepointName: "initial",
-    }),
-  ],
+  files: memoryFiles,
+  savepoints: memorySavepoints,
   activity: [
     buildActivity(
       "evt-memory-1",
@@ -378,35 +280,22 @@ const memoryWorkspace: RAFWorkspace = {
 const sandboxWorkspace: RAFWorkspace = {
   id: "support-sandbox",
   name: "support-sandbox",
-  description: "Blank workspace for reproducing customer issues with isolated agent sessions.",
+  description: "Blank workspace for reproducing customer issues with isolated checkpoints.",
   cloudAccount: "Redis Cloud / Support",
   databaseId: "db-support-sandbox",
   databaseName: "support-sandbox-us-central-1",
-  redisKey: "raf:support-sandbox",
+  redisKey: "afs:support-sandbox",
   region: "us-central-1",
-  mountedPath: "~/.raf/workspaces/support-sandbox",
+  mountedPath: "~/.afs/workspaces/support-sandbox",
   status: "attention",
   source: "blank",
   createdAt: "2026-04-01T12:05:00Z",
   updatedAt: "2026-04-01T12:05:00Z",
-  defaultSessionId: "session-sandbox-main",
+  draftState: "clean",
+  headSavepointId: "sp-sandbox-initial",
   tags: ["sandbox", "ops"],
-  sessions: [
-    buildSession({
-      id: "session-sandbox-main",
-      name: "main",
-      description: "Template sandbox used to spin up short-lived sessions.",
-      author: "sam",
-      createdAt: "2026-04-01T12:05:00Z",
-      updatedAt: "2026-04-01T12:05:00Z",
-      lastRunAt: "2026-04-01T12:07:00Z",
-      status: "clean",
-      kind: "main",
-      files: sandboxFiles,
-      savepoints: sandboxSavepoints,
-      headSavepointName: "initial",
-    }),
-  ],
+  files: sandboxFiles,
+  savepoints: sandboxSavepoints,
   activity: [
     buildActivity(
       "evt-sandbox-1",

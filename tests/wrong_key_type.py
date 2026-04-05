@@ -1,4 +1,4 @@
-from test import TestCase
+from test_runner import TestCase
 
 
 class WrongKeyType(TestCase):

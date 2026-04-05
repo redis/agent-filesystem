@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
-import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
@@ -18,11 +17,6 @@ import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const SessionsRoute = SessionsRouteImport.update({
-  id: '/sessions',
-  path: '/sessions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivityRoute = ActivityRouteImport.update({
@@ -44,14 +38,12 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
-  '/sessions': typeof SessionsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
-  '/sessions': typeof SessionsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
@@ -59,7 +51,6 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
-  '/sessions': typeof SessionsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
@@ -68,21 +59,18 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity'
-    | '/sessions'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/activity'
-    | '/sessions'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   id:
     | '__root__'
     | '/'
     | '/activity'
-    | '/sessions'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
@@ -90,7 +78,6 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
-  SessionsRoute: typeof SessionsRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
 }
 
@@ -101,13 +88,6 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/sessions': {
-      id: '/sessions'
-      path: '/sessions'
-      fullPath: '/sessions'
-      preLoaderRoute: typeof SessionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activity': {
@@ -149,7 +129,6 @@ const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
-  SessionsRoute: SessionsRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
 }
 export const routeTree = rootRouteImport

@@ -1,8 +1,8 @@
-# Agent Filesystem
+# Redis Agent Filesystem
 
-Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
+Redis Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
 
-**Why Agent Filesystem:**
+**Why Redis Agent Filesystem:**
 - **Persistence** — data survives process restarts via RDB/AOF
 - **Multi-client access** — any Redis client can read/write the same volume concurrently
 - **Atomic operations** — every FS.* command is atomic, no partial writes
@@ -35,7 +35,7 @@ The `rfs` binary is at the repo root after building.
 
 Use `--config <path>` before any command to override the config file location:
 ```bash
-./raf --config /path/to/custom.json up
+./afs --config /path/to/custom.json up
 ```
 
 ## Programmatic Setup (for agents)
@@ -51,7 +51,7 @@ cd /home/ubuntu/git/agent-filesystem && make
 ### 2. Write config
 
 ```bash
-cat > /home/ubuntu/git/agent-filesystem/raf.config.json << 'EOF'
+cat > /home/ubuntu/git/agent-filesystem/afs.config.json << 'EOF'
 {
   "useExistingRedis": false,
   "redisAddr": "localhost:6379",
@@ -75,19 +75,19 @@ Empty strings for `redisServerBin`, `modulePath`, and `mountBin` are auto-detect
 ### 3. Start
 
 ```bash
-./raf up
+./afs up
 ```
 
 ### 4. Verify
 
 ```bash
-./raf status
+./afs status
 ls ~/agent-filesystem
 ```
 
 ## Configuration Reference
 
-File: `raf.config.json` (next to the `raf` binary in the repo root)
+File: `afs.config.json` (next to the `afs` binary in the repo root)
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -140,7 +140,7 @@ Replace `vol` below with your chosen key name.
 
 ### Quick reference
 
-| Unix command | Agent Filesystem equivalent | Notes |
+| Unix command | Redis Agent Filesystem equivalent | Notes |
 |---|---|---|
 | `echo "text" > file` | `FS.ECHO vol /file "text"` | Creates parents automatically |
 | `echo "text" >> file` | `FS.ECHO vol /file "text" APPEND` | Also `FS.APPEND` |

@@ -56,7 +56,7 @@ func (f *fakeImportClient) Utimens(_ context.Context, path string, _, _ int64) e
 func TestImportDirectoryRespectsRAFIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
 
-	writeTestFile(t, filepath.Join(sourceDir, ".rafignore"), "cache/\nworktrees/\n*.log\n!logs/keep.log\n")
+	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\nworktrees/\n*.log\n!logs/keep.log\n")
 	writeTestFile(t, filepath.Join(sourceDir, "keep.txt"), "keep")
 	writeTestFile(t, filepath.Join(sourceDir, "cache", "state.json"), "{}")
 	writeTestFile(t, filepath.Join(sourceDir, "logs", "debug.log"), "ignore me")
@@ -98,8 +98,8 @@ func TestImportDirectoryRespectsRAFIgnore(t *testing.T) {
 	if client.files["/logs/keep.log"] != "keep me" {
 		t.Fatalf("expected logs/keep.log to be re-included")
 	}
-	if client.files["/.rafignore"] == "" {
-		t.Fatalf("expected .rafignore to be imported")
+	if client.files["/.afsignore"] == "" {
+		t.Fatalf("expected .afsignore to be imported")
 	}
 	if _, ok := client.files["/logs/debug.log"]; ok {
 		t.Fatalf("expected logs/debug.log to be ignored")
@@ -118,7 +118,7 @@ func TestImportDirectoryRespectsRAFIgnore(t *testing.T) {
 func TestImportDirectoryImportsIncludedPathsAndSkipsIgnoredOnes(t *testing.T) {
 	sourceDir := t.TempDir()
 
-	writeTestFile(t, filepath.Join(sourceDir, ".rafignore"), "cache/\n*.tmp\n!important.tmp\n")
+	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\n*.tmp\n!important.tmp\n")
 	writeTestFile(t, filepath.Join(sourceDir, "important.tmp"), "keep")
 	writeTestFile(t, filepath.Join(sourceDir, "throwaway.tmp"), "skip")
 	writeTestFile(t, filepath.Join(sourceDir, "cache", "blob.txt"), "skip")
@@ -141,8 +141,8 @@ func TestImportDirectoryImportsIncludedPathsAndSkipsIgnoredOnes(t *testing.T) {
 	if client.files["/notes.md"] != "keep" {
 		t.Fatalf("expected notes.md to be imported")
 	}
-	if client.files["/.rafignore"] == "" {
-		t.Fatalf("expected .rafignore to be imported")
+	if client.files["/.afsignore"] == "" {
+		t.Fatalf("expected .afsignore to be imported")
 	}
 	if _, ok := client.files["/throwaway.tmp"]; ok {
 		t.Fatalf("expected throwaway.tmp to be ignored")
@@ -176,7 +176,7 @@ func TestLoadMigrationIgnoreFallsBackToLegacyRFSIgnore(t *testing.T) {
 
 func TestLoadMigrationIgnorePrefersRAFIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
-	writeTestFile(t, filepath.Join(sourceDir, ".rafignore"), "cache/\n")
+	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\n")
 	writeTestFile(t, filepath.Join(sourceDir, ".rfsignore"), "logs/\n")
 
 	ignorer, err := loadMigrationIgnore(sourceDir)
@@ -187,10 +187,10 @@ func TestLoadMigrationIgnorePrefersRAFIgnore(t *testing.T) {
 		t.Fatal("expected ignorer to be loaded")
 	}
 	if ignorer.legacy {
-		t.Fatal("expected .rafignore to take precedence over legacy file")
+		t.Fatal("expected .afsignore to take precedence over legacy file")
 	}
-	if filepath.Base(ignorer.path) != ".rafignore" {
-		t.Fatalf("ignore path = %q, want .rafignore", ignorer.path)
+	if filepath.Base(ignorer.path) != ".afsignore" {
+		t.Fatalf("ignore path = %q, want .afsignore", ignorer.path)
 	}
 }
 

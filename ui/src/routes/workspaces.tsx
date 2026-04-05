@@ -50,7 +50,7 @@ function WorkspacesPage() {
             <SectionTitle
               eyebrow="Catalog"
               title="Create or import a workspace"
-              body="This form now matches the control-plane shape more closely: a workspace record mapped to one backing database and RAF namespace."
+              body="This form now matches the control-plane shape more closely: a workspace record mapped to one backing database and AFS namespace."
             />
           </SectionHeader>
 
@@ -147,7 +147,7 @@ function WorkspacesPage() {
           <SectionHeader>
             <SectionTitle
               title="Workspace catalog"
-              body="Each row is one Agent Filesystem. This table is shaped for the future cloud API and the matching CLI backend: database mapping, Redis key, content size, sessions, forks, and checkpoints."
+              body="Each row is one Agent Filesystem. This table is shaped for the future cloud API and the matching CLI backend: database mapping, Redis key, content size, draft state, and checkpoints."
             />
           </SectionHeader>
 

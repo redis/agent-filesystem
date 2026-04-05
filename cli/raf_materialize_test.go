@@ -19,14 +19,14 @@ func TestMaterializeManifestToPathWritesManifestEntries(t *testing.T) {
 	defer closeStore()
 
 	sourceDir := t.TempDir()
-	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello raf\n")
+	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello afs\n")
 	writeTestFile(t, filepath.Join(sourceDir, "nested", "app.txt"), "nested data\n")
 	writeTestFile(t, filepath.Join(sourceDir, "large.txt"), strings.Repeat("x", rafInlineThreshold+32))
 	if err := os.Symlink("README.md", filepath.Join(sourceDir, "link.txt")); err != nil {
 		t.Fatalf("Symlink() returned error: %v", err)
 	}
 
-	manifest := seedWorkspaceSessionFromDirectory(t, store, "repo", "main", "initial", sourceDir)
+	manifest := seedWorkspaceFromDirectory(t, store, "repo", "initial", sourceDir)
 	targetDir := filepath.Join(t.TempDir(), "mounted")
 	if err := materializeManifestToPath(context.Background(), store, "repo", manifest, targetDir); err != nil {
 		t.Fatalf("materializeManifestToPath() returned error: %v", err)
@@ -36,8 +36,8 @@ func TestMaterializeManifestToPathWritesManifestEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile(README.md) returned error: %v", err)
 	}
-	if string(readme) != "hello raf\n" {
-		t.Fatalf("README.md = %q, want %q", string(readme), "hello raf\n")
+	if string(readme) != "hello afs\n" {
+		t.Fatalf("README.md = %q, want %q", string(readme), "hello afs\n")
 	}
 
 	nested, err := os.ReadFile(filepath.Join(targetDir, "nested", "app.txt"))
@@ -65,7 +65,7 @@ func TestMaterializeManifestToPathWritesManifestEntries(t *testing.T) {
 	}
 }
 
-func TestMaterializeSessionPreservesModesAndTimes(t *testing.T) {
+func TestMaterializeWorkspacePreservesModesAndTimes(t *testing.T) {
 	t.Helper()
 
 	store, closeStore := newRAFStoreForTest(t)
@@ -99,12 +99,12 @@ func TestMaterializeSessionPreservesModesAndTimes(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.WorkRoot = t.TempDir()
 
-	seedWorkspaceSessionFromDirectory(t, store, "repo", "main", "initial", sourceDir)
-	if err := materializeSession(context.Background(), store, cfg, "repo", "main"); err != nil {
-		t.Fatalf("materializeSession() returned error: %v", err)
+	seedWorkspaceFromDirectory(t, store, "repo", "initial", sourceDir)
+	if err := materializeWorkspace(context.Background(), store, cfg, "repo"); err != nil {
+		t.Fatalf("materializeWorkspace() returned error: %v", err)
 	}
 
-	treePath := rafSessionTreePath(cfg, "repo", "main")
+	treePath := rafWorkspaceTreePath(cfg, "repo")
 	fileInfo, err := os.Stat(filepath.Join(treePath, "scripts", "tool.sh"))
 	if err != nil {
 		t.Fatalf("Stat(tool.sh) returned error: %v", err)
@@ -138,7 +138,7 @@ func newRAFStoreForTest(t *testing.T) (*rafStore, func()) {
 	}
 }
 
-func seedWorkspaceSessionFromDirectory(t *testing.T, store *rafStore, workspace, session, savepoint, sourceDir string) manifest {
+func seedWorkspaceFromDirectory(t *testing.T, store *rafStore, workspace, savepoint, sourceDir string) manifest {
 	t.Helper()
 
 	manifest, blobs, stats, err := buildManifestFromDirectory(sourceDir, workspace, savepoint)
@@ -162,7 +162,8 @@ func seedWorkspaceSessionFromDirectory(t *testing.T, store *rafStore, workspace,
 		Version:          rafFormatVersion,
 		Name:             workspace,
 		CreatedAt:        now,
-		DefaultSession:   session,
+		UpdatedAt:        now,
+		HeadSavepoint:    savepoint,
 		DefaultSavepoint: savepoint,
 	}); err != nil {
 		t.Fatalf("putWorkspaceMeta() returned error: %v", err)
@@ -172,7 +173,6 @@ func seedWorkspaceSessionFromDirectory(t *testing.T, store *rafStore, workspace,
 		ID:           savepoint,
 		Name:         savepoint,
 		Workspace:    workspace,
-		Session:      session,
 		ManifestHash: hash,
 		CreatedAt:    now,
 		FileCount:    stats.FileCount,
@@ -180,16 +180,6 @@ func seedWorkspaceSessionFromDirectory(t *testing.T, store *rafStore, workspace,
 		TotalBytes:   stats.TotalBytes,
 	}, manifest); err != nil {
 		t.Fatalf("putSavepoint() returned error: %v", err)
-	}
-	if err := store.putSessionMeta(ctx, sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     workspace,
-		Name:          session,
-		HeadSavepoint: savepoint,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}); err != nil {
-		t.Fatalf("putSessionMeta() returned error: %v", err)
 	}
 	return manifest
 }

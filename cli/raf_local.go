@@ -10,8 +10,8 @@ import (
 	"time"
 )
 
-var errRAFSessionConflict = errors.New("raf session head conflict")
-var errRAFSessionNotMaterialized = errors.New("raf session is not materialized")
+var errRAFWorkspaceConflict = errors.New("afs workspace head conflict")
+var errRAFWorkspaceNotMaterialized = errors.New("afs workspace is not materialized")
 
 func rafWorkspaceDir(cfg config, workspace string) string {
 	return filepath.Join(cfg.WorkRoot, workspace)
@@ -21,21 +21,17 @@ func rafWorkspaceArchiveDir(cfg config, workspace string) string {
 	return filepath.Join(rafWorkspaceDir(cfg, workspace), "archive")
 }
 
-func rafSessionDir(cfg config, workspace, session string) string {
-	return filepath.Join(rafWorkspaceDir(cfg, workspace), "sessions", session)
+func rafWorkspaceStatePath(cfg config, workspace string) string {
+	return filepath.Join(rafWorkspaceDir(cfg, workspace), "state.json")
 }
 
-func rafSessionStatePath(cfg config, workspace, session string) string {
-	return filepath.Join(rafSessionDir(cfg, workspace, session), "state.json")
+func rafWorkspaceTreePath(cfg config, workspace string) string {
+	return filepath.Join(rafWorkspaceDir(cfg, workspace), "tree")
 }
 
-func rafSessionTreePath(cfg config, workspace, session string) string {
-	return filepath.Join(rafSessionDir(cfg, workspace, session), "tree")
-}
-
-func loadRAFLocalState(cfg config, workspace, session string) (rafLocalState, error) {
+func loadRAFLocalState(cfg config, workspace string) (rafLocalState, error) {
 	var st rafLocalState
-	raw, err := os.ReadFile(rafSessionStatePath(cfg, workspace, session))
+	raw, err := os.ReadFile(rafWorkspaceStatePath(cfg, workspace))
 	if err != nil {
 		return st, err
 	}
@@ -46,26 +42,26 @@ func loadRAFLocalState(cfg config, workspace, session string) (rafLocalState, er
 }
 
 func saveRAFLocalState(cfg config, st rafLocalState) error {
-	if err := os.MkdirAll(rafSessionDir(cfg, st.Workspace, st.Session), 0o755); err != nil {
+	if err := os.MkdirAll(rafWorkspaceDir(cfg, st.Workspace), 0o755); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(rafSessionStatePath(cfg, st.Workspace, st.Session), raw, 0o600)
+	return os.WriteFile(rafWorkspaceStatePath(cfg, st.Workspace), raw, 0o600)
 }
 
 func removeLocalWorkspace(cfg config, workspace string) error {
 	return os.RemoveAll(rafWorkspaceDir(cfg, workspace))
 }
 
-func materializeSession(ctx context.Context, store *rafStore, cfg config, workspace, session string) error {
-	return materializeSessionWithProgress(ctx, store, cfg, workspace, session, nil)
+func materializeWorkspace(ctx context.Context, store *rafStore, cfg config, workspace string) error {
+	return materializeWorkspaceWithProgress(ctx, store, cfg, workspace, nil)
 }
 
-func materializeSessionWithProgress(ctx context.Context, store *rafStore, cfg config, workspace, session string, onProgress func(importStats)) error {
-	meta, err := store.getSessionMeta(ctx, workspace, session)
+func materializeWorkspaceWithProgress(ctx context.Context, store *rafStore, cfg config, workspace string, onProgress func(importStats)) error {
+	meta, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return err
 	}
@@ -74,9 +70,8 @@ func materializeSessionWithProgress(ctx context.Context, store *rafStore, cfg co
 		return err
 	}
 
-	sessionDir := rafSessionDir(cfg, workspace, session)
-	treePath := rafSessionTreePath(cfg, workspace, session)
-	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+	treePath := rafWorkspaceTreePath(cfg, workspace)
+	if err := os.MkdirAll(rafWorkspaceDir(cfg, workspace), 0o755); err != nil {
 		return err
 	}
 	if _, err := materializeManifestToDirectory(treePath, m, func(blobID string) ([]byte, error) {
@@ -92,7 +87,6 @@ func materializeSessionWithProgress(ctx context.Context, store *rafStore, cfg co
 	localState := rafLocalState{
 		Version:        rafFormatVersion,
 		Workspace:      workspace,
-		Session:        session,
 		HeadSavepoint:  meta.HeadSavepoint,
 		Dirty:          false,
 		MaterializedAt: now,
@@ -106,87 +100,87 @@ func materializeSessionWithProgress(ctx context.Context, store *rafStore, cfg co
 	meta.LastMaterializedAt = now
 	meta.LastKnownMaterializedAt = host
 	meta.DirtyHint = false
-	return store.putSessionMeta(ctx, meta)
+	return store.putWorkspaceMeta(ctx, meta)
 }
 
-func ensureMaterializedSession(ctx context.Context, store *rafStore, cfg config, workspace, session string) (sessionMeta, rafLocalState, error) {
-	meta, err := store.getSessionMeta(ctx, workspace, session)
+func ensureMaterializedWorkspace(ctx context.Context, store *rafStore, cfg config, workspace string) (workspaceMeta, rafLocalState, error) {
+	meta, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
-	treePath := rafSessionTreePath(cfg, workspace, session)
-	localState, err := loadRAFLocalState(cfg, workspace, session)
+	treePath := rafWorkspaceTreePath(cfg, workspace)
+	localState, err := loadRAFLocalState(cfg, workspace)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if err := materializeSession(ctx, store, cfg, workspace, session); err != nil {
-				return sessionMeta{}, rafLocalState{}, err
+			if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
+				return workspaceMeta{}, rafLocalState{}, err
 			}
-			localState, err = loadRAFLocalState(cfg, workspace, session)
+			localState, err = loadRAFLocalState(cfg, workspace)
 			return meta, localState, err
 		}
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
 	if _, err := os.Stat(treePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if err := materializeSession(ctx, store, cfg, workspace, session); err != nil {
-				return sessionMeta{}, rafLocalState{}, err
+			if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
+				return workspaceMeta{}, rafLocalState{}, err
 			}
-			localState, err = loadRAFLocalState(cfg, workspace, session)
+			localState, err = loadRAFLocalState(cfg, workspace)
 			return meta, localState, err
 		}
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
 	if localState.HeadSavepoint != meta.HeadSavepoint {
 		if localState.Dirty {
-			return sessionMeta{}, rafLocalState{}, errRAFSessionConflict
+			return workspaceMeta{}, rafLocalState{}, errRAFWorkspaceConflict
 		}
-		if err := materializeSession(ctx, store, cfg, workspace, session); err != nil {
-			return sessionMeta{}, rafLocalState{}, err
+		if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
+			return workspaceMeta{}, rafLocalState{}, err
 		}
-		localState, err = loadRAFLocalState(cfg, workspace, session)
+		localState, err = loadRAFLocalState(cfg, workspace)
 		return meta, localState, err
 	}
 
 	return meta, localState, nil
 }
 
-func requireMaterializedSession(ctx context.Context, store *rafStore, cfg config, workspace, session string) (sessionMeta, rafLocalState, error) {
-	meta, err := store.getSessionMeta(ctx, workspace, session)
+func requireMaterializedWorkspace(ctx context.Context, store *rafStore, cfg config, workspace string) (workspaceMeta, rafLocalState, error) {
+	meta, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
-	treePath := rafSessionTreePath(cfg, workspace, session)
-	localState, err := loadRAFLocalState(cfg, workspace, session)
+	treePath := rafWorkspaceTreePath(cfg, workspace)
+	localState, err := loadRAFLocalState(cfg, workspace)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return sessionMeta{}, rafLocalState{}, errRAFSessionNotMaterialized
+			return workspaceMeta{}, rafLocalState{}, errRAFWorkspaceNotMaterialized
 		}
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
 	if _, err := os.Stat(treePath); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return sessionMeta{}, rafLocalState{}, errRAFSessionNotMaterialized
+			return workspaceMeta{}, rafLocalState{}, errRAFWorkspaceNotMaterialized
 		}
-		return sessionMeta{}, rafLocalState{}, err
+		return workspaceMeta{}, rafLocalState{}, err
 	}
 
 	if localState.HeadSavepoint != meta.HeadSavepoint {
 		if localState.Dirty {
-			return sessionMeta{}, rafLocalState{}, errRAFSessionConflict
+			return workspaceMeta{}, rafLocalState{}, errRAFWorkspaceConflict
 		}
-		return sessionMeta{}, rafLocalState{}, errRAFSessionNotMaterialized
+		return workspaceMeta{}, rafLocalState{}, errRAFWorkspaceNotMaterialized
 	}
 
 	return meta, localState, nil
 }
 
-func archiveLocalTree(cfg config, workspace, session string) (string, error) {
-	treePath := rafSessionTreePath(cfg, workspace, session)
+func archiveLocalTree(cfg config, workspace string) (string, error) {
+	treePath := rafWorkspaceTreePath(cfg, workspace)
 	if _, err := os.Stat(treePath); err != nil {
 		return "", err
 	}
@@ -196,7 +190,7 @@ func archiveLocalTree(cfg config, workspace, session string) (string, error) {
 		return "", err
 	}
 
-	target := filepath.Join(archiveDir, fmt.Sprintf("%s-%d", session, time.Now().UTC().UnixNano()))
+	target := filepath.Join(archiveDir, fmt.Sprintf("%s-%d", workspace, time.Now().UTC().UnixNano()))
 	if err := os.Rename(treePath, target); err != nil {
 		return "", err
 	}

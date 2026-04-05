@@ -138,7 +138,7 @@ export function AppSidebar() {
                 <S.LogoWrapper>
                   <RedisLogoDarkFullIcon />
                 </S.LogoWrapper>
-              <S.ProductName>Agent Filesystem</S.ProductName>
+              <S.ProductName>Redis Agent Filesystem</S.ProductName>
             </S.LogoWithName>
           ) : (
             <S.CollapsedLogoWrapper>

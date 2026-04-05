@@ -22,9 +22,6 @@ func cmdImport(args []string) error {
 	if err != nil {
 		return err
 	}
-	if parsed.session != "" {
-		return fmt.Errorf("import does not accept --session")
-	}
 	if len(parsed.positionals) != 2 {
 		return fmt.Errorf("usage: %s import [--force] <workspace> <directory>", filepath.Base(os.Args[0]))
 	}
@@ -60,16 +57,8 @@ func cmdImport(args []string) error {
 		return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
 	}
 
-	defaultSession := cfg.DefaultSession
-	if defaultSession == "" {
-		defaultSession = "main"
-	}
-	if err := validateRAFName("session", defaultSession); err != nil {
-		return err
-	}
-
 	const initialSavepoint = "initial"
-	total, ignorer, scanDuration, err := prepareRAFImport(sourceDir, workspace, defaultSession, cfg, parsed.force)
+	total, ignorer, scanDuration, err := prepareRAFImport(sourceDir, workspace, cfg, parsed.force)
 	if err != nil {
 		if errors.Is(err, errImportCancelled) {
 			fmt.Println()
@@ -113,23 +102,15 @@ func cmdImport(args []string) error {
 		Version:          rafFormatVersion,
 		Name:             workspace,
 		CreatedAt:        now,
-		DefaultSession:   defaultSession,
+		UpdatedAt:        now,
+		HeadSavepoint:    initialSavepoint,
 		DefaultSavepoint: initialSavepoint,
-	}
-	sessionMeta := sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     workspace,
-		Name:          defaultSession,
-		HeadSavepoint: initialSavepoint,
-		CreatedAt:     now,
-		UpdatedAt:     now,
 	}
 	savepointMeta := savepointMeta{
 		Version:      rafFormatVersion,
 		ID:           initialSavepoint,
 		Name:         initialSavepoint,
 		Workspace:    workspace,
-		Session:      defaultSession,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    stats.FileCount,
@@ -164,14 +145,10 @@ func cmdImport(args []string) error {
 		step.fail(err.Error())
 		return err
 	}
-	if err := store.putSessionMeta(ctx, sessionMeta); err != nil {
-		step.fail(err.Error())
-		return err
-	}
 	metadataDuration := step.elapsed()
 	step.succeed(initialSavepoint)
 
-	if err := store.audit(ctx, workspace, defaultSession, "import", map[string]any{
+	if err := store.audit(ctx, workspace, "import", map[string]any{
 		"savepoint":   initialSavepoint,
 		"files":       stats.FileCount,
 		"dirs":        stats.DirCount,
@@ -198,7 +175,7 @@ func cmdImport(args []string) error {
 	return nil
 }
 
-func prepareRAFImport(sourceDir, workspace, session string, cfg config, replaceExisting bool) (importStats, *migrationIgnore, time.Duration, error) {
+func prepareRAFImport(sourceDir, workspace string, cfg config, replaceExisting bool) (importStats, *migrationIgnore, time.Duration, error) {
 	reader := bufio.NewReader(os.Stdin)
 	interactive := isInteractiveTerminal()
 
@@ -242,11 +219,11 @@ func prepareRAFImport(sourceDir, workspace, session string, cfg config, replaceE
 		}
 		rows = append(rows,
 			boxRow{},
-			boxRow{Value: clr(ansiDim, "Tip: use .rafignore to skip caches, dependencies, logs, or build output before import.")},
+			boxRow{Value: clr(ansiDim, "Tip: use .afsignore to skip caches, dependencies, logs, or build output before import.")},
 		)
 		printBox(clr(ansiBold, "Import plan"), rows)
 
-		editLabel := "  Create or edit .rafignore before importing?"
+		editLabel := "  Create or edit .afsignore before importing?"
 		if ignorer != nil {
 			editLabel = fmt.Sprintf("  Edit %s before importing?", filepath.Base(ignorer.path))
 		}
@@ -357,7 +334,7 @@ func ensureRAFIgnoreTemplate(path string) error {
 		return err
 	}
 	template := strings.Join([]string{
-		"# Ignore paths during raf import and migrate.",
+		"# Ignore paths during afs import and migrate.",
 		"# Syntax matches .gitignore.",
 		"",
 		"# Common examples:",
@@ -430,131 +407,13 @@ func resolveWorkspaceName(ctx context.Context, cfg config, store *rafStore, requ
 	return currentWorkspaceName(ctx, cfg, store)
 }
 
-func cmdClone(args []string) error {
-	parsed, err := parseRAFArgs(args[1:], false, false)
-	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) > 1 {
-		return fmt.Errorf("usage: %s session clone [workspace] [--session <name>]", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspace := ""
-	if len(parsed.positionals) == 1 {
-		workspace = parsed.positionals[0]
-	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-
-	session := defaultRAFSession(cfg, parsed.session)
-	if err := validateRAFName("session", session); err != nil {
-		return err
-	}
-
-	treePath := rafSessionTreePath(cfg, workspace, session)
-	if _, _, err := requireMaterializedSession(context.Background(), store, cfg, workspace, session); err == nil {
-		printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "working copy ready"), []boxRow{
-			{Label: "workspace", Value: workspace},
-			{Label: "session", Value: session},
-			{Label: "path", Value: treePath},
-		})
-		return nil
-	} else if err != nil && !errors.Is(err, errRAFSessionNotMaterialized) && !errors.Is(err, errRAFSessionConflict) {
-		return err
-	}
-
-	ctx := context.Background()
-	meta, err := store.getSessionMeta(ctx, workspace, session)
-	if err != nil {
-		return err
-	}
-	headManifest, err := store.getManifest(ctx, workspace, meta.HeadSavepoint)
-	if err != nil {
-		return err
-	}
-	total := manifestImportStats(headManifest)
-
-	step := startStep("Creating working copy")
-	if err := materializeSessionWithProgress(ctx, store, cfg, workspace, session, func(progress importStats) {
-		step.update(formatRAFImportProgressLabel("Creating working copy", progress, total, step.elapsed()))
-	}); err != nil {
-		step.fail(err.Error())
-		return err
-	}
-	step.succeed(treePath)
-
-	_ = store.audit(ctx, workspace, session, "clone", map[string]any{
-		"head": meta.HeadSavepoint,
-		"path": treePath,
-	})
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "working copy created"), []boxRow{
-		{Label: "workspace", Value: workspace},
-		{Label: "session", Value: session},
-		{Label: "head", Value: meta.HeadSavepoint},
-		{Label: "path", Value: treePath},
-	})
-	return nil
-}
-
-func cmdRun(args []string) error {
-	parsed, childArgs, err := parseRAFCommandInvocation(args[1:])
-	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) > 1 {
-		return fmt.Errorf("usage: %s session run [workspace] [--session <name>] [--readonly] -- <command...>", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspace := ""
-	if len(parsed.positionals) == 1 {
-		workspace = parsed.positionals[0]
-	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-
-	session := defaultRAFSession(cfg, parsed.session)
-	if err := validateRAFName("session", session); err != nil {
-		return err
-	}
-
-	if err := runRAFCommand(context.Background(), cfg, store, workspace, session, childArgs, parsed.readonly); err != nil {
-		if errors.Is(err, errRAFSessionConflict) {
-			return fmt.Errorf("session %q moved since this tree was materialized; inspect the workspace or fork before running again", session)
-		}
-		return err
-	}
-	return nil
-}
-
-func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace, session string, childArgs []string, readonly bool) error {
-	sessionMeta, localState, err := ensureMaterializedSession(ctx, store, cfg, workspace, session)
+func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace string, childArgs []string, readonly bool) error {
+	workspaceMeta, localState, err := ensureMaterializedWorkspace(ctx, store, cfg, workspace)
 	if err != nil {
 		return err
 	}
 
-	treePath := rafSessionTreePath(cfg, workspace, session)
+	treePath := rafWorkspaceTreePath(cfg, workspace)
 	cmd := exec.Command(childArgs[0], childArgs[1:]...)
 	cmd.Dir = treePath
 	cmd.Stdin = os.Stdin
@@ -566,7 +425,7 @@ func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace, 
 		return err
 	}
 	startedAt := time.Now().UTC()
-	_ = store.audit(ctx, workspace, session, "run_start", map[string]any{
+	_ = store.audit(ctx, workspace, "run_start", map[string]any{
 		"pid":      cmd.Process.Pid,
 		"cwd":      treePath,
 		"argv":     strings.Join(childArgs, " "),
@@ -587,7 +446,7 @@ func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace, 
 		}
 	}
 
-	_ = store.audit(ctx, workspace, session, "run_exit", map[string]any{
+	_ = store.audit(ctx, workspace, "run_exit", map[string]any{
 		"pid":         cmd.Process.Pid,
 		"exit_code":   exitCode,
 		"duration_ms": time.Since(startedAt).Milliseconds(),
@@ -601,12 +460,12 @@ func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace, 
 			return err
 		}
 
-		sessionMeta.DirtyHint = true
-		if err := store.putSessionMeta(ctx, sessionMeta); err != nil {
+		workspaceMeta.DirtyHint = true
+		if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
 			return err
 		}
 	} else {
-		if _, err := saveRAFSession(ctx, cfg, store, workspace, session, generatedSavepointName(), true); err != nil {
+		if _, err := saveRAFWorkspace(ctx, cfg, store, workspace, generatedSavepointName(), true); err != nil {
 			if exitCode != 0 {
 				return fmt.Errorf("command exited with code %d, and auto-save failed: %w", exitCode, err)
 			}
@@ -620,158 +479,25 @@ func runRAFCommand(ctx context.Context, cfg config, store *rafStore, workspace, 
 	return nil
 }
 
-func cmdDiff(args []string) error {
-	parsed, err := parseRAFArgs(args[1:], false, false)
+func saveRAFWorkspace(ctx context.Context, cfg config, store *rafStore, workspace, savepointID string, printResult bool) (bool, error) {
+	workspaceInfo, localState, err := requireMaterializedWorkspace(ctx, store, cfg, workspace)
 	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) > 1 {
-		return fmt.Errorf("usage: %s session diff [workspace] [--session <name>]", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspace := ""
-	if len(parsed.positionals) == 1 {
-		workspace = parsed.positionals[0]
-	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-
-	session := defaultRAFSession(cfg, parsed.session)
-	if err := validateRAFName("session", session); err != nil {
-		return err
-	}
-
-	ctx := context.Background()
-	sessionMeta, localState, err := requireMaterializedSession(ctx, store, cfg, workspace, session)
-	if err != nil {
-		if errors.Is(err, errRAFSessionConflict) {
-			return fmt.Errorf("session %q has unsaved local changes against an old head; save or fork before diffing", session)
-		}
-		if errors.Is(err, errRAFSessionNotMaterialized) {
-			return fmt.Errorf("session %q has no working copy yet; run '%s session clone %s --session %s' or '%s session run %s --session %s -- <command>' first", session, filepath.Base(os.Args[0]), workspace, session, filepath.Base(os.Args[0]), workspace, session)
-		}
-		return err
-	}
-
-	headManifest, err := store.getManifest(ctx, workspace, sessionMeta.HeadSavepoint)
-	if err != nil {
-		return err
-	}
-	localManifest, _, _, err := buildManifestFromDirectory(rafSessionTreePath(cfg, workspace, session), workspace, sessionMeta.HeadSavepoint)
-	if err != nil {
-		return err
-	}
-	diff := summarizeManifestDiff(headManifest, localManifest)
-
-	localState.Dirty = len(diff) > 0
-	localState.LastScanAt = time.Now().UTC()
-	if err := saveRAFLocalState(cfg, localState); err != nil {
-		return err
-	}
-	sessionMeta.DirtyHint = localState.Dirty
-	if err := store.putSessionMeta(ctx, sessionMeta); err != nil {
-		return err
-	}
-
-	if len(diff) == 0 {
-		fmt.Println("No changes")
-		return nil
-	}
-	for _, entry := range diff {
-		fmt.Printf("%s %s\n", entry.Kind, strings.TrimPrefix(entry.Path, "/"))
-	}
-	return nil
-}
-
-func cmdSave(args []string) error {
-	parsed, err := parseRAFArgs(args[1:], false, false)
-	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) > 2 {
-		return fmt.Errorf("usage: %s session save [workspace] [--session <name>] [savepoint]", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	ctx := context.Background()
-	workspace := ""
-	savepointID := generatedSavepointName()
-	switch len(parsed.positionals) {
-	case 0:
-		workspace, err = currentWorkspaceName(ctx, cfg, store)
-		if err != nil {
-			return err
-		}
-	case 1:
-		explicitWorkspace, explicitErr := store.workspaceExists(ctx, parsed.positionals[0])
-		if explicitErr != nil {
-			return explicitErr
-		}
-		if explicitWorkspace {
-			workspace = parsed.positionals[0]
-		} else {
-			workspace, err = currentWorkspaceName(ctx, cfg, store)
-			if err != nil {
-				return err
-			}
-			savepointID = parsed.positionals[0]
-		}
-	case 2:
-		workspace = parsed.positionals[0]
-		savepointID = parsed.positionals[1]
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-
-	session := defaultRAFSession(cfg, parsed.session)
-	if err := validateRAFName("session", session); err != nil {
-		return err
-	}
-
-	if err := validateRAFName("savepoint", savepointID); err != nil {
-		return err
-	}
-
-	_, err = saveRAFSession(ctx, cfg, store, workspace, session, savepointID, true)
-	return err
-}
-
-func saveRAFSession(ctx context.Context, cfg config, store *rafStore, workspace, session, savepointID string, printResult bool) (bool, error) {
-	sessionInfo, localState, err := requireMaterializedSession(ctx, store, cfg, workspace, session)
-	if err != nil {
-		if errors.Is(err, errRAFSessionConflict) {
+		if errors.Is(err, errRAFWorkspaceConflict) {
 			return false, fmt.Errorf("workspace %q moved since this tree was materialized; reopen it before creating a checkpoint", workspace)
 		}
-		if errors.Is(err, errRAFSessionNotMaterialized) {
+		if errors.Is(err, errRAFWorkspaceNotMaterialized) {
 			return false, fmt.Errorf("workspace %q has no working copy yet; run '%s workspace run %s -- /bin/sh' first", workspace, filepath.Base(os.Args[0]), workspace)
 		}
 		return false, err
 	}
 
-	headManifest, err := store.getManifest(ctx, workspace, sessionInfo.HeadSavepoint)
+	headManifest, err := store.getManifest(ctx, workspace, workspaceInfo.HeadSavepoint)
 	if err != nil {
 		return false, err
 	}
 
 	now := time.Now().UTC()
-	treePath := rafSessionTreePath(cfg, workspace, session)
+	treePath := rafWorkspaceTreePath(cfg, workspace)
 	localManifest, blobs, stats, err := buildManifestFromDirectory(treePath, workspace, savepointID)
 	if err != nil {
 		return false, err
@@ -782,8 +508,8 @@ func saveRAFSession(ctx context.Context, cfg config, store *rafStore, workspace,
 		if err := saveRAFLocalState(cfg, localState); err != nil {
 			return false, err
 		}
-		sessionInfo.DirtyHint = false
-		if err := store.putSessionMeta(ctx, sessionInfo); err != nil {
+		workspaceInfo.DirtyHint = false
+		if err := store.putWorkspaceMeta(ctx, workspaceInfo); err != nil {
 			return false, err
 		}
 		if printResult {
@@ -792,9 +518,9 @@ func saveRAFSession(ctx context.Context, cfg config, store *rafStore, workspace,
 		return false, nil
 	}
 
-	saved, err := saveRAFManifest(ctx, store, workspace, session, localState.HeadSavepoint, savepointID, localManifest, blobs, stats)
+	saved, err := saveRAFManifest(ctx, store, workspace, localState.HeadSavepoint, savepointID, localManifest, blobs, stats)
 	if err != nil {
-		if errors.Is(err, errRAFSessionConflict) {
+		if errors.Is(err, errRAFWorkspaceConflict) {
 			return false, fmt.Errorf("checkpoint conflict: workspace %q moved while saving; reopen it before retrying", workspace)
 		}
 		return false, err
@@ -813,7 +539,6 @@ func saveRAFSession(ctx context.Context, cfg config, store *rafStore, workspace,
 	if printResult {
 		printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "save complete"), []boxRow{
 			{Label: "workspace", Value: workspace},
-			{Label: "session", Value: session},
 			{Label: "savepoint", Value: savepointID},
 			{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 			{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
@@ -823,7 +548,7 @@ func saveRAFSession(ctx context.Context, cfg config, store *rafStore, workspace,
 	return true, nil
 }
 
-func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats) (bool, error) {
+func saveRAFManifest(ctx context.Context, store *rafStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats) (bool, error) {
 	headManifest, err := store.getManifest(ctx, workspace, expectedHead)
 	if err != nil {
 		return false, err
@@ -846,7 +571,6 @@ func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, e
 		ID:              savepointID,
 		Name:            savepointID,
 		Workspace:       workspace,
-		Session:         session,
 		ParentSavepoint: expectedHead,
 		ManifestHash:    manifestHash,
 		CreatedAt:       now,
@@ -856,12 +580,12 @@ func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, e
 	}
 
 	err = store.rdb.Watch(ctx, func(tx *redis.Tx) error {
-		current, err := rafGetJSON[sessionMeta](ctx, tx, rafSessionMetaKey(workspace, session))
+		current, err := rafGetJSON[workspaceMeta](ctx, tx, rafWorkspaceMetaKey(workspace))
 		if err != nil {
 			return err
 		}
 		if current.HeadSavepoint != expectedHead {
-			return errRAFSessionConflict
+			return errRAFWorkspaceConflict
 		}
 		exists, err := tx.Exists(ctx, rafSavepointMetaKey(workspace, savepointID)).Result()
 		if err != nil {
@@ -902,16 +626,12 @@ func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, e
 			if err := rafSetJSON(ctx, pipe, rafSavepointManifestKey(workspace, savepointID), localManifest); err != nil {
 				return err
 			}
-			if err := rafSetJSON(ctx, pipe, rafSessionMetaKey(workspace, session), current); err != nil {
+			if err := rafSetJSON(ctx, pipe, rafWorkspaceMetaKey(workspace), current); err != nil {
 				return err
 			}
 			pipe.ZAdd(ctx, rafWorkspaceSavepointsKey(workspace), redis.Z{
 				Score:  float64(now.UnixMilli()),
 				Member: savepointID,
-			})
-			pipe.ZAdd(ctx, rafWorkspaceSessionsKey(workspace), redis.Z{
-				Score:  float64(now.UnixMilli()),
-				Member: session,
 			})
 			for blobID, ref := range updatedRefs {
 				if err := rafSetJSON(ctx, pipe, rafBlobRefKey(workspace, blobID), ref); err != nil {
@@ -921,15 +641,15 @@ func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, e
 			return nil
 		})
 		return err
-	}, rafSessionMetaKey(workspace, session))
+	}, rafWorkspaceMetaKey(workspace))
 	if err != nil {
-		if errors.Is(err, errRAFSessionConflict) || err == redis.TxFailedErr {
-			return false, errRAFSessionConflict
+		if errors.Is(err, errRAFWorkspaceConflict) || err == redis.TxFailedErr {
+			return false, errRAFWorkspaceConflict
 		}
 		return false, err
 	}
 
-	if err := store.audit(ctx, workspace, session, "save", map[string]any{
+	if err := store.audit(ctx, workspace, "save", map[string]any{
 		"savepoint": savepointID,
 		"parent":    savepointMeta.ParentSavepoint,
 		"files":     stats.FileCount,
@@ -939,164 +659,6 @@ func saveRAFManifest(ctx context.Context, store *rafStore, workspace, session, e
 		return false, err
 	}
 	return true, nil
-}
-
-func cmdFork(args []string) error {
-	if len(args) != 3 && len(args) != 4 {
-		return fmt.Errorf("usage: %s session fork [workspace] <session> <new-session>", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	ctx := context.Background()
-	workspace := ""
-	sourceSession := ""
-	newSession := ""
-	switch len(args) {
-	case 3:
-		workspace, err = currentWorkspaceName(ctx, cfg, store)
-		if err != nil {
-			return err
-		}
-		sourceSession = args[1]
-		newSession = args[2]
-	case 4:
-		workspace = args[1]
-		sourceSession = args[2]
-		newSession = args[3]
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-	if err := validateRAFName("session", sourceSession); err != nil {
-		return err
-	}
-	if err := validateRAFName("session", newSession); err != nil {
-		return err
-	}
-
-	sourceMeta, err := store.getSessionMeta(ctx, workspace, sourceSession)
-	if err != nil {
-		return err
-	}
-	if _, err := store.getSessionMeta(ctx, workspace, newSession); err == nil {
-		return fmt.Errorf("session %q already exists", newSession)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if _, err := os.Stat(rafSessionDir(cfg, workspace, newSession)); err == nil {
-		return fmt.Errorf("local session directory already exists for %q", newSession)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	now := time.Now().UTC()
-	forked := sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     workspace,
-		Name:          newSession,
-		HeadSavepoint: sourceMeta.HeadSavepoint,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
-	if err := store.putSessionMeta(ctx, forked); err != nil {
-		return err
-	}
-	if err := store.audit(ctx, workspace, newSession, "fork", map[string]any{
-		"from_session": sourceSession,
-		"head":         sourceMeta.HeadSavepoint,
-	}); err != nil {
-		return err
-	}
-
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "session forked"), []boxRow{
-		{Label: "workspace", Value: workspace},
-		{Label: "from", Value: sourceSession},
-		{Label: "new", Value: newSession},
-		{Label: "head", Value: sourceMeta.HeadSavepoint},
-	})
-	return nil
-}
-
-func cmdRollback(args []string) error {
-	parsed, err := parseRAFArgs(args[1:], false, false)
-	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) < 1 || len(parsed.positionals) > 2 {
-		return fmt.Errorf("usage: %s session rollback [workspace] [--session <name>] <savepoint>", filepath.Base(os.Args[0]))
-	}
-
-	cfg, store, closeStore, err := openRAFStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	ctx := context.Background()
-	workspace := ""
-	targetSavepoint := ""
-	switch len(parsed.positionals) {
-	case 1:
-		workspace, err = currentWorkspaceName(ctx, cfg, store)
-		if err != nil {
-			return err
-		}
-		targetSavepoint = parsed.positionals[0]
-	case 2:
-		workspace = parsed.positionals[0]
-		targetSavepoint = parsed.positionals[1]
-	}
-	if err := validateRAFName("workspace", workspace); err != nil {
-		return err
-	}
-	if err := validateRAFName("savepoint", targetSavepoint); err != nil {
-		return err
-	}
-
-	session := defaultRAFSession(cfg, parsed.session)
-	if err := validateRAFName("session", session); err != nil {
-		return err
-	}
-
-	exists, err := store.savepointExists(ctx, workspace, targetSavepoint)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("savepoint %q does not exist", targetSavepoint)
-	}
-
-	resetResult, err := resetRAFSessionHead(ctx, cfg, store, workspace, session, targetSavepoint)
-	if err != nil {
-		if err == redis.TxFailedErr {
-			return fmt.Errorf("rollback conflict: session %q moved while rolling back", session)
-		}
-		return err
-	}
-
-	if err := store.audit(ctx, workspace, session, "rollback", map[string]any{
-		"savepoint": targetSavepoint,
-		"archive":   resetResult.archivePath,
-	}); err != nil {
-		return err
-	}
-
-	rows := []boxRow{
-		{Label: "workspace", Value: workspace},
-		{Label: "session", Value: session},
-		{Label: "savepoint", Value: targetSavepoint},
-		{Label: "local tree", Value: resetResult.treePath},
-	}
-	if resetResult.archivePath != "" {
-		rows = append(rows, boxRow{Label: "archive", Value: resetResult.archivePath})
-	}
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "rollback complete"), rows)
-	return nil
 }
 
 type rafProcessExitError struct {
@@ -1109,7 +671,6 @@ func (e rafProcessExitError) Error() string {
 
 type rafParsedArgs struct {
 	positionals []string
-	session     string
 	force       bool
 	readonly    bool
 }
@@ -1134,12 +695,6 @@ func parseRAFArgs(args []string, allowForce, allowReadonly bool) (rafParsedArgs,
 	var parsed rafParsedArgs
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
-		case "--session":
-			if i+1 >= len(args) {
-				return parsed, errors.New("missing value for --session")
-			}
-			parsed.session = args[i+1]
-			i++
 		case "--force":
 			if !allowForce {
 				return parsed, fmt.Errorf("unknown flag %q", args[i])
@@ -1160,16 +715,6 @@ func parseRAFArgs(args []string, allowForce, allowReadonly bool) (rafParsedArgs,
 	return parsed, nil
 }
 
-func defaultRAFSession(cfg config, requested string) string {
-	if requested != "" {
-		return requested
-	}
-	if strings.TrimSpace(cfg.DefaultSession) != "" {
-		return cfg.DefaultSession
-	}
-	return "main"
-}
-
 func generatedSavepointName() string {
 	return "save-" + time.Now().UTC().Format("20060102-150405")
 }
@@ -1179,16 +724,25 @@ func inspectWorkspace(ctx context.Context, cfg config, store *rafStore, workspac
 	if err != nil {
 		return err
 	}
-	sessions, err := store.listSessions(ctx, workspace)
-	if err != nil {
-		return err
-	}
-	savepoints, err := store.listSavepoints(ctx, workspace, "", 5)
+	savepoints, err := store.listSavepoints(ctx, workspace, 5)
 	if err != nil {
 		return err
 	}
 	blobStats, err := store.blobStats(ctx, workspace)
 	if err != nil {
+		return err
+	}
+
+	stateValue := clr(ansiDim, "not materialized")
+	localTree := clr(ansiDim, rafWorkspaceTreePath(cfg, workspace))
+	if st, err := loadRAFLocalState(cfg, workspace); err == nil {
+		if st.Dirty {
+			stateValue = clr(ansiYellow, "dirty")
+		} else {
+			stateValue = clr(ansiGreen, "clean")
+		}
+		localTree = rafWorkspaceTreePath(cfg, workspace)
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
@@ -1203,40 +757,12 @@ func inspectWorkspace(ctx context.Context, cfg config, store *rafStore, workspac
 
 	printBox(clr(ansiBold, "workspace")+" "+workspace, []boxRow{
 		{Label: "created", Value: meta.CreatedAt.Local().Format(time.RFC3339)},
-		{Label: "default session", Value: meta.DefaultSession},
+		{Label: "head", Value: meta.HeadSavepoint},
 		{Label: "default savepoint", Value: meta.DefaultSavepoint},
-		{Label: "sessions", Value: strconv.Itoa(len(sessions))},
+		{Label: "state", Value: stateValue},
+		{Label: "local tree", Value: localTree},
 		{Label: "recent saves", Value: latest},
 		{Label: "blobs", Value: fmt.Sprintf("%d (%s)", blobStats.Count, formatBytes(blobStats.Bytes))},
-	})
-	return nil
-}
-
-func inspectSession(ctx context.Context, cfg config, store *rafStore, workspace, session string) error {
-	meta, err := store.getSessionMeta(ctx, workspace, session)
-	if err != nil {
-		return err
-	}
-
-	stateValue := clr(ansiDim, "not materialized")
-	materializedAt := clr(ansiDim, "n/a")
-	if st, err := loadRAFLocalState(cfg, workspace, session); err == nil {
-		if st.Dirty {
-			stateValue = clr(ansiYellow, "dirty")
-		} else {
-			stateValue = clr(ansiGreen, "clean")
-		}
-		materializedAt = st.MaterializedAt.Local().Format(time.RFC3339)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	printBox(clr(ansiBold, "session")+" "+workspace+"/"+session, []boxRow{
-		{Label: "head", Value: meta.HeadSavepoint},
-		{Label: "state", Value: stateValue},
-		{Label: "local tree", Value: rafSessionTreePath(cfg, workspace, session)},
-		{Label: "materialized", Value: materializedAt},
-		{Label: "updated", Value: meta.UpdatedAt.Local().Format(time.RFC3339)},
 	})
 	return nil
 }
@@ -1267,7 +793,7 @@ func openRAFStore(ctx context.Context) (config, *rafStore, func(), error) {
 	}
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		closeFn()
-		return cfg, nil, func() {}, fmt.Errorf("cannot connect to Redis at %s: %w\nRun '%s up' first or point RAF at an existing Redis server",
+		return cfg, nil, func() {}, fmt.Errorf("cannot connect to Redis at %s: %w\nRun '%s up' first or point AFS at an existing Redis server",
 			cfg.RedisAddr, err, filepath.Base(os.Args[0]))
 	}
 	return cfg, newRAFStore(rdb), closeFn, nil

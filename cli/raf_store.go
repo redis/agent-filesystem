@@ -60,7 +60,7 @@ func (s *rafStore) listWorkspaces(ctx context.Context) ([]workspaceMeta, error) 
 	metas := make([]workspaceMeta, 0)
 	var cursor uint64
 	for {
-		keys, next, err := s.rdb.Scan(ctx, cursor, "raf:{*}:workspace:meta", 128).Result()
+		keys, next, err := s.rdb.Scan(ctx, cursor, "afs:{*}:workspace:meta", 128).Result()
 		if err != nil {
 			return nil, err
 		}
@@ -82,63 +82,6 @@ func (s *rafStore) listWorkspaces(ctx context.Context) ([]workspaceMeta, error) 
 	sort.Slice(metas, func(i, j int) bool {
 		return metas[i].Name < metas[j].Name
 	})
-	return metas, nil
-}
-
-func (s *rafStore) putSessionMeta(ctx context.Context, meta sessionMeta) error {
-	if err := rafSetJSON(ctx, s.rdb, rafSessionMetaKey(meta.Workspace, meta.Name), meta); err != nil {
-		return err
-	}
-	return s.rdb.ZAdd(ctx, rafWorkspaceSessionsKey(meta.Workspace), redis.Z{
-		Score:  float64(meta.UpdatedAt.UTC().UnixMilli()),
-		Member: meta.Name,
-	}).Err()
-}
-
-func (s *rafStore) getSessionMeta(ctx context.Context, workspace, session string) (sessionMeta, error) {
-	return rafGetJSON[sessionMeta](ctx, s.rdb, rafSessionMetaKey(workspace, session))
-}
-
-func (s *rafStore) moveSessionHead(ctx context.Context, workspace, session, savepoint string, updatedAt time.Time) error {
-	return s.rdb.Watch(ctx, func(tx *redis.Tx) error {
-		current, err := rafGetJSON[sessionMeta](ctx, tx, rafSessionMetaKey(workspace, session))
-		if err != nil {
-			return err
-		}
-		current.HeadSavepoint = savepoint
-		current.UpdatedAt = updatedAt.UTC()
-		current.DirtyHint = false
-
-		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			if err := rafSetJSON(ctx, pipe, rafSessionMetaKey(workspace, session), current); err != nil {
-				return err
-			}
-			pipe.ZAdd(ctx, rafWorkspaceSessionsKey(workspace), redis.Z{
-				Score:  float64(updatedAt.UTC().UnixMilli()),
-				Member: session,
-			})
-			return nil
-		})
-		return err
-	}, rafSessionMetaKey(workspace, session))
-}
-
-func (s *rafStore) listSessions(ctx context.Context, workspace string) ([]sessionMeta, error) {
-	names, err := s.rdb.ZRange(ctx, rafWorkspaceSessionsKey(workspace), 0, -1).Result()
-	if err != nil {
-		return nil, err
-	}
-	metas := make([]sessionMeta, 0, len(names))
-	for _, name := range names {
-		meta, err := s.getSessionMeta(ctx, workspace, name)
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
-		}
-		metas = append(metas, meta)
-	}
 	return metas, nil
 }
 
@@ -171,7 +114,7 @@ func (s *rafStore) getManifest(ctx context.Context, workspace, savepoint string)
 	return rafGetJSON[manifest](ctx, s.rdb, rafSavepointManifestKey(workspace, savepoint))
 }
 
-func (s *rafStore) listSavepoints(ctx context.Context, workspace, session string, limit int64) ([]savepointMeta, error) {
+func (s *rafStore) listSavepoints(ctx context.Context, workspace string, limit int64) ([]savepointMeta, error) {
 	stop := int64(-1)
 	if limit > 0 {
 		stop = limit - 1
@@ -188,9 +131,6 @@ func (s *rafStore) listSavepoints(ctx context.Context, workspace, session string
 				continue
 			}
 			return nil, err
-		}
-		if session != "" && meta.Session != session {
-			continue
 		}
 		savepoints = append(savepoints, meta)
 	}
@@ -228,6 +168,9 @@ func (s *rafStore) addBlobRefs(ctx context.Context, workspace string, m manifest
 			}
 		}
 		ref.RefCount++
+		if ref.Size == 0 {
+			ref.Size = size
+		}
 		if err := rafSetJSON(ctx, s.rdb, rafBlobRefKey(workspace, blobID), ref); err != nil {
 			return err
 		}
@@ -273,29 +216,34 @@ func (s *rafStore) blobStats(ctx context.Context, workspace string) (workspaceBl
 	}
 }
 
-func (s *rafStore) audit(ctx context.Context, workspace, session, op string, extra map[string]any) error {
+func (s *rafStore) moveWorkspaceHead(ctx context.Context, workspace, savepoint string, updatedAt time.Time) error {
+	return s.rdb.Watch(ctx, func(tx *redis.Tx) error {
+		current, err := rafGetJSON[workspaceMeta](ctx, tx, rafWorkspaceMetaKey(workspace))
+		if err != nil {
+			return err
+		}
+		current.HeadSavepoint = savepoint
+		current.UpdatedAt = updatedAt.UTC()
+		current.DirtyHint = false
+
+		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+			return rafSetJSON(ctx, pipe, rafWorkspaceMetaKey(workspace), current)
+		})
+		return err
+	}, rafWorkspaceMetaKey(workspace))
+}
+
+func (s *rafStore) audit(ctx context.Context, workspace, op string, extra map[string]any) error {
 	fields := map[string]any{
 		"ts_ms":     strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
 		"workspace": workspace,
 		"op":        op,
 	}
-	if session != "" {
-		fields["session"] = session
-	}
 	for key, value := range extra {
 		fields[key] = fmt.Sprint(value)
 	}
-	if err := s.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: rafWorkspaceAuditKey(workspace),
-		Values: fields,
-	}).Err(); err != nil {
-		return err
-	}
-	if session == "" {
-		return nil
-	}
 	return s.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: rafSessionAuditKey(workspace, session),
+		Stream: rafWorkspaceAuditKey(workspace),
 		Values: fields,
 	}).Err()
 }

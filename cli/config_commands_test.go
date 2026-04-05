@@ -23,7 +23,7 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 		_ = os.Setenv("HOME", origHome)
 	})
 
-	configFile := filepath.Join(t.TempDir(), "raf.config.json")
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
 	origConfigPath := cfgPathOverride
 	cfgPathOverride = configFile
 	t.Cleanup(func() {
@@ -202,7 +202,7 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 		"--redis-url <redis://...|rediss://...>",
 		"--mount-backend auto|none|fuse|nfs",
 		"Current workspace is not configured here",
-		"runtime paths stay available in raf.config.json",
+		"runtime paths stay available in afs.config.json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("config set help output = %q, want substring %q", out, want)
@@ -274,7 +274,7 @@ func TestCmdWorkspaceRunHelpExplainsBehavior(t *testing.T) {
 		"save changes back to Redis unless --readonly is set",
 		"If <workspace> is omitted",
 		"workspace use <workspace>",
-		"does not accept --session",
+		"workspace run demo -- /bin/sh",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("workspace run help output = %q, want substring %q", out, want)
@@ -357,8 +357,8 @@ func TestCmdCheckpointRestoreHelpExplainsArchiveBehavior(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Restore a workspace to a checkpoint",
-		"archived if one exists",
+		"Restore the workspace working copy to the selected checkpoint",
+		"checkpoint restore <workspace> <checkpoint>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("checkpoint restore help output = %q, want substring %q", out, want)

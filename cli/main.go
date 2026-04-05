@@ -33,7 +33,6 @@ type config struct {
 	RedisTLS         bool   `json:"redisTLS"`
 	WorkRoot         string `json:"workRoot"`
 	CurrentWorkspace string `json:"currentWorkspace"`
-	DefaultSession   string `json:"defaultSession"`
 	RuntimeMode      string `json:"runtimeMode"`
 	RedisKey         string `json:"redisKey"`
 	Mountpoint       string `json:"mountpoint"`
@@ -169,7 +168,7 @@ func printUsage() {
 Commands:
   setup                Interactive setup
   config ...           Show or change basic Redis and mount settings non-interactively
-  up [flags]           Start RAF services with optional one-shot overrides
+  up [flags]           Start AFS services with optional one-shot overrides
   down                 Stop and unmount
   status               Show current status
   workspace ...        Workspace operations (create, list, current, use, run, clone, fork, delete, import)
@@ -198,7 +197,7 @@ func statusRemoteLabel(addr string, db int) string {
 
 func statusTitle(prefix, backendName, workspace, localPath string) string {
 	if backendName == mountBackendNone {
-		return prefix + " " + clr(ansiBold, "raf no mounted filesystem")
+		return prefix + " " + clr(ansiBold, "afs no mounted filesystem")
 	}
 	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace: %s mounted at %s (via %s)", currentWorkspaceLabel(workspace), localPath, userModeLabel(backendName)))
 }
@@ -240,13 +239,13 @@ func currentWorkspaceLabel(workspace string) string {
 func cmdSetup() error {
 	if st, err := loadState(); err == nil {
 		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.ManageRedis && st.RedisPID > 0 && processAlive(st.RedisPID)) {
-			return fmt.Errorf("raf is currently running\nRun '%s down' first", filepath.Base(os.Args[0]))
+			return fmt.Errorf("afs is currently running\nRun '%s down' first", filepath.Base(os.Args[0]))
 		}
 	}
 
 	printBanner()
 
-	fmt.Println("  " + clr(ansiDim, "RAF stores workspace state in Redis and can optionally expose"))
+	fmt.Println("  " + clr(ansiDim, "AFS stores workspace state in Redis and can optionally expose"))
 	fmt.Println("  " + clr(ansiDim, "a mounted filesystem for tools that need one."))
 	fmt.Println()
 	cfg := defaultConfig()
@@ -371,7 +370,7 @@ func promptRedisConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) err
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Redis Connection"))
 	fmt.Fprintln(out)
 
-	fmt.Fprintln(out, "  How would you like to connect RAF?")
+	fmt.Fprintln(out, "  How would you like to connect AFS?")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Start and manage a local Redis server")
 	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Connect to an existing Redis server")
@@ -446,11 +445,11 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 			mountDefault = cfg.Mountpoint
 		}
 	}
-	promptHint := "  " + clr(ansiDim, "Leave empty for no mounted filesystem. Example: ~/raf")
+	promptHint := "  " + clr(ansiDim, "Leave empty for no mounted filesystem. Example: ~/afs")
 	if mountDefault != "" {
 		promptHint = "  " + clr(ansiDim, "Press enter to keep "+mountDefault+", or type none for no mounted filesystem")
 	} else if strings.TrimSpace(cfg.CurrentWorkspace) == "" {
-		promptHint = "  " + clr(ansiDim, "Leave empty for no mounted filesystem. If you continue, RAF will ask for a workspace name and create it if needed.")
+		promptHint = "  " + clr(ansiDim, "Leave empty for no mounted filesystem. If you continue, AFS will ask for a workspace name and create it if needed.")
 	}
 	mp, err := promptString(r, out,
 		"  Choose local mount point\n"+promptHint, mountDefault)
@@ -470,7 +469,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		}
 		workspace, err := promptString(r, out,
 			"\n  Workspace name\n"+
-				"  "+clr(ansiDim, "RAF will create this workspace before mounting if it does not already exist"), workspaceDefault)
+				"  "+clr(ansiDim, "AFS will create this workspace before mounting if it does not already exist"), workspaceDefault)
 		if err != nil {
 			return "", err
 		}
@@ -592,7 +591,7 @@ func cleanupStaleMount(cfg config) error {
 	s := startStep("Cleaning stale mount")
 	if err := backend.Unmount(cfg.Mountpoint); err != nil {
 		s.fail(err.Error())
-		return fmt.Errorf("stale RAF mount at %s could not be unmounted: %w", cfg.Mountpoint, err)
+		return fmt.Errorf("stale AFS mount at %s could not be unmounted: %w", cfg.Mountpoint, err)
 	}
 	s.succeed(cfg.Mountpoint)
 	return nil
@@ -612,7 +611,7 @@ func cmdDown() error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			fmt.Println()
-			fmt.Println("  RAF is not running. Nothing to stop.")
+			fmt.Println("  AFS is not running. Nothing to stop.")
 			fmt.Println()
 			return nil
 		}
@@ -631,9 +630,6 @@ func cmdDown() error {
 	}
 	if workRoot, err := expandPath(cfg.WorkRoot); err == nil {
 		cfg.WorkRoot = workRoot
-	}
-	if strings.TrimSpace(cfg.DefaultSession) == "" {
-		cfg.DefaultSession = "main"
 	}
 	if strings.TrimSpace(st.CurrentWorkspace) != "" {
 		cfg.CurrentWorkspace = st.CurrentWorkspace
@@ -657,12 +653,12 @@ func cmdDown() error {
 		expectedHead := strings.TrimSpace(st.MountedHeadSavepoint)
 		if expectedHead == "" {
 			store := newRAFStore(rdb)
-			sessionMeta, metaErr := store.getSessionMeta(context.Background(), st.CurrentWorkspace, primaryStateName(cfg))
+			workspaceMeta, metaErr := store.getWorkspaceMeta(context.Background(), st.CurrentWorkspace)
 			if metaErr != nil {
 				_ = rdb.Close()
 				return metaErr
 			}
-			expectedHead = sessionMeta.HeadSavepoint
+			expectedHead = workspaceMeta.HeadSavepoint
 		}
 
 		s := startStep("Saving mounted workspace")
@@ -741,7 +737,7 @@ func cmdDown() error {
 		return err
 	}
 
-	fmt.Printf("\n  %s raf stopped\n\n", clr(ansiDim, "■"))
+	fmt.Printf("\n  %s afs stopped\n\n", clr(ansiDim, "■"))
 	return nil
 }
 
@@ -753,9 +749,9 @@ func cmdStatus() error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			title := clr(ansiDim, "○") + " raf is not running"
+			title := clr(ansiDim, "○") + " afs is not running"
 			printBox(title, []boxRow{
-				{Label: "start", Value: clr(ansiCyan, "raf up")},
+				{Label: "start", Value: clr(ansiCyan, "afs up")},
 			})
 			return nil
 		}
@@ -877,7 +873,7 @@ func startServices(cfg config) error {
 	workspace, created, err := ensureMountWorkspace(ctx, cfg, store)
 	if err != nil {
 		workspaceStep.fail(err.Error())
-		return fmt.Errorf("a current workspace is required before RAF can mount a filesystem: %w", err)
+		return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
 	}
 	if created {
 		workspaceStep.succeed(workspace + " (created)")
@@ -1431,7 +1427,7 @@ func applyMetadata(ctx context.Context, fsClient importClient, path string, info
 // ---------------------------------------------------------------------------
 
 func startRedisDaemon(cfg config) (int, error) {
-	pidfile := fmt.Sprintf("/tmp/raf-%d.pid", cfg.redisPort)
+	pidfile := fmt.Sprintf("/tmp/afs-%d.pid", cfg.redisPort)
 	args := []string{
 		"--port", strconv.Itoa(cfg.redisPort),
 		"--save", "",
@@ -1440,7 +1436,7 @@ func startRedisDaemon(cfg config) (int, error) {
 		"--pidfile", pidfile,
 		"--logfile", cfg.RedisLog,
 		"--dir", "/tmp",
-		"--dbfilename", fmt.Sprintf("raf-%d.rdb", cfg.redisPort),
+		"--dbfilename", fmt.Sprintf("afs-%d.rdb", cfg.redisPort),
 	}
 	cmd := exec.Command(cfg.RedisServerBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -1507,12 +1503,23 @@ func processAlive(pid int) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Config persistence (~/.raf/config.json)
+// Config persistence (~/.afs/config.json)
 // ---------------------------------------------------------------------------
 
 func configPath() string {
 	if cfgPathOverride != "" {
 		return cfgPathOverride
+	}
+	exe, err := executablePath()
+	if err != nil {
+		return "afs.config.json"
+	}
+	return filepath.Join(filepath.Dir(exe), "afs.config.json")
+}
+
+func legacyConfigPath() string {
+	if cfgPathOverride != "" {
+		return ""
 	}
 	exe, err := executablePath()
 	if err != nil {
@@ -1531,7 +1538,24 @@ func saveConfig(cfg config) error {
 
 func loadConfig() (config, error) {
 	cfg := defaultConfig()
-	b, err := os.ReadFile(configPath())
+	paths := []string{configPath()}
+	if legacy := legacyConfigPath(); legacy != "" && legacy != configPath() {
+		paths = append(paths, legacy)
+	}
+
+	var (
+		b   []byte
+		err error
+	)
+	for _, path := range paths {
+		b, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return cfg, err
+		}
+	}
 	if err != nil {
 		return cfg, err
 	}
@@ -1555,15 +1579,14 @@ func defaultConfig() config {
 		RedisAddr:      "localhost:6379",
 		RedisDB:        0,
 		WorkRoot:       defaultWorkRoot(),
-		DefaultSession: "main",
 		RuntimeMode:    "host",
 		RedisKey:       "myfs",
-		Mountpoint:     "~/raf",
+		Mountpoint:     "~/afs",
 		MountBackend:   mountBackendAuto,
 		NFSHost:        "127.0.0.1",
 		NFSPort:        20490,
-		RedisLog:       "/tmp/raf-redis.log",
-		MountLog:       "/tmp/raf-mount.log",
+		RedisLog:       "/tmp/afs-redis.log",
+		MountLog:       "/tmp/afs-mount.log",
 	}
 }
 
@@ -1599,9 +1622,6 @@ func prepareConfigForSave(cfg *config) error {
 		return err
 	}
 	cfg.WorkRoot = workRoot
-	if strings.TrimSpace(cfg.DefaultSession) == "" {
-		cfg.DefaultSession = "main"
-	}
 	if strings.TrimSpace(cfg.RuntimeMode) == "" {
 		cfg.RuntimeMode = "host"
 	}
@@ -1713,10 +1733,18 @@ func resolveConfigPaths(cfg *config) error {
 }
 
 // ---------------------------------------------------------------------------
-// State persistence (~/.raf/state.json)
+// State persistence (~/.afs/state.json)
 // ---------------------------------------------------------------------------
 
 func stateDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "."
+	}
+	return filepath.Join(home, ".afs")
+}
+
+func legacyStateDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "."
@@ -1732,6 +1760,10 @@ func statePath() string {
 	return filepath.Join(stateDir(), "state.json")
 }
 
+func legacyStatePath() string {
+	return filepath.Join(legacyStateDir(), "state.json")
+}
+
 func saveState(st state) error {
 	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
@@ -1745,7 +1777,20 @@ func saveState(st state) error {
 
 func loadState() (state, error) {
 	var st state
-	b, err := os.ReadFile(statePath())
+	paths := []string{statePath(), legacyStatePath()}
+	var (
+		b   []byte
+		err error
+	)
+	for _, path := range paths {
+		b, err = os.ReadFile(path)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return st, err
+		}
+	}
 	if err != nil {
 		return st, err
 	}

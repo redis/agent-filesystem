@@ -96,7 +96,7 @@ func runeWidth(s string) int {
 func printBanner() {
 	if !colorTerm {
 		fmt.Println()
-		fmt.Println("  RAF")
+		fmt.Println("  AFS")
 		fmt.Println("  Redis Agent Filesystem")
 		fmt.Println()
 		return
@@ -114,7 +114,7 @@ func printBanner() {
 	lines := []string{
 		"",
 		bar,
-		centerBannerText(clr(ansiBold+ansiWhite, "RAF")),
+		centerBannerText(clr(ansiBold+ansiWhite, "AFS")),
 		centerBannerText(clr(ansiDim, "Redis Agent Filesystem")),
 		bar,
 		"",
@@ -131,7 +131,7 @@ func printBanner() {
 func printBannerCompact() {
 	if !colorTerm {
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "  RAF")
+		fmt.Fprintln(os.Stderr, "  AFS")
 		fmt.Fprintln(os.Stderr, "  Redis Agent Filesystem")
 		fmt.Fprintln(os.Stderr)
 		return
@@ -145,7 +145,7 @@ func printBannerCompact() {
 		ansiGray + "░░░░" + ansiReset
 	fmt.Fprintf(os.Stderr, "\n%s%s\n%s\n%s\n%s%s\n\n",
 		bannerIndent, bar,
-		centerBannerTextForOutput(os.Stderr, clr(ansiBold+ansiWhite, "RAF")),
+		centerBannerTextForOutput(os.Stderr, clr(ansiBold+ansiWhite, "AFS")),
 		centerBannerTextForOutput(os.Stderr, clr(ansiDim, "Redis Agent Filesystem")),
 		bannerIndent, bar)
 }

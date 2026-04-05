@@ -1,4 +1,4 @@
-from test import TestCase
+from test_runner import TestCase
 from tests.invariants import assert_tree_consistent
 
 

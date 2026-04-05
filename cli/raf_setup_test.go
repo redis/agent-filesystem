@@ -136,7 +136,7 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 func TestLoadConfigMigratesLegacyDefaultWorkspaceToCurrentWorkspace(t *testing.T) {
 	t.Helper()
 
-	configFile := filepath.Join(t.TempDir(), "raf.config.json")
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
 	orig := cfgPathOverride
 	cfgPathOverride = configFile
 	t.Cleanup(func() {
@@ -179,7 +179,7 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 
 	input := stringsJoinLines(
 		"2", // filesystem mount only
-		"/tmp/raf-mount",
+		"/tmp/afs-mount",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -193,8 +193,8 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
 	}
-	if cfg.Mountpoint != "/tmp/raf-mount" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/raf-mount")
+	if cfg.Mountpoint != "/tmp/afs-mount" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/afs-mount")
 	}
 	if runtime.GOOS == "darwin" {
 		if cfg.NFSHost != "127.0.0.1" {
@@ -219,7 +219,7 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 
 	input := stringsJoinLines(
 		"2",        // filesystem mount only
-		"/tmp/raf", // requested mountpoint
+		"/tmp/afs", // requested mountpoint
 		"newfiles", // workspace name to create/use
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -234,8 +234,8 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	if cfg.CurrentWorkspace != "newfiles" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "newfiles")
 	}
-	if cfg.Mountpoint != "/tmp/raf" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/raf")
+	if cfg.Mountpoint != "/tmp/afs" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/afs")
 	}
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
@@ -259,7 +259,7 @@ func TestStartServicesFilesystemOnlyUsesRedisWithoutMountpoint(t *testing.T) {
 	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
-	cfg.WorkRoot = filepath.Join(homeDir, ".raf", "workspaces")
+	cfg.WorkRoot = filepath.Join(homeDir, ".afs", "workspaces")
 
 	if err := resolveConfigPaths(&cfg); err != nil {
 		t.Fatalf("resolveConfigPaths() returned error: %v", err)

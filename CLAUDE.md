@@ -5,20 +5,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test
 
 ```bash
-make                # build module/fs.so + mount/agent-filesystem-mount + mount/agent-filesystem-nfs + rfs
+make                # build module/fs.so + mount/agent-filesystem-mount + mount/agent-filesystem-nfs + afs
 make module         # build module/fs.so only
 make mount          # build mount/agent-filesystem-mount + mount/agent-filesystem-nfs
-make cli            # build rfs only
+make cli            # build afs only
 make clean          # remove compiled artifacts
 
 # CLI lifecycle helper:
-./raf setup
-./raf up
-./raf down
-./raf status
-./raf workspace import <workspace> <directory>
-./raf workspace run <workspace> -- /bin/sh
-./raf checkpoint list <workspace>
+./afs setup
+./afs up
+./afs down
+./afs status
+./afs workspace import <workspace> <directory>
+./afs workspace run <workspace> -- /bin/sh
+./afs checkpoint list <workspace>
 ```
 
 Load into Redis for manual testing:
@@ -32,7 +32,7 @@ CLI coverage exists under `cli/`; run `cd cli && go test ./...` for automated ch
 
 ## Architecture
 
-Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
+Redis Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
 
 ### Data Model
 

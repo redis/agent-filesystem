@@ -20,29 +20,22 @@ import {
   SectionHeader,
   SectionTitle,
   Select,
-  SessionButton,
-  SessionLayout,
-  SessionRail,
   TabButton,
   Tabs,
   Tag,
   TextArea,
   TextInput,
   ToneChip,
-  TwoColumnFields,
 } from "../components/raf-kit";
 import {
   useCreateSavepointMutation,
-  useCreateSessionMutation,
-  useDeleteSessionMutation,
   useDeleteWorkspaceMutation,
-  useRollbackSessionMutation,
-  useUpdateSessionFileMutation,
+  useRestoreSavepointMutation,
+  useUpdateWorkspaceFileMutation,
   useWorkspace,
 } from "../foundation/hooks/use-raf";
-import type { RAFSession } from "../foundation/types/raf";
 
-type StudioTab = "sessions" | "editor" | "activity";
+type StudioTab = "overview" | "editor" | "activity";
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   component: WorkspaceStudioPage,
@@ -52,62 +45,43 @@ function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
   const workspaceQuery = useWorkspace(workspaceId);
-  const createSession = useCreateSessionMutation();
-  const deleteSession = useDeleteSessionMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
-  const updateFile = useUpdateSessionFileMutation();
+  const updateFile = useUpdateWorkspaceFileMutation();
   const createSavepoint = useCreateSavepointMutation();
-  const rollbackSession = useRollbackSessionMutation();
+  const restoreSavepoint = useRestoreSavepointMutation();
 
-  const [tab, setTab] = useState<StudioTab>("sessions");
-  const [selectedSessionId, setSelectedSessionId] = useState("");
+  const [tab, setTab] = useState<StudioTab>("overview");
   const [selectedFilePath, setSelectedFilePath] = useState("");
   const [draftContent, setDraftContent] = useState("");
-  const [sessionName, setSessionName] = useState("");
-  const [sessionDescription, setSessionDescription] = useState("");
-  const [importName, setImportName] = useState("");
   const [savepointName, setSavepointName] = useState("");
   const [savepointNote, setSavepointNote] = useState("");
   const [rollbackTarget, setRollbackTarget] = useState("");
 
-  useEffect(() => {
-    const workspace = workspaceQuery.data;
-    if (workspace == null) {
-      return;
-    }
-
-    const defaultSessionId = workspace.defaultSessionId || workspace.sessions[0]?.id || "";
-    setSelectedSessionId((current) =>
-      workspace.sessions.some((session) => session.id === current) ? current : defaultSessionId,
-    );
-  }, [workspaceQuery.data]);
-
   const workspace = workspaceQuery.data;
-  const activeSession =
-    workspace?.sessions.find((session) => session.id === selectedSessionId) ?? null;
+  const selectedFile = workspace?.files.find((file) => file.path === selectedFilePath) ?? null;
+  const activeSavepoint =
+    workspace?.savepoints.find((savepoint) => savepoint.id === workspace.headSavepointId) ?? null;
 
   useEffect(() => {
-    if (activeSession == null) {
+    if (workspace == null) {
       setSelectedFilePath("");
-      setDraftContent("");
       return;
     }
 
-    const firstPath = activeSession.files[0]?.path ?? "";
+    const firstPath = workspace.files[0]?.path ?? "";
     setSelectedFilePath((current) =>
-      activeSession.files.some((file) => file.path === current) ? current : firstPath,
+      workspace.files.some((file) => file.path === current) ? current : firstPath,
     );
-  }, [activeSession]);
+    setRollbackTarget((current) =>
+      workspace.savepoints.some((savepoint) => savepoint.id === current)
+        ? current
+        : workspace.headSavepointId,
+    );
+  }, [workspace]);
 
   useEffect(() => {
-    if (activeSession == null) {
-      return;
-    }
-
-    const file = activeSession.files.find((item) => item.path === selectedFilePath);
-    setDraftContent(file?.content ?? "");
-    setRollbackTarget(activeSession.headSavepointId);
-  }, [activeSession, selectedFilePath]);
+    setDraftContent(selectedFile?.content ?? "");
+  }, [selectedFile]);
 
   if (workspaceQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -116,9 +90,6 @@ function WorkspaceStudioPage() {
   if (workspace == null) {
     throw new Error("Workspace not found.");
   }
-
-  const selectedFile =
-    activeSession?.files.find((file) => file.path === selectedFilePath) ?? null;
 
   return (
     <PageStack>
@@ -155,11 +126,12 @@ function WorkspaceStudioPage() {
             <Tag>{workspace.cloudAccount}</Tag>
             <Tag>{workspace.region}</Tag>
             <Tag>{workspace.mountedPath}</Tag>
+            <Tag>{workspace.files.length} files</Tag>
           </InlineActions>
           <div style={{ marginTop: 20 }}>
             <Tabs>
-              <TabButton $active={tab === "sessions"} onClick={() => setTab("sessions")}>
-                Sessions
+              <TabButton $active={tab === "overview"} onClick={() => setTab("overview")}>
+                Overview
               </TabButton>
               <TabButton $active={tab === "editor"} onClick={() => setTab("editor")}>
                 Browser + Editor
@@ -172,256 +144,104 @@ function WorkspaceStudioPage() {
         </SectionCard>
       </SectionGrid>
 
-      {tab === "sessions" ? (
+      {tab === "overview" ? (
         <SectionGrid>
-          <SectionCard $span={12}>
-            <SessionLayout>
+          <SectionCard $span={5}>
+            <SectionHeader>
+              <SectionTitle
+                title="Workspace state"
+                body="AFS now tracks one live working copy and one checkpoint timeline per workspace."
+              />
+            </SectionHeader>
+            <CardHeader>
               <div>
-                <SectionHeader>
-                  <SectionTitle
-                    title="Sessions"
-                    body="Branch, import, and manage RAF sessions for this workspace."
-                  />
-                </SectionHeader>
-                <SessionRail>
-                  {workspace.sessions.map((session) => (
-                    <SessionButton
-                      key={session.id}
-                      $active={session.id === activeSession?.id}
-                      onClick={() => setSelectedSessionId(session.id)}
+                <Typography.Heading component="h3" size="S">
+                  {workspace.name}
+                </Typography.Heading>
+                <Typography.Body color="secondary" component="p">
+                  {workspace.description}
+                </Typography.Body>
+              </div>
+              <InlineActions>
+                <ToneChip $tone={workspace.draftState}>{workspace.draftState}</ToneChip>
+              </InlineActions>
+            </CardHeader>
+            <Typography.Body color="secondary" component="p">
+              Head checkpoint: {activeSavepoint?.name ?? "n/a"}
+            </Typography.Body>
+            <Typography.Body color="secondary" component="p">
+              Updated {new Date(workspace.updatedAt).toLocaleString()}
+            </Typography.Body>
+            <InlineActions style={{ marginTop: 14 }}>
+              {workspace.tags.map((tag) => (
+                <Tag key={tag}>{tag}</Tag>
+              ))}
+            </InlineActions>
+          </SectionCard>
+
+          <SectionCard $span={7}>
+            <SectionHeader>
+              <SectionTitle
+                title="Checkpoint history"
+                body="Each checkpoint is immutable. Restoring rematerializes the workspace from Redis."
+              />
+            </SectionHeader>
+            <SavepointGrid>
+              {workspace.savepoints.map((savepoint) => (
+                <SavepointRow key={savepoint.id}>
+                  <div>
+                    <Typography.Body component="strong">{savepoint.name}</Typography.Body>
+                    <Typography.Body color="secondary" component="p">
+                      {savepoint.note || "No note provided."}
+                    </Typography.Body>
+                    <InlineActions style={{ marginTop: 10 }}>
+                      <Tag>{savepoint.fileCount} files</Tag>
+                      <Tag>{savepoint.sizeLabel}</Tag>
+                      <Tag>{new Date(savepoint.createdAt).toLocaleString()}</Tag>
+                      {savepoint.id === workspace.headSavepointId ? <Tag>Current head</Tag> : null}
+                    </InlineActions>
+                  </div>
+                  <InlineActions>
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      disabled={
+                        restoreSavepoint.isPending || savepoint.id === workspace.headSavepointId
+                      }
+                      onClick={() =>
+                        restoreSavepoint.mutate({
+                          workspaceId: workspace.id,
+                          savepointId: savepoint.id,
+                        })
+                      }
                     >
-                      <Typography.Body component="strong">{session.name}</Typography.Body>
-                      <Typography.Body color="secondary" component="p">
-                        {session.description}
-                      </Typography.Body>
-                      <InlineActions style={{ marginTop: 10 }}>
-                        <ToneChip $tone={session.status}>{session.status}</ToneChip>
-                        <Tag>{session.kind}</Tag>
-                      </InlineActions>
-                    </SessionButton>
-                  ))}
-                </SessionRail>
-              </div>
-
-              <div>
-                {activeSession == null ? null : (
-                  <SectionGrid>
-                    <SectionCard $span={7}>
-                      <CardHeader>
-                        <div>
-                          <Typography.Heading component="h3" size="S">
-                            {activeSession.name}
-                          </Typography.Heading>
-                          <Typography.Body color="secondary" component="p">
-                            {activeSession.description}
-                          </Typography.Body>
-                        </div>
-                        <InlineActions>
-                          <ToneChip $tone={activeSession.status}>{activeSession.status}</ToneChip>
-                          <Tag>{activeSession.kind}</Tag>
-                        </InlineActions>
-                      </CardHeader>
-                      <Typography.Body color="secondary" component="p">
-                        Head savepoint:{" "}
-                        {activeSession.savepoints.find(
-                          (savepoint) => savepoint.id === activeSession.headSavepointId,
-                        )?.name ?? "n/a"}
-                      </Typography.Body>
-                      <Typography.Body color="secondary" component="p">
-                        Updated {new Date(activeSession.updatedAt).toLocaleString()}
-                      </Typography.Body>
-                      <InlineActions style={{ marginTop: 16 }}>
-                        <Button
-                          size="medium"
-                          variant="secondary-fill"
-                          disabled={deleteSession.isPending || workspace.sessions.length <= 1}
-                          onClick={() =>
-                            deleteSession.mutate({
-                              workspaceId: workspace.id,
-                              sessionId: activeSession.id,
-                            })
-                          }
-                        >
-                          Delete session
-                        </Button>
-                      </InlineActions>
-                    </SectionCard>
-
-                    <SectionCard $span={5}>
-                      <SectionTitle
-                        title="Create session"
-                        body="Fork from the current default session for focused work."
-                      />
-                      <div style={{ marginTop: 16 }}>
-                        <FormGrid
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (sessionName.trim() === "") {
-                              return;
-                            }
-
-                            createSession.mutate({
-                              workspaceId: workspace.id,
-                              name: sessionName,
-                              description: sessionDescription,
-                              mode: "branch",
-                              baseSessionId: activeSession.id,
-                            });
-                            setSessionName("");
-                            setSessionDescription("");
-                          }}
-                        >
-                          <Field>
-                            Session name
-                            <TextInput
-                              value={sessionName}
-                              onChange={(event) => setSessionName(event.target.value)}
-                              placeholder="qa-pass"
-                            />
-                          </Field>
-                          <Field>
-                            Description
-                            <TextArea
-                              value={sessionDescription}
-                              onChange={(event) => setSessionDescription(event.target.value)}
-                              placeholder="Short summary of what the session is for."
-                            />
-                          </Field>
-                          <Button size="medium" type="submit" disabled={createSession.isPending}>
-                            Create branch session
-                          </Button>
-                        </FormGrid>
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard $span={12}>
-                      <SectionHeader>
-                        <SectionTitle
-                          title="Savepoints"
-                          body="Checkpoint, inspect, and roll back immutable session state."
-                        />
-                      </SectionHeader>
-                      <SavepointGrid>
-                        {activeSession.savepoints.map((savepoint) => (
-                          <SavepointRow key={savepoint.id}>
-                            <div>
-                              <Typography.Body component="strong">
-                                {savepoint.name}
-                              </Typography.Body>
-                              <Typography.Body color="secondary" component="p">
-                                {savepoint.note}
-                              </Typography.Body>
-                              <InlineActions style={{ marginTop: 10 }}>
-                                <Tag>{savepoint.fileCount} files</Tag>
-                                <Tag>{savepoint.sizeLabel}</Tag>
-                                <Tag>{new Date(savepoint.createdAt).toLocaleString()}</Tag>
-                              </InlineActions>
-                            </div>
-                            <InlineActions>
-                              <Button
-                                size="medium"
-                                variant="secondary-fill"
-                                disabled={rollbackSession.isPending}
-                                onClick={() =>
-                                  rollbackSession.mutate({
-                                    workspaceId: workspace.id,
-                                    sessionId: activeSession.id,
-                                    savepointId: savepoint.id,
-                                  })
-                                }
-                              >
-                                Roll back
-                              </Button>
-                            </InlineActions>
-                          </SavepointRow>
-                        ))}
-                      </SavepointGrid>
-                    </SectionCard>
-                  </SectionGrid>
-                )}
-              </div>
-            </SessionLayout>
+                      Restore
+                    </Button>
+                  </InlineActions>
+                </SavepointRow>
+              ))}
+            </SavepointGrid>
           </SectionCard>
         </SectionGrid>
       ) : null}
 
-      {tab === "editor" && activeSession != null ? (
+      {tab === "editor" ? (
         <SectionGrid>
           <SectionCard $span={12}>
             <SectionHeader>
               <SectionTitle
                 title="Browser + editor"
-                body="A RAF-specific studio for browsing files, editing drafts, importing sessions, and capturing savepoints."
+                body="Browse the materialized workspace, edit draft files, and capture checkpoints from the current working tree."
               />
             </SectionHeader>
-
-            <TwoColumnFields style={{ marginBottom: 16 }}>
-              <Field>
-                Import a session
-                <TextInput
-                  value={importName}
-                  onChange={(event) => setImportName(event.target.value)}
-                  placeholder="imported-support-thread"
-                />
-              </Field>
-              <Field>
-                Roll back target
-                <Select
-                  value={rollbackTarget}
-                  onChange={(event) => setRollbackTarget(event.target.value)}
-                >
-                  {activeSession.savepoints.map((savepoint) => (
-                    <option key={savepoint.id} value={savepoint.id}>
-                      {savepoint.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </TwoColumnFields>
-
-            <InlineActions style={{ marginBottom: 20 }}>
-              <Button
-                size="medium"
-                onClick={() => {
-                  if (importName.trim() === "") {
-                    return;
-                  }
-
-                  createSession.mutate({
-                    workspaceId: workspace.id,
-                    name: importName,
-                    description: "Imported into RAF from the Web UI.",
-                    mode: "imported",
-                    baseSessionId: activeSession.id,
-                  });
-                  setImportName("");
-                }}
-              >
-                Import session
-              </Button>
-              <Button
-                size="medium"
-                variant="secondary-fill"
-                disabled={rollbackSession.isPending}
-                onClick={() =>
-                  rollbackSession.mutate({
-                    workspaceId: workspace.id,
-                    sessionId: activeSession.id,
-                    savepointId: rollbackTarget,
-                  })
-                }
-              >
-                Roll back selection
-              </Button>
-            </InlineActions>
 
             <FileStudio>
               <div>
                 <Typography.Heading component="h3" size="S">
-                  {activeSession.name} files
+                  Workspace files
                 </Typography.Heading>
                 <FileList style={{ marginTop: 14 }}>
-                  {activeSession.files.map((file) => (
+                  {workspace.files.map((file) => (
                     <FileButton
                       key={file.path}
                       $active={file.path === selectedFilePath}
@@ -442,16 +262,16 @@ function WorkspaceStudioPage() {
                     Select a file to start editing.
                   </Typography.Body>
                 ) : (
-                  <FormGrid
+                  <form
                     onSubmit={(event) => {
                       event.preventDefault();
                       updateFile.mutate({
                         workspaceId: workspace.id,
-                        sessionId: activeSession.id,
                         path: selectedFile.path,
                         content: draftContent,
                       });
                     }}
+                    style={{ display: "grid", gap: 16 }}
                   >
                     <CardHeader>
                       <div>
@@ -462,73 +282,113 @@ function WorkspaceStudioPage() {
                           {selectedFile.language}
                         </Typography.Body>
                       </div>
-                      <ToneChip $tone={activeSession.status}>{activeSession.status}</ToneChip>
+                      <ToneChip $tone={workspace.draftState}>{workspace.draftState}</ToneChip>
                     </CardHeader>
                     <EditorArea
                       value={draftContent}
                       onChange={(event) => setDraftContent(event.target.value)}
                     />
-                    <SectionGrid>
-                      <SectionCard $span={7}>
-                        <SectionTitle
-                          title="Save draft"
-                          body="Persists the current file back into the selected RAF session."
-                        />
-                        <InlineActions style={{ marginTop: 14 }}>
-                          <Button size="medium" type="submit" disabled={updateFile.isPending}>
-                            Save file
-                          </Button>
-                        </InlineActions>
-                      </SectionCard>
-
-                      <SectionCard $span={5}>
-                        <SectionTitle
-                          title="Checkpoint"
-                          body="Create a savepoint from the current local session state."
-                        />
-                        <FormGrid
-                          style={{ marginTop: 14 }}
-                          onSubmit={(event) => {
-                            event.preventDefault();
-                            if (savepointName.trim() === "") {
-                              return;
-                            }
-
-                            createSavepoint.mutate({
-                              workspaceId: workspace.id,
-                              sessionId: activeSession.id,
-                              name: savepointName,
-                              note: savepointNote,
-                            });
-                            setSavepointName("");
-                            setSavepointNote("");
-                          }}
-                        >
-                          <TextInput
-                            value={savepointName}
-                            onChange={(event) => setSavepointName(event.target.value)}
-                            placeholder="after-editor-pass"
-                          />
-                          <TextArea
-                            value={savepointNote}
-                            onChange={(event) => setSavepointNote(event.target.value)}
-                            placeholder="Why this checkpoint exists."
-                          />
-                          <Button
-                            size="medium"
-                            variant="secondary-fill"
-                            type="submit"
-                            disabled={createSavepoint.isPending}
-                          >
-                            Create savepoint
-                          </Button>
-                        </FormGrid>
-                      </SectionCard>
-                    </SectionGrid>
-                  </FormGrid>
+                    <InlineActions>
+                      <Button size="medium" type="submit" disabled={updateFile.isPending}>
+                        Save file
+                      </Button>
+                    </InlineActions>
+                  </form>
                 )}
               </EditorPanel>
             </FileStudio>
+
+            <SectionGrid style={{ marginTop: 16 }}>
+              <SectionCard $span={5}>
+                <SectionTitle
+                  title="Working copy"
+                  body="Draft changes stay local until you capture a checkpoint."
+                />
+                <InlineActions style={{ marginTop: 14 }}>
+                  <ToneChip $tone={workspace.draftState}>{workspace.draftState}</ToneChip>
+                  <Tag>{activeSavepoint?.name ?? "n/a"}</Tag>
+                  <Tag>{workspace.files.length} files</Tag>
+                </InlineActions>
+              </SectionCard>
+
+              <SectionCard $span={7}>
+                <SectionTitle
+                  title="Checkpoint actions"
+                  body="Capture the current tree or rematerialize from a saved checkpoint."
+                />
+                <div style={{ marginTop: 16, display: "grid", gap: 14 }}>
+                  <Field>
+                    Restore target
+                    <Select
+                      value={rollbackTarget}
+                      onChange={(event) => setRollbackTarget(event.target.value)}
+                    >
+                      {workspace.savepoints.map((savepoint) => (
+                        <option key={savepoint.id} value={savepoint.id}>
+                          {savepoint.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <InlineActions>
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      disabled={restoreSavepoint.isPending}
+                      onClick={() =>
+                        restoreSavepoint.mutate({
+                          workspaceId: workspace.id,
+                          savepointId: rollbackTarget,
+                        })
+                      }
+                    >
+                      Restore checkpoint
+                    </Button>
+                  </InlineActions>
+                  <FormGrid
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (savepointName.trim() === "") {
+                        return;
+                      }
+
+                      createSavepoint.mutate({
+                        workspaceId: workspace.id,
+                        name: savepointName,
+                        note: savepointNote,
+                      });
+                      setSavepointName("");
+                      setSavepointNote("");
+                    }}
+                  >
+                    <Field>
+                      Checkpoint name
+                      <TextInput
+                        value={savepointName}
+                        onChange={(event) => setSavepointName(event.target.value)}
+                        placeholder="after-editor-pass"
+                      />
+                    </Field>
+                    <Field>
+                      Checkpoint note
+                      <TextArea
+                        value={savepointNote}
+                        onChange={(event) => setSavepointNote(event.target.value)}
+                        placeholder="Why this checkpoint exists."
+                      />
+                    </Field>
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      type="submit"
+                      disabled={createSavepoint.isPending}
+                    >
+                      Create checkpoint
+                    </Button>
+                  </FormGrid>
+                </div>
+              </SectionCard>
+            </SectionGrid>
           </SectionCard>
         </SectionGrid>
       ) : null}

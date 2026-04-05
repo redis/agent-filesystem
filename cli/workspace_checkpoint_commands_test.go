@@ -39,7 +39,7 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	}
 	defer closeStore()
 
-	treePath := rafSessionTreePath(loadedCfg, "repo", "main")
+	treePath := rafWorkspaceTreePath(loadedCfg, "repo")
 	if _, err := os.Stat(filepath.Join(treePath, "main.go")); err != nil {
 		t.Fatalf("expected opened workspace tree to exist: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openRAFStore() returned error: %v", err)
 	}
-	treePath := rafSessionTreePath(loadedCfg, "repo", "main")
+	treePath := rafWorkspaceTreePath(loadedCfg, "repo")
 	targetFile := filepath.Join(treePath, "main.go")
 
 	if err := os.WriteFile(targetFile, []byte("package updated\n"), 0o644); err != nil {
@@ -173,14 +173,14 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRunRejectsSessionFlag(t *testing.T) {
+func TestWorkspaceRunRejectsLegacyFlag(t *testing.T) {
 	t.Helper()
 
 	err := cmdWorkspace([]string{"workspace", "run", "repo", "--session", "main", "--", "/bin/sh", "-c", "true"})
 	if err == nil {
-		t.Fatal("cmdWorkspace(run) returned nil error, want session flag rejection")
+		t.Fatal("cmdWorkspace(run) returned nil error, want legacy flag rejection")
 	}
-	if !strings.Contains(err.Error(), "does not accept --session") {
-		t.Fatalf("cmdWorkspace(run) error = %q, want session rejection", err)
+	if !strings.Contains(err.Error(), `unknown flag "--session"`) {
+		t.Fatalf("cmdWorkspace(run) error = %q, want legacy --session rejection", err)
 	}
 }

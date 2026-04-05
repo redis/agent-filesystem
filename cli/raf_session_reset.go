@@ -7,18 +7,18 @@ import (
 	"time"
 )
 
-type rafSessionResetResult struct {
+type rafWorkspaceResetResult struct {
 	treePath    string
 	archivePath string
 }
 
-func resetRAFSessionHead(ctx context.Context, cfg config, store *rafStore, workspace, session, savepoint string) (rafSessionResetResult, error) {
-	result := rafSessionResetResult{
-		treePath: rafSessionTreePath(cfg, workspace, session),
+func resetRAFWorkspaceHead(ctx context.Context, cfg config, store *rafStore, workspace, savepoint string) (rafWorkspaceResetResult, error) {
+	result := rafWorkspaceResetResult{
+		treePath: rafWorkspaceTreePath(cfg, workspace),
 	}
 
 	if _, err := os.Stat(result.treePath); err == nil {
-		archivePath, err := archiveLocalTree(cfg, workspace, session)
+		archivePath, err := archiveLocalTree(cfg, workspace)
 		if err != nil {
 			return result, err
 		}
@@ -27,14 +27,14 @@ func resetRAFSessionHead(ctx context.Context, cfg config, store *rafStore, works
 		return result, err
 	}
 
-	if err := store.moveSessionHead(ctx, workspace, session, savepoint, time.Now().UTC()); err != nil {
+	if err := store.moveWorkspaceHead(ctx, workspace, savepoint, time.Now().UTC()); err != nil {
 		if result.archivePath != "" {
 			_ = os.Rename(result.archivePath, result.treePath)
 		}
 		return result, err
 	}
 
-	if err := materializeSession(ctx, store, cfg, workspace, session); err != nil {
+	if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
 		return result, err
 	}
 

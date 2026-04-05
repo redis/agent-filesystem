@@ -29,8 +29,8 @@ function ActivityPage() {
         <SectionCard $span={12}>
           <SectionTitle
             eyebrow="Audit"
-            title="Workspace and session activity"
-            body="Later this can read straight from RAF audit streams in Redis. For now it exercises the same UI patterns with the demo store."
+            title="Workspace activity"
+            body="Later this can read straight from AFS audit streams in Redis. For now it exercises the same UI patterns with the demo store."
           />
           <div style={{ marginTop: 16 }}>
             <EventList events={events} />

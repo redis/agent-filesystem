@@ -1,23 +1,21 @@
 import { cloneInitialRAFState } from "../mocks/raf";
 import type {
   CreateSavepointInput,
-  CreateSessionInput,
   CreateWorkspaceInput,
   RAFActivityEvent,
   RAFClientMode,
   RAFFile,
   RAFSavepoint,
-  RAFSession,
   RAFState,
   RAFWorkspace,
   RAFWorkspaceDetail,
   RAFWorkspaceListResponse,
   RAFWorkspaceSummary,
-  RollbackSessionInput,
-  UpdateSessionFileInput,
+  RestoreSavepointInput,
+  UpdateWorkspaceFileInput,
 } from "../types/raf";
 
-const STORAGE_KEY = "raf-ui-demo-state-v1";
+const STORAGE_KEY = "afs-ui-demo-state-v1";
 const DEMO_DELAY_MS = 120;
 const HTTP_BASE_URL = import.meta.env.VITE_RAF_API_BASE_URL?.replace(/\/+$/, "") ?? "";
 
@@ -28,11 +26,9 @@ type RAFClient = {
   getWorkspace: (workspaceId: string) => Promise<RAFWorkspaceDetail | null>;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<RAFWorkspaceDetail>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;
-  createSession: (input: CreateSessionInput) => Promise<RAFSession>;
-  deleteSession: (workspaceId: string, sessionId: string) => Promise<void>;
-  updateSessionFile: (input: UpdateSessionFileInput) => Promise<RAFWorkspaceDetail | null>;
+  updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<RAFWorkspaceDetail | null>;
   createSavepoint: (input: CreateSavepointInput) => Promise<RAFWorkspaceDetail | null>;
-  rollbackSession: (input: RollbackSessionInput) => Promise<RAFWorkspaceDetail | null>;
+  restoreSavepoint: (input: RestoreSavepointInput) => Promise<RAFWorkspaceDetail | null>;
   resetDemo: () => RAFState;
 };
 
@@ -89,10 +85,7 @@ function folderCount(files: RAFFile[]) {
 }
 
 function lastCheckpointAt(workspace: RAFWorkspace) {
-  const values = workspace.sessions.flatMap((session) =>
-    session.savepoints.map((savepoint) => savepoint.createdAt),
-  );
-
+  const values = workspace.savepoints.map((savepoint) => savepoint.createdAt);
   return values.sort((left, right) => right.localeCompare(left))[0] ?? workspace.updatedAt;
 }
 
@@ -139,11 +132,6 @@ function sourceLabel(source: RAFWorkspace["source"]) {
 }
 
 function workspaceToSummary(workspace: RAFWorkspace): RAFWorkspaceSummary {
-  const canonicalSession =
-    workspace.sessions.find((session) => session.id === workspace.defaultSessionId) ??
-    workspace.sessions[0];
-  const files = canonicalSession.files;
-
   return {
     id: workspace.id,
     name: workspace.name,
@@ -151,17 +139,11 @@ function workspaceToSummary(workspace: RAFWorkspace): RAFWorkspaceSummary {
     databaseName: workspace.databaseName,
     redisKey: workspace.redisKey,
     status: workspace.status,
-    fileCount: files.length,
-    folderCount: folderCount(files),
-    totalBytes: bytesCount(files),
-    sessionCount: workspace.sessions.length,
-    forkCount: workspace.sessions.filter((session) => session.kind === "branch").length,
-    checkpointCount: workspace.sessions.reduce(
-      (sum, session) => sum + session.savepoints.length,
-      0,
-    ),
-    dirtySessionCount: workspace.sessions.filter((session) => session.status === "dirty").length,
-    defaultSessionId: workspace.defaultSessionId,
+    fileCount: workspace.files.length,
+    folderCount: folderCount(workspace.files),
+    totalBytes: bytesCount(workspace.files),
+    checkpointCount: workspace.savepoints.length,
+    draftState: workspace.draftState,
     lastCheckpointAt: lastCheckpointAt(workspace),
     updatedAt: workspace.updatedAt,
     region: workspace.region,
@@ -207,12 +189,12 @@ function requireWorkspace(state: RAFState, workspaceId: string) {
   return workspace;
 }
 
-function requireSession(workspace: RAFWorkspace, sessionId: string) {
-  const session = workspace.sessions.find((item) => item.id === sessionId);
-  if (session == null) {
-    throw new Error(`Session ${sessionId} was not found.`);
+function requireSavepoint(workspace: RAFWorkspace, savepointId: string) {
+  const savepoint = workspace.savepoints.find((item) => item.id === savepointId);
+  if (savepoint == null) {
+    throw new Error(`Savepoint ${savepointId} was not found.`);
   }
-  return session;
+  return savepoint;
 }
 
 function touchWorkspace(workspace: RAFWorkspace) {
@@ -257,7 +239,7 @@ const demoRAFClient: RAFClient = {
           modifiedAt: createdAt,
           content: `# ${input.name}
 
-This workspace was created from the RAF Web UI.
+This workspace was created from the AFS Web UI.
 
 - account: ${input.cloudAccount}
 - database: ${input.databaseName}
@@ -271,20 +253,6 @@ This workspace was created from the RAF Web UI.
         "webui",
         baseFiles,
       );
-      const mainSession: RAFSession = {
-        id: makeId("session"),
-        name: "main",
-        description: "Default session for the workspace.",
-        author: "webui",
-        createdAt,
-        updatedAt: createdAt,
-        lastRunAt: createdAt,
-        status: "clean",
-        kind: "main",
-        headSavepointId: initialSavepoint.id,
-        files: baseFiles,
-        savepoints: [initialSavepoint],
-      };
 
       draft.workspaces.unshift({
         id,
@@ -293,16 +261,18 @@ This workspace was created from the RAF Web UI.
         cloudAccount: input.cloudAccount.trim(),
         databaseId: `db-${id}`,
         databaseName: input.databaseName.trim(),
-        redisKey: `raf:${id}`,
+        redisKey: `afs:${id}`,
         region: input.region.trim(),
-        mountedPath: `~/.raf/workspaces/${id}`,
+        mountedPath: `~/.afs/workspaces/${id}`,
         status: input.source === "blank" ? "healthy" : "syncing",
         source: input.source,
         createdAt,
         updatedAt: createdAt,
-        defaultSessionId: mainSession.id,
+        draftState: "clean",
+        headSavepointId: initialSavepoint.id,
         tags: [input.region.trim(), sourceLabel(input.source)],
-        sessions: [mainSession],
+        files: baseFiles,
+        savepoints: [initialSavepoint],
         activity: [
           createActivity(
             `Created ${input.name.trim()}`,
@@ -325,88 +295,14 @@ This workspace was created from the RAF Web UI.
     });
   },
 
-  async createSession(input: CreateSessionInput) {
+  async updateWorkspaceFile(input: UpdateWorkspaceFileInput) {
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      const sourceSession =
-        input.baseSessionId != null
-          ? requireSession(workspace, input.baseSessionId)
-          : requireSession(workspace, workspace.defaultSessionId);
-      const files = clone(sourceSession.files);
-      const createdAt = nowISO();
-      const initialSavepoint = createSavepointRecord(
-        input.mode === "imported" ? "imported" : "forked",
-        input.mode === "imported"
-          ? "Session imported into RAF from an external source."
-          : `Session branched from ${sourceSession.name}.`,
-        "webui",
-        files,
-      );
-      const session: RAFSession = {
-        id: makeId("session"),
-        name: input.name.trim(),
-        description: input.description.trim(),
-        author: "webui",
-        createdAt,
-        updatedAt: createdAt,
-        lastRunAt: createdAt,
-        status: "clean",
-        kind: input.mode,
-        headSavepointId: initialSavepoint.id,
-        files,
-        savepoints: [initialSavepoint],
-      };
-      workspace.sessions.unshift(session);
-      touchWorkspace(workspace);
-      workspace.activity.unshift(
-        createActivity(
-          input.mode === "imported"
-            ? `Imported session ${input.name.trim()}`
-            : `Created session ${input.name.trim()}`,
-          `Session seeded from ${sourceSession.name}.`,
-          "webui",
-          input.mode === "imported" ? "session.imported" : "session.created",
-          "session",
-        ),
-      );
-    });
-
-    const workspace = requireWorkspace(state, input.workspaceId);
-    return clone(workspace.sessions[0]);
-  },
-
-  async deleteSession(workspaceId: string, sessionId: string) {
-    await wait();
-    updateState((draft) => {
-      const workspace = requireWorkspace(draft, workspaceId);
-      const session = requireSession(workspace, sessionId);
-      workspace.sessions = workspace.sessions.filter((item) => item.id !== sessionId);
-      if (workspace.defaultSessionId === sessionId) {
-        workspace.defaultSessionId = workspace.sessions[0]?.id ?? "";
-      }
-      touchWorkspace(workspace);
-      workspace.activity.unshift(
-        createActivity(
-          `Deleted session ${session.name}`,
-          "Session removed from the workspace catalog.",
-          "webui",
-          "session.deleted",
-          "session",
-        ),
-      );
-    });
-  },
-
-  async updateSessionFile(input: UpdateSessionFileInput) {
-    await wait();
-    const state = updateState((draft) => {
-      const workspace = requireWorkspace(draft, input.workspaceId);
-      const session = requireSession(workspace, input.sessionId);
       const modifiedAt = nowISO();
-      const file = session.files.find((item) => item.path === input.path);
+      const file = workspace.files.find((item) => item.path === input.path);
       if (file == null) {
-        session.files.unshift({
+        workspace.files.unshift({
           path: input.path,
           language: input.path.endsWith(".md") ? "markdown" : "text",
           modifiedAt,
@@ -416,13 +312,12 @@ This workspace was created from the RAF Web UI.
         file.content = input.content;
         file.modifiedAt = modifiedAt;
       }
-      session.updatedAt = modifiedAt;
-      session.status = "dirty";
+      workspace.draftState = "dirty";
       touchWorkspace(workspace);
       workspace.activity.unshift(
         createActivity(
           `Edited ${input.path}`,
-          `Updated in session ${session.name}.`,
+          "Updated from the Web UI editor.",
           "webui",
           "file.updated",
           "file",
@@ -437,22 +332,20 @@ This workspace was created from the RAF Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      const session = requireSession(workspace, input.sessionId);
       const savepoint = createSavepointRecord(
         input.name.trim(),
         input.note.trim(),
         "webui",
-        session.files,
+        workspace.files,
       );
-      session.savepoints.unshift(savepoint);
-      session.headSavepointId = savepoint.id;
-      session.status = "clean";
-      session.updatedAt = savepoint.createdAt;
-      touchWorkspace(workspace);
+      workspace.savepoints.unshift(savepoint);
+      workspace.headSavepointId = savepoint.id;
+      workspace.draftState = "clean";
+      workspace.updatedAt = savepoint.createdAt;
       workspace.activity.unshift(
         createActivity(
           `Created savepoint ${savepoint.name}`,
-          `Session ${session.name} checkpointed from the Web UI.`,
+          "Checkpoint captured from the Web UI.",
           "webui",
           "savepoint.created",
           "savepoint",
@@ -463,27 +356,22 @@ This workspace was created from the RAF Web UI.
     return clone(requireWorkspace(state, input.workspaceId));
   },
 
-  async rollbackSession(input: RollbackSessionInput) {
+  async restoreSavepoint(input: RestoreSavepointInput) {
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      const session = requireSession(workspace, input.sessionId);
-      const savepoint = session.savepoints.find((item) => item.id === input.savepointId);
-      if (savepoint == null) {
-        throw new Error("Savepoint was not found.");
-      }
-      session.files = clone(savepoint.filesSnapshot);
-      session.headSavepointId = savepoint.id;
-      session.status = "clean";
-      session.updatedAt = nowISO();
+      const savepoint = requireSavepoint(workspace, input.savepointId);
+      workspace.files = clone(savepoint.filesSnapshot);
+      workspace.headSavepointId = savepoint.id;
+      workspace.draftState = "clean";
       touchWorkspace(workspace);
       workspace.activity.unshift(
         createActivity(
-          `Rolled back ${session.name}`,
-          `Restored session files to ${savepoint.name}.`,
+          `Restored ${savepoint.name}`,
+          "Workspace files rolled back to a saved checkpoint.",
           "webui",
-          "session.rollback",
-          "session",
+          "savepoint.restored",
+          "savepoint",
         ),
       );
     });
@@ -574,29 +462,10 @@ const httpRAFClient: RAFClient = {
     });
   },
 
-  async createSession(input: CreateSessionInput) {
-    return requestJSON<RAFSession>(`/workspaces/${input.workspaceId}/sessions`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: input.name,
-        description: input.description,
-        mode: input.mode === "branch" ? "fork" : input.mode,
-        source_session_id: input.baseSessionId,
-      }),
-    });
-  },
-
-  async deleteSession(workspaceId: string, sessionId: string) {
-    await requestJSON<void>(`/workspaces/${workspaceId}/sessions/${sessionId}`, {
-      method: "DELETE",
-    });
-  },
-
-  async updateSessionFile(input: UpdateSessionFileInput) {
+  async updateWorkspaceFile(input: UpdateWorkspaceFileInput) {
     await requestJSON(`/workspaces/${input.workspaceId}/files/content`, {
       method: "PUT",
       body: JSON.stringify({
-        session_id: input.sessionId,
         path: input.path,
         content: input.content,
         expected_revision: input.expectedRevision,
@@ -607,30 +476,24 @@ const httpRAFClient: RAFClient = {
   },
 
   async createSavepoint(input: CreateSavepointInput) {
-    await requestJSON(
-      `/workspaces/${input.workspaceId}/sessions/${input.sessionId}/checkpoints`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          name: input.name,
-          description: input.note,
-        }),
-      },
-    );
+    await requestJSON(`/workspaces/${input.workspaceId}/checkpoints`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        description: input.note,
+      }),
+    });
 
     return httpRAFClient.getWorkspace(input.workspaceId);
   },
 
-  async rollbackSession(input: RollbackSessionInput) {
-    await requestJSON(
-      `/workspaces/${input.workspaceId}/sessions/${input.sessionId}:rollback`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          checkpoint_id: input.savepointId,
-        }),
-      },
-    );
+  async restoreSavepoint(input: RestoreSavepointInput) {
+    await requestJSON(`/workspaces/${input.workspaceId}:restore`, {
+      method: "POST",
+      body: JSON.stringify({
+        checkpoint_id: input.savepointId,
+      }),
+    });
 
     return httpRAFClient.getWorkspace(input.workspaceId);
   },

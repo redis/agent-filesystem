@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	rafIgnoreFilename       = ".rafignore"
+	rafIgnoreFilename       = ".afsignore"
+	legacyRAFIgnoreFilename = ".rafignore"
 	legacyRFSIgnoreFilename = ".rfsignore"
 )
 
@@ -28,6 +29,7 @@ func loadMigrationIgnore(sourceDir string) (*migrationIgnore, error) {
 		legacy   bool
 	}{
 		{filename: rafIgnoreFilename},
+		{filename: legacyRAFIgnoreFilename, legacy: true},
 		{filename: legacyRFSIgnoreFilename, legacy: true},
 	}
 	for _, candidate := range candidates {

@@ -7,10 +7,9 @@ import {
 import { rafApi } from "../api/raf";
 import type {
   CreateSavepointInput,
-  CreateSessionInput,
   CreateWorkspaceInput,
-  RollbackSessionInput,
-  UpdateSessionFileInput,
+  RestoreSavepointInput,
+  UpdateWorkspaceFileInput,
 } from "../types/raf";
 
 const rafKeys = {
@@ -82,34 +81,11 @@ export function useDeleteWorkspaceMutation() {
   });
 }
 
-export function useCreateSessionMutation() {
+export function useUpdateWorkspaceFileMutation() {
   const invalidate = useWorkspaceInvalidation();
 
   return useMutation({
-    mutationFn: (input: CreateSessionInput) => rafApi.createSession(input),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
-    },
-  });
-}
-
-export function useDeleteSessionMutation() {
-  const invalidate = useWorkspaceInvalidation();
-
-  return useMutation({
-    mutationFn: (input: { workspaceId: string; sessionId: string }) =>
-      rafApi.deleteSession(input.workspaceId, input.sessionId),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
-    },
-  });
-}
-
-export function useUpdateSessionFileMutation() {
-  const invalidate = useWorkspaceInvalidation();
-
-  return useMutation({
-    mutationFn: (input: UpdateSessionFileInput) => rafApi.updateSessionFile(input),
+    mutationFn: (input: UpdateWorkspaceFileInput) => rafApi.updateWorkspaceFile(input),
     onSuccess: async (_, variables) => {
       await invalidate(variables.workspaceId);
     },
@@ -127,11 +103,11 @@ export function useCreateSavepointMutation() {
   });
 }
 
-export function useRollbackSessionMutation() {
+export function useRestoreSavepointMutation() {
   const invalidate = useWorkspaceInvalidation();
 
   return useMutation({
-    mutationFn: (input: RollbackSessionInput) => rafApi.rollbackSession(input),
+    mutationFn: (input: RestoreSavepointInput) => rafApi.restoreSavepoint(input),
     onSuccess: async (_, variables) => {
       await invalidate(variables.workspaceId);
     },

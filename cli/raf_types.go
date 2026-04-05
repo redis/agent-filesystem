@@ -16,7 +16,6 @@ var rafNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 type rafLocalState struct {
 	Version        int       `json:"version"`
 	Workspace      string    `json:"workspace"`
-	Session        string    `json:"session"`
 	HeadSavepoint  string    `json:"head_savepoint"`
 	Dirty          bool      `json:"dirty"`
 	MaterializedAt time.Time `json:"materialized_at"`
@@ -25,20 +24,12 @@ type rafLocalState struct {
 }
 
 type workspaceMeta struct {
-	Version          int       `json:"version"`
-	Name             string    `json:"name"`
-	CreatedAt        time.Time `json:"created_at"`
-	DefaultSession   string    `json:"default_session"`
-	DefaultSavepoint string    `json:"default_savepoint"`
-}
-
-type sessionMeta struct {
 	Version                 int       `json:"version"`
-	Workspace               string    `json:"workspace"`
 	Name                    string    `json:"name"`
-	HeadSavepoint           string    `json:"head_savepoint"`
 	CreatedAt               time.Time `json:"created_at"`
 	UpdatedAt               time.Time `json:"updated_at"`
+	HeadSavepoint           string    `json:"head_savepoint"`
+	DefaultSavepoint        string    `json:"default_savepoint"`
 	DirtyHint               bool      `json:"dirty_hint"`
 	LastMaterializedAt      time.Time `json:"last_materialized_at"`
 	LastKnownMaterializedAt string    `json:"last_materialized_host,omitempty"`
@@ -49,7 +40,6 @@ type savepointMeta struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
 	Workspace       string    `json:"workspace"`
-	Session         string    `json:"session"`
 	ParentSavepoint string    `json:"parent_savepoint,omitempty"`
 	ManifestHash    string    `json:"manifest_hash"`
 	CreatedAt       time.Time `json:"created_at"`

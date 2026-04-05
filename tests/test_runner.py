@@ -13,7 +13,7 @@ Usage:
     # Start Redis with the module loaded first:
     #   redis-server --loadmodule ./module/fs.so --enable-debug-command yes
     #
-    python3 test.py [--port 6379]
+    python3 tests/test_runner.py [--port 6379]
 """
 
 import argparse
@@ -137,23 +137,32 @@ class TestCase:
 
 def find_test_classes(port):
     """Auto-discover TestCase subclasses in tests/*.py."""
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    tests_dir = os.path.join(project_dir, "tests")
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(tests_dir)
     if not os.path.isdir(tests_dir):
         print(colored("ERROR: tests/ directory not found.", "red"))
         sys.exit(1)
 
-    # Ensure project root is on sys.path so `from test import TestCase` works.
-    if project_dir not in sys.path:
-        sys.path.insert(0, project_dir)
+    # Ensure both the repo root and tests directory are importable.
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
 
     classes = []
     for fname in sorted(os.listdir(tests_dir)):
         if not fname.endswith(".py") or fname.startswith("_"):
             continue
+        if fname == "test_runner.py":
+            continue
+        path = os.path.join(tests_dir, fname)
+        with open(path, "r", encoding="utf-8") as fh:
+            source = fh.read()
+        if "from test_runner import TestCase" not in source:
+            continue
         module_name = fname[:-3]
         spec = importlib.util.spec_from_file_location(
-            module_name, os.path.join(tests_dir, fname))
+            module_name, path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
 
@@ -173,13 +182,14 @@ def find_test_classes(port):
 # ---------------------------------------------------------------------------
 
 def main():
-    # Ensure this module is importable as "test" even when run as __main__.
-    # Test files do `from test import TestCase` — without this, Python would
-    # re-import test.py as a separate module and issubclass() would fail.
-    project_dir = os.path.dirname(os.path.abspath(__file__))
-    if project_dir not in sys.path:
-        sys.path.insert(0, project_dir)
-    sys.modules["test"] = sys.modules[__name__]
+    # Ensure this module is importable as "test_runner" even when run as __main__.
+    tests_dir = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(tests_dir)
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+    if tests_dir not in sys.path:
+        sys.path.insert(0, tests_dir)
+    sys.modules["test_runner"] = sys.modules[__name__]
 
     parser = argparse.ArgumentParser(description="Agent Filesystem test runner")
     parser.add_argument("--port", type=int, default=6379,

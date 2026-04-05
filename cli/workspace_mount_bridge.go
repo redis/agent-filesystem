@@ -25,7 +25,7 @@ var mountedArtifactNames = map[string]struct{}{
 }
 
 func mountRedisKeyForWorkspace(workspace string) string {
-	return "raf.mount." + workspace
+	return "afs.mount." + workspace
 }
 
 func ensureMountWorkspace(ctx context.Context, cfg config, store *rafStore) (string, bool, error) {
@@ -51,18 +51,17 @@ func ensureMountWorkspace(ctx context.Context, cfg config, store *rafStore) (str
 }
 
 func seedWorkspaceMountKey(ctx context.Context, cfg config, store *rafStore, rdb *redis.Client, workspace string) (string, string, error) {
-	session := primaryStateName(cfg)
-	sessionMeta, _, err := ensureMaterializedSession(ctx, store, cfg, workspace, session)
+	workspaceMeta, _, err := ensureMaterializedWorkspace(ctx, store, cfg, workspace)
 	if err != nil {
 		return "", "", err
 	}
 
-	treePath := rafSessionTreePath(cfg, workspace, session)
+	treePath := rafWorkspaceTreePath(cfg, workspace)
 	mountKey := mountRedisKeyForWorkspace(workspace)
 	if err := syncDirectoryToRedisFSKey(ctx, rdb, mountKey, treePath); err != nil {
 		return "", "", err
 	}
-	return mountKey, sessionMeta.HeadSavepoint, nil
+	return mountKey, workspaceMeta.HeadSavepoint, nil
 }
 
 func syncDirectoryToRedisFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
@@ -87,7 +86,6 @@ func syncDirectoryToRedisFSKey(ctx context.Context, rdb *redis.Client, fsKey, so
 }
 
 func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, rdb *redis.Client, workspace, expectedHead string) (bool, error) {
-	session := primaryStateName(cfg)
 	savepointID := generatedSavepointName()
 	mountKey := mountRedisKeyForWorkspace(workspace)
 
@@ -96,14 +94,14 @@ func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, 
 		return false, err
 	}
 
-	saved, err := saveRAFManifest(ctx, store, workspace, session, expectedHead, savepointID, mountedManifest, blobs, stats)
+	saved, err := saveRAFManifest(ctx, store, workspace, expectedHead, savepointID, mountedManifest, blobs, stats)
 	if err != nil {
-		if err == errRAFSessionConflict {
-			return false, fmt.Errorf("workspace %q moved while it was mounted; inspect it before stopping RAF", workspace)
+		if err == errRAFWorkspaceConflict {
+			return false, fmt.Errorf("workspace %q moved while it was mounted; inspect it before stopping AFS", workspace)
 		}
 		return false, err
 	}
-	if err := materializeSession(ctx, store, cfg, workspace, session); err != nil {
+	if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
 		return false, err
 	}
 	return saved, nil

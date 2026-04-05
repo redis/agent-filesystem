@@ -2,7 +2,6 @@ import type { IconType } from "@redislabsdev/redis-ui-icons";
 import {
   ClusterIcon,
   DashboardIcon,
-  DatabaseIcon,
   NotificationsIcon,
 } from "@redislabsdev/redis-ui-icons";
 
@@ -37,12 +36,6 @@ const workspacePanelChildren: ReadonlyArray<NavigationRouteItem> = [
     path: "/workspaces",
     icon: ClusterIcon,
     title: "Workspaces",
-  },
-  {
-    kind: "route",
-    label: "Sessions",
-    path: "/sessions",
-    icon: DatabaseIcon,
   },
 ];
 
@@ -115,7 +108,9 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
 }
 
 export function getNavigationPanel(_panelId: Exclude<SidebarPanelId, "root">) {
-  return navigationItems.find(
-    (item): item is NavigationPanelItem => item.kind === "panel",
-  ) ?? null;
+  return (
+    navigationItems.find(
+      (item): item is NavigationPanelItem => item.kind === "panel",
+    ) ?? null
+  );
 }

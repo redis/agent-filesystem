@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
+func TestMaterializeWorkspaceWritesTreeAndState(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -23,7 +23,7 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 	})
 
 	sourceDir := t.TempDir()
-	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello raf\n")
+	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello afs\n")
 	writeTestFile(t, filepath.Join(sourceDir, "nested", "app.txt"), "data\n")
 	if err := os.Symlink("README.md", filepath.Join(sourceDir, "link.txt")); err != nil {
 		t.Fatalf("Symlink() returned error: %v", err)
@@ -52,7 +52,8 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 		Version:          rafFormatVersion,
 		Name:             "repo",
 		CreatedAt:        now,
-		DefaultSession:   "main",
+		UpdatedAt:        now,
+		HeadSavepoint:    "initial",
 		DefaultSavepoint: "initial",
 	}); err != nil {
 		t.Fatalf("putWorkspaceMeta() returned error: %v", err)
@@ -62,7 +63,6 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 		ID:           "initial",
 		Name:         "initial",
 		Workspace:    "repo",
-		Session:      "main",
 		ManifestHash: hash,
 		CreatedAt:    now,
 		FileCount:    stats.FileCount,
@@ -71,28 +71,17 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 	}, manifest); err != nil {
 		t.Fatalf("putSavepoint() returned error: %v", err)
 	}
-	if err := store.putSessionMeta(context.Background(), sessionMeta{
-		Version:       rafFormatVersion,
-		Workspace:     "repo",
-		Name:          "main",
-		HeadSavepoint: "initial",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}); err != nil {
-		t.Fatalf("putSessionMeta() returned error: %v", err)
+	if err := materializeWorkspace(context.Background(), store, cfg, "repo"); err != nil {
+		t.Fatalf("materializeWorkspace() returned error: %v", err)
 	}
 
-	if err := materializeSession(context.Background(), store, cfg, "repo", "main"); err != nil {
-		t.Fatalf("materializeSession() returned error: %v", err)
-	}
-
-	treePath := rafSessionTreePath(cfg, "repo", "main")
+	treePath := rafWorkspaceTreePath(cfg, "repo")
 	readme, err := os.ReadFile(filepath.Join(treePath, "README.md"))
 	if err != nil {
 		t.Fatalf("ReadFile(README.md) returned error: %v", err)
 	}
-	if string(readme) != "hello raf\n" {
-		t.Fatalf("README.md = %q, want %q", string(readme), "hello raf\n")
+	if string(readme) != "hello afs\n" {
+		t.Fatalf("README.md = %q, want %q", string(readme), "hello afs\n")
 	}
 
 	nested, err := os.ReadFile(filepath.Join(treePath, "nested", "app.txt"))
@@ -111,7 +100,7 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 		t.Fatalf("Readlink(link.txt) = %q, want %q", linkTarget, "README.md")
 	}
 
-	localState, err := loadRAFLocalState(cfg, "repo", "main")
+	localState, err := loadRAFLocalState(cfg, "repo")
 	if err != nil {
 		t.Fatalf("loadRAFLocalState() returned error: %v", err)
 	}
@@ -119,7 +108,7 @@ func TestMaterializeSessionWritesTreeAndState(t *testing.T) {
 		t.Fatalf("HeadSavepoint = %q, want %q", localState.HeadSavepoint, "initial")
 	}
 	if localState.Dirty {
-		t.Fatal("expected materialized session to be clean")
+		t.Fatal("expected materialized workspace to be clean")
 	}
 }
 
@@ -240,22 +229,14 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getWorkspaceMeta() returned error: %v", err)
 	}
-	if workspaceMeta.DefaultSession != "main" {
-		t.Fatalf("DefaultSession = %q, want %q", workspaceMeta.DefaultSession, "main")
+	if workspaceMeta.HeadSavepoint != "initial" {
+		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
 
-	sessionMeta, err := store.getSessionMeta(context.Background(), "repo", "main")
-	if err != nil {
-		t.Fatalf("getSessionMeta() returned error: %v", err)
-	}
-	if sessionMeta.HeadSavepoint != "initial" {
-		t.Fatalf("HeadSavepoint = %q, want %q", sessionMeta.HeadSavepoint, "initial")
-	}
-
-	if _, err := loadRAFLocalState(loadedCfg, "repo", "main"); !errors.Is(err, os.ErrNotExist) {
+	if _, err := loadRAFLocalState(loadedCfg, "repo"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected imported workspace to remain unmaterialized, got err=%v", err)
 	}
-	if _, err := os.Stat(rafSessionTreePath(loadedCfg, "repo", "main")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(rafWorkspaceTreePath(loadedCfg, "repo")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no working copy after import, got err=%v", err)
 	}
 
@@ -284,7 +265,7 @@ func TestCmdImportRespectsRAFIgnore(t *testing.T) {
 	saveTempConfig(t, cfg)
 
 	sourceDir := t.TempDir()
-	writeTestFile(t, filepath.Join(sourceDir, ".rafignore"), "node_modules/\n*.log\n")
+	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "node_modules/\n*.log\n")
 	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
 	writeTestFile(t, filepath.Join(sourceDir, "node_modules", "left-pad", "index.js"), "module.exports = 1\n")
 	writeTestFile(t, filepath.Join(sourceDir, "debug.log"), "skip me\n")
@@ -309,11 +290,11 @@ func TestCmdImportRespectsRAFIgnore(t *testing.T) {
 	if _, ok := manifest.Entries["/debug.log"]; ok {
 		t.Fatal("expected ignored file to be excluded from manifest")
 	}
-	if _, ok := manifest.Entries["/.rafignore"]; !ok {
-		t.Fatal("expected .rafignore to be imported")
+	if _, ok := manifest.Entries["/.afsignore"]; !ok {
+		t.Fatal("expected .afsignore to be imported")
 	}
 
-	if _, err := os.Stat(rafSessionTreePath(loadedCfg, "repo", "main")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(rafWorkspaceTreePath(loadedCfg, "repo")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected no working copy after import, got err=%v", err)
 	}
 }
@@ -349,7 +330,7 @@ func TestCmdImportHandlesEmptyFiles(t *testing.T) {
 	}
 	defer closeStore()
 
-	data, err := os.ReadFile(filepath.Join(rafSessionTreePath(loadedCfg, "repo", "main"), "empty.txt"))
+	data, err := os.ReadFile(filepath.Join(rafWorkspaceTreePath(loadedCfg, "repo"), "empty.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(empty.txt) returned error: %v", err)
 	}
@@ -387,10 +368,10 @@ func TestCmdWorkspaceRunCreatesWorkingCopy(t *testing.T) {
 	}
 	defer closeStore()
 
-	if _, err := loadRAFLocalState(loadedCfg, "repo", "main"); err != nil {
+	if _, err := loadRAFLocalState(loadedCfg, "repo"); err != nil {
 		t.Fatalf("expected working copy state after clone: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(rafSessionTreePath(loadedCfg, "repo", "main"), "docs", "notes.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(rafWorkspaceTreePath(loadedCfg, "repo"), "docs", "notes.md")); err != nil {
 		t.Fatalf("expected working copy contents after clone: %v", err)
 	}
 }
@@ -398,7 +379,7 @@ func TestCmdWorkspaceRunCreatesWorkingCopy(t *testing.T) {
 func saveTempConfig(t *testing.T, cfg config) {
 	t.Helper()
 
-	configFile := filepath.Join(t.TempDir(), "raf.config.json")
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
 	orig := cfgPathOverride
 	cfgPathOverride = configFile
 	t.Cleanup(func() {

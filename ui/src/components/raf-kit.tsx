@@ -2,7 +2,7 @@ import { Card, Typography } from "@redislabsdev/redis-ui-components";
 import styled, { css } from "styled-components";
 import type {
   RAFActivityEvent,
-  RAFSessionStatus,
+  RAFDraftState,
   RAFWorkspaceSource,
   RAFWorkspaceStatus,
 } from "../foundation/types/raf";
@@ -193,7 +193,7 @@ const toneStyles = {
 } as const;
 
 export const ToneChip = styled.span<{
-  $tone: RAFWorkspaceStatus | RAFSessionStatus | RAFWorkspaceSource;
+  $tone: RAFWorkspaceStatus | RAFDraftState | RAFWorkspaceSource;
 }>`
   display: inline-flex;
   align-items: center;
@@ -264,38 +264,6 @@ export const EmptyState = styled.div`
   border-radius: 16px;
   padding: 18px;
   background: ${({ theme }) => theme.semantic.color.background.neutral0};
-`;
-
-export const SessionLayout = styled.div`
-  display: grid;
-  gap: 16px;
-  grid-template-columns: 280px 1fr;
-
-  @media (max-width: 1080px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-export const SessionRail = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-`;
-
-export const SessionButton = styled.button<{ $active?: boolean }>`
-  width: 100%;
-  border-radius: 16px;
-  border: 1px solid
-    ${({ theme, $active }) =>
-      $active ? "#7d14ff" : theme.semantic.color.border.neutral200};
-  background:
-    ${({ $active }) =>
-      $active
-        ? "linear-gradient(135deg, rgba(125, 20, 255, 0.08), rgba(71, 191, 255, 0.08))"
-        : "#fff"};
-  padding: 14px 16px;
-  text-align: left;
-  cursor: pointer;
 `;
 
 export const Tabs = styled.div`

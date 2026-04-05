@@ -18,8 +18,8 @@ func TestConfigPathDefaultsToRAFConfig(t *testing.T) {
 		cfgPathOverride = orig
 	}()
 
-	if got := filepath.Base(configPath()); got != "raf.config.json" {
-		t.Fatalf("configPath() basename = %q, want %q", got, "raf.config.json")
+	if got := filepath.Base(configPath()); got != "afs.config.json" {
+		t.Fatalf("configPath() basename = %q, want %q", got, "afs.config.json")
 	}
 }
 
@@ -27,8 +27,8 @@ func TestStateDirAndWorkRootUseRAFHome(t *testing.T) {
 	t.Helper()
 
 	dir := stateDir()
-	if !strings.HasSuffix(dir, string(filepath.Separator)+".raf") {
-		t.Fatalf("stateDir() = %q, want suffix %q", dir, string(filepath.Separator)+".raf")
+	if !strings.HasSuffix(dir, string(filepath.Separator)+".afs") {
+		t.Fatalf("stateDir() = %q, want suffix %q", dir, string(filepath.Separator)+".afs")
 	}
 
 	wantWorkRoot := filepath.Join(dir, "workspaces")
@@ -44,20 +44,17 @@ func TestDefaultConfigUsesRAFDefaults(t *testing.T) {
 	if cfg.WorkRoot != defaultWorkRoot() {
 		t.Fatalf("WorkRoot = %q, want %q", cfg.WorkRoot, defaultWorkRoot())
 	}
-	if cfg.DefaultSession != "main" {
-		t.Fatalf("DefaultSession = %q, want %q", cfg.DefaultSession, "main")
-	}
 	if cfg.RuntimeMode != "host" {
 		t.Fatalf("RuntimeMode = %q, want %q", cfg.RuntimeMode, "host")
 	}
-	if cfg.Mountpoint != "~/raf" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "~/raf")
+	if cfg.Mountpoint != "~/afs" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "~/afs")
 	}
-	if cfg.RedisLog != "/tmp/raf-redis.log" {
-		t.Fatalf("RedisLog = %q, want %q", cfg.RedisLog, "/tmp/raf-redis.log")
+	if cfg.RedisLog != "/tmp/afs-redis.log" {
+		t.Fatalf("RedisLog = %q, want %q", cfg.RedisLog, "/tmp/afs-redis.log")
 	}
-	if cfg.MountLog != "/tmp/raf-mount.log" {
-		t.Fatalf("MountLog = %q, want %q", cfg.MountLog, "/tmp/raf-mount.log")
+	if cfg.MountLog != "/tmp/afs-mount.log" {
+		t.Fatalf("MountLog = %q, want %q", cfg.MountLog, "/tmp/afs-mount.log")
 	}
 }
 
@@ -66,8 +63,8 @@ func TestExecutablePathResolvesSymlinks(t *testing.T) {
 
 	realDir := t.TempDir()
 	linkDir := t.TempDir()
-	realBin := filepath.Join(realDir, "raf")
-	linkBin := filepath.Join(linkDir, "raf")
+	realBin := filepath.Join(realDir, "afs")
+	linkBin := filepath.Join(linkDir, "afs")
 
 	if err := os.WriteFile(realBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("WriteFile(%q) returned error: %v", realBin, err)
@@ -106,7 +103,7 @@ func TestStatusRowsUseNoMountLabelsWhenFilesystemMountIsNone(t *testing.T) {
 	if rows[1].Label != "current workspace" || rows[1].Value != "demo" {
 		t.Fatalf("rows[1] = %+v, want current workspace row", rows[1])
 	}
-	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, "raf.config.json") {
+	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, "afs.config.json") {
 		t.Fatalf("rows[2] = %+v, want config row", rows[2])
 	}
 }
@@ -127,7 +124,7 @@ func TestStatusRowsKeepFilesystemLabelsForMountMode(t *testing.T) {
 	if rows[2].Label != "current workspace" || rows[2].Value != "none" {
 		t.Fatalf("rows[2] = %+v, want current workspace row", rows[2])
 	}
-	if rows[3].Label != "config" || !strings.Contains(rows[3].Value, "raf.config.json") {
+	if rows[3].Label != "config" || !strings.Contains(rows[3].Value, "afs.config.json") {
 		t.Fatalf("rows[3] = %+v, want config row", rows[3])
 	}
 }
@@ -140,7 +137,7 @@ func TestStatusTitleUsesMountedWorkspaceWording(t *testing.T) {
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
 	}
-	if strings.Contains(title, "raf nfs mount") {
+	if strings.Contains(title, "afs nfs mount") {
 		t.Fatalf("statusTitle() = %q, should not use legacy mount wording", title)
 	}
 }
@@ -174,10 +171,10 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 func TestCenterBannerTextForOutputCentersTextWithinBannerWidth(t *testing.T) {
 	t.Helper()
 
-	got := stripAnsi(centerBannerTextForOutput(io.Discard, "RAF"))
-	want := bannerIndent + strings.Repeat(" ", (bannerWidth-len("RAF"))/2) + "RAF"
+	got := stripAnsi(centerBannerTextForOutput(io.Discard, "AFS"))
+	want := bannerIndent + strings.Repeat(" ", (bannerWidth-len("AFS"))/2) + "AFS"
 	if got != want {
-		t.Fatalf("centerBannerTextForOutput(RAF) = %q, want %q", got, want)
+		t.Fatalf("centerBannerTextForOutput(AFS) = %q, want %q", got, want)
 	}
 
 	subtitle := "Redis Agent Filesystem"
@@ -232,10 +229,10 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdUp() returned error: %v", err)
 	}
-	if !strings.Contains(out, "raf no mounted filesystem") {
+	if !strings.Contains(out, "afs no mounted filesystem") {
 		t.Fatalf("cmdUp() output = %q, want status output", out)
 	}
-	if strings.Contains(out, "Run 'raf down' first") {
+	if strings.Contains(out, "Run 'afs down' first") {
 		t.Fatalf("cmdUp() output still contains old already-running error: %q", out)
 	}
 }

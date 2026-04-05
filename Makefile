@@ -16,12 +16,12 @@ cli:
 
 install: cli
 	@mkdir -p "$(BINDIR)"
-	@ln -sf "$(PWD)/raf" "$(BINDIR)/raf"
-	@echo "Installed raf -> $(BINDIR)/raf"
+	@ln -sf "$(PWD)/afs" "$(BINDIR)/afs"
+	@echo "Installed afs -> $(BINDIR)/afs"
 
 uninstall:
-	@rm -f "$(BINDIR)/raf"
-	@echo "Removed $(BINDIR)/raf"
+	@rm -f "$(BINDIR)/afs"
+	@echo "Removed $(BINDIR)/afs"
 
 clean:
 	$(MAKE) -C module clean
@@ -52,7 +52,7 @@ uninstall-skill-local:
 mcp-up:
 	docker-compose up -d --build
 	@echo ""
-	@echo "Agent Filesystem MCP server running at http://localhost:8089/sse"
+	@echo "Redis Agent Filesystem MCP server running at http://localhost:8089/sse"
 	@echo "Health check: http://localhost:8089/health"
 	@echo ""
 	@echo "To add to Auggie, run: make install-mcp-auggie"

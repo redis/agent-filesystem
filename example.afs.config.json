@@ -5,11 +5,10 @@
   "redisPassword": "",
   "redisDB": 0,
   "redisTLS": false,
-  "workRoot": "~/.raf/workspaces",
+  "workRoot": "~/.afs/workspaces",
   "currentWorkspace": "",
-  "defaultSession": "main",
   "runtimeMode": "host",
-  "redisKey": "raf-demo",
+  "redisKey": "afs-demo",
   "mountpoint": "",
   "mountBackend": "none",
   "readOnly": false,
@@ -20,6 +19,6 @@
   "nfsBin": "",
   "nfsHost": "127.0.0.1",
   "nfsPort": 20490,
-  "redisLog": "/tmp/raf-redis.log",
-  "mountLog": "/tmp/raf-mount.log"
+  "redisLog": "/tmp/afs-redis.log",
+  "mountLog": "/tmp/afs-mount.log"
 }

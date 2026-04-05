@@ -1,6 +1,5 @@
 export type RAFWorkspaceStatus = "healthy" | "syncing" | "attention";
-export type RAFSessionStatus = "clean" | "dirty";
-export type RAFSessionKind = "main" | "branch" | "imported";
+export type RAFDraftState = "clean" | "dirty";
 export type RAFWorkspaceSource = "blank" | "git-import" | "cloud-import";
 export type RAFClientMode = "demo" | "http";
 
@@ -20,21 +19,6 @@ export type RAFSavepoint = {
   fileCount: number;
   sizeLabel: string;
   filesSnapshot: RAFFile[];
-};
-
-export type RAFSession = {
-  id: string;
-  name: string;
-  description: string;
-  author: string;
-  createdAt: string;
-  updatedAt: string;
-  lastRunAt: string;
-  status: RAFSessionStatus;
-  kind: RAFSessionKind;
-  headSavepointId: string;
-  files: RAFFile[];
-  savepoints: RAFSavepoint[];
 };
 
 export type RAFActivityEvent = {
@@ -61,9 +45,11 @@ export type RAFWorkspace = {
   source: RAFWorkspaceSource;
   createdAt: string;
   updatedAt: string;
-  defaultSessionId: string;
+  draftState: RAFDraftState;
+  headSavepointId: string;
   tags: string[];
-  sessions: RAFSession[];
+  files: RAFFile[];
+  savepoints: RAFSavepoint[];
   activity: RAFActivityEvent[];
 };
 
@@ -77,11 +63,8 @@ export type RAFWorkspaceSummary = {
   fileCount: number;
   folderCount: number;
   totalBytes: number;
-  sessionCount: number;
-  forkCount: number;
   checkpointCount: number;
-  dirtySessionCount: number;
-  defaultSessionId: string;
+  draftState: RAFDraftState;
   lastCheckpointAt: string;
   updatedAt: string;
   region: string;
@@ -107,17 +90,8 @@ export type CreateWorkspaceInput = {
   source: RAFWorkspaceSource;
 };
 
-export type CreateSessionInput = {
+export type UpdateWorkspaceFileInput = {
   workspaceId: string;
-  name: string;
-  description: string;
-  mode: RAFSessionKind;
-  baseSessionId?: string;
-};
-
-export type UpdateSessionFileInput = {
-  workspaceId: string;
-  sessionId: string;
   path: string;
   content: string;
   expectedRevision?: string;
@@ -125,13 +99,11 @@ export type UpdateSessionFileInput = {
 
 export type CreateSavepointInput = {
   workspaceId: string;
-  sessionId: string;
   name: string;
   note: string;
 };
 
-export type RollbackSessionInput = {
+export type RestoreSavepointInput = {
   workspaceId: string;
-  sessionId: string;
   savepointId: string;
 };

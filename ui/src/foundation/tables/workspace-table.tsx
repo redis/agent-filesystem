@@ -12,7 +12,7 @@ type WorkspaceSortField =
   | "databaseName"
   | "fileCount"
   | "totalBytes"
-  | "sessionCount"
+  | "draftState"
   | "checkpointCount"
   | "updatedAt";
 
@@ -133,15 +133,15 @@ export function WorkspaceTable({
           cell: ({ row }) => formatBytes(row.original.totalBytes),
         },
         {
-          accessorKey: "sessionCount",
-          header: "Sessions",
+          accessorKey: "draftState",
+          header: "Draft",
           size: 60,
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
-              <Typography.Body component="span">{row.original.sessionCount} sessions</Typography.Body>
+              <ToneChip $tone={row.original.draftState}>{row.original.draftState}</ToneChip>
               <Typography.Body color="secondary" component="span">
-                {row.original.forkCount} forks · {row.original.dirtySessionCount} dirty
+                Working copy state
               </Typography.Body>
             </S.Stack>
           ),
@@ -175,7 +175,11 @@ export function WorkspaceTable({
           size: 42,
           enableSorting: false,
           cell: ({ row }) => (
-            <Button size="medium" variant="secondary-fill" onClick={() => onOpenWorkspace(row.original.id)}>
+            <Button
+              size="medium"
+              variant="secondary-fill"
+              onClick={() => onOpenWorkspace(row.original.id)}
+            >
               Open
             </Button>
           ),
