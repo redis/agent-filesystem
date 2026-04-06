@@ -202,6 +202,39 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 	}
 }
 
+func TestPrintReadyBoxKeepsVisibleLinesWithinEightyColumns(t *testing.T) {
+	t.Helper()
+
+	origColorTerm := colorTerm
+	colorTerm = true
+	t.Cleanup(func() {
+		colorTerm = origColorTerm
+	})
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = "localhost:6379"
+	cfg.RedisDB = 0
+	cfg.CurrentWorkspace = "workspace-with-a-very-long-name-for-status-output"
+	cfg.Mountpoint = "/Users/example/Library/Application Support/Agent Filesystem/projects/customer-success/super-long-nested-workspace-path"
+
+	out, err := captureStdout(t, func() error {
+		printReadyBox(cfg, mountBackendNFS, "")
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("printReadyBox() returned error: %v", err)
+	}
+
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.TrimSpace(stripAnsi(line)) == "" {
+			continue
+		}
+		if width := runeWidth(line); width > maxCLIWidth {
+			t.Fatalf("line width = %d, want <= %d: %q", width, maxCLIWidth, stripAnsi(line))
+		}
+	}
+}
+
 func TestCenterBannerTextForOutputCentersTextWithinBannerWidth(t *testing.T) {
 	t.Helper()
 

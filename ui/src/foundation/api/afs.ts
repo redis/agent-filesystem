@@ -235,15 +235,15 @@ function demoCapabilities(): AFSWorkspaceCapabilities {
 
 function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
   const normalized: AFSWorkspace = clone(workspace);
-  normalized.fileCount = workspace.fileCount ?? workspace.files.length;
-  normalized.folderCount = workspace.folderCount ?? folderCount(workspace.files);
-  normalized.totalBytes = workspace.totalBytes ?? bytesCount(workspace.files);
-  normalized.checkpointCount = workspace.checkpointCount ?? workspace.savepoints.length;
-  normalized.capabilities = workspace.capabilities ?? demoCapabilities();
+  normalized.fileCount = workspace.fileCount;
+  normalized.folderCount = workspace.folderCount;
+  normalized.totalBytes = workspace.totalBytes;
+  normalized.checkpointCount = workspace.checkpointCount;
+  normalized.capabilities = workspace.capabilities;
   normalized.savepoints = workspace.savepoints.map((savepoint) => ({
     ...savepoint,
-    folderCount: savepoint.folderCount ?? folderCount(savepoint.filesSnapshot),
-    totalBytes: savepoint.totalBytes ?? bytesCount(savepoint.filesSnapshot),
+    folderCount: savepoint.folderCount,
+    totalBytes: savepoint.totalBytes,
     sizeLabel: savepoint.sizeLabel || bytesLabel(savepoint.filesSnapshot),
   }));
   normalized.activity = workspace.activity.map((event) => ({
@@ -583,7 +583,7 @@ This workspace was created from the AFS Web UI.
       draft.workspaces.unshift(workspace);
     });
 
-    return normalizeWorkspace(state.workspaces[0]!);
+    return normalizeWorkspace(state.workspaces[0]);
   },
 
   async deleteWorkspace(workspaceId: string) {

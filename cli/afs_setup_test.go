@@ -128,8 +128,56 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	if !strings.Contains(got, "Change filesystem mount") || !strings.Contains(got, "none") {
 		t.Fatalf("setup output = %q, want filesystem mount current setting", got)
 	}
-	if strings.Contains(got, "Change current workspace") || strings.Contains(got, "Current Workspace") {
-		t.Fatalf("setup output = %q, current workspace should not be editable in setup", got)
+	if !strings.Contains(got, "Change current workspace") || !strings.Contains(got, "demo") {
+		t.Fatalf("setup output = %q, want current workspace current setting", got)
+	}
+}
+
+func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
+	t.Helper()
+
+	existing := defaultConfig()
+	existing.UseExistingRedis = true
+	existing.CurrentWorkspace = "demo"
+
+	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
+		"3",
+		"repo-two",
+	)))
+
+	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if migrateDir != "" {
+		t.Fatalf("migrateDir = %q, want empty", migrateDir)
+	}
+	if cfg.CurrentWorkspace != "repo-two" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "repo-two")
+	}
+}
+
+func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
+	t.Helper()
+
+	existing := defaultConfig()
+	existing.UseExistingRedis = true
+	existing.CurrentWorkspace = "demo"
+
+	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
+		"3",
+		"none",
+	)))
+
+	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if migrateDir != "" {
+		t.Fatalf("migrateDir = %q, want empty", migrateDir)
+	}
+	if cfg.CurrentWorkspace != "" {
+		t.Fatalf("CurrentWorkspace = %q, want empty", cfg.CurrentWorkspace)
 	}
 }
 

@@ -4,6 +4,21 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --afs-bg: #f3f6fb;
+  --afs-bg-soft: #f9fbff;
+  --afs-panel: rgba(255, 255, 255, 0.84);
+  --afs-panel-strong: #ffffff;
+  --afs-line: rgba(170, 59, 255, 0.08);
+  --afs-line-strong: rgba(170, 59, 255, 0.16);
+  --afs-ink: #08060d;
+  --afs-ink-soft: #40384d;
+  --afs-muted: #626b78;
+  --afs-accent: #aa3bff;
+  --afs-accent-soft: rgba(170, 59, 255, 0.1);
+  --afs-amber: #aa3bff;
+  --afs-shadow: 0 24px 70px rgba(8, 6, 13, 0.08);
+  --afs-sans: inherit;
+  --afs-mono: "Monaco", "Menlo", monospace;
 }
 
 html,
@@ -15,7 +30,7 @@ body,
 body {
   margin: 0;
   background:
-    radial-gradient(circle at top right, rgba(125, 20, 255, 0.08), transparent 28%),
+    radial-gradient(circle at top right, rgba(170, 59, 255, 0.08), transparent 28%),
     linear-gradient(180deg, #f9fbff 0%, #f3f6fb 100%);
 }
 
@@ -28,4 +43,9 @@ textarea {
 
 * {
   box-sizing: border-box;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }

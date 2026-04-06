@@ -3,7 +3,11 @@ import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
 import { useMemo, useState } from "react";
 import { formatBytes } from "../api/afs";
-import type { AFSWorkspaceSummary } from "../types/afs";
+import type {
+  AFSDraftState,
+  AFSWorkspaceStatus,
+  AFSWorkspaceSummary,
+} from "../types/afs";
 import { ToneChip } from "../../components/afs-kit";
 import * as S from "./workspace-table.styles";
 
@@ -78,7 +82,9 @@ export function WorkspaceTable({
           accessorKey: "status",
           header: "Status",
           size: 24,
-          cell: ({ row }) => <ToneChip $tone={row.original.status}>{row.original.status}</ToneChip>,
+          cell: ({ row }) => (
+            <ToneChip $tone={row.original.status}>{statusLabel(row.original.status)}</ToneChip>
+          ),
           enableSorting: false,
         },
         {
@@ -139,7 +145,9 @@ export function WorkspaceTable({
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
-              <ToneChip $tone={row.original.draftState}>{row.original.draftState}</ToneChip>
+              <ToneChip $tone={row.original.draftState}>
+                {draftStateLabel(row.original.draftState)}
+              </ToneChip>
               <Typography.Body color="secondary" component="span">
                 Working copy state
               </Typography.Body>
@@ -192,7 +200,7 @@ export function WorkspaceTable({
     <S.TableCard>
       <S.HeadingWrap>
         <TableHeading>
-          <TableHeading.Title>Agent Filesystems</TableHeading.Title>
+          <TableHeading.Title>Workspace registry</TableHeading.Title>
         </TableHeading>
         <S.SearchInput
           value={search}
@@ -234,4 +242,14 @@ export function WorkspaceTable({
       ) : null}
     </S.TableCard>
   );
+}
+
+function statusLabel(status: AFSWorkspaceStatus) {
+  if (status === "healthy") return "Healthy";
+  if (status === "syncing") return "Syncing";
+  return "Attention";
+}
+
+function draftStateLabel(state: AFSDraftState) {
+  return state === "dirty" ? "Draft dirty" : "Draft clean";
 }

@@ -78,7 +78,12 @@ function useWorkspaceInvalidation() {
   return async (workspaceId?: string) => {
     const invalidations: Array<Promise<unknown>> = [
       queryClient.invalidateQueries({ queryKey: afsKeys.workspaceSummaries() }),
-      queryClient.invalidateQueries({ queryKey: [...afsKeys.all, "activity"] }),
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) &&
+          query.queryKey[0] === "afs" &&
+          query.queryKey[1] === "activity",
+      }),
     ];
 
     if (workspaceId != null) {

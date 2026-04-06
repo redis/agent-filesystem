@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import { useState } from "react";
+import styled from "styled-components";
 import {
   Field,
   FormGrid,
@@ -10,6 +11,11 @@ import {
   SectionHeader,
   SectionTitle,
   Select,
+  StatCard,
+  StatDetail,
+  StatGrid,
+  StatLabel,
+  StatValue,
   TextArea,
   TextInput,
   TwoColumnFields,
@@ -41,18 +47,80 @@ function WorkspacesPage() {
   }
 
   const workspaces = workspacesQuery.data ?? [];
+  const healthy = workspaces.filter((workspace) => workspace.status === "healthy").length;
+  const dirty = workspaces.filter((workspace) => workspace.draftState === "dirty").length;
+  const imported = workspaces.filter((workspace) => workspace.source !== "blank").length;
+  const checkpoints = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
 
   return (
     <PageStack>
+      <StatGrid>
+        <StatCard>
+          <div>
+            <StatLabel>Catalog Size</StatLabel>
+            <StatValue>{workspaces.length}</StatValue>
+          </div>
+          <StatDetail>Each row is one complete Redis-backed filesystem namespace.</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Healthy</StatLabel>
+            <StatValue>{healthy}</StatValue>
+          </div>
+          <StatDetail>Healthy workspaces are ready to browse, edit, or checkpoint.</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Dirty Drafts</StatLabel>
+            <StatValue>{dirty}</StatValue>
+          </div>
+          <StatDetail>Dirty working copies deserve fast access from the catalog.</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Imported</StatLabel>
+            <StatValue>{imported}</StatValue>
+          </div>
+          <StatDetail>{checkpoints} checkpoints are already attached across imported and local workspaces.</StatDetail>
+        </StatCard>
+      </StatGrid>
+
       <SectionGrid>
         <SectionCard $span={4}>
           <SectionHeader>
             <SectionTitle
-              eyebrow="Catalog"
+              eyebrow="Workspace Intake"
               title="Create or import a workspace"
-              body="This form now matches the control-plane shape more closely: a workspace record mapped to one backing database and AFS namespace."
+              body="This intake surface should feel closer to provisioning a managed environment than filling out a generic form. Source choice, database mapping, and region belong together."
             />
           </SectionHeader>
+
+          <SourcePicker>
+            <SourceOption
+              $active={source === "blank"}
+              type="button"
+              onClick={() => setSource("blank")}
+            >
+              <SourceTitle>Blank workspace</SourceTitle>
+              <SourceBody>Start with an empty filesystem and build fresh state in Redis.</SourceBody>
+            </SourceOption>
+            <SourceOption
+              $active={source === "git-import"}
+              type="button"
+              onClick={() => setSource("git-import")}
+            >
+              <SourceTitle>Git import</SourceTitle>
+              <SourceBody>Seed a workspace from code or configuration that still needs browser-side edits.</SourceBody>
+            </SourceOption>
+            <SourceOption
+              $active={source === "cloud-import"}
+              type="button"
+              onClick={() => setSource("cloud-import")}
+            >
+              <SourceTitle>Redis Cloud import</SourceTitle>
+              <SourceBody>Pull an existing managed workspace into the control plane catalog.</SourceBody>
+            </SourceOption>
+          </SourcePicker>
 
           <FormGrid
             onSubmit={(event) => {
@@ -107,7 +175,7 @@ function WorkspacesPage() {
               <TextArea
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                placeholder="What this workspace is for and who owns it."
+                placeholder="What this workspace is for, which team owns it, and why it exists."
               />
             </Field>
             <TwoColumnFields>
@@ -141,13 +209,19 @@ function WorkspacesPage() {
               {createWorkspace.isPending ? "Creating..." : "Create workspace"}
             </Button>
           </FormGrid>
+
+          <FormNote>
+            Opening a workspace immediately after creation keeps the catalog action-oriented: provision
+            here, inspect in the studio, then checkpoint once the draft settles.
+          </FormNote>
         </SectionCard>
 
         <SectionCard $span={8}>
           <SectionHeader>
             <SectionTitle
+              eyebrow="Fleet Catalog"
               title="Workspace catalog"
-              body="Each row is one Agent Filesystem. This table is shaped for the future cloud API and the matching CLI backend: database mapping, Redis key, content size, draft state, and checkpoints."
+              body="The table should support triage as much as discovery: status, draft state, content size, and checkpoint depth all matter before you open the studio."
             />
           </SectionHeader>
 
@@ -167,3 +241,48 @@ function WorkspacesPage() {
     </PageStack>
   );
 }
+
+const SourcePicker = styled.div`
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+`;
+
+const SourceOption = styled.button<{ $active: boolean }>`
+  border: 1px solid
+    ${({ $active }) => ($active ? "var(--afs-line-strong)" : "var(--afs-line)")};
+  border-radius: 18px;
+  padding: 14px 15px;
+  background: ${({ $active }) =>
+    $active ? "var(--afs-accent-soft)" : "rgba(255, 255, 255, 0.74)"};
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+`;
+
+const SourceTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 700;
+`;
+
+const SourceBody = styled.p`
+  margin: 6px 0 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
+const FormNote = styled.p`
+  margin: 18px 0 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.7;
+`;

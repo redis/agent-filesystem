@@ -17,11 +17,11 @@ export const FlexColItem = styled(FlexCol)`
 
 export const MainContainer = styled.main`
   display: flex;
-  min-width: 100%;
+  min-width: 0;
   position: relative;
   overflow-x: hidden;
   overflow-y: auto;
   flex-direction: column;
   flex: 1;
-  background-color: ${({ theme }) => theme.semantic.color.background.neutral0};
+  background: transparent;
 `;

@@ -295,6 +295,7 @@ func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
 	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change filesystem mount "+clr(ansiDim, "("+setupLocalModeLabel(cfg)+")"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
 	fmt.Fprintln(out)
 
 	choice, err := promptString(r, out, "  Choose", "1")
@@ -314,6 +315,11 @@ func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (
 			return cfg, "", err
 		}
 		return cfg, migrateDir, nil
+	case "3":
+		if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
+			return cfg, "", err
+		}
+		return cfg, "", nil
 	default:
 		return cfg, "", fmt.Errorf("unsupported choice %q", choice)
 	}
@@ -509,6 +515,37 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 
 	fmt.Fprintln(out)
 	return "", nil
+}
+
+func promptCurrentWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Current Workspace"))
+	fmt.Fprintln(out)
+
+	promptHint := "  " + clr(ansiDim, "Enter a workspace name, or type none to clear the current workspace")
+	defaultValue := strings.TrimSpace(cfg.CurrentWorkspace)
+	if defaultValue != "" {
+		promptHint = "  " + clr(ansiDim, "Press enter to keep "+defaultValue+", or type none to clear the current workspace")
+	}
+
+	workspace, err := promptString(r, out, "  Workspace name\n"+promptHint, defaultValue)
+	if err != nil {
+		return err
+	}
+	workspace = strings.TrimSpace(workspace)
+	if strings.EqualFold(workspace, "none") {
+		cfg.CurrentWorkspace = ""
+		return nil
+	}
+	if workspace == "" {
+		cfg.CurrentWorkspace = ""
+		return nil
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
+	cfg.CurrentWorkspace = workspace
+	return nil
 }
 
 func suggestNFSPort(host string, preferred int) (int, bool, error) {

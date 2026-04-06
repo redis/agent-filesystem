@@ -35,6 +35,9 @@ var (
 const (
 	bannerIndent = "  "
 	bannerWidth  = 40
+	maxCLIWidth  = 80
+	maxBoxWidth  = maxCLIWidth - len(bannerIndent) - 2
+	maxBoxText   = maxBoxWidth - 4
 )
 
 func init() {
@@ -87,6 +90,60 @@ func stripAnsi(s string) string {
 
 func runeWidth(s string) int {
 	return utf8.RuneCountInString(stripAnsi(s))
+}
+
+func fitDisplayText(text string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	if runeWidth(text) <= maxWidth {
+		return text
+	}
+	if maxWidth == 1 {
+		return "…"
+	}
+
+	var b strings.Builder
+	visible := 0
+	hasAnsi := false
+
+	for i := 0; i < len(text); {
+		if text[i] == '\033' && i+1 < len(text) && text[i+1] == '[' {
+			hasAnsi = true
+			j := i + 2
+			for j < len(text) && !((text[j] >= 'A' && text[j] <= 'Z') || (text[j] >= 'a' && text[j] <= 'z')) {
+				j++
+			}
+			if j < len(text) {
+				j++
+			}
+			b.WriteString(text[i:j])
+			i = j
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if visible >= maxWidth-1 {
+			break
+		}
+		b.WriteRune(r)
+		visible++
+		i += size
+	}
+
+	b.WriteRune('…')
+	if hasAnsi {
+		b.WriteString(ansiReset)
+	}
+	return b.String()
+}
+
+func padVisibleText(text string, width int) string {
+	padding := width - runeWidth(text)
+	if padding <= 0 {
+		return text
+	}
+	return text + strings.Repeat(" ", padding)
 }
 
 // ---------------------------------------------------------------------------
@@ -301,9 +358,12 @@ type boxRow struct {
 func printBox(title string, rows []boxRow) {
 	maxLabel := 0
 	for _, r := range rows {
-		if len(r.Label) > maxLabel {
-			maxLabel = len(r.Label)
+		if w := runeWidth(r.Label); w > maxLabel {
+			maxLabel = w
 		}
+	}
+	if maxLabel > maxBoxText-3 {
+		maxLabel = maxBoxText - 3
 	}
 
 	type fmtLine struct {
@@ -313,7 +373,7 @@ func printBox(title string, rows []boxRow) {
 	var lines []fmtLine
 
 	if title != "" {
-		lines = append(lines, fmtLine{content: title})
+		lines = append(lines, fmtLine{content: fitDisplayText(title, maxBoxText)})
 		lines = append(lines, fmtLine{empty: true})
 	}
 
@@ -324,11 +384,16 @@ func printBox(title string, rows []boxRow) {
 		}
 		var content string
 		if r.Label != "" {
+			label := padVisibleText(r.Label, maxLabel)
+			valueWidth := maxBoxText - maxLabel - 3
+			if valueWidth < 0 {
+				valueWidth = 0
+			}
 			content = fmt.Sprintf("%s   %s",
-				clr(ansiDim, fmt.Sprintf("%-*s", maxLabel, r.Label)),
-				r.Value)
+				clr(ansiDim, label),
+				fitDisplayText(r.Value, valueWidth))
 		} else {
-			content = r.Value
+			content = fitDisplayText(r.Value, maxBoxText)
 		}
 		lines = append(lines, fmtLine{content: content})
 	}
@@ -343,6 +408,9 @@ func printBox(title string, rows []boxRow) {
 		maxWidth = 36
 	}
 	innerWidth := maxWidth + 4
+	if innerWidth > maxBoxWidth {
+		innerWidth = maxBoxWidth
+	}
 
 	if !colorTerm {
 		fmt.Println()
