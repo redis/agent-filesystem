@@ -271,7 +271,7 @@ func cmdWorkspaceUse(args []string) error {
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "current workspace updated"), []boxRow{
 		{Label: "workspace", Value: workspace},
-		{Label: "config", Value: clr(ansiDim, configPath())},
+		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 	})
 	return nil
 }

@@ -71,10 +71,12 @@ func onRename(ctx context.Context, w *response, userHandle Handler) error {
 	}
 	preDestData := ToFileAttribute(toDirInfo, toDirPath).AsCache()
 
-	oldHandle := userHandle.ToHandle(fs, append(fromPath, string(from.Filename)))
+	oldFullPath := append(fromPath, string(from.Filename))
+	newFullPath := append(toPath, string(to.Filename))
+	oldHandle := userHandle.ToHandle(fs, oldFullPath)
 
-	fromLoc := fs.Join(append(fromPath, string(from.Filename))...)
-	toLoc := fs.Join(append(toPath, string(to.Filename))...)
+	fromLoc := fs.Join(oldFullPath...)
+	toLoc := fs.Join(newFullPath...)
 
 	err = fs.Rename(fromLoc, toLoc)
 	if err != nil {
@@ -87,9 +89,16 @@ func onRename(ctx context.Context, w *response, userHandle Handler) error {
 		return &NFSStatusError{NFSStatusIO, err}
 	}
 
-	if err := userHandle.InvalidateHandle(fs, oldHandle); err != nil {
-		return &NFSStatusError{NFSStatusServerFault, err}
+	if renamer, ok := userHandle.(HandleRenamer); ok {
+		if err := renamer.RenameHandle(fs, oldFullPath, newFullPath); err != nil {
+			return &NFSStatusError{NFSStatusServerFault, err}
+		}
+	} else {
+		if err := userHandle.InvalidateHandle(fs, oldHandle); err != nil {
+			return &NFSStatusError{NFSStatusServerFault, err}
+		}
 	}
+	invalidateVerifiers(userHandle, fs, fromPath, toPath, oldFullPath, newFullPath)
 
 	writer := bytes.NewBuffer([]byte{})
 	if err := xdr.Write(writer, uint32(NFSStatusOk)); err != nil {

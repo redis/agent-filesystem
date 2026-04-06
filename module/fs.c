@@ -1078,13 +1078,11 @@ static int REPLACE_RedisCommand(RedisModuleCtx *ctx, RedisModuleString **argv, i
     size_t result_len = 0;
     long long replacements = 0;
     long long current_line = 1;
-    size_t line_start_pos = 0;
 
     for (size_t i = 0; i <= size; ) {
         // Track line boundaries for LINE constraint.
         if (i < size && data[i] == '\n') {
             current_line++;
-            line_start_pos = i + 1;
         }
 
         // Check if we're within line constraint.

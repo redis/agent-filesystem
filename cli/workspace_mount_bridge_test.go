@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -67,6 +68,52 @@ func TestSeedWorkspaceMountKeyUsesCurrentWorkspaceTree(t *testing.T) {
 	}
 	if string(data) != "package dirty\n" {
 		t.Fatalf("mounted main.go = %q, want %q", string(data), "package dirty\n")
+	}
+}
+
+func TestSeedWorkspaceMountKeyUsesCanonicalAFSKeysOnly(t *testing.T) {
+	t.Helper()
+
+	cfg, _, store, closeStore := importRAFWorkspaceForTest(t)
+	defer closeStore()
+
+	ctx := context.Background()
+	mountKey, _, err := seedWorkspaceMountKey(ctx, cfg, store, store.rdb, "repo")
+	if err != nil {
+		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
+	}
+
+	legacyKeys, err := store.rdb.Keys(ctx, "rfs:{"+mountKey+"}:*").Result()
+	if err != nil {
+		t.Fatalf("Keys(legacy mount prefix) returned error: %v", err)
+	}
+	if len(legacyKeys) != 0 {
+		t.Fatalf("expected no legacy rfs mount keys, got %v", legacyKeys)
+	}
+
+	keys, err := store.rdb.Keys(ctx, "afs:{"+mountKey+"}:*").Result()
+	if err != nil {
+		t.Fatalf("Keys(afs mount prefix) returned error: %v", err)
+	}
+	if len(keys) == 0 {
+		t.Fatal("expected canonical afs mount keys to exist")
+	}
+
+	for _, key := range keys {
+		if strings.HasPrefix(key, "afs:{"+mountKey+"}:children:") {
+			t.Fatalf("unexpected legacy children key: %s", key)
+		}
+		if key == "afs:{"+mountKey+"}:inode:/" {
+			t.Fatalf("unexpected legacy path-keyed root inode key: %s", key)
+		}
+	}
+
+	rootExists, err := store.rdb.Exists(ctx, "afs:{"+mountKey+"}:inode:1").Result()
+	if err != nil {
+		t.Fatalf("Exists(canonical root inode) returned error: %v", err)
+	}
+	if rootExists != 1 {
+		t.Fatal("expected canonical root inode key afs:{<mount>}:inode:1")
 	}
 }
 

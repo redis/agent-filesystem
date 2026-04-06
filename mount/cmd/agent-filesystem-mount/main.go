@@ -119,7 +119,7 @@ func main() {
 		GID:         gid,
 	}
 
-	log.Printf("Mounting Redis FS key %q at %s", redisKey, mountpoint)
+	log.Printf("Mounting AFS key %q at %s", redisKey, mountpoint)
 	log.Printf("Redis: %s (db %d)", *redisAddr, *redisDB)
 
 	server, err := redisfs.Mount(mountpoint, c, opts)

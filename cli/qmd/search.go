@@ -21,11 +21,18 @@ type Client struct {
 	prefix    string
 }
 
+type inodePathRecord struct {
+	key    string
+	id     string
+	parent string
+	name   string
+}
+
 func NewClient(rdb *redis.Client, fsKey, indexName string) *Client {
 	if indexName == "" {
-		indexName = fmt.Sprintf("rfs_idx:{%s}", fsKey)
+		indexName = fmt.Sprintf("afs_idx:{%s}", fsKey)
 	}
-	prefix := fmt.Sprintf("rfs:{%s}:inode:", fsKey)
+	prefix := fmt.Sprintf("afs:{%s}:inode:", fsKey)
 	return &Client{rdb: rdb, fsKey: fsKey, indexName: indexName, prefix: prefix}
 }
 
@@ -36,31 +43,84 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 func (c *Client) EnsurePathFields(ctx context.Context) (int, error) {
+	records := map[string]inodePathRecord{}
 	var cursor uint64
-	updated := 0
 	for {
 		keys, next, err := c.rdb.Scan(ctx, cursor, c.prefix+"*", 500).Result()
 		if err != nil {
-			return updated, err
+			return 0, err
 		}
 		for _, k := range keys {
-			p := strings.TrimPrefix(k, c.prefix)
-			if p == "" {
+			id := strings.TrimPrefix(k, c.prefix)
+			if id == "" {
 				continue
 			}
-			fields := map[string]interface{}{
-				"path":           p,
-				"path_ancestors": pathAncestors(p),
+			vals, err := c.rdb.HMGet(ctx, k, "parent", "name").Result()
+			if err != nil {
+				return 0, err
 			}
-			if err := c.rdb.HSet(ctx, k, fields).Err(); err != nil {
-				return updated, err
+			records[id] = inodePathRecord{
+				key:    k,
+				id:     id,
+				parent: toString(vals[0]),
+				name:   toString(vals[1]),
 			}
-			updated++
 		}
 		cursor = next
 		if cursor == 0 {
 			break
 		}
+	}
+
+	resolved := make(map[string]string, len(records))
+	var resolvePath func(string) string
+	resolvePath = func(id string) string {
+		if p, ok := resolved[id]; ok {
+			return p
+		}
+		if id == "" {
+			return ""
+		}
+		if strings.HasPrefix(id, "/") {
+			resolved[id] = id
+			return id
+		}
+
+		record, ok := records[id]
+		if !ok {
+			return ""
+		}
+		if id == "1" || (record.parent == "" && record.name == "") {
+			resolved[id] = "/"
+			return "/"
+		}
+
+		parentPath := resolvePath(record.parent)
+		switch {
+		case record.name == "":
+			resolved[id] = parentPath
+		case parentPath == "" || parentPath == "/":
+			resolved[id] = "/" + strings.TrimPrefix(record.name, "/")
+		default:
+			resolved[id] = parentPath + "/" + strings.TrimPrefix(record.name, "/")
+		}
+		return resolved[id]
+	}
+
+	updated := 0
+	for _, record := range records {
+		p := resolvePath(record.id)
+		if p == "" {
+			continue
+		}
+		fields := map[string]interface{}{
+			"path":           p,
+			"path_ancestors": pathAncestors(p),
+		}
+		if err := c.rdb.HSet(ctx, record.key, fields).Err(); err != nil {
+			return updated, err
+		}
+		updated++
 	}
 	return updated, nil
 }
@@ -327,7 +387,10 @@ func searchHitFromFields(docID string, score float64, fields map[string]string) 
 	if h.Path == "" {
 		idx := strings.Index(docID, ":inode:")
 		if idx >= 0 {
-			h.Path = docID[idx+len(":inode:"):]
+			p := docID[idx+len(":inode:"):]
+			if strings.HasPrefix(p, "/") {
+				h.Path = p
+			}
 		}
 	}
 	return h

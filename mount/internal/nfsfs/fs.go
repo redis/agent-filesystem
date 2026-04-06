@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-git/go-billy/v5"
@@ -22,10 +24,15 @@ var _ billy.Change = (*FS)(nil)
 type FS struct {
 	client   client.Client
 	readOnly bool
+	debug    bool
 }
 
 func New(c client.Client, readOnly bool) *FS {
-	return &FS{client: c, readOnly: readOnly}
+	return &FS{
+		client:   c,
+		readOnly: readOnly,
+		debug:    os.Getenv("AFS_NFS_DEBUG") == "1",
+	}
 }
 
 func (f *FS) withTimeout() (context.Context, context.CancelFunc) {
@@ -50,8 +57,16 @@ func (f *FS) Open(filename string) (billy.File, error) {
 	return f.OpenFile(filename, os.O_RDONLY, 0)
 }
 
+func (f *FS) debugf(format string, args ...interface{}) {
+	if !f.debug {
+		return
+	}
+	log.Printf("nfsfs: "+format, args...)
+}
+
 func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, error) {
 	p := f.normalize(filename)
+	f.debugf("OpenFile path=%q flag=%#x perm=%#o", p, flag, perm.Perm())
 	ctx, cancel := f.withTimeout()
 	defer cancel()
 
@@ -63,6 +78,7 @@ func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, 
 		return nil, err
 	}
 	missing := st == nil
+	existedBeforeOpen := !missing
 	if missing {
 		if flag&os.O_CREATE == 0 {
 			return nil, os.ErrNotExist
@@ -70,50 +86,45 @@ func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, 
 		if f.readOnly {
 			return nil, os.ErrPermission
 		}
-		// Defer creation to Close — avoids double-write (create empty then overwrite).
-		return &fileHandle{
-			fs:            f,
-			path:          p,
-			data:          nil,
-			writable:      true,
-			dirty:         true,
-			pendingCreate: true,
-			createMode:    perm,
-		}, nil
+		created, _, err := f.client.CreateFile(ctx, p, uint32(perm.Perm()), flag&os.O_EXCL != 0)
+		if err != nil {
+			if strings.Contains(err.Error(), "already exists") {
+				return nil, os.ErrExist
+			}
+			return nil, err
+		}
+		st = created
+		missing = false
 	}
 
 	if st.Type == "dir" {
 		return nil, fmt.Errorf("%s is a directory", p)
 	}
-	if flag&os.O_EXCL != 0 && flag&os.O_CREATE != 0 && !missing {
+	if flag&os.O_EXCL != 0 && flag&os.O_CREATE != 0 && existedBeforeOpen {
 		return nil, os.ErrExist
 	}
 
-	var data []byte
 	if flag&os.O_TRUNC != 0 {
 		if f.readOnly {
 			return nil, os.ErrPermission
 		}
-		data = nil
-	} else {
-		data, err = f.client.Cat(ctx, p)
-		if err != nil {
+		f.debugf("OpenFile truncating inode=%d path=%q", st.Inode, p)
+		if err := f.client.TruncateInode(ctx, st.Inode, 0); err != nil {
 			return nil, err
 		}
+		st.Size = 0
 	}
 
 	fh := &fileHandle{
+		inode:    st.Inode,
+		size:     st.Size,
 		fs:       f,
 		path:     p,
-		data:     append([]byte(nil), data...),
 		writable: flag&(os.O_WRONLY|os.O_RDWR) != 0 || flag&(os.O_CREATE|os.O_APPEND|os.O_TRUNC) != 0,
 		append:   flag&os.O_APPEND != 0,
 	}
 	if fh.append {
-		fh.pos = int64(len(fh.data))
-	}
-	if flag&os.O_TRUNC != 0 {
-		fh.dirty = true
+		fh.pos = st.Size
 	}
 	return fh, nil
 }
@@ -149,7 +160,7 @@ func (f *FS) Rename(oldpath, newpath string) error {
 	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Mv(ctx, f.normalize(oldpath), f.normalize(newpath))
+	return f.client.Rename(ctx, f.normalize(oldpath), f.normalize(newpath), 0)
 }
 
 func (f *FS) Remove(filename string) error {
@@ -191,8 +202,11 @@ func (f *FS) ReadDir(p string) ([]os.FileInfo, error) {
 	out := make([]os.FileInfo, 0, len(entries))
 	for _, entry := range entries {
 		st := &client.StatResult{
+			Inode: entry.Inode,
 			Type:  entry.Type,
 			Mode:  entry.Mode,
+			UID:   entry.UID,
+			GID:   entry.GID,
 			Size:  entry.Size,
 			Mtime: entry.Mtime,
 		}
@@ -294,20 +308,30 @@ func (fi fileInfo) Mode() os.FileMode {
 }
 func (fi fileInfo) ModTime() time.Time { return time.UnixMilli(fi.st.Mtime) }
 func (fi fileInfo) IsDir() bool        { return fi.st.Type == "dir" }
-func (fi fileInfo) Sys() interface{}   { return nil }
+func (fi fileInfo) Sys() interface{} {
+	stat := &syscall.Stat_t{
+		Ino: fi.st.Inode,
+		Uid: fi.st.UID,
+		Gid: fi.st.GID,
+	}
+	if fi.st.Type == "dir" {
+		stat.Nlink = 2
+	} else {
+		stat.Nlink = 1
+	}
+	return stat
+}
 
 type fileHandle struct {
-	mu            sync.Mutex
-	fs            *FS
-	path          string
-	data          []byte
-	pos           int64
-	writable      bool
-	append        bool
-	dirty         bool
-	closed        bool
-	pendingCreate bool
-	createMode    os.FileMode
+	mu       sync.Mutex
+	fs       *FS
+	path     string
+	inode    uint64
+	size     int64
+	pos      int64
+	writable bool
+	append   bool
+	closed   bool
 }
 
 func (fh *fileHandle) Name() string { return fh.path }
@@ -325,10 +349,17 @@ func (fh *fileHandle) Read(p []byte) (int, error) {
 	if err := fh.ensureOpen(); err != nil {
 		return 0, err
 	}
-	if fh.pos >= int64(len(fh.data)) {
+	ctx, cancel := fh.fs.withTimeout()
+	defer cancel()
+	data, err := fh.fs.client.ReadInodeAt(ctx, fh.inode, fh.pos, len(p))
+	if err != nil {
+		return 0, err
+	}
+	fh.fs.debugf("Read inode=%d path=%q off=%d size=%d -> %d bytes", fh.inode, fh.path, fh.pos, len(p), len(data))
+	if len(data) == 0 {
 		return 0, io.EOF
 	}
-	n := copy(p, fh.data[fh.pos:])
+	n := copy(p, data)
 	fh.pos += int64(n)
 	if n < len(p) {
 		return n, io.EOF
@@ -342,10 +373,17 @@ func (fh *fileHandle) ReadAt(p []byte, off int64) (int, error) {
 	if err := fh.ensureOpen(); err != nil {
 		return 0, err
 	}
-	if off >= int64(len(fh.data)) {
+	ctx, cancel := fh.fs.withTimeout()
+	defer cancel()
+	data, err := fh.fs.client.ReadInodeAt(ctx, fh.inode, off, len(p))
+	if err != nil {
+		return 0, err
+	}
+	fh.fs.debugf("ReadAt inode=%d path=%q off=%d size=%d -> %d bytes", fh.inode, fh.path, off, len(p), len(data))
+	if len(data) == 0 {
 		return 0, io.EOF
 	}
-	n := copy(p, fh.data[off:])
+	n := copy(p, data)
 	if n < len(p) {
 		return n, io.EOF
 	}
@@ -362,21 +400,30 @@ func (fh *fileHandle) Write(p []byte) (int, error) {
 		return 0, os.ErrPermission
 	}
 	if fh.append {
-		fh.pos = int64(len(fh.data))
+		ctx, cancel := fh.fs.withTimeout()
+		defer cancel()
+		st, err := fh.fs.client.StatInode(ctx, fh.inode)
+		if err != nil {
+			return 0, err
+		}
+		if st == nil {
+			return 0, os.ErrNotExist
+		}
+		fh.size = st.Size
+		fh.pos = st.Size
+	}
+	ctx, cancel := fh.fs.withTimeout()
+	defer cancel()
+	fh.fs.debugf("Write inode=%d path=%q off=%d len=%d", fh.inode, fh.path, fh.pos, len(p))
+	if err := fh.fs.client.WriteInodeAt(ctx, fh.inode, p, fh.pos); err != nil {
+		return 0, err
 	}
 	end := fh.pos + int64(len(p))
-	if end > int64(len(fh.data)) {
-		newCap := int64(cap(fh.data)) * 2
-		if newCap < end {
-			newCap = end
-		}
-		grown := make([]byte, end, newCap)
-		copy(grown, fh.data)
-		fh.data = grown
+	if end > fh.size {
+		fh.size = end
 	}
-	copy(fh.data[fh.pos:end], p)
 	fh.pos = end
-	fh.dirty = true
+	fh.fs.debugf("Write complete inode=%d path=%q new_size=%d new_pos=%d", fh.inode, fh.path, fh.size, fh.pos)
 	return len(p), nil
 }
 
@@ -393,7 +440,17 @@ func (fh *fileHandle) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		next = fh.pos + offset
 	case io.SeekEnd:
-		next = int64(len(fh.data)) + offset
+		ctx, cancel := fh.fs.withTimeout()
+		defer cancel()
+		st, err := fh.fs.client.StatInode(ctx, fh.inode)
+		if err != nil {
+			return 0, err
+		}
+		if st == nil {
+			return 0, os.ErrNotExist
+		}
+		fh.size = st.Size
+		next = st.Size + offset
 	default:
 		return 0, errors.New("invalid whence")
 	}
@@ -411,23 +468,17 @@ func (fh *fileHandle) Close() error {
 		return nil
 	}
 	fh.closed = true
-	if !fh.dirty {
-		return nil
-	}
-	ctx, cancel := fh.fs.withTimeout()
-	defer cancel()
-	if fh.pendingCreate {
-		mode := uint32(0o644)
-		if fh.createMode != 0 {
-			mode = uint32(fh.createMode.Perm())
-		}
-		return fh.fs.client.EchoCreate(ctx, fh.path, fh.data, mode)
-	}
-	return fh.fs.client.Echo(ctx, fh.path, fh.data)
+	fh.fs.debugf("Close inode=%d path=%q", fh.inode, fh.path)
+	return nil
 }
 
-func (fh *fileHandle) Lock() error   { return nil }
-func (fh *fileHandle) Unlock() error { return nil }
+func (fh *fileHandle) Lock() error {
+	return errors.New("nfs advisory locking is disabled; mount clients should use nolock/nolocks")
+}
+
+func (fh *fileHandle) Unlock() error {
+	return errors.New("nfs advisory locking is disabled; mount clients should use nolock/nolocks")
+}
 
 func (fh *fileHandle) Truncate(size int64) error {
 	fh.mu.Lock()
@@ -441,16 +492,15 @@ func (fh *fileHandle) Truncate(size int64) error {
 	if size < 0 {
 		return errors.New("negative size")
 	}
-	if size <= int64(len(fh.data)) {
-		fh.data = fh.data[:size]
-	} else {
-		grown := make([]byte, size)
-		copy(grown, fh.data)
-		fh.data = grown
+	ctx, cancel := fh.fs.withTimeout()
+	defer cancel()
+	fh.fs.debugf("Truncate inode=%d path=%q size=%d", fh.inode, fh.path, size)
+	if err := fh.fs.client.TruncateInode(ctx, fh.inode, size); err != nil {
+		return err
 	}
+	fh.size = size
 	if fh.pos > size {
 		fh.pos = size
 	}
-	fh.dirty = true
 	return nil
 }

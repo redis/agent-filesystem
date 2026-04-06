@@ -125,6 +125,7 @@ func onMknod(ctx context.Context, w *response, userHandle Handler) error {
 		return &NFSStatusError{NFSStatusBadType, os.ErrInvalid}
 		// end of input.
 	}
+	invalidateVerifiers(userHandle, fs, path, append(path, string(obj.Filename)))
 
 	writer := bytes.NewBuffer([]byte{})
 	if err := xdr.Write(writer, uint32(NFSStatusOk)); err != nil {

@@ -58,23 +58,18 @@ func seedWorkspaceMountKey(ctx context.Context, cfg config, store *rafStore, rdb
 
 	treePath := rafWorkspaceTreePath(cfg, workspace)
 	mountKey := mountRedisKeyForWorkspace(workspace)
-	if err := syncDirectoryToRedisFSKey(ctx, rdb, mountKey, treePath); err != nil {
+	if err := syncDirectoryToAFSKey(ctx, rdb, mountKey, treePath); err != nil {
 		return "", "", err
 	}
 	return mountKey, workspaceMeta.HeadSavepoint, nil
 }
 
-func syncDirectoryToRedisFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
+func syncDirectoryToAFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
 	if err := deleteNamespace(ctx, rdb, fsKey); err != nil {
 		return err
 	}
-	if err := createMigrationNamespace(ctx, rdb, fsKey); err != nil {
-		return err
-	}
-	if _, _, err := importDirectoriesBatched(ctx, rdb, fsKey, sourceDir, nil, nil); err != nil {
-		return err
-	}
-	if _, _, _, _, err := importFilesBatched(ctx, rdb, fsKey, sourceDir, nil, nil); err != nil {
+	fsClient := client.New(rdb, fsKey)
+	if _, _, _, _, _, err := importDirectory(ctx, fsClient, sourceDir, nil, nil); err != nil {
 		return err
 	}
 
@@ -89,7 +84,7 @@ func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, 
 	savepointID := generatedSavepointName()
 	mountKey := mountRedisKeyForWorkspace(workspace)
 
-	mountedManifest, blobs, stats, err := buildManifestFromRedisFS(ctx, client.New(rdb, mountKey), workspace, savepointID)
+	mountedManifest, blobs, stats, err := buildManifestFromAFS(ctx, client.New(rdb, mountKey), workspace, savepointID)
 	if err != nil {
 		return false, err
 	}
@@ -107,7 +102,7 @@ func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, 
 	return saved, nil
 }
 
-func buildManifestFromRedisFS(ctx context.Context, fsClient client.Client, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {
+func buildManifestFromAFS(ctx context.Context, fsClient client.Client, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {
 	tree, err := fsClient.Tree(ctx, "/", workspaceMountTreeMaxDepth)
 	if err != nil {
 		return manifest{}, nil, manifestStats{}, err

@@ -15,7 +15,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:6379", "Redis host:port")
 	db := flag.Int("db", 0, "Redis DB")
 	key := flag.String("key", "", "agent-filesystem key name (required)")
-	index := flag.String("index", "", "RediSearch index name (default: rfs_idx:{<key>})")
+	index := flag.String("index", "", "RediSearch index name (default: afs_idx:{<key>})")
 	flag.Parse()
 
 	if *key == "" {

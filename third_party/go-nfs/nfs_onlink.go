@@ -63,6 +63,7 @@ func onLink(ctx context.Context, w *response, userHandle Handler) error {
 	if err != nil {
 		return &NFSStatusError{NFSStatusAccess, err}
 	}
+	invalidateVerifiers(userHandle, fs, path, append(path, string(obj.Filename)))
 	if err := attrs.Apply(changer, fs, newFilePath); err != nil {
 		return &NFSStatusError{NFSStatusIO, err}
 	}

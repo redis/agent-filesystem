@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
 )
 
 func TestConfigPathDefaultsToRAFConfig(t *testing.T) {
@@ -20,6 +22,20 @@ func TestConfigPathDefaultsToRAFConfig(t *testing.T) {
 
 	if got := filepath.Base(configPath()); got != "afs.config.json" {
 		t.Fatalf("configPath() basename = %q, want %q", got, "afs.config.json")
+	}
+}
+
+func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
+	t.Helper()
+
+	got := compactDisplayPath("/Users/example/.afs/afs.config.json")
+	want := filepath.Join(".afs", "afs.config.json")
+	if got != want {
+		t.Fatalf("compactDisplayPath() = %q, want %q", got, want)
+	}
+
+	if got := compactDisplayPath("afs.config.json"); got != "afs.config.json" {
+		t.Fatalf("compactDisplayPath(single file) = %q, want %q", got, "afs.config.json")
 	}
 }
 
@@ -90,6 +106,12 @@ func TestExecutablePathResolvesSymlinks(t *testing.T) {
 func TestStatusRowsUseNoMountLabelsWhenFilesystemMountIsNone(t *testing.T) {
 	t.Helper()
 
+	orig := cfgPathOverride
+	cfgPathOverride = filepath.Join("/Users/example/Library/Application Support/AFS", ".afs", "afs.config.json")
+	defer func() {
+		cfgPathOverride = orig
+	}()
+
 	rows := statusRows(mountBackendNone, "/tmp/workspaces", "localhost:6379", 0, "demo")
 	if len(rows) != 3 {
 		t.Fatalf("len(statusRows()) = %d, want 3", len(rows))
@@ -103,13 +125,22 @@ func TestStatusRowsUseNoMountLabelsWhenFilesystemMountIsNone(t *testing.T) {
 	if rows[1].Label != "current workspace" || rows[1].Value != "demo" {
 		t.Fatalf("rows[1] = %+v, want current workspace row", rows[1])
 	}
-	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, "afs.config.json") {
+	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, filepath.Join(".afs", "afs.config.json")) {
 		t.Fatalf("rows[2] = %+v, want config row", rows[2])
+	}
+	if strings.Contains(stripAnsi(rows[2].Value), "/Users/example/") {
+		t.Fatalf("rows[2] = %+v, did not expect full absolute path", rows[2])
 	}
 }
 
 func TestStatusRowsKeepFilesystemLabelsForMountMode(t *testing.T) {
 	t.Helper()
+
+	orig := cfgPathOverride
+	cfgPathOverride = filepath.Join("/Users/example/Library/Application Support/AFS", ".afs", "afs.config.json")
+	defer func() {
+		cfgPathOverride = orig
+	}()
 
 	rows := statusRows(mountBackendFuse, "/tmp/mount", "localhost:6379", 0, "")
 	if len(rows) != 4 {
@@ -124,8 +155,11 @@ func TestStatusRowsKeepFilesystemLabelsForMountMode(t *testing.T) {
 	if rows[2].Label != "current workspace" || rows[2].Value != "none" {
 		t.Fatalf("rows[2] = %+v, want current workspace row", rows[2])
 	}
-	if rows[3].Label != "config" || !strings.Contains(rows[3].Value, "afs.config.json") {
+	if rows[3].Label != "config" || !strings.Contains(rows[3].Value, filepath.Join(".afs", "afs.config.json")) {
 		t.Fatalf("rows[3] = %+v, want config row", rows[3])
+	}
+	if strings.Contains(stripAnsi(rows[3].Value), "/Users/example/") {
+		t.Fatalf("rows[3] = %+v, did not expect full absolute path", rows[3])
 	}
 }
 
@@ -234,6 +268,51 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 	}
 	if strings.Contains(out, "Run 'afs down' first") {
 		t.Fatalf("cmdUp() output still contains old already-running error: %q", out)
+	}
+}
+
+func TestCmdDownContinuesWhenMountedWorkspaceCannotBeSaved(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+
+	st := state{
+		StartedAt:            time.Now().UTC(),
+		ManageRedis:          false,
+		RedisAddr:            mr.Addr(),
+		RedisDB:              0,
+		CurrentWorkspace:     "demo",
+		MountedHeadSavepoint: "initial",
+		MountBackend:         mountBackendFuse,
+		Mountpoint:           filepath.Join(t.TempDir(), "mount"),
+		RedisKey:             "afs.mount.demo",
+	}
+	if err := saveState(st); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, cmdDown)
+	if err != nil {
+		t.Fatalf("cmdDown() returned error: %v", err)
+	}
+
+	if !strings.Contains(out, "mounted changes for demo were not saved") {
+		t.Fatalf("cmdDown() output = %q, want unsaved changes warning", out)
+	}
+	if !strings.Contains(out, "afs stopped") {
+		t.Fatalf("cmdDown() output = %q, want stopped message", out)
+	}
+	if _, err := os.Stat(statePath()); !os.IsNotExist(err) {
+		t.Fatalf("statePath() should be removed after cmdDown(), stat err = %v", err)
 	}
 }
 

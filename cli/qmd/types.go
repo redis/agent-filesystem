@@ -4,7 +4,7 @@ import "time"
 
 const (
 	ToolVersion   = "0.1.0"
-	SchemaVersion = "rfs_qmd_v1"
+	SchemaVersion = "afs_qmd_v1"
 )
 
 // SearchHit is one indexed document match.

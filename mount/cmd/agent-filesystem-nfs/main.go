@@ -51,6 +51,19 @@ func (h authCompatHandler) Mount(ctx context.Context, conn net.Conn, req nfs.Mou
 	return status, fs, flavors
 }
 
+func (h authCompatHandler) RenameHandle(fs billy.Filesystem, oldPath, newPath []string) error {
+	if renamer, ok := h.Handler.(nfs.HandleRenamer); ok {
+		return renamer.RenameHandle(fs, oldPath, newPath)
+	}
+	return h.Handler.InvalidateHandle(fs, h.Handler.ToHandle(fs, oldPath))
+}
+
+func (h authCompatHandler) InvalidateVerifier(path string) {
+	if invalidator, ok := h.Handler.(nfs.VerifierInvalidator); ok {
+		invalidator.InvalidateVerifier(path)
+	}
+}
+
 func newNFSHandler(fs billy.Filesystem) authCompatHandler {
 	baseHandler := helpers.NewNullAuthHandler(fs)
 	// macOS creates AppleDouble sidecar files (._*) for files and directories on NFS mounts.
@@ -115,6 +128,8 @@ func main() {
 	log.Printf("Serving Redis key %q via NFS at %s", redisKey, *listenAddr)
 	log.Printf("Export path: %s", exp)
 	log.Printf("Mount target example: %s:%s", hostOnly(*listenAddr), exp)
+	log.Printf("NFS advisory locking is disabled for this export. Mount clients should use nolock/nolocks.")
+	log.Printf("FUSE record locks are Redis-backed and inode-keyed, but they are not propagated over NFS yet.")
 
 	errCh := make(chan error, 1)
 	go func() {

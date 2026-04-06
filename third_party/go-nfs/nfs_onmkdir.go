@@ -66,6 +66,7 @@ func onMkdir(ctx context.Context, w *response, userHandle Handler) error {
 			return &NFSStatusError{NFSStatusIO, err}
 		}
 	}
+	invalidateVerifiers(userHandle, fs, path, newFolder)
 
 	writer := bytes.NewBuffer([]byte{})
 	if err := xdr.Write(writer, uint32(NFSStatusOk)); err != nil {

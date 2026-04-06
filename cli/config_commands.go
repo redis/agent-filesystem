@@ -162,7 +162,7 @@ func cmdConfigSet(args []string) error {
 	}
 
 	rows := configSummaryRows(cfg, "saved")
-	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, configPath())})
+	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "config updated"), rows)
 	return nil
 }
@@ -334,7 +334,7 @@ Examples:
   %s up --redis-url rediss://user:pass@redis.example:6379/4
   %s up --mount-backend none
   %s up --mount-backend nfs --mountpoint ~/demo
-`, bin, configPath(), bin, bin, bin, bin)
+`, bin, compactDisplayPath(configPath()), bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {
