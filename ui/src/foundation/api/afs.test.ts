@@ -46,4 +46,19 @@ describe("afsApi", () => {
     expect(savedWorkspace?.draftState).toBe("clean");
     expect(savedWorkspace?.savepoints[0]?.name).toBe("after-update");
   });
+
+  test("updates workspace metadata", async () => {
+    const workspace = await afsApi.updateWorkspace({
+      workspaceId: "payments-portal",
+      description: "Updated description",
+      cloudAccount: "Redis Cloud / Updated",
+      databaseName: "payments-portal-prod-us-east-1",
+      region: "us-east-2",
+    });
+
+    expect(workspace?.description).toBe("Updated description");
+    expect(workspace?.cloudAccount).toBe("Redis Cloud / Updated");
+    expect(workspace?.databaseName).toBe("payments-portal-prod-us-east-1");
+    expect(workspace?.region).toBe("us-east-2");
+  });
 });

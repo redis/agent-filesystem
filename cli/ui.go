@@ -463,6 +463,19 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
+func formatDisplayTimestamp(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return raw
+	}
+	return parsed.Local().Format("Jan 2, 2006 3:04 PM")
+}
+
 func pidStatusColored(pid int) string {
 	if pid <= 0 {
 		return "unknown"

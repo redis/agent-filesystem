@@ -1,16 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Button, Loader, Typography } from "@redislabsdev/redis-ui-components";
+import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import styled from "styled-components";
 import {
-  CardHeader,
   EventList,
   HeroBody,
   HeroCard,
   HeroLayout,
-  HeroMetaGrid,
   InlineActions,
-  MetaItem,
-  MetaRow,
   PageStack,
   SectionCard,
   SectionGrid,
@@ -22,17 +18,9 @@ import {
   StatLabel,
   StatValue,
   Tag,
-  ToneChip,
-  WorkspaceCard,
-  WorkspaceGrid,
 } from "../components/afs-kit";
-import { getAFSClientMode, formatBytes } from "../foundation/api/afs";
+import { formatBytes } from "../foundation/api/afs";
 import { useActivity, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
-import type {
-  AFSDraftState,
-  AFSWorkspaceSource,
-  AFSWorkspaceStatus,
-} from "../foundation/types/afs";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
@@ -47,136 +35,132 @@ function OverviewPage() {
   }
 
   const workspaces = workspacesQuery.data ?? [];
-  const backendMode = getAFSClientMode();
   const activity = (activityQuery.data ?? []).map((event) => ({
     ...event,
     title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
   }));
+
+  if (workspaces.length === 0) {
+    return (
+      <PageStack>
+        <HeroCard>
+          <HeroLayout>
+            <HeroBody>
+              <SectionTitle
+                eyebrow="Getting Started"
+                title="Create your first agent workspace"
+                body="Agent Filesystem gives every agent a durable workspace you can browse in the browser, checkpoint before risky changes, and restore when you need to recover fast. Start blank, import existing work, or register a managed workspace and operate on it from one place."
+              />
+              <InlineActions>
+                <Link to="/workspaces">
+                  <Button size="medium">Add workspace</Button>
+                </Link>
+              </InlineActions>
+              <BenefitGrid>
+                <BenefitCard>
+                  <BenefitKicker>01</BenefitKicker>
+                  <BenefitTitle>Bring in real working state</BenefitTitle>
+                  <BenefitBody>
+                    Start with a blank workspace, a Git import, or a Redis Cloud import instead of rebuilding context by hand.
+                  </BenefitBody>
+                </BenefitCard>
+                <BenefitCard>
+                  <BenefitKicker>02</BenefitKicker>
+                  <BenefitTitle>Edit, inspect, and keep history close</BenefitTitle>
+                  <BenefitBody>
+                    Browse files in the studio, keep mutable state visible, and make checkpoints part of the normal workflow.
+                  </BenefitBody>
+                </BenefitCard>
+                <BenefitCard>
+                  <BenefitKicker>03</BenefitKicker>
+                  <BenefitTitle>Recover without guesswork</BenefitTitle>
+                  <BenefitBody>
+                    Open a workspace and use its checkpoint view to compare history, restore safely, and understand what changed.
+                  </BenefitBody>
+                </BenefitCard>
+              </BenefitGrid>
+            </HeroBody>
+
+            <StarterPanel>
+              <StarterPreview>
+                <StarterCore>Agent Filesystem</StarterCore>
+                <StarterNode $x="8%" $y="14%">
+                  Blank workspace
+                </StarterNode>
+                <StarterNode $x="58%" $y="18%">
+                  Git import
+                </StarterNode>
+                <StarterNode $x="18%" $y="66%">
+                  Browser studio
+                </StarterNode>
+                <StarterNode $x="56%" $y="70%">
+                  Checkpoints
+                </StarterNode>
+              </StarterPreview>
+              <StarterList>
+                <StarterListTitle>What you unlock</StarterListTitle>
+                <StarterListItem>One place to manage durable workspaces for code, prompts, memories, and artifacts.</StarterListItem>
+                <StarterListItem>A clear path from draft edits to saved checkpoints.</StarterListItem>
+                <StarterListItem>A registry, studio, and activity view that stay in sync.</StarterListItem>
+              </StarterList>
+              <StarterTags>
+                <Tag>Blank workspace</Tag>
+                <Tag>Git import</Tag>
+                <Tag>Redis Cloud import</Tag>
+              </StarterTags>
+            </StarterPanel>
+          </HeroLayout>
+        </HeroCard>
+      </PageStack>
+    );
+  }
+
+  const activeWorkspaces = workspaces.filter((workspace) => workspace.status !== "attention").length;
+  const attentionWorkspaces = workspaces.filter((workspace) => workspace.status === "attention").length;
   const dirtyWorkspaces = workspaces.filter((workspace) => workspace.draftState === "dirty").length;
+  const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
   const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
-  const healthyWorkspaces = workspaces.filter((workspace) => workspace.status === "healthy").length;
-  const importedWorkspaces = workspaces.filter((workspace) => workspace.source !== "blank").length;
   const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
+  const importedWorkspaces = workspaces.filter((workspace) => workspace.source !== "blank").length;
+  const blankWorkspaces = workspaces.length - importedWorkspaces;
   const regionCount = new Set(workspaces.map((workspace) => workspace.region)).size;
-  const featuredWorkspaces = [...workspaces]
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-    .slice(0, 4);
+  const latestCheckpointAt = workspaces
+    .filter((workspace) => workspace.checkpointCount > 0)
+    .map((workspace) => workspace.lastCheckpointAt)
+    .sort((left, right) => right.localeCompare(left))[0];
+  const largestWorkspace = [...workspaces].sort((left, right) => right.totalBytes - left.totalBytes)[0];
+  const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
   return (
     <PageStack>
-      <HeroCard>
-        <HeroLayout>
-          <HeroBody>
-            <SectionTitle
-              eyebrow="Filesystem Operations Surface"
-              title="See workspace health, draft pressure, and checkpoint recovery in one console"
-              body="The first screen should immediately answer three questions: what needs attention, where edits are still mutable, and which checkpoint lets you recover without guesswork."
-            />
-            <InlineActions>
-              <Link to="/workspaces">
-                <Button size="medium">Open workspace catalog</Button>
-              </Link>
-              <Link to="/activity">
-                <Button size="medium" variant="secondary-fill">
-                  Review activity feed
-                </Button>
-              </Link>
-            </InlineActions>
-            <FlowGrid>
-              <FlowCard>
-                <FlowStep>01</FlowStep>
-                <FlowTitle>Pick the workspace</FlowTitle>
-                <FlowBody>
-                  Start from fleet health and open the workspace that is drifting, syncing, or ready
-                  for a checkpoint.
-                </FlowBody>
-              </FlowCard>
-              <FlowCard>
-                <FlowStep>02</FlowStep>
-                <FlowTitle>Inspect mutable state</FlowTitle>
-                <FlowBody>
-                  Separate working copy edits from saved head so operators can see whether a change is
-                  tentative or canonical.
-                </FlowBody>
-              </FlowCard>
-              <FlowCard>
-                <FlowStep>03</FlowStep>
-                <FlowTitle>Checkpoint with intent</FlowTitle>
-                <FlowBody>
-                  Every restore or savepoint should feel like a deliberate move in an operational
-                  loop, not an afterthought.
-                </FlowBody>
-              </FlowCard>
-            </FlowGrid>
-          </HeroBody>
-
-          <HeroMetaGrid>
-            <MetaItem>
-              <MetaLabel>Current backend</MetaLabel>
-              <MetaValue>
-                {backendMode === "http" ? "HTTP control plane" : "Local AFS demo store"}
-              </MetaValue>
-              <MetaBody>
-                {backendMode === "http"
-                  ? "The console is reading workspace summaries and activity from the running service."
-                  : "Demo mode stays useful while the live control plane is still being wired up."}
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Mutable pressure</MetaLabel>
-              <MetaValue>{dirtyWorkspaces} dirty workspaces</MetaValue>
-              <MetaBody>
-                Draft state stays visible at the fleet level so it is easy to spot pending edits.
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Checkpoint coverage</MetaLabel>
-              <MetaValue>{checkpointCount} recovery points</MetaValue>
-              <MetaBody>
-                The UI should make rollback confidence feel built in, not hidden behind a workflow.
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Footprint</MetaLabel>
-              <MetaValue>
-                {workspaces.length} workspaces across {regionCount || 0} regions
-              </MetaValue>
-              <MetaBody>Redis-backed filesystems stay legible even as the fleet spreads out.</MetaBody>
-            </MetaItem>
-          </HeroMetaGrid>
-        </HeroLayout>
-      </HeroCard>
-
       <StatGrid>
         <StatCard>
           <div>
-            <StatLabel>Workspace Fleet</StatLabel>
+            <StatLabel>Workspaces</StatLabel>
             <StatValue>{workspaces.length}</StatValue>
           </div>
-          <StatDetail>
-            {healthyWorkspaces} healthy and {dirtyWorkspaces} holding draft edits.
-          </StatDetail>
+          <StatDetail>{activeWorkspaces} active and {attentionWorkspaces} inactive.</StatDetail>
         </StatCard>
         <StatCard>
           <div>
-            <StatLabel>Imported Sources</StatLabel>
-            <StatValue>{importedWorkspaces}</StatValue>
-          </div>
-          <StatDetail>Git and Redis Cloud imports should read as first-class entry paths.</StatDetail>
-        </StatCard>
-        <StatCard>
-          <div>
-            <StatLabel>Stored Content</StatLabel>
+            <StatLabel>Stored Data</StatLabel>
             <StatValue>{formatBytes(totalBytes)}</StatValue>
           </div>
-          <StatDetail>Size is useful when a workspace becomes a long-lived memory or artifact set.</StatDetail>
+          <StatDetail>Total durable content tracked across all workspaces.</StatDetail>
         </StatCard>
         <StatCard>
           <div>
-            <StatLabel>Recovery Depth</StatLabel>
+            <StatLabel>Checkpoints Created</StatLabel>
             <StatValue>{checkpointCount}</StatValue>
           </div>
-          <StatDetail>Checkpoint history should stay close to the live editing surface.</StatDetail>
+          <StatDetail>{checkpointCoverage}% of workspaces currently have checkpoint history.</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Attention Needed</StatLabel>
+            <StatValue>{attentionWorkspaces + dirtyWorkspaces}</StatValue>
+          </div>
+          <StatDetail>{dirtyWorkspaces} workspace{dirtyWorkspaces === 1 ? "" : "s"} currently carrying draft changes.</StatDetail>
         </StatCard>
       </StatGrid>
 
@@ -184,65 +168,60 @@ function OverviewPage() {
         <SectionCard $span={7}>
           <SectionHeader>
             <SectionTitle
-              eyebrow="Fleet Signals"
-              title="Hot workspaces"
-              body="These cards should feel like operational readouts: source, mutable state, content footprint, and the Redis mapping you will touch if you open the studio."
+              eyebrow="Health"
+              title=""
             />
           </SectionHeader>
-          <WorkspaceGrid>
-            {featuredWorkspaces.map((workspace) => (
-              <WorkspaceCard key={workspace.id}>
-                <CardHeader>
-                  <div>
-                    <Typography.Heading component="h3" size="S">
-                      {workspace.name}
-                    </Typography.Heading>
-                    <Typography.Body color="secondary" component="p">
-                      {workspace.databaseName} · {workspace.redisKey}
-                    </Typography.Body>
-                  </div>
-                  <ToneChip $tone={workspace.status}>{statusLabel(workspace.status)}</ToneChip>
-                </CardHeader>
-                <InlineActions>
-                  <ToneChip $tone={workspace.draftState}>
-                    {draftStateLabel(workspace.draftState)}
-                  </ToneChip>
-                  <ToneChip $tone={workspace.source}>{sourceLabel(workspace.source)}</ToneChip>
-                </InlineActions>
-                <WorkspaceFacts>
-                  <FactTile>
-                    <FactLabel>Content</FactLabel>
-                    <FactValue>{workspace.fileCount} files</FactValue>
-                  </FactTile>
-                  <FactTile>
-                    <FactLabel>Footprint</FactLabel>
-                    <FactValue>{formatBytes(workspace.totalBytes)}</FactValue>
-                  </FactTile>
-                  <FactTile>
-                    <FactLabel>Checkpoints</FactLabel>
-                    <FactValue>{workspace.checkpointCount}</FactValue>
-                  </FactTile>
-                  <FactTile>
-                    <FactLabel>Updated</FactLabel>
-                    <FactValue>{new Date(workspace.updatedAt).toLocaleDateString()}</FactValue>
-                  </FactTile>
-                </WorkspaceFacts>
-                <MetaRow>
-                  <Tag>{workspace.region}</Tag>
-                  <Tag>{workspace.folderCount} folders</Tag>
-                  <Tag>{new Date(workspace.lastCheckpointAt).toLocaleDateString()}</Tag>
-                </MetaRow>
-              </WorkspaceCard>
-            ))}
-          </WorkspaceGrid>
+          <SignalList>
+            <SignalRow>
+              <SignalText>
+                <SignalTitle>Active workspaces</SignalTitle>
+                <SignalBody>Healthy and syncing workspaces that are currently in rotation.</SignalBody>
+              </SignalText>
+              <SignalMetric>{activeWorkspaces}</SignalMetric>
+              <SignalBar>
+                <SignalFill $value={ratio(activeWorkspaces, workspaces.length)} />
+              </SignalBar>
+            </SignalRow>
+            <SignalRow>
+              <SignalText>
+                <SignalTitle>Inactive workspaces</SignalTitle>
+                <SignalBody>Workspaces that need attention before they should be trusted as ready.</SignalBody>
+              </SignalText>
+              <SignalMetric>{attentionWorkspaces}</SignalMetric>
+              <SignalBar>
+                <SignalFill $value={ratio(attentionWorkspaces, workspaces.length)} />
+              </SignalBar>
+            </SignalRow>
+            <SignalRow>
+              <SignalText>
+                <SignalTitle>Dirty working state</SignalTitle>
+                <SignalBody>Workspaces carrying draft changes that have not been checkpointed yet.</SignalBody>
+              </SignalText>
+              <SignalMetric>{dirtyWorkspaces}</SignalMetric>
+              <SignalBar>
+                <SignalFill $value={ratio(dirtyWorkspaces, workspaces.length)} />
+              </SignalBar>
+            </SignalRow>
+            <SignalRow>
+              <SignalText>
+                <SignalTitle>Checkpoint coverage</SignalTitle>
+                <SignalBody>Workspaces with at least one checkpoint already recorded.</SignalBody>
+              </SignalText>
+              <SignalMetric>{workspacesWithCheckpoints}</SignalMetric>
+              <SignalBar>
+                <SignalFill $value={ratio(workspacesWithCheckpoints, workspaces.length)} />
+              </SignalBar>
+            </SignalRow>
+          </SignalList>
         </SectionCard>
 
         <SectionCard $span={5}>
           <SectionHeader>
             <SectionTitle
-              eyebrow="Audit Pulse"
-              title="Recent activity"
-              body="The event feed is the fastest way to validate that the console reflects real Redis-backed mutations."
+              eyebrow="Recent Activity"
+              title="Latest activity"
+              body="Recent activity belongs on the overview as a quick confidence check that the registry, studio, and audit feed are all moving together."
             />
           </SectionHeader>
           <EventList events={activity} />
@@ -250,219 +229,104 @@ function OverviewPage() {
       </SectionGrid>
 
       <SectionGrid>
-        <SectionCard $span={4}>
-          <SectionTitle
-            eyebrow="Operator Loop"
-            title="What this UI should make obvious"
-            body="The console is working when these decisions require almost no interpretation from the operator."
-          />
-          <Checklist>
-            <ChecklistItem>
-              <ChecklistTitle>Which state is canonical?</ChecklistTitle>
-              <ChecklistBody>Saved head, working copy, and checkpoints must read as clearly distinct views.</ChecklistBody>
-            </ChecklistItem>
-            <ChecklistItem>
-              <ChecklistTitle>Can I safely roll back?</ChecklistTitle>
-              <ChecklistBody>Recovery actions should always be adjacent to the history they affect.</ChecklistBody>
-            </ChecklistItem>
-            <ChecklistItem>
-              <ChecklistTitle>What changed recently?</ChecklistTitle>
-              <ChecklistBody>The audit trail belongs in the same visual language as file and checkpoint work.</ChecklistBody>
-            </ChecklistItem>
-          </Checklist>
+        <SectionCard $span={6}>
+          <SectionHeader>
+            <SectionTitle
+              eyebrow="Recovery"
+              title="Checkpoint readiness"
+              body="Checkpoint data is most useful when it is summarized as readiness, not buried inside an individual workspace."
+            />
+          </SectionHeader>
+          <HighlightGrid>
+            <HighlightCard>
+              <HighlightLabel>Coverage</HighlightLabel>
+              <HighlightValue>{checkpointCoverage}%</HighlightValue>
+              <HighlightBody>Workspaces already carrying checkpoint history.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Without checkpoints</HighlightLabel>
+              <HighlightValue>{workspaces.length - workspacesWithCheckpoints}</HighlightValue>
+              <HighlightBody>Workspaces that should create their first recovery point.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Average depth</HighlightLabel>
+              <HighlightValue>
+                {workspaces.length === 0 ? "0.0" : (checkpointCount / workspaces.length).toFixed(1)}
+              </HighlightValue>
+              <HighlightBody>Average number of checkpoints per workspace.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Latest checkpoint</HighlightLabel>
+              <HighlightValue>
+                {latestCheckpointAt ? new Date(latestCheckpointAt).toLocaleDateString() : "n/a"}
+              </HighlightValue>
+              <HighlightBody>Most recent checkpoint creation time across the fleet.</HighlightBody>
+            </HighlightCard>
+          </HighlightGrid>
         </SectionCard>
 
-        <SectionCard $span={8}>
-          <SectionTitle
-            eyebrow="Studio Intent"
-            title="The three surfaces to reinforce"
-            body="Every route in the UI can ladder back to these product truths, which keeps the design opinionated instead of drifting toward generic admin chrome."
-          />
-          <InsightGrid>
-            <InsightCard>
-              <InsightKicker>Canonical State</InsightKicker>
-              <InsightTitle>Redis-backed head is the stable reference point</InsightTitle>
-              <InsightBody>
-                The saved head should feel like the trustworthy baseline operators compare everything
-                else against.
-              </InsightBody>
-            </InsightCard>
-            <InsightCard>
-              <InsightKicker>Mutable State</InsightKicker>
-              <InsightTitle>Working copy edits are live, visible, and intentionally temporary</InsightTitle>
-              <InsightBody>
-                Dirty draft state needs visual tension so in-progress edits are noticeable without
-                looking like errors.
-              </InsightBody>
-            </InsightCard>
-            <InsightCard>
-              <InsightKicker>Recovery State</InsightKicker>
-              <InsightTitle>Checkpoint history should feel like an instrument panel</InsightTitle>
-              <InsightBody>
-                Recovery points earn trust when the UI makes them tangible, recent, and easy to
-                compare against the current workspace.
-              </InsightBody>
-            </InsightCard>
-          </InsightGrid>
+        <SectionCard $span={6}>
+          <SectionHeader>
+            <SectionTitle
+              eyebrow="Posture"
+              title="Workspace mix"
+              body="A compact mix view helps you see how the registry is composed without turning Overview into another catalog."
+            />
+          </SectionHeader>
+          <HighlightGrid>
+            <HighlightCard>
+              <HighlightLabel>Imported</HighlightLabel>
+              <HighlightValue>{importedWorkspaces}</HighlightValue>
+              <HighlightBody>Workspaces brought in from Git or Redis Cloud.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Blank</HighlightLabel>
+              <HighlightValue>{blankWorkspaces}</HighlightValue>
+              <HighlightBody>Workspaces created directly inside Agent Filesystem.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Regions</HighlightLabel>
+              <HighlightValue>{regionCount}</HighlightValue>
+              <HighlightBody>Distinct regions represented in the current registry.</HighlightBody>
+            </HighlightCard>
+            <HighlightCard>
+              <HighlightLabel>Largest workspace</HighlightLabel>
+              <HighlightValue>{formatBytes(largestWorkspace.totalBytes)}</HighlightValue>
+              <HighlightBody>{largestWorkspace.name}</HighlightBody>
+            </HighlightCard>
+          </HighlightGrid>
         </SectionCard>
       </SectionGrid>
     </PageStack>
   );
 }
 
-function statusLabel(status: AFSWorkspaceStatus) {
-  if (status === "healthy") return "Healthy";
-  if (status === "syncing") return "Syncing";
-  return "Attention";
+function ratio(value: number, total: number) {
+  if (total <= 0 || value <= 0) {
+    return 0;
+  }
+
+  return Math.max(8, Math.min(100, Math.round((value / total) * 100)));
 }
 
-function draftStateLabel(state: AFSDraftState) {
-  return state === "dirty" ? "Draft dirty" : "Draft clean";
-}
-
-function sourceLabel(source: AFSWorkspaceSource) {
-  if (source === "git-import") return "Git import";
-  if (source === "cloud-import") return "Cloud import";
-  return "Blank";
-}
-
-const FlowGrid = styled.div`
+const BenefitGrid = styled.div`
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
 
-  @media (max-width: 860px) {
+  @media (max-width: 900px) {
     grid-template-columns: 1fr;
   }
 `;
 
-const FlowCard = styled.div`
+const BenefitCard = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 20px;
   padding: 16px 18px;
   background: rgba(255, 255, 255, 0.78);
 `;
 
-const FlowStep = styled.div`
-  color: var(--afs-amber);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-`;
-
-const FlowTitle = styled.div`
-  margin-top: 10px;
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-const FlowBody = styled.p`
-  margin: 8px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const MetaLabel = styled.span`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const MetaValue = styled.span`
-  color: var(--afs-ink);
-  font-size: 1.1rem;
-  font-weight: 700;
-  line-height: 1.35;
-`;
-
-const MetaBody = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const WorkspaceFacts = styled.div`
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin-top: 16px;
-`;
-
-const FactTile = styled.div`
-  border-radius: 18px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.74);
-  border: 1px solid var(--afs-line);
-`;
-
-const FactLabel = styled.div`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-`;
-
-const FactValue = styled.div`
-  margin-top: 6px;
-  color: var(--afs-ink);
-  font-size: 14px;
-  font-weight: 700;
-`;
-
-const Checklist = styled.div`
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-`;
-
-const ChecklistItem = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 18px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.74);
-`;
-
-const ChecklistTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-const ChecklistBody = styled.p`
-  margin: 8px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const InsightGrid = styled.div`
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin-top: 18px;
-
-  @media (max-width: 960px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const InsightCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 22px;
-  padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 246, 251, 0.92)),
-    rgba(255, 255, 255, 0.8);
-`;
-
-const InsightKicker = styled.div`
+const BenefitKicker = styled.div`
   color: var(--afs-accent);
   font-size: 11px;
   font-weight: 800;
@@ -470,15 +334,201 @@ const InsightKicker = styled.div`
   text-transform: uppercase;
 `;
 
-const InsightTitle = styled.div`
+const BenefitTitle = styled.div`
   margin-top: 10px;
   color: var(--afs-ink);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   line-height: 1.45;
 `;
 
-const InsightBody = styled.p`
+const BenefitBody = styled.p`
+  margin: 8px 0 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.65;
+`;
+
+const StarterPanel = styled.div`
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--afs-line);
+  border-radius: 24px;
+  padding: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 246, 251, 0.92)),
+    rgba(255, 255, 255, 0.86);
+`;
+
+const StarterPreview = styled.div`
+  position: relative;
+  min-height: 230px;
+  border-radius: 22px;
+  border: 1px solid var(--afs-line);
+  background:
+    radial-gradient(circle at center, rgba(170, 59, 255, 0.12), transparent 48%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 255, 0.92));
+  overflow: hidden;
+`;
+
+const StarterCore = styled.div`
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  min-width: 168px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  text-align: center;
+  border: 1px solid var(--afs-line-strong);
+  background: #fff;
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 14px 28px rgba(8, 6, 13, 0.08);
+`;
+
+const StarterNode = styled.div<{ $x: string; $y: string }>`
+  position: absolute;
+  left: ${({ $x }) => $x};
+  top: ${({ $y }) => $y};
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--afs-line);
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--afs-ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+`;
+
+const StarterList = styled.div`
+  display: grid;
+  gap: 10px;
+`;
+
+const StarterListTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 700;
+`;
+
+const StarterListItem = styled.div`
+  position: relative;
+  padding-left: 18px;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.65;
+
+  &::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 9px;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--afs-accent);
+  }
+`;
+
+const StarterTags = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+`;
+
+const SignalList = styled.div`
+  display: grid;
+  gap: 14px;
+`;
+
+const SignalRow = styled.div`
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.4fr) auto minmax(120px, 180px);
+  align-items: center;
+  border: 1px solid var(--afs-line);
+  border-radius: 20px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.78);
+
+  @media (max-width: 860px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const SignalText = styled.div`
+  display: grid;
+  gap: 6px;
+`;
+
+const SignalTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 700;
+`;
+
+const SignalBody = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
+const SignalMetric = styled.div`
+  color: var(--afs-ink);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+`;
+
+const SignalBar = styled.div`
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(8, 6, 13, 0.08);
+  overflow: hidden;
+`;
+
+const SignalFill = styled.div<{ $value: number }>`
+  width: ${({ $value }) => `${$value}%`};
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #aa3bff, #47bfff);
+`;
+
+const HighlightGrid = styled.div`
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  @media (max-width: 720px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const HighlightCard = styled.div`
+  border: 1px solid var(--afs-line);
+  border-radius: 20px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.78);
+`;
+
+const HighlightLabel = styled.div`
+  color: var(--afs-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+`;
+
+const HighlightValue = styled.div`
+  margin-top: 10px;
+  color: var(--afs-ink);
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+`;
+
+const HighlightBody = styled.p`
   margin: 8px 0 0;
   color: var(--afs-muted);
   font-size: 14px;

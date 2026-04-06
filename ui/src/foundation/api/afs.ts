@@ -19,6 +19,7 @@ import type {
   AFSWorkspaceSummary,
   AFSWorkspaceView,
   RestoreSavepointInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
 } from "../types/afs";
 
@@ -32,6 +33,7 @@ type AFSClient = {
   getWorkspace: (workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<AFSWorkspaceDetail>;
   deleteWorkspace: (workspaceId: string) => Promise<void>;
+  updateWorkspace: (input: UpdateWorkspaceInput) => Promise<AFSWorkspaceDetail | null>;
   updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<AFSWorkspaceDetail | null>;
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
@@ -44,6 +46,7 @@ type AFSClient = {
 type HTTPWorkspaceSummary = {
   id: string;
   name: string;
+  cloud_account: string;
   database_id: string;
   database_name: string;
   redis_key: string;
@@ -307,6 +310,7 @@ function workspaceToSummary(workspace: AFSWorkspace): AFSWorkspaceSummary {
   return {
     id: normalized.id,
     name: normalized.name,
+    cloudAccount: normalized.cloudAccount,
     databaseId: normalized.databaseId,
     databaseName: normalized.databaseName,
     redisKey: normalized.redisKey,
@@ -593,6 +597,32 @@ This workspace was created from the AFS Web UI.
     });
   },
 
+  async updateWorkspace(input: UpdateWorkspaceInput) {
+    await wait();
+    const state = updateState((draft) => {
+      const workspace = requireWorkspace(draft, input.workspaceId);
+      workspace.description = input.description.trim();
+      workspace.cloudAccount = input.cloudAccount.trim();
+      workspace.databaseName = input.databaseName.trim();
+      workspace.region = input.region.trim();
+      workspace.tags = [workspace.region, sourceLabel(workspace.source)].filter(Boolean);
+      touchWorkspace(workspace);
+      workspace.activity.unshift(
+        createActivity(
+          `Updated ${workspace.name}`,
+          "Workspace details were updated from the Web UI.",
+          "webui",
+          "workspace.updated",
+          "workspace",
+          workspace.id,
+          workspace.name,
+        ),
+      );
+    });
+
+    return normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+  },
+
   async updateWorkspaceFile(input: UpdateWorkspaceFileInput) {
     await wait();
     const state = updateState((draft) => {
@@ -823,6 +853,7 @@ function mapWorkspaceSummary(input: HTTPWorkspaceSummary): AFSWorkspaceSummary {
   return {
     id: input.id,
     name: input.name,
+    cloudAccount: input.cloud_account,
     databaseId: input.database_id,
     databaseName: input.database_name,
     redisKey: input.redis_key,
@@ -945,6 +976,20 @@ const httpAFSClient: AFSClient = {
     await requestJSON<void>(`/workspaces/${workspaceId}`, {
       method: "DELETE",
     });
+  },
+
+  async updateWorkspace(input: UpdateWorkspaceInput) {
+    return mapWorkspaceDetail(
+      await requestJSON<HTTPWorkspaceDetail>(`/workspaces/${input.workspaceId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          description: input.description,
+          database_name: input.databaseName,
+          cloud_account: input.cloudAccount,
+          region: input.region,
+        }),
+      }),
+    );
   },
 
   async updateWorkspaceFile() {

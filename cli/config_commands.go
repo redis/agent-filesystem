@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -9,8 +11,12 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type optionalString struct {
@@ -168,21 +174,245 @@ func cmdConfigSet(args []string) error {
 }
 
 func loadConfigForUp(args []string) (config, error) {
-	cfg, _, err := loadConfigWithPresence()
+	return loadConfigForUpWithIO(args, bufio.NewReader(os.Stdin), os.Stdout, isInteractiveTerminal())
+}
+
+type upConfigPresence struct {
+	filePresent       bool
+	redisDBPresent    bool
+	mountpointPresent bool
+}
+
+func loadConfigForUpWithIO(args []string, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
+	cfg, presence, err := loadConfigWithUpPresence()
 	if err != nil {
 		return cfg, err
 	}
-	overrides, _, err := parseConfigOverrideFlags("up", args, false)
-	if err != nil {
+
+	changed := false
+	switch len(args) {
+	case 0:
+		changed, err = promptForMissingUpConfig(&cfg, presence, r, out, allowPrompt)
+		if err != nil {
+			return cfg, err
+		}
+	case 2:
+		if err := applyUpWorkspaceAndMountpoint(&cfg, args[0], args[1]); err != nil {
+			return cfg, err
+		}
+		changed = true
+	default:
+		return cfg, fmt.Errorf("%s", upUsageText(filepath.Base(os.Args[0])))
+	}
+
+	if changed {
+		if err := persistConfigForUp(&cfg); err != nil {
+			return cfg, err
+		}
+	}
+	if err := resolveConfigPaths(&cfg); err != nil {
 		return cfg, err
 	}
-	if err := applyConfigOverrides(&cfg, overrides); err != nil {
+	return cfg, nil
+}
+
+func prepareMountedConfig(cfg config, workspace, mountpoint string) (config, error) {
+	if err := applyUpWorkspaceAndMountpoint(&cfg, workspace, mountpoint); err != nil {
 		return cfg, err
 	}
 	if err := resolveConfigPaths(&cfg); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
+
+	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	if err != nil {
+		return err
+	}
+	if backendName == mountBackendNone {
+		return fmt.Errorf("filesystem mounts are disabled in config\nRun '%s config set --mount-backend nfs --mountpoint %s' or similar first", filepath.Base(os.Args[0]), mountpoint)
+	}
+
+	cfg.CurrentWorkspace = workspace
+	cfg.Mountpoint = mountpoint
+	return nil
+}
+
+func loadConfigWithUpPresence() (config, upConfigPresence, error) {
+	cfg := defaultConfig()
+	var presence upConfigPresence
+
+	raw, err := os.ReadFile(configPath())
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return cfg, presence, nil
+		}
+		return cfg, presence, err
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return cfg, presence, err
+	}
+
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return cfg, presence, err
+	}
+
+	presence.filePresent = true
+	_, presence.redisDBPresent = fields["redisDB"]
+	_, presence.mountpointPresent = fields["mountpoint"]
+	return cfg, presence, nil
+}
+
+func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.Reader, out io.Writer, allowPrompt bool) (bool, error) {
+	if cfg == nil {
+		return false, fmt.Errorf("missing config")
+	}
+
+	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	if err != nil {
+		return false, err
+	}
+
+	missingDatabase := !presence.filePresent || !presence.redisDBPresent
+	missingWorkspace := backendName != mountBackendNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
+	missingMountpoint := backendName != mountBackendNone && (!presence.filePresent || !presence.mountpointPresent || strings.TrimSpace(cfg.Mountpoint) == "")
+	if !missingDatabase && !missingWorkspace && !missingMountpoint {
+		return false, nil
+	}
+	if !allowPrompt {
+		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database, workspace, and mountpoint", filepath.Base(os.Args[0]))
+	}
+
+	changed := false
+	if missingDatabase {
+		value, err := promptString(r, out,
+			"  Redis database\n  "+clr(ansiDim, "Choose the Redis database number for this AFS config"),
+			strconv.Itoa(cfg.RedisDB))
+		if err != nil {
+			return false, err
+		}
+		db, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return false, fmt.Errorf("invalid redis database %q", value)
+		}
+		if db < 0 {
+			return false, fmt.Errorf("redis db must be >= 0")
+		}
+		cfg.RedisDB = db
+		changed = true
+	}
+
+	if missingWorkspace {
+		defaultWorkspace, hint := suggestUpWorkspace(*cfg)
+		label := "  Workspace"
+		if hint != "" {
+			label += "\n  " + clr(ansiDim, hint)
+		}
+		workspace, err := promptString(r, out, label, defaultWorkspace)
+		if err != nil {
+			return false, err
+		}
+		workspace = strings.TrimSpace(workspace)
+		if workspace == "" {
+			return false, fmt.Errorf("workspace name cannot be empty when starting a mounted filesystem")
+		}
+		if err := validateAFSName("workspace", workspace); err != nil {
+			return false, err
+		}
+		cfg.CurrentWorkspace = workspace
+		changed = true
+	}
+
+	if missingMountpoint {
+		defaultMountpoint := strings.TrimSpace(cfg.Mountpoint)
+		if defaultMountpoint == "" {
+			defaultMountpoint = defaultConfig().Mountpoint
+		}
+		mountpoint, err := promptString(r, out,
+			"  Local mountpoint\n  "+clr(ansiDim, "Directory where the workspace should be mounted"),
+			defaultMountpoint)
+		if err != nil {
+			return false, err
+		}
+		mountpoint = strings.TrimSpace(mountpoint)
+		if mountpoint == "" {
+			return false, fmt.Errorf("mountpoint cannot be empty when starting a mounted filesystem")
+		}
+		cfg.Mountpoint = mountpoint
+		changed = true
+	}
+
+	return changed, nil
+}
+
+func suggestUpWorkspace(cfg config) (string, string) {
+	names, err := existingWorkspaceNames(cfg)
+	if err != nil || len(names) == 0 {
+		return "", "Enter a workspace name to mount"
+	}
+	if len(names) == 1 {
+		return names[0], "Available workspace: " + names[0]
+	}
+	return names[0], "Available workspaces: " + strings.Join(names, ", ")
+}
+
+func existingWorkspaceNames(cfg config) ([]string, error) {
+	if !cfg.UseExistingRedis {
+		return nil, nil
+	}
+
+	redisCfg := cfg
+	if err := prepareConfigForSave(&redisCfg); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	rdb := redis.NewClient(buildRedisOptions(redisCfg, 4))
+	defer rdb.Close()
+
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		return nil, nil
+	}
+	workspaces, err := newAFSStore(rdb).listWorkspaces(ctx)
+	if err != nil {
+		return nil, nil
+	}
+
+	names := make([]string, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		if strings.TrimSpace(workspace.Name) != "" {
+			names = append(names, workspace.Name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func persistConfigForUp(cfg *config) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	persisted := *cfg
+	if err := prepareConfigForSave(&persisted); err != nil {
+		return err
+	}
+	if err := saveConfig(persisted); err != nil {
+		return err
+	}
+	*cfg = persisted
+	return nil
 }
 
 func loadConfigWithPresence() (config, bool, error) {
@@ -315,26 +545,22 @@ Examples:
 
 func upUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s up [flags...]
+  %s up
+  %s up <workspace> <mountpoint>
 
-Start AFS using the saved config, with optional one-shot overrides.
-These flags apply to the current run only and do not rewrite %s.
-
-Basics:
-  --redis-url <redis://...|rediss://...>
-  --mount-backend auto|none|fuse|nfs
-  --mountpoint <path>
-  --readonly[=true|false]
+Start AFS using the saved config.
+If <workspace> and <mountpoint> are provided, AFS saves them into %s before
+starting so future runs use the updated workspace and mountpoint.
 
 Notes:
-  Current workspace is not set here. Use '%s workspace use <workspace>'.
-  Advanced fields like runtime paths stay available in afs.config.json if needed.
+  Redis connection, mount backend, and readonly mode come from config.
+  If required settings are missing, AFS prompts for them in the terminal.
+  Use '%s config set ...' to change Redis or mount settings persistently.
 
 Examples:
-  %s up --redis-url rediss://user:pass@redis.example:6379/4
-  %s up --mount-backend none
-  %s up --mount-backend nfs --mountpoint ~/demo
-`, bin, compactDisplayPath(configPath()), bin, bin, bin, bin)
+  %s up
+  %s up claude-code ~/.claude
+`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {

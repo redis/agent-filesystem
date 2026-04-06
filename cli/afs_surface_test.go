@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/alicebob/miniredis/v2"
 )
 
 func TestConfigPathDefaultsToAFSConfig(t *testing.T) {
@@ -36,6 +34,22 @@ func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 
 	if got := compactDisplayPath("afs.config.json"); got != "afs.config.json" {
 		t.Fatalf("compactDisplayPath(single file) = %q, want %q", got, "afs.config.json")
+	}
+}
+
+func TestFormatDisplayTimestampUsesReadableLocalTime(t *testing.T) {
+	t.Helper()
+
+	origLocal := time.Local
+	time.Local = time.FixedZone("MST", -7*60*60)
+	t.Cleanup(func() {
+		time.Local = origLocal
+	})
+
+	got := formatDisplayTimestamp("2026-04-06T22:52:53Z")
+	want := "Apr 6, 2026 3:52 PM"
+	if got != want {
+		t.Fatalf("formatDisplayTimestamp() = %q, want %q", got, want)
 	}
 }
 
@@ -304,7 +318,7 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 	}
 }
 
-func TestCmdDownContinuesWhenMountedWorkspaceCannotBeSaved(t *testing.T) {
+func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -316,18 +330,22 @@ func TestCmdDownContinuesWhenMountedWorkspaceCannotBeSaved(t *testing.T) {
 		_ = os.Setenv("HOME", origHome)
 	})
 
-	mr := miniredis.RunT(t)
+	mountpoint := filepath.Join(t.TempDir(), "mount")
+	if err := os.MkdirAll(mountpoint, 0o755); err != nil {
+		t.Fatalf("MkdirAll(mountpoint) returned error: %v", err)
+	}
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
 		ManageRedis:          false,
-		RedisAddr:            mr.Addr(),
+		RedisAddr:            "127.0.0.1:65535",
 		RedisDB:              0,
 		CurrentWorkspace:     "demo",
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendFuse,
-		Mountpoint:           filepath.Join(t.TempDir(), "mount"),
-		RedisKey:             "afs.mount.demo",
+		Mountpoint:           mountpoint,
+		CreatedMountpoint:    true,
+		RedisKey:             workspaceRedisKey("demo"),
 	}
 	if err := saveState(st); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
@@ -338,11 +356,14 @@ func TestCmdDownContinuesWhenMountedWorkspaceCannotBeSaved(t *testing.T) {
 		t.Fatalf("cmdDown() returned error: %v", err)
 	}
 
-	if !strings.Contains(out, "mounted changes for demo were not saved") {
-		t.Fatalf("cmdDown() output = %q, want unsaved changes warning", out)
+	if strings.Contains(out, "Saving mounted workspace") {
+		t.Fatalf("cmdDown() output = %q, want no mounted workspace save step", out)
 	}
 	if !strings.Contains(out, "afs stopped") {
 		t.Fatalf("cmdDown() output = %q, want stopped message", out)
+	}
+	if _, err := os.Stat(mountpoint); !os.IsNotExist(err) {
+		t.Fatalf("mountpoint should be removed after cmdDown(), stat err = %v", err)
 	}
 	if _, err := os.Stat(statePath()); !os.IsNotExist(err) {
 		t.Fatalf("statePath() should be removed after cmdDown(), stat err = %v", err)

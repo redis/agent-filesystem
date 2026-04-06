@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,21 +21,36 @@ type Config struct {
 	RedisPassword string `json:"redisPassword"`
 	RedisDB       int    `json:"redisDB"`
 	RedisTLS      bool   `json:"redisTLS"`
+	RedisKey      string `json:"redisKey"`
 }
 
 func LoadConfig(configPathOverride string) (Config, error) {
+	cfg, present, err := LoadConfigWithPresence(configPathOverride)
+	if err != nil {
+		return cfg, err
+	}
+	if !present {
+		return cfg, fmt.Errorf("no configuration found\nCreate %s or run afs setup first", configPath(configPathOverride))
+	}
+	return cfg, nil
+}
+
+func LoadConfigWithPresence(configPathOverride string) (Config, bool, error) {
 	cfg := defaultConfig()
 	data, err := os.ReadFile(configPath(configPathOverride))
 	if err != nil {
-		return cfg, fmt.Errorf("no configuration found\nCreate %s or run afs setup first", configPath(configPathOverride))
+		if errors.Is(err, os.ErrNotExist) {
+			return cfg, false, nil
+		}
+		return cfg, false, err
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return cfg, err
+		return cfg, true, err
 	}
 	if err := prepareConfig(&cfg); err != nil {
-		return cfg, err
+		return cfg, true, err
 	}
-	return cfg, nil
+	return cfg, true, nil
 }
 
 func OpenStore(ctx context.Context, cfg Config) (*Store, func(), error) {
@@ -61,6 +77,10 @@ func buildRedisOptions(cfg Config, poolSize int) *redis.Options {
 	}
 }
 
+func NewRedisClient(cfg Config, poolSize int) *redis.Client {
+	return redis.NewClient(buildRedisOptions(cfg, poolSize))
+}
+
 func buildRedisTLSConfig(enabled bool) *tls.Config {
 	if !enabled {
 		return nil
@@ -83,6 +103,7 @@ func defaultConfig() Config {
 	return Config{
 		RedisAddr: "localhost:6379",
 		RedisDB:   0,
+		RedisKey:  "myfs",
 	}
 }
 

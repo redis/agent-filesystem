@@ -71,20 +71,19 @@ logs/
 EOF
 ```
 
-Import the existing directory into the `.codex` workspace and replace it in place with an AFS-managed copy:
+Import the existing directory into the `.codex` workspace and mount it in place:
 
 ```bash
-./afs workspace import --clone-at-source .codex ~/.codex
+./afs workspace import --mount-at-source .codex ~/.codex
 ./afs workspace use .codex
-./afs up
 ```
 
 What that does:
 
 - imports `~/.codex` into the workspace `.codex`
 - moves your original directory to `~/.codex.pre-afs`
-- materializes the imported workspace back at `~/.codex`
-- mounts the current workspace at `~/.codex`
+- mounts the imported workspace at `~/.codex`
+- keeps `.codex` selected for future `./afs up` runs
 
 Verify:
 
@@ -126,7 +125,7 @@ If you want an agent to perform this, the agent should:
 2. Recommend creating `~/.codex/.afsignore` before import.
 3. Suggest excluding `worktrees/` by default, unless the user explicitly wants local checkout state shared.
 4. Build `agent-filesystem` with `make`.
-5. On the first machine, run `./afs setup`, then `./afs workspace import --clone-at-source .codex ~/.codex`, then `./afs workspace use .codex`, then `./afs up`.
+5. On the first machine, run `./afs setup`, then `./afs workspace import --mount-at-source .codex ~/.codex`, then `./afs workspace use .codex`.
 6. On later machines, back up any existing `~/.codex`, run `./afs setup` with workspace `.codex` and mountpoint `~/.codex`, then run `./afs up`.
 7. Verify that the same Codex files appear on every machine.
 

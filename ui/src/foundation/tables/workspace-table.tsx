@@ -1,22 +1,18 @@
-import { Button, TableHeading, Typography } from "@redislabsdev/redis-ui-components";
+import { Menu, Typography } from "@redislabsdev/redis-ui-components";
+import { MoreactionsIcon } from "@redislabsdev/redis-ui-icons/monochrome";
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
 import { useMemo, useState } from "react";
 import { formatBytes } from "../api/afs";
-import type {
-  AFSDraftState,
-  AFSWorkspaceStatus,
-  AFSWorkspaceSummary,
-} from "../types/afs";
-import { ToneChip } from "../../components/afs-kit";
+import type { AFSWorkspaceSummary } from "../types/afs";
 import * as S from "./workspace-table.styles";
 
 type WorkspaceSortField =
   | "name"
+  | "cloudAccount"
   | "databaseName"
   | "fileCount"
   | "totalBytes"
-  | "draftState"
   | "checkpointCount"
   | "updatedAt";
 
@@ -25,7 +21,11 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  onPreviewWorkspace: (workspaceId: string) => void;
   onOpenWorkspace: (workspaceId: string) => void;
+  onEditWorkspace: (workspaceId: string) => void;
+  onDeleteWorkspace: (workspaceId: string) => void;
+  deletingWorkspaceId?: string | null;
 };
 
 function compareValues(
@@ -46,7 +46,11 @@ export function WorkspaceTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load workspaces. Please retry.",
+  onPreviewWorkspace,
   onOpenWorkspace,
+  onEditWorkspace,
+  onDeleteWorkspace,
+  deletingWorkspaceId = null,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -58,7 +62,7 @@ export function WorkspaceTable({
       query === ""
         ? rows
         : rows.filter((row) =>
-            [row.name, row.databaseName, row.redisKey, row.region].some((value) =>
+            [row.name, row.databaseName, row.redisKey, row.region, row.cloudAccount].some((value) =>
               value.toLowerCase().includes(query),
             ),
           );
@@ -74,27 +78,42 @@ export function WorkspaceTable({
     () => [{ id: sortBy, desc: sortDirection === "desc" }],
     [sortBy, sortDirection],
   );
+  const isFiltering = search.trim() !== "";
 
   const columns = useMemo(
     () =>
       [
         {
+          id: "health",
           accessorKey: "status",
-          header: "Status",
-          size: 24,
-          cell: ({ row }) => (
-            <ToneChip $tone={row.original.status}>{statusLabel(row.original.status)}</ToneChip>
-          ),
+          header: "",
+          size: 20,
+          minSize: 20,
+          maxSize: 20,
           enableSorting: false,
+          cell: ({ row }) => (
+            <S.HealthCell>
+              <S.HealthDot
+                $active={row.original.status !== "attention"}
+                $syncing={row.original.status === "syncing"}
+                aria-label={`health-${row.original.status}`}
+              />
+            </S.HealthCell>
+          ),
         },
         {
           accessorKey: "name",
-          header: "Workspace",
+          header: "Workspace name",
           size: 110,
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
-              <S.WorkspaceNameButton onClick={() => onOpenWorkspace(row.original.id)}>
+              <S.WorkspaceNameButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPreviewWorkspace(row.original.id);
+                }}
+              >
                 {row.original.name}
               </S.WorkspaceNameButton>
               <Typography.Body color="secondary" component="span">
@@ -105,30 +124,27 @@ export function WorkspaceTable({
         },
         {
           accessorKey: "databaseName",
-          header: "Database",
-          size: 90,
+          header: "Database hosting",
+          size: 110,
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
               <Typography.Body component="strong">{row.original.databaseName}</Typography.Body>
               <Typography.Body color="secondary" component="span">
-                {row.original.region}
+                {row.original.cloudAccount} · {row.original.region}
               </Typography.Body>
             </S.Stack>
           ),
         },
         {
           accessorKey: "fileCount",
-          header: "Content",
+          header: "Files/Folder",
           size: 70,
           enableSorting: true,
           cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="span">{row.original.folderCount} folders</Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                {row.original.fileCount} files
-              </Typography.Body>
-            </S.Stack>
+            <Typography.Body component="span">
+              {row.original.fileCount}/{row.original.folderCount}
+            </Typography.Body>
           ),
         },
         {
@@ -139,40 +155,15 @@ export function WorkspaceTable({
           cell: ({ row }) => formatBytes(row.original.totalBytes),
         },
         {
-          accessorKey: "draftState",
-          header: "Draft",
-          size: 60,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <ToneChip $tone={row.original.draftState}>
-                {draftStateLabel(row.original.draftState)}
-              </ToneChip>
-              <Typography.Body color="secondary" component="span">
-                Working copy state
-              </Typography.Body>
-            </S.Stack>
-          ),
-        },
-        {
           accessorKey: "checkpointCount",
           header: "Checkpoints",
           size: 65,
           enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="span">
-                {row.original.checkpointCount} checkpoints
-              </Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                Last: {new Date(row.original.lastCheckpointAt).toLocaleDateString()}
-              </Typography.Body>
-            </S.Stack>
-          ),
+          cell: ({ row }) => row.original.checkpointCount,
         },
         {
           accessorKey: "updatedAt",
-          header: "Updated",
+          header: "Last updated",
           size: 65,
           enableSorting: true,
           cell: ({ row }) => new Date(row.original.updatedAt).toLocaleString(),
@@ -180,43 +171,70 @@ export function WorkspaceTable({
         {
           id: "actions",
           header: "",
-          size: 42,
+          size: 10,
+          maxSize: 10,
           enableSorting: false,
           cell: ({ row }) => (
-            <Button
-              size="medium"
-              variant="secondary-fill"
-              onClick={() => onOpenWorkspace(row.original.id)}
-            >
-              Open
-            </Button>
+            <Menu>
+              <Menu.Trigger withButton={false}>
+                <S.MoreActionsTrigger
+                  aria-label={`More actions for ${row.original.name}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                >
+                  <MoreactionsIcon size="S" />
+                </S.MoreActionsTrigger>
+              </Menu.Trigger>
+              <Menu.Content align="end">
+                <Menu.Content.Item
+                  text="Open workspace"
+                  onClick={() => onOpenWorkspace(row.original.id)}
+                />
+                <Menu.Content.Item
+                  text="Edit workspace"
+                  onClick={() => onEditWorkspace(row.original.id)}
+                />
+                <Menu.Content.Item
+                  text={deletingWorkspaceId === row.original.id ? "Deleting..." : "Delete workspace"}
+                  onClick={() => {
+                    if (deletingWorkspaceId === row.original.id) {
+                      return;
+                    }
+                    onDeleteWorkspace(row.original.id);
+                  }}
+                />
+              </Menu.Content>
+            </Menu>
           ),
         },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [onOpenWorkspace],
+    [deletingWorkspaceId, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace, onPreviewWorkspace],
   );
 
   return (
     <S.TableCard>
-      <S.HeadingWrap>
-        <TableHeading>
-          <TableHeading.Title>Workspace registry</TableHeading.Title>
-        </TableHeading>
+      <S.SearchOnlyHeadingWrap>
         <S.SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search workspace, database, key, or region"
+          placeholder="Search workspace, database, ..."
         />
-      </S.HeadingWrap>
+        
+      </S.SearchOnlyHeadingWrap>
 
       {loading ? <S.EmptyState>Loading workspaces...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
-        <S.EmptyState>No workspaces match the current filter.</S.EmptyState>
+        <S.EmptyState>
+          {isFiltering
+            ? "No workspaces match the current filter."
+            : "No workspaces yet. Use Add workspace to create one."}
+        </S.EmptyState>
       ) : null}
 
       {!loading && !error && filteredRows.length > 0 ? (
-        <S.TableViewport>
+        <S.RegistryTableViewport>
           <Table
             columns={columns}
             data={filteredRows}
@@ -236,20 +254,10 @@ export function WorkspaceTable({
             }}
             enableSorting
             stripedRows
-            onRowClick={(rowData) => onOpenWorkspace(rowData.id)}
+            onRowClick={(rowData) => onPreviewWorkspace(rowData.id)}
           />
-        </S.TableViewport>
+        </S.RegistryTableViewport>
       ) : null}
     </S.TableCard>
   );
-}
-
-function statusLabel(status: AFSWorkspaceStatus) {
-  if (status === "healthy") return "Healthy";
-  if (status === "syncing") return "Syncing";
-  return "Attention";
-}
-
-function draftStateLabel(state: AFSDraftState) {
-  return state === "dirty" ? "Draft dirty" : "Draft clean";
 }

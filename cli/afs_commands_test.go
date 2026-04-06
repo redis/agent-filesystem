@@ -143,6 +143,55 @@ func TestCurrentWorkspaceNameUsesConfiguredCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestCurrentWorkspaceNamePrefersActiveMountedWorkspace(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	cfg := defaultConfig()
+	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "alpha"
+	store := newAFSStore(rdb)
+
+	ctx := context.Background()
+	if err := createEmptyWorkspace(ctx, cfg, store, "alpha"); err != nil {
+		t.Fatalf("createEmptyWorkspace(alpha) returned error: %v", err)
+	}
+	if err := createEmptyWorkspace(ctx, cfg, store, "beta"); err != nil {
+		t.Fatalf("createEmptyWorkspace(beta) returned error: %v", err)
+	}
+
+	if err := saveState(state{
+		StartedAt:        time.Now().UTC(),
+		CurrentWorkspace: "beta",
+		MountBackend:     mountBackendNFS,
+		RedisKey:         workspaceRedisKey("beta"),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	got, err := currentWorkspaceName(ctx, cfg, store)
+	if err != nil {
+		t.Fatalf("currentWorkspaceName() returned error: %v", err)
+	}
+	if got != "beta" {
+		t.Fatalf("currentWorkspaceName() = %q, want %q", got, "beta")
+	}
+}
+
 func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *testing.T) {
 	t.Helper()
 

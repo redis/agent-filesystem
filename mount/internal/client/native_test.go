@@ -182,6 +182,12 @@ func TestCanonicalInodeStorageFormat(t *testing.T) {
 	if vals["name"] != "hello.txt" {
 		t.Fatalf("expected name=hello.txt, got %q", vals["name"])
 	}
+	if vals["path"] != "/hello.txt" {
+		t.Fatalf("expected path=/hello.txt, got %q", vals["path"])
+	}
+	if vals["path_ancestors"] != "/hello.txt" {
+		t.Fatalf("expected path_ancestors=/hello.txt, got %q", vals["path_ancestors"])
+	}
 
 	rootDirentsKey := "afs:{keytest}:dirents:" + rootInodeID
 	childID, err := rdb.HGet(ctx, rootDirentsKey, "hello.txt").Result()
@@ -429,6 +435,43 @@ func TestRenameReplacesEmptyDirectory(t *testing.T) {
 	}
 	if string(data) != "payload" {
 		t.Fatalf("unexpected nested content after dir replace: %q", string(data))
+	}
+}
+
+func TestRenameUpdatesIndexedPathsForDirectorySubtree(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-indexed-paths")
+
+	if err := c.Mkdir(ctx, "/src/sub"); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := c.Echo(ctx, "/src/sub/file.txt", []byte("payload")); err != nil {
+		t.Fatalf("echo nested file: %v", err)
+	}
+
+	before, err := c.Stat(ctx, "/src/sub/file.txt")
+	if err != nil {
+		t.Fatalf("stat before rename: %v", err)
+	}
+	if before == nil || before.Inode == 0 {
+		t.Fatalf("expected file inode before rename, got %+v", before)
+	}
+
+	if err := c.Rename(ctx, "/src", "/dst", 0); err != nil {
+		t.Fatalf("rename src to dst: %v", err)
+	}
+
+	inodeKey := "afs:{rename-indexed-paths}:inode:" + strconv.FormatUint(before.Inode, 10)
+	vals, err := rdb.HGetAll(ctx, inodeKey).Result()
+	if err != nil {
+		t.Fatalf("hgetall renamed inode: %v", err)
+	}
+	if vals["path"] != "/dst/sub/file.txt" {
+		t.Fatalf("path = %q, want %q", vals["path"], "/dst/sub/file.txt")
+	}
+	if vals["path_ancestors"] != "/dst,/dst/sub,/dst/sub/file.txt" {
+		t.Fatalf("path_ancestors = %q, want %q", vals["path_ancestors"], "/dst,/dst/sub,/dst/sub/file.txt")
 	}
 }
 

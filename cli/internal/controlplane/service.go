@@ -41,6 +41,7 @@ type capabilities struct {
 type workspaceSummary struct {
 	ID               string `json:"id"`
 	Name             string `json:"name"`
+	CloudAccount     string `json:"cloud_account"`
 	DatabaseID       string `json:"database_id"`
 	DatabaseName     string `json:"database_name"`
 	RedisKey         string `json:"redis_key"`
@@ -159,6 +160,13 @@ type createWorkspaceRequest struct {
 	Source       sourceRef `json:"source"`
 }
 
+type updateWorkspaceRequest struct {
+	Description  string `json:"description"`
+	DatabaseName string `json:"database_name"`
+	CloudAccount string `json:"cloud_account"`
+	Region       string `json:"region"`
+}
+
 type restoreCheckpointRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 }
@@ -185,6 +193,7 @@ type TreeResponse = treeResponse
 type FileContentResponse = fileContentResponse
 type SourceRef = sourceRef
 type CreateWorkspaceRequest = createWorkspaceRequest
+type UpdateWorkspaceRequest = updateWorkspaceRequest
 
 type SaveCheckpointRequest struct {
 	Workspace    string
@@ -211,6 +220,10 @@ func (s *Service) GetWorkspace(ctx context.Context, workspace string) (Workspace
 
 func (s *Service) CreateWorkspace(ctx context.Context, input CreateWorkspaceRequest) (WorkspaceDetail, error) {
 	return s.createWorkspace(ctx, input)
+}
+
+func (s *Service) UpdateWorkspace(ctx context.Context, workspace string, input UpdateWorkspaceRequest) (WorkspaceDetail, error) {
+	return s.updateWorkspace(ctx, workspace, input)
 }
 
 func (s *Service) DeleteWorkspace(ctx context.Context, workspace string) error {
@@ -312,7 +325,7 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		CloudAccount:     meta.CloudAccount,
 		DatabaseID:       meta.DatabaseID,
 		DatabaseName:     meta.DatabaseName,
-		RedisKey:         fmt.Sprintf("afs:%s", meta.Name),
+		RedisKey:         WorkspaceFSKey(meta.Name),
 		Region:           meta.Region,
 		Status:           workspaceStatus(meta),
 		Source:           workspaceSource(meta),
@@ -387,6 +400,44 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace string) error {
 	return s.store.DeleteWorkspace(ctx, workspace)
 }
 
+func (s *Service) updateWorkspace(ctx context.Context, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
+	if err := ValidateName("workspace", workspace); err != nil {
+		return workspaceDetail{}, err
+	}
+	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	databaseName := strings.TrimSpace(input.DatabaseName)
+	if databaseName == "" {
+		return workspaceDetail{}, fmt.Errorf("database name is required")
+	}
+	cloudAccount := strings.TrimSpace(input.CloudAccount)
+	if cloudAccount == "" {
+		return workspaceDetail{}, fmt.Errorf("cloud account is required")
+	}
+
+	meta = applyWorkspaceMetaDefaults(s.cfg, meta)
+	meta.Description = strings.TrimSpace(input.Description)
+	meta.DatabaseName = databaseName
+	meta.CloudAccount = cloudAccount
+	meta.Region = strings.TrimSpace(input.Region)
+	meta.Tags = workspaceTags(meta.Region, workspaceSource(meta))
+	meta.UpdatedAt = time.Now().UTC()
+
+	if err := s.store.PutWorkspaceMeta(ctx, meta); err != nil {
+		return workspaceDetail{}, err
+	}
+	if err := s.store.Audit(ctx, workspace, "workspace_update", map[string]any{
+		"database_name": meta.DatabaseName,
+		"cloud_account": meta.CloudAccount,
+		"region":        meta.Region,
+	}); err != nil {
+		return workspaceDetail{}, err
+	}
+	return s.getWorkspace(ctx, workspace)
+}
+
 func (s *Service) listCheckpoints(ctx context.Context, workspace string, limit int) ([]checkpointSummary, error) {
 	if limit <= 0 {
 		limit = 100
@@ -434,6 +485,13 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 		if err == redis.TxFailedErr {
 			return ErrWorkspaceConflict
 		}
+		return err
+	}
+	manifestValue, err := s.store.GetManifest(ctx, workspace, checkpointID)
+	if err != nil {
+		return err
+	}
+	if err := SyncWorkspaceRoot(ctx, s.store, workspace, manifestValue); err != nil {
 		return err
 	}
 	return s.store.Audit(ctx, workspace, "checkpoint_restore", map[string]any{
@@ -554,6 +612,9 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 		}
 		return false, err
 	}
+	if err := SyncWorkspaceRoot(ctx, s.store, input.Workspace, input.Manifest); err != nil {
+		return false, err
+	}
 
 	if err := s.store.Audit(ctx, input.Workspace, "save", map[string]any{
 		"savepoint": input.CheckpointID,
@@ -650,6 +711,9 @@ func (s *Service) forkWorkspace(ctx context.Context, sourceWorkspace, newWorkspa
 		return err
 	}
 	if err := s.store.PutSavepoint(ctx, checkpointMeta, newManifest); err != nil {
+		return err
+	}
+	if err := SyncWorkspaceRoot(ctx, s.store, newWorkspace, newManifest); err != nil {
 		return err
 	}
 	return s.store.Audit(ctx, newWorkspace, "workspace_fork", map[string]any{
@@ -843,9 +907,10 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 	return workspaceSummary{
 		ID:               meta.Name,
 		Name:             meta.Name,
+		CloudAccount:     meta.CloudAccount,
 		DatabaseID:       meta.DatabaseID,
 		DatabaseName:     meta.DatabaseName,
-		RedisKey:         fmt.Sprintf("afs:%s", meta.Name),
+		RedisKey:         WorkspaceFSKey(meta.Name),
 		Status:           workspaceStatus(meta),
 		FileCount:        headMeta.FileCount,
 		FolderCount:      headMeta.DirCount,
@@ -958,6 +1023,9 @@ func createWorkspaceWithMetadata(ctx context.Context, cfg Config, store *Store, 
 		return err
 	}
 	if err := store.PutSavepoint(ctx, checkpointMeta, rootManifest); err != nil {
+		return err
+	}
+	if err := SyncWorkspaceRoot(ctx, store, workspace, rootManifest); err != nil {
 		return err
 	}
 	return store.Audit(ctx, workspace, "workspace_create", map[string]any{

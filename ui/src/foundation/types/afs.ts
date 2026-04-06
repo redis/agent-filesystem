@@ -109,6 +109,7 @@ export type AFSWorkspace = {
 export type AFSWorkspaceSummary = {
   id: string;
   name: string;
+  cloudAccount: string;
   databaseId: string;
   databaseName: string;
   redisKey: string;
@@ -145,6 +146,14 @@ export type CreateWorkspaceInput = {
   databaseName: string;
   region: string;
   source: AFSWorkspaceSource;
+};
+
+export type UpdateWorkspaceInput = {
+  workspaceId: string;
+  description: string;
+  cloudAccount: string;
+  databaseName: string;
+  region: string;
 };
 
 export type UpdateWorkspaceFileInput = {
