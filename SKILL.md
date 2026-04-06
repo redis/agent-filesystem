@@ -1,8 +1,8 @@
-# Redis Agent Filesystem
+# Agent Filesystem
 
-Redis Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
+Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
 
-**Why Redis Agent Filesystem:**
+**Why Agent Filesystem:**
 - **Persistence** — data survives process restarts via RDB/AOF
 - **Multi-client access** — any Redis client can read/write the same volume concurrently
 - **Atomic operations** — every FS.* command is atomic, no partial writes
@@ -15,23 +15,23 @@ Redis Agent Filesystem is a Redis module that provides a complete POSIX-like fil
 
 ```bash
 cd /home/ubuntu/git/agent-filesystem
-make          # builds module/fs.so + mount/agent-filesystem-mount + rfs
+make          # builds module/fs.so + mount/agent-filesystem-mount + afs
 make module   # builds only the Redis module (module/fs.so)
 make mount    # builds only the FUSE mount binary
-make cli      # builds only the rfs CLI
+make cli      # builds only the afs CLI
 ```
 
 ## CLI Commands
 
-The `rfs` binary is at the repo root after building.
+The `afs` binary is at the repo root after building.
 
 | Command | Description |
 |---------|-------------|
-| `rfs setup` | Interactive first-time wizard — saves config, starts services |
-| `rfs up` | Start services from saved config |
-| `rfs down` | Stop all services and unmount |
-| `rfs status` | Show current status |
-| `rfs migrate <dir>` | Import a directory into Redis, honoring `.rfsignore` if present |
+| `afs setup` | Interactive first-time wizard — saves config, starts services |
+| `afs up` | Start services from saved config |
+| `afs down` | Stop all services and unmount |
+| `afs status` | Show current status |
+| `afs migrate <dir>` | Import a directory into Redis, honoring `.afsignore` if present |
 
 Use `--config <path>` before any command to override the config file location:
 ```bash
@@ -64,8 +64,8 @@ cat > /home/ubuntu/git/agent-filesystem/afs.config.json << 'EOF'
   "redisServerBin": "",
   "modulePath": "",
   "mountBin": "",
-  "redisLog": "/tmp/rfs-redis.log",
-  "mountLog": "/tmp/rfs-mount.log"
+  "redisLog": "/tmp/afs-redis.log",
+  "mountLog": "/tmp/afs-mount.log"
 }
 EOF
 ```
@@ -102,8 +102,8 @@ File: `afs.config.json` (next to the `afs` binary in the repo root)
 | `redisServerBin` | string | auto | Path to `redis-server` (only used when `useExistingRedis` is `false`) |
 | `modulePath` | string | auto | Path to `fs.so` module |
 | `mountBin` | string | auto | Path to `agent-filesystem-mount` binary |
-| `redisLog` | string | `"/tmp/rfs-redis.log"` | Log file for managed Redis |
-| `mountLog` | string | `"/tmp/rfs-mount.log"` | Log file for mount daemon |
+| `redisLog` | string | `"/tmp/afs-redis.log"` | Log file for managed Redis |
+| `mountLog` | string | `"/tmp/afs-mount.log"` | Log file for mount daemon |
 
 ### Common config patterns
 
@@ -129,8 +129,8 @@ File: `afs.config.json` (next to the `afs` binary in the repo root)
 
 ## Runtime State
 
-- Config: `rfs.config.json` (repo root, next to the binary)
-- State: `~/.rfs/state.json` (runtime PIDs, created/removed automatically)
+- Config: `afs.config.json` (repo root, next to the binary)
+- State: `~/.afs/state.json` (runtime PIDs, created/removed automatically)
 
 ## FS.* Command Reference
 
@@ -140,7 +140,7 @@ Replace `vol` below with your chosen key name.
 
 ### Quick reference
 
-| Unix command | Redis Agent Filesystem equivalent | Notes |
+| Unix command | Agent Filesystem equivalent | Notes |
 |---|---|---|
 | `echo "text" > file` | `FS.ECHO vol /file "text"` | Creates parents automatically |
 | `echo "text" >> file` | `FS.ECHO vol /file "text" APPEND` | Also `FS.APPEND` |
@@ -231,7 +231,7 @@ redis-cli FS.TREE vol / DEPTH 2
 
 ## Bulk Import via redis-cli
 
-If you need to import files directly via `redis-cli` without the `rfs migrate` command:
+If you need to import files directly via `redis-cli` without the `afs migrate` command:
 
 ```bash
 cd /path/to/local/dir && find . -type f | while read -r f; do
@@ -248,7 +248,7 @@ cd /path/to/local/dir && find . -type f | while read -r f; do
 done
 ```
 
-Or use `rfs migrate <dir>` which handles import, archiving, and mounting in one step. If the source directory contains a `.rfsignore`, matching files and directories are skipped using `.gitignore`-style patterns.
+Or use `afs migrate <dir>` which handles import, archiving, and mounting in one step. If the source directory contains a `.afsignore`, matching files and directories are skipped using `.gitignore`-style patterns.
 
 ## Volume Management
 
@@ -276,9 +276,9 @@ redis-cli RENAME staging production   # rename a volume
 
 | Problem | Solution |
 |---------|----------|
-| `no configuration found` | Run `rfs setup` or create `rfs.config.json` next to the binary |
+| `no configuration found` | Run `afs setup` or create `afs.config.json` next to the binary |
 | `module not loaded` | Load with: `redis-cli MODULE LOAD /path/to/module/fs.so` |
 | `cannot find redis-server` | Install Redis, or set `useExistingRedis: true` |
 | `cannot find agent-filesystem-mount` | Run `make mount` in the repo root |
 | `mount did not become ready` | Check `mountLog` path for errors |
-| `agent-filesystem is already running` | Run `rfs down` first |
+| `agent-filesystem is already running` | Run `afs down` first |

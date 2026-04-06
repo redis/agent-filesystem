@@ -292,9 +292,9 @@ func TestCmdWorkspaceUseAndCurrentManageSelectionOutsideConfigCommand(t *testing
 	cfg.MountBackend = mountBackendNone
 	saveTempConfig(t, cfg)
 
-	loadedCfg, store, closeStore, err := openRAFStore(context.Background())
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
-		t.Fatalf("openRAFStore() returned error: %v", err)
+		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
 	defer closeStore()
 	if err := createEmptyWorkspace(context.Background(), loadedCfg, store, "demo"); err != nil {

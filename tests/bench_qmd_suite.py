@@ -16,7 +16,7 @@ Example:
   python3 tests/bench_qmd_suite.py \
     --redis-key ttt \
     --redis-mount /Users/me/ttt \
-    --local-root /tmp/rfs-local-bench \
+    --local-root /tmp/afs-local-bench \
     --files 2000 \
     --rounds 5
 """
@@ -695,7 +695,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="agent-filesystem vs local filesystem benchmark suite")
     p.add_argument("--redis-key", required=True, help="agent-filesystem key name")
     p.add_argument("--redis-mount", required=True, help="mounted agent-filesystem path")
-    p.add_argument("--local-root", default="/tmp/rfs-local-bench", help="root for local benchmark corpus")
+    p.add_argument("--local-root", default="/tmp/afs-local-bench", help="root for local benchmark corpus")
     p.add_argument("--addr", default="127.0.0.1:6379", help="Redis host:port")
     p.add_argument("--db", type=int, default=0, help="Redis DB")
     p.add_argument("--password", default="", help="Redis password")
@@ -787,7 +787,7 @@ def main() -> None:
     mount_read_med, mount_read_max = timed(lambda: read_docs(redis_bench_root, docs), args.rounds)
 
     print("Running direct Redis command benchmarks...")
-    with tempfile.TemporaryDirectory(prefix="rfs-bench-") as td:
+    with tempfile.TemporaryDirectory(prefix="afs-bench-") as td:
         td_path = Path(td)
         hget_file = td_path / "hget.pipe"
         hset_file = td_path / "hset.pipe"

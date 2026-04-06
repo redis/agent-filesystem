@@ -53,7 +53,7 @@ func (f *fakeImportClient) Utimens(_ context.Context, path string, _, _ int64) e
 	return nil
 }
 
-func TestImportDirectoryRespectsRAFIgnore(t *testing.T) {
+func TestImportDirectoryRespectsAFSIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
 
 	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\nworktrees/\n*.log\n!logs/keep.log\n")
@@ -155,7 +155,7 @@ func TestImportDirectoryImportsIncludedPathsAndSkipsIgnoredOnes(t *testing.T) {
 	}
 }
 
-func TestLoadMigrationIgnoreFallsBackToLegacyRFSIgnore(t *testing.T) {
+func TestLoadMigrationIgnoreFallsBackToLegacyOriginalIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
 	writeTestFile(t, filepath.Join(sourceDir, ".rfsignore"), "cache/\n")
 
@@ -174,7 +174,7 @@ func TestLoadMigrationIgnoreFallsBackToLegacyRFSIgnore(t *testing.T) {
 	}
 }
 
-func TestLoadMigrationIgnorePrefersRAFIgnore(t *testing.T) {
+func TestLoadMigrationIgnorePrefersAFSIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
 	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\n")
 	writeTestFile(t, filepath.Join(sourceDir, ".rfsignore"), "logs/\n")

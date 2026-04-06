@@ -16,9 +16,9 @@ The AFS product surfaces inside that frame are custom:
 
 Current state:
 
-- frontend-only demo backed by a local in-browser store
+- demo-by-default with optional local HTTP control plane mode
 - Redis Cloud alignment through Redis UI primitives and layout shell
-- clean seams for replacing the demo store with real AFS APIs later
+- clean seams for switching between the demo store and real AFS APIs
 
 ## Commands
 
@@ -27,4 +27,17 @@ npm install
 npm run dev
 npm run build
 npm run test
+```
+
+To run the UI against the local AFS control plane from the repo root:
+
+```bash
+./afs setup   # once, if afs.config.json does not exist yet
+make web-dev
+```
+
+Or run just the UI against an already-running control plane:
+
+```bash
+VITE_AFS_API_BASE_URL=http://127.0.0.1:8091 npm run dev
 ```

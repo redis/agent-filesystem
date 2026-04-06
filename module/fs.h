@@ -6,8 +6,8 @@
  * of absolute paths to inodes.
  */
 
-#ifndef REDIS_FS_H
-#define REDIS_FS_H
+#ifndef AFS_FS_H
+#define AFS_FS_H
 
 /* POSIX feature test macros — must come before any system headers. */
 #define _POSIX_C_SOURCE 200809L
@@ -129,4 +129,4 @@ void FSFree(void *value);
 size_t FSMemUsage(const void *value);
 void FSDigest(RedisModuleDigest *md, void *value);
 
-#endif /* REDIS_FS_H */
+#endif /* AFS_FS_H */

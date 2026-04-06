@@ -97,7 +97,7 @@ func printBanner() {
 	if !colorTerm {
 		fmt.Println()
 		fmt.Println("  AFS")
-		fmt.Println("  Redis Agent Filesystem")
+		fmt.Println("  Agent Filesystem")
 		fmt.Println()
 		return
 	}
@@ -115,7 +115,7 @@ func printBanner() {
 		"",
 		bar,
 		centerBannerText(clr(ansiBold+ansiWhite, "AFS")),
-		centerBannerText(clr(ansiDim, "Redis Agent Filesystem")),
+		centerBannerText(clr(ansiDim, "Agent Filesystem")),
 		bar,
 		"",
 	}
@@ -132,7 +132,7 @@ func printBannerCompact() {
 	if !colorTerm {
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "  AFS")
-		fmt.Fprintln(os.Stderr, "  Redis Agent Filesystem")
+		fmt.Fprintln(os.Stderr, "  Agent Filesystem")
 		fmt.Fprintln(os.Stderr)
 		return
 	}
@@ -146,7 +146,7 @@ func printBannerCompact() {
 	fmt.Fprintf(os.Stderr, "\n%s%s\n%s\n%s\n%s%s\n\n",
 		bannerIndent, bar,
 		centerBannerTextForOutput(os.Stderr, clr(ansiBold+ansiWhite, "AFS")),
-		centerBannerTextForOutput(os.Stderr, clr(ansiDim, "Redis Agent Filesystem")),
+		centerBannerTextForOutput(os.Stderr, clr(ansiDim, "Agent Filesystem")),
 		bannerIndent, bar)
 }
 

@@ -33,13 +33,13 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
-	loadedCfg, store, closeStore, err := openRAFStore(context.Background())
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
-		t.Fatalf("openRAFStore() returned error: %v", err)
+		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
 	defer closeStore()
 
-	treePath := rafWorkspaceTreePath(loadedCfg, "repo")
+	treePath := afsWorkspaceTreePath(loadedCfg, "repo")
 	if _, err := os.Stat(filepath.Join(treePath, "main.go")); err != nil {
 		t.Fatalf("expected opened workspace tree to exist: %v", err)
 	}
@@ -133,11 +133,11 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
-	loadedCfg, _, _, err := openRAFStore(context.Background())
+	loadedCfg, _, _, err := openAFSStore(context.Background())
 	if err != nil {
-		t.Fatalf("openRAFStore() returned error: %v", err)
+		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
-	treePath := rafWorkspaceTreePath(loadedCfg, "repo")
+	treePath := afsWorkspaceTreePath(loadedCfg, "repo")
 	targetFile := filepath.Join(treePath, "main.go")
 
 	if err := os.WriteFile(targetFile, []byte("package updated\n"), 0o644); err != nil {

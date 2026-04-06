@@ -3,9 +3,9 @@ name: agent-filesystem
 description: Persistent filesystem storage in Redis for agent memories, documents, state, and tasks. NOT for binaries or executables. Use via MCP tools, Python library, or redis-cli.
 ---
 
-# Redis Agent Filesystem: Distributed Filesystem for Agents
+# Agent Filesystem: Distributed Filesystem for Agents
 
-Redis Agent Filesystem provides persistent, distributed filesystem storage backed by Redis. One Redis key = one filesystem volume.
+Agent Filesystem provides persistent, distributed filesystem storage backed by Redis. One Redis key = one filesystem volume.
 
 ## When to Use This Skill
 

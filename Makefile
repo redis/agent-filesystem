@@ -1,7 +1,16 @@
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+NPM ?= npm
+UI_DIR ?= ui
+WEB_DEV_SCRIPT := scripts/web-dev.sh
+UI_NODE_MODULES := $(UI_DIR)/node_modules
+AFS_WEB_SERVER_ADDR ?= 127.0.0.1:8091
+AFS_WEB_ALLOW_ORIGIN ?= *
+AFS_WEB_API_BASE_URL ?= http://127.0.0.1:8091
+AFS_WEB_UI_HOST ?= 127.0.0.1
+AFS_WEB_UI_PORT ?= 5173
 
-.PHONY: all module mount cli clean test install uninstall install-skill install-skill-local uninstall-skill-local mcp-up mcp-down mcp-logs install-mcp-auggie uninstall-mcp-auggie
+.PHONY: all module mount cli clean test install uninstall install-skill install-skill-local uninstall-skill-local mcp-up mcp-down mcp-logs install-mcp-auggie uninstall-mcp-auggie web-install web-server web-ui web-dev
 
 all: module mount cli
 
@@ -32,6 +41,28 @@ clean:
 test: module
 	$(MAKE) -C module test
 
+$(UI_NODE_MODULES):
+	cd "$(UI_DIR)" && $(NPM) install
+
+web-install: $(UI_NODE_MODULES)
+
+web-server: cli
+	./afs-server --listen "$(AFS_WEB_SERVER_ADDR)" --allow-origin "$(AFS_WEB_ALLOW_ORIGIN)"
+
+web-ui: $(UI_NODE_MODULES)
+	cd "$(UI_DIR)" && VITE_AFS_API_BASE_URL="$(AFS_WEB_API_BASE_URL)" $(NPM) run dev -- --host "$(AFS_WEB_UI_HOST)" --port "$(AFS_WEB_UI_PORT)"
+
+web-dev: cli $(UI_NODE_MODULES)
+	@AFS_WEB_SERVER_BIN="$(PWD)/afs-server" \
+	AFS_WEB_SERVER_ADDR="$(AFS_WEB_SERVER_ADDR)" \
+	AFS_WEB_ALLOW_ORIGIN="$(AFS_WEB_ALLOW_ORIGIN)" \
+	AFS_WEB_API_BASE_URL="$(AFS_WEB_API_BASE_URL)" \
+	AFS_WEB_UI_DIR="$(PWD)/$(UI_DIR)" \
+	AFS_WEB_UI_HOST="$(AFS_WEB_UI_HOST)" \
+	AFS_WEB_UI_PORT="$(AFS_WEB_UI_PORT)" \
+	AFS_WEB_NPM_BIN="$(NPM)" \
+	"$(PWD)/$(WEB_DEV_SCRIPT)"
+
 # Install skill to all detected agents (requires Node.js/npx)
 install-skill:
 	@echo "Installing agent-filesystem skill to all detected agents..."
@@ -52,7 +83,7 @@ uninstall-skill-local:
 mcp-up:
 	docker-compose up -d --build
 	@echo ""
-	@echo "Redis Agent Filesystem MCP server running at http://localhost:8089/sse"
+	@echo "Agent Filesystem MCP server running at http://localhost:8089/sse"
 	@echo "Health check: http://localhost:8089/health"
 	@echo ""
 	@echo "To add to Auggie, run: make install-mcp-auggie"

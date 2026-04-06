@@ -1,8 +1,8 @@
-# Redis Agent Filesystem
+# Agent Filesystem
 
-Redis Agent Filesystem, or AFS, gives agents a filesystem-shaped way to work with data, without being trapped in one machine's local disk.
+Agent Filesystem, or AFS, gives agents a filesystem-shaped way to work with data, without being trapped in one machine's local disk.
 
-The name is an explicit nod to the original Andrew File System (AFS): a shared filesystem built for distributed work. Redis Agent Filesystem borrows that shared-filesystem inspiration and adapts it for agents, with Redis as the persistence and coordination layer.
+The name is an explicit nod to the original Andrew File System (AFS): a shared filesystem built for distributed work. Agent Filesystem borrows that shared-filesystem inspiration and adapts it for agents, with Redis as the persistence and coordination layer.
 
 Filesystems are a great interface for agents because they already know how to read files, write files, search trees, run tools, and work in directories. But ordinary local filesystems have a few problems for agent workflows:
 
@@ -25,7 +25,37 @@ If you want the short version, AFS is:
 - backed by Redis
 - with real directories for real tools
 
+## Why AFS Instead of the Usual Tools
+
+AFS is not trying to replace every mature filesystem or version-control tool.
+
+If you need one shared live POSIX tree, use NFS, EFS, CephFS, NetApp, or another standard shared filesystem.
+
+If you only need source-code branching and merging, use Git and `git worktree`.
+
+If all work stays on one machine, local disk plus ZFS or Btrfs snapshots is simpler.
+
+AFS exists for a different shape of problem: agent workspaces that should feel like a normal directory, while also being easy to checkpoint, restore, fork, and move between machines.
+
+| If you need... | The usual good answer | Why AFS is different |
+| --- | --- | --- |
+| one shared live tree | NFS, EFS, CephFS, NetApp, SMB | AFS can expose a shared mount, but the main point is not the mount. The main point is a workspace model with checkpoints and forks. |
+| source-code branching | Git branches and `git worktree` | AFS is for whole workspaces, not just committed source. Notes, generated files, prompts, logs, scratch state, and code can all live in one workspace timeline. |
+| point-in-time rollback on one machine | ZFS or Btrfs snapshots | AFS gives you similar checkpoint and fork ideas, but with a remote saved source of truth that is not tied to one machine. |
+| normal local execution plus remote saved state | a hand-rolled sync or cache layer | AFS makes that model explicit: save state in Redis, mount or materialize locally, run real tools, checkpoint when ready. |
+
+Choose something else when:
+
+- you need the strongest possible POSIX fidelity and multi-writer behavior across many clients
+- you mostly want a shared NAS for humans or services, not an agent workspace model
+- you only need Git-style branching for source code
+- you mostly store large binaries, media, or build artifacts
+
 ## Why Redis
+
+Redis is not the reason to use AFS. The reason to use AFS is the workspace model above.
+
+Redis is the canonical store because it gives AFS a simple remote source of truth for workspace state, checkpoints, manifests, blobs, and metadata, while still letting agents work through normal local directories and mounts.
 
 Local filesystems are already fast. AFS uses Redis so you can keep a remote, checkpointable, forkable source of truth without paying a huge performance penalty when you mount it locally.
 
@@ -46,7 +76,7 @@ The important pattern is:
 - search stays in the same low-millisecond range
 - writes and renames are slower than local disk, but still stay in low single-digit milliseconds
 
-So AFS is not trying to beat your local SSD. It is trying to give you a remote filesystem with enough performance that normal tools still feel normal.
+So AFS is not trying to beat your local SSD, and it is not trying to out-POSIX mature shared filesystems. It is trying to give you a remote, checkpointable, forkable workspace with enough performance that normal tools still feel normal.
 
 ## 60-Second Quick Start
 
@@ -209,7 +239,7 @@ Notes:
 
 - `.afsignore` is only used when importing a directory into AFS
 - the `.afsignore` file itself is imported too, so the workspace keeps its own import rules
-- legacy `.rafignore` and `.rfsignore` files are still accepted, but `.afsignore` is the preferred name
+- legacy `.rfsignore` files are still accepted, but `.afsignore` is the preferred name
 
 ## What Gets Stored Where
 
@@ -250,8 +280,42 @@ Other build targets:
 ```bash
 make module
 make mount
+make web-install
+make web-server
+make web-ui
+make web-dev
 make clean
 make uninstall
+```
+
+## Web UI Dev
+
+To run the local control plane and web UI together:
+
+```bash
+./afs setup        # once, if afs.config.json does not exist yet
+make web-dev
+```
+
+That target:
+
+- builds `afs-server`
+- installs UI dependencies if `ui/node_modules` is missing
+- starts `afs-server` on `http://127.0.0.1:8091`
+- starts the Vite dev server on `http://127.0.0.1:5173`
+- wires the UI to the control plane with `VITE_AFS_API_BASE_URL`
+
+If you want to run the pieces separately:
+
+```bash
+make web-server
+make web-ui
+```
+
+You can override the defaults at invocation time:
+
+```bash
+make web-dev AFS_WEB_SERVER_ADDR=127.0.0.1:9001 AFS_WEB_API_BASE_URL=http://127.0.0.1:9001 AFS_WEB_UI_PORT=4173
 ```
 
 ## Alternative: `workspace run`
