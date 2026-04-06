@@ -13,13 +13,13 @@ import {
   TextArea,
   TextInput,
   TwoColumnFields,
-} from "../components/raf-kit";
+} from "../components/afs-kit";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
 import {
   useCreateWorkspaceMutation,
   useWorkspaceSummaries,
-} from "../foundation/hooks/use-raf";
-import type { RAFWorkspaceSource } from "../foundation/types/raf";
+} from "../foundation/hooks/use-afs";
+import type { AFSWorkspaceSource } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
@@ -34,7 +34,7 @@ function WorkspacesPage() {
   const [cloudAccount, setCloudAccount] = useState("Redis Cloud / Product");
   const [databaseName, setDatabaseName] = useState("agentfs-dev-us-east-1");
   const [region, setRegion] = useState("us-east-1");
-  const [source, setSource] = useState<RAFWorkspaceSource>("blank");
+  const [source, setSource] = useState<AFSWorkspaceSource>("blank");
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -130,7 +130,7 @@ function WorkspacesPage() {
               Source
               <Select
                 value={source}
-                onChange={(event) => setSource(event.target.value as RAFWorkspaceSource)}
+                onChange={(event) => setSource(event.target.value as AFSWorkspaceSource)}
               >
                 <option value="blank">Blank workspace</option>
                 <option value="git-import">Git import</option>

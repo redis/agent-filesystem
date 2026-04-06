@@ -32,7 +32,7 @@ CLI coverage exists under `cli/`; run `cd cli && go test ./...` for automated ch
 
 ## Architecture
 
-Redis Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
+Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
 
 ### Data Model
 

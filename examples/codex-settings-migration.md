@@ -1,6 +1,6 @@
-# Share Codex State Across Computers with Redis Agent Filesystem
+# Share Codex State Across Computers with Agent Filesystem
 
-This guide shows how to put `~/.codex` into Redis Agent Filesystem on one computer, then mount that same shared state on other computers so Codex keeps the same memory and settings everywhere.
+This guide shows how to put `~/.codex` into Agent Filesystem on one computer, then mount that same shared state on other computers so Codex keeps the same memory and settings everywhere.
 
 Use this when:
 
@@ -41,7 +41,7 @@ Because `.afsignore` uses `.gitignore`-style rules, you can also re-include a sp
 
 ## Machine 1: import the existing `~/.codex`
 
-Build Redis Agent Filesystem:
+Build Agent Filesystem:
 
 ```bash
 cd /path/to/agent-filesystem

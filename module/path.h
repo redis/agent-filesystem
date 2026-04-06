@@ -6,8 +6,8 @@
  * using RedisModule_Free().
  */
 
-#ifndef REDIS_FS_PATH_H
-#define REDIS_FS_PATH_H
+#ifndef AFS_PATH_H
+#define AFS_PATH_H
 
 #include <stddef.h>
 
@@ -38,4 +38,4 @@ int fsGlobMatch(const char *pattern, const char *string);
 /* Match a pattern against a string, case-insensitive. */
 int fsGlobMatchNoCase(const char *pattern, const char *string);
 
-#endif /* REDIS_FS_PATH_H */
+#endif /* AFS_PATH_H */

@@ -758,7 +758,7 @@ func main() {
 	tag := fmt.Sprintf("bench-%s", time.Now().Format("20060102-150405"))
 
 	// Create local temp corpus.
-	localRoot, err := os.MkdirTemp("", "rfs-bench-local-")
+	localRoot, err := os.MkdirTemp("", "afs-bench-local-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mkdirtemp:", err)
 		os.Exit(1)

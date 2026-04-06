@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	rafIgnoreFilename       = ".afsignore"
-	legacyRAFIgnoreFilename = ".rafignore"
-	legacyRFSIgnoreFilename = ".rfsignore"
+	afsIgnoreFilename            = ".afsignore"
+	legacyOriginalIgnoreFilename = ".rfsignore"
 )
 
 type migrationIgnore struct {
@@ -28,9 +27,8 @@ func loadMigrationIgnore(sourceDir string) (*migrationIgnore, error) {
 		filename string
 		legacy   bool
 	}{
-		{filename: rafIgnoreFilename},
-		{filename: legacyRAFIgnoreFilename, legacy: true},
-		{filename: legacyRFSIgnoreFilename, legacy: true},
+		{filename: afsIgnoreFilename},
+		{filename: legacyOriginalIgnoreFilename, legacy: true},
 	}
 	for _, candidate := range candidates {
 		ignorePath := filepath.Join(sourceDir, candidate.filename)

@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/cli/internal/controlplane"
 )
 
 const (
-	rafInitialCheckpointName = "initial"
+	afsInitialCheckpointName = "initial"
 )
 
 func cloneManifest(source manifest) manifest {
@@ -88,87 +88,38 @@ func cmdWorkspaceCreate(args []string) error {
 	}
 
 	workspace := args[2]
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
 	ctx := context.Background()
-	exists, err := store.workspaceExists(ctx, workspace)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("workspace %q already exists", workspace)
-	}
-
 	if err := createEmptyWorkspace(ctx, cfg, store, workspace); err != nil {
 		return err
 	}
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace created"), []boxRow{
 		{Label: "workspace", Value: workspace},
-		{Label: "checkpoint", Value: rafInitialCheckpointName},
+		{Label: "checkpoint", Value: afsInitialCheckpointName},
 		{Label: "run", Value: filepath.Base(os.Args[0]) + " workspace run " + workspace + " -- /bin/sh"},
 	})
 	return nil
 }
 
-func createEmptyWorkspace(ctx context.Context, cfg config, store *rafStore, workspace string) error {
-	now := time.Now().UTC()
-
-	rootManifest := manifest{
-		Version:   rafFormatVersion,
-		Workspace: workspace,
-		Savepoint: rafInitialCheckpointName,
-		Entries: map[string]manifestEntry{
-			"/": {
-				Type:    "dir",
-				Mode:    0o755,
-				MtimeMs: now.UnixMilli(),
-				Size:    0,
-			},
+func createEmptyWorkspace(ctx context.Context, cfg config, store *afsStore, workspace string) error {
+	service := controlPlaneServiceFromStore(cfg, store)
+	_, err := service.CreateWorkspace(ctx, controlplane.CreateWorkspaceRequest{
+		Name: workspace,
+		Source: controlplane.SourceRef{
+			Kind: controlplane.SourceBlank,
 		},
-	}
-	manifestHash, err := hashManifest(rootManifest)
-	if err != nil {
-		return err
-	}
-
-	workspaceMeta := workspaceMeta{
-		Version:          rafFormatVersion,
-		Name:             workspace,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		HeadSavepoint:    rafInitialCheckpointName,
-		DefaultSavepoint: rafInitialCheckpointName,
-	}
-	checkpointMeta := savepointMeta{
-		Version:      rafFormatVersion,
-		ID:           rafInitialCheckpointName,
-		Name:         rafInitialCheckpointName,
-		Workspace:    workspace,
-		ManifestHash: manifestHash,
-		CreatedAt:    now,
-		FileCount:    0,
-		DirCount:     0,
-		TotalBytes:   0,
-	}
-
-	if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
-		return err
-	}
-	if err := store.putSavepoint(ctx, checkpointMeta, rootManifest); err != nil {
-		return err
-	}
-	return store.audit(ctx, workspace, "workspace_create", map[string]any{
-		"checkpoint": rafInitialCheckpointName,
 	})
+	return err
 }
 
 func cmdWorkspaceList(args []string) error {
@@ -180,27 +131,24 @@ func cmdWorkspaceList(args []string) error {
 		return fmt.Errorf("%s", workspaceListUsageText(filepath.Base(os.Args[0])))
 	}
 
-	_, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
+	service := controlPlaneServiceFromStore(cfg, store)
 	ctx := context.Background()
-	workspaces, err := store.listWorkspaces(ctx)
+	workspaces, err := service.ListWorkspaceSummaries(ctx)
 	if err != nil {
 		return err
 	}
 
-	rows := make([]boxRow, 0, len(workspaces))
-	for _, meta := range workspaces {
-		checkpoints, err := store.listSavepoints(ctx, meta.Name, 0)
-		if err != nil {
-			return err
-		}
+	rows := make([]boxRow, 0, len(workspaces.Items))
+	for _, meta := range workspaces.Items {
 		rows = append(rows, boxRow{
 			Label: meta.Name,
-			Value: fmt.Sprintf("%d checkpoints · created %s", len(checkpoints), meta.CreatedAt.Local().Format(time.RFC3339)),
+			Value: fmt.Sprintf("%d checkpoints · updated %s", meta.CheckpointCount, meta.UpdatedAt),
 		})
 	}
 	if len(rows) == 0 {
@@ -243,11 +191,11 @@ func cmdWorkspaceUse(args []string) error {
 	}
 
 	workspace := strings.TrimSpace(args[2])
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
@@ -281,7 +229,7 @@ func cmdWorkspaceRun(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceRunUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	parsed, childArgs, err := parseRAFCommandInvocation(args[2:])
+	parsed, childArgs, err := parseAFSCommandInvocation(args[2:])
 	if err != nil {
 		return err
 	}
@@ -289,7 +237,7 @@ func cmdWorkspaceRun(args []string) error {
 		return fmt.Errorf("%s", workspaceRunUsageText(filepath.Base(os.Args[0])))
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
@@ -303,12 +251,12 @@ func cmdWorkspaceRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	if err := runRAFCommand(context.Background(), cfg, store, workspace, childArgs, parsed.readonly); err != nil {
-		if errors.Is(err, errRAFWorkspaceConflict) {
+	if err := runAFSCommand(context.Background(), cfg, store, workspace, childArgs, parsed.readonly); err != nil {
+		if errors.Is(err, errAFSWorkspaceConflict) {
 			return fmt.Errorf("workspace %q moved since this working copy was materialized; inspect it before running again", workspace)
 		}
 		return err
@@ -326,28 +274,26 @@ func cmdWorkspaceDelete(args []string) error {
 	}
 	names := args[2:]
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
 	ctx := context.Background()
+	service := controlPlaneServiceFromStore(cfg, store)
 	deleted := make([]string, 0, len(names))
 	for _, name := range names {
-		if err := validateRAFName("workspace", name); err != nil {
+		if err := validateAFSName("workspace", name); err != nil {
 			return err
-		}
-		exists, err := store.workspaceExists(ctx, name)
-		if err != nil {
-			return err
-		}
-		if !exists {
-			return fmt.Errorf("workspace %q does not exist", name)
 		}
 
 		step := startStep("Deleting workspace " + name)
-		if err := store.deleteWorkspace(ctx, name); err != nil {
+		if err := service.DeleteWorkspace(ctx, name); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				step.fail("does not exist")
+				return fmt.Errorf("workspace %q does not exist", name)
+			}
 			step.fail(err.Error())
 			return err
 		}
@@ -378,11 +324,11 @@ func cmdWorkspaceClone(args []string) error {
 	}
 	workspace := args[2]
 	targetDir := args[3]
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	cfg, _, _, err := openRAFStore(context.Background())
+	cfg, _, _, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
@@ -440,28 +386,22 @@ func cmdWorkspaceFork(args []string) error {
 	}
 	sourceWorkspace := args[2]
 	newWorkspace := args[3]
-	if err := validateRAFName("workspace", sourceWorkspace); err != nil {
+	if err := validateAFSName("workspace", sourceWorkspace); err != nil {
 		return err
 	}
-	if err := validateRAFName("workspace", newWorkspace); err != nil {
+	if err := validateAFSName("workspace", newWorkspace); err != nil {
 		return err
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
 	ctx := context.Background()
-	exists, err := store.workspaceExists(ctx, newWorkspace)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return fmt.Errorf("workspace %q already exists", newWorkspace)
-	}
-	if err := forkWorkspace(ctx, cfg, store, sourceWorkspace, newWorkspace); err != nil {
+	service := controlPlaneServiceFromStore(cfg, store)
+	if err := service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace); err != nil {
 		return err
 	}
 
@@ -471,73 +411,6 @@ func cmdWorkspaceFork(args []string) error {
 		{Label: "run", Value: filepath.Base(os.Args[0]) + " workspace run " + newWorkspace + " -- /bin/sh"},
 	})
 	return nil
-}
-
-func forkWorkspace(ctx context.Context, cfg config, store *rafStore, sourceWorkspace, newWorkspace string) error {
-	sourceMeta, err := store.getWorkspaceMeta(ctx, sourceWorkspace)
-	if err != nil {
-		return err
-	}
-	sourceManifest, err := store.getManifest(ctx, sourceWorkspace, sourceMeta.HeadSavepoint)
-	if err != nil {
-		return err
-	}
-
-	now := time.Now().UTC()
-	newManifest := cloneManifest(sourceManifest)
-	newManifest.Workspace = newWorkspace
-	newManifest.Savepoint = rafInitialCheckpointName
-	manifestHash, err := hashManifest(newManifest)
-	if err != nil {
-		return err
-	}
-
-	blobs := map[string][]byte{}
-	for blobID := range manifestBlobRefs(sourceManifest) {
-		data, err := store.getBlob(ctx, sourceWorkspace, blobID)
-		if err != nil {
-			return err
-		}
-		blobs[blobID] = data
-	}
-	if err := store.saveBlobs(ctx, newWorkspace, blobs); err != nil {
-		return err
-	}
-	if err := store.addBlobRefs(ctx, newWorkspace, newManifest, now); err != nil {
-		return err
-	}
-
-	stats := manifestImportStats(newManifest)
-	workspaceMeta := workspaceMeta{
-		Version:          rafFormatVersion,
-		Name:             newWorkspace,
-		CreatedAt:        now,
-		UpdatedAt:        now,
-		HeadSavepoint:    rafInitialCheckpointName,
-		DefaultSavepoint: rafInitialCheckpointName,
-	}
-	checkpointMeta := savepointMeta{
-		Version:      rafFormatVersion,
-		ID:           rafInitialCheckpointName,
-		Name:         rafInitialCheckpointName,
-		Workspace:    newWorkspace,
-		ManifestHash: manifestHash,
-		CreatedAt:    now,
-		FileCount:    stats.Files,
-		DirCount:     stats.Dirs,
-		TotalBytes:   stats.Bytes,
-	}
-
-	if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
-		return err
-	}
-	if err := store.putSavepoint(ctx, checkpointMeta, newManifest); err != nil {
-		return err
-	}
-	return store.audit(ctx, newWorkspace, "workspace_fork", map[string]any{
-		"source_workspace":  sourceWorkspace,
-		"source_checkpoint": sourceMeta.HeadSavepoint,
-	})
 }
 
 func cmdWorkspaceImport(args []string) error {
@@ -571,7 +444,7 @@ func cmdWorkspaceImport(args []string) error {
 }
 
 func cloneWorkspaceAtSource(workspace, sourceDir string) error {
-	cfg, _, _, err := openRAFStore(context.Background())
+	cfg, _, _, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
@@ -612,7 +485,7 @@ func cloneWorkspaceAtSource(workspace, sourceDir string) error {
 }
 
 func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
-	_, store, closeStore, err := openRAFStore(ctx)
+	_, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
 	}
@@ -629,7 +502,7 @@ func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targ
 	return materializeManifestToPath(ctx, store, workspace, m, targetDir)
 }
 
-func materializeManifestToPath(ctx context.Context, store *rafStore, workspace string, m manifest, targetDir string) error {
+func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
 	targetDir, err := expandPath(targetDir)
 	if err != nil {
 		return err
@@ -649,17 +522,18 @@ func cmdCheckpointList(args []string) error {
 		return fmt.Errorf("%s", checkpointListUsageText(filepath.Base(os.Args[0])))
 	}
 	workspace := args[2]
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	_, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	checkpoints, err := store.listSavepoints(context.Background(), workspace, 100)
+	service := controlPlaneServiceFromStore(cfg, store)
+	checkpoints, err := service.ListCheckpoints(context.Background(), workspace, 100)
 	if err != nil {
 		return err
 	}
@@ -667,7 +541,7 @@ func cmdCheckpointList(args []string) error {
 	for _, meta := range checkpoints {
 		rows = append(rows, boxRow{
 			Label: meta.Name,
-			Value: fmt.Sprintf("%s · %s", meta.CreatedAt.Local().Format(time.RFC3339), formatBytes(meta.TotalBytes)),
+			Value: fmt.Sprintf("%s · %s", meta.CreatedAt, formatBytes(meta.TotalBytes)),
 		})
 	}
 	if len(rows) == 0 {
@@ -690,20 +564,20 @@ func cmdCheckpointCreate(args []string) error {
 	if len(args) == 4 {
 		checkpointID = args[3]
 	}
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
-	if err := validateRAFName("checkpoint", checkpointID); err != nil {
+	if err := validateAFSName("checkpoint", checkpointID); err != nil {
 		return err
 	}
 
-	cfg, store, closeStore, err := openRAFStore(context.Background())
+	cfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	saved, err := saveRAFWorkspace(context.Background(), cfg, store, workspace, checkpointID, false)
+	saved, err := saveAFSWorkspace(context.Background(), cfg, store, workspace, checkpointID, false)
 	if err != nil {
 		return err
 	}
@@ -729,10 +603,10 @@ func cmdCheckpointRestore(args []string) error {
 	}
 	workspace := args[2]
 	checkpointID := args[3]
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
-	if err := validateRAFName("checkpoint", checkpointID); err != nil {
+	if err := validateAFSName("checkpoint", checkpointID); err != nil {
 		return err
 	}
 
@@ -740,32 +614,21 @@ func cmdCheckpointRestore(args []string) error {
 }
 
 func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
-	cfg, store, closeStore, err := openRAFStore(ctx)
+	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	exists, err := store.savepointExists(ctx, workspace, checkpointID)
+	service := controlPlaneServiceFromStore(cfg, store)
+	resetResult, err := resetAFSWorkspaceHead(ctx, cfg, store, service, workspace, checkpointID)
 	if err != nil {
-		return err
-	}
-	if !exists {
-		return fmt.Errorf("checkpoint %q does not exist", checkpointID)
-	}
-
-	resetResult, err := resetRAFWorkspaceHead(ctx, cfg, store, workspace, checkpointID)
-	if err != nil {
-		if err == redis.TxFailedErr || errors.Is(err, errRAFWorkspaceConflict) {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("checkpoint %q does not exist", checkpointID)
+		}
+		if err == redis.TxFailedErr || errors.Is(err, errAFSWorkspaceConflict) {
 			return fmt.Errorf("checkpoint restore conflict while restoring %q", checkpointID)
 		}
-		return err
-	}
-
-	if err := store.audit(ctx, workspace, "checkpoint_restore", map[string]any{
-		"checkpoint": checkpointID,
-		"archive":    resetResult.archivePath,
-	}); err != nil {
 		return err
 	}
 

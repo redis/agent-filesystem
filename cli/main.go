@@ -477,7 +477,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		if workspace == "" {
 			return "", fmt.Errorf("workspace name cannot be empty when enabling a mounted filesystem")
 		}
-		if err := validateRAFName("workspace", workspace); err != nil {
+		if err := validateAFSName("workspace", workspace); err != nil {
 			return "", err
 		}
 		cfg.CurrentWorkspace = workspace
@@ -579,7 +579,7 @@ func cleanupStaleMount(cfg config) error {
 	if !mounted {
 		return nil
 	}
-	if !isRedisFSMountEntry(entry) {
+	if !isAFSMountEntry(entry) {
 		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", cfg.Mountpoint, entry)
 	}
 
@@ -597,7 +597,7 @@ func cleanupStaleMount(cfg config) error {
 	return nil
 }
 
-func isRedisFSMountEntry(entry string) bool {
+func isAFSMountEntry(entry string) bool {
 	v := strings.ToLower(entry)
 	return strings.Contains(v, "fuse.agent-filesystem") || strings.Contains(v, "agent-filesystem on ") || strings.Contains(v, " agent-filesystem ")
 }
@@ -652,7 +652,7 @@ func cmdDown() error {
 
 		expectedHead := strings.TrimSpace(st.MountedHeadSavepoint)
 		if expectedHead == "" {
-			store := newRAFStore(rdb)
+			store := newAFSStore(rdb)
 			workspaceMeta, metaErr := store.getWorkspaceMeta(context.Background(), st.CurrentWorkspace)
 			if metaErr != nil {
 				_ = rdb.Close()
@@ -662,7 +662,7 @@ func cmdDown() error {
 		}
 
 		s := startStep("Saving mounted workspace")
-		saved, syncErr := syncMountedWorkspaceBack(context.Background(), cfg, newRAFStore(rdb), rdb, st.CurrentWorkspace, expectedHead)
+		saved, syncErr := syncMountedWorkspaceBack(context.Background(), cfg, newAFSStore(rdb), rdb, st.CurrentWorkspace, expectedHead)
 		if syncErr != nil {
 			s.fail(syncErr.Error())
 			_ = rdb.Close()
@@ -868,7 +868,7 @@ func startServices(cfg config) error {
 		return nil
 	}
 
-	store := newRAFStore(rdb)
+	store := newAFSStore(rdb)
 	workspaceStep := startStep("Ensuring current workspace")
 	workspace, created, err := ensureMountWorkspace(ctx, cfg, store)
 	if err != nil {
@@ -1517,17 +1517,6 @@ func configPath() string {
 	return filepath.Join(filepath.Dir(exe), "afs.config.json")
 }
 
-func legacyConfigPath() string {
-	if cfgPathOverride != "" {
-		return ""
-	}
-	exe, err := executablePath()
-	if err != nil {
-		return "raf.config.json"
-	}
-	return filepath.Join(filepath.Dir(exe), "raf.config.json")
-}
-
 func saveConfig(cfg config) error {
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -1538,55 +1527,29 @@ func saveConfig(cfg config) error {
 
 func loadConfig() (config, error) {
 	cfg := defaultConfig()
-	paths := []string{configPath()}
-	if legacy := legacyConfigPath(); legacy != "" && legacy != configPath() {
-		paths = append(paths, legacy)
-	}
-
-	var (
-		b   []byte
-		err error
-	)
-	for _, path := range paths {
-		b, err = os.ReadFile(path)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return cfg, err
-		}
-	}
+	b, err := os.ReadFile(configPath())
 	if err != nil {
-		return cfg, err
-	}
-	var legacy struct {
-		DefaultWorkspace string `json:"defaultWorkspace"`
-	}
-	if err := json.Unmarshal(b, &legacy); err != nil {
 		return cfg, err
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return cfg, err
-	}
-	if strings.TrimSpace(cfg.CurrentWorkspace) == "" && strings.TrimSpace(legacy.DefaultWorkspace) != "" {
-		cfg.CurrentWorkspace = strings.TrimSpace(legacy.DefaultWorkspace)
 	}
 	return cfg, nil
 }
 
 func defaultConfig() config {
 	return config{
-		RedisAddr:      "localhost:6379",
-		RedisDB:        0,
-		WorkRoot:       defaultWorkRoot(),
-		RuntimeMode:    "host",
-		RedisKey:       "myfs",
-		Mountpoint:     "~/afs",
-		MountBackend:   mountBackendAuto,
-		NFSHost:        "127.0.0.1",
-		NFSPort:        20490,
-		RedisLog:       "/tmp/afs-redis.log",
-		MountLog:       "/tmp/afs-mount.log",
+		RedisAddr:    "localhost:6379",
+		RedisDB:      0,
+		WorkRoot:     defaultWorkRoot(),
+		RuntimeMode:  "host",
+		RedisKey:     "myfs",
+		Mountpoint:   "~/afs",
+		MountBackend: mountBackendAuto,
+		NFSHost:      "127.0.0.1",
+		NFSPort:      20490,
+		RedisLog:     "/tmp/afs-redis.log",
+		MountLog:     "/tmp/afs-mount.log",
 	}
 }
 
@@ -1662,7 +1625,7 @@ func prepareConfigForSave(cfg *config) error {
 	}
 
 	if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
-		if err := validateRAFName("workspace", strings.TrimSpace(cfg.CurrentWorkspace)); err != nil {
+		if err := validateAFSName("workspace", strings.TrimSpace(cfg.CurrentWorkspace)); err != nil {
 			return err
 		}
 		cfg.CurrentWorkspace = strings.TrimSpace(cfg.CurrentWorkspace)
@@ -1744,24 +1707,12 @@ func stateDir() string {
 	return filepath.Join(home, ".afs")
 }
 
-func legacyStateDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "."
-	}
-	return filepath.Join(home, ".raf")
-}
-
 func defaultWorkRoot() string {
 	return filepath.Join(stateDir(), "workspaces")
 }
 
 func statePath() string {
 	return filepath.Join(stateDir(), "state.json")
-}
-
-func legacyStatePath() string {
-	return filepath.Join(legacyStateDir(), "state.json")
 }
 
 func saveState(st state) error {
@@ -1777,20 +1728,7 @@ func saveState(st state) error {
 
 func loadState() (state, error) {
 	var st state
-	paths := []string{statePath(), legacyStatePath()}
-	var (
-		b   []byte
-		err error
-	)
-	for _, path := range paths {
-		b, err = os.ReadFile(path)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return st, err
-		}
-	}
+	b, err := os.ReadFile(statePath())
 	if err != nil {
 		return st, err
 	}

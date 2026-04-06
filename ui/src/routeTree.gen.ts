@@ -56,17 +56,9 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/activity'
-    | '/workspaces'
-    | '/workspaces/$workspaceId'
+  fullPaths: '/' | '/activity' | '/workspaces' | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/activity'
-    | '/workspaces'
-    | '/workspaces/$workspaceId'
+  to: '/' | '/activity' | '/workspaces' | '/workspaces/$workspaceId'
   id:
     | '__root__'
     | '/'

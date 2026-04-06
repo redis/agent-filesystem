@@ -1,11 +1,11 @@
 ---
 name: codex-settings-sync
-description: Use when the user wants to migrate Codex state in ~/.codex into Redis Agent Filesystem and mount the same shared Codex memory/settings across multiple computers. Recommends a .afsignore before migration and defaults to excluding worktrees, caches, logs, and temporary files.
+description: Use when the user wants to migrate Codex state in ~/.codex into Agent Filesystem and mount the same shared Codex memory/settings across multiple computers. Recommends a .afsignore before migration and defaults to excluding worktrees, caches, logs, and temporary files.
 ---
 
 # Codex Settings Sync
 
-Use this skill when the goal is to share Codex state across machines by moving `~/.codex` into Redis Agent Filesystem, then mounting that same Redis-backed volume on other computers.
+Use this skill when the goal is to share Codex state across machines by moving `~/.codex` into Agent Filesystem, then mounting that same Redis-backed volume on other computers.
 
 ## Default stance
 

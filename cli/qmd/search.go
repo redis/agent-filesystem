@@ -23,7 +23,7 @@ type Client struct {
 
 func NewClient(rdb *redis.Client, fsKey, indexName string) *Client {
 	if indexName == "" {
-		indexName = fmt.Sprintf("rfs_idx:{%s}", fsKey)
+		indexName = fmt.Sprintf("afs_idx:{%s}", fsKey)
 	}
 	prefix := fmt.Sprintf("rfs:{%s}:inode:", fsKey)
 	return &Client{rdb: rdb, fsKey: fsKey, indexName: indexName, prefix: prefix}

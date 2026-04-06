@@ -28,12 +28,12 @@ func mountRedisKeyForWorkspace(workspace string) string {
 	return "afs.mount." + workspace
 }
 
-func ensureMountWorkspace(ctx context.Context, cfg config, store *rafStore) (string, bool, error) {
+func ensureMountWorkspace(ctx context.Context, cfg config, store *afsStore) (string, bool, error) {
 	workspace := strings.TrimSpace(cfg.CurrentWorkspace)
 	if workspace == "" {
 		return "", false, errors.New("no current workspace is selected")
 	}
-	if err := validateRAFName("workspace", workspace); err != nil {
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return "", false, err
 	}
 
@@ -50,21 +50,21 @@ func ensureMountWorkspace(ctx context.Context, cfg config, store *rafStore) (str
 	return workspace, true, nil
 }
 
-func seedWorkspaceMountKey(ctx context.Context, cfg config, store *rafStore, rdb *redis.Client, workspace string) (string, string, error) {
+func seedWorkspaceMountKey(ctx context.Context, cfg config, store *afsStore, rdb *redis.Client, workspace string) (string, string, error) {
 	workspaceMeta, _, err := ensureMaterializedWorkspace(ctx, store, cfg, workspace)
 	if err != nil {
 		return "", "", err
 	}
 
-	treePath := rafWorkspaceTreePath(cfg, workspace)
+	treePath := afsWorkspaceTreePath(cfg, workspace)
 	mountKey := mountRedisKeyForWorkspace(workspace)
-	if err := syncDirectoryToRedisFSKey(ctx, rdb, mountKey, treePath); err != nil {
+	if err := syncDirectoryToAFSKey(ctx, rdb, mountKey, treePath); err != nil {
 		return "", "", err
 	}
 	return mountKey, workspaceMeta.HeadSavepoint, nil
 }
 
-func syncDirectoryToRedisFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
+func syncDirectoryToAFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
 	if err := deleteNamespace(ctx, rdb, fsKey); err != nil {
 		return err
 	}
@@ -85,18 +85,18 @@ func syncDirectoryToRedisFSKey(ctx context.Context, rdb *redis.Client, fsKey, so
 	return applyMetadata(ctx, client.New(rdb, fsKey), "/", rootInfo)
 }
 
-func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, rdb *redis.Client, workspace, expectedHead string) (bool, error) {
+func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *afsStore, rdb *redis.Client, workspace, expectedHead string) (bool, error) {
 	savepointID := generatedSavepointName()
 	mountKey := mountRedisKeyForWorkspace(workspace)
 
-	mountedManifest, blobs, stats, err := buildManifestFromRedisFS(ctx, client.New(rdb, mountKey), workspace, savepointID)
+	mountedManifest, blobs, stats, err := buildManifestFromAFS(ctx, client.New(rdb, mountKey), workspace, savepointID)
 	if err != nil {
 		return false, err
 	}
 
-	saved, err := saveRAFManifest(ctx, store, workspace, expectedHead, savepointID, mountedManifest, blobs, stats)
+	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, mountedManifest, blobs, stats)
 	if err != nil {
-		if err == errRAFWorkspaceConflict {
+		if err == errAFSWorkspaceConflict {
 			return false, fmt.Errorf("workspace %q moved while it was mounted; inspect it before stopping AFS", workspace)
 		}
 		return false, err
@@ -107,7 +107,7 @@ func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *rafStore, 
 	return saved, nil
 }
 
-func buildManifestFromRedisFS(ctx context.Context, fsClient client.Client, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {
+func buildManifestFromAFS(ctx context.Context, fsClient client.Client, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {
 	tree, err := fsClient.Tree(ctx, "/", workspaceMountTreeMaxDepth)
 	if err != nil {
 		return manifest{}, nil, manifestStats{}, err
@@ -153,7 +153,7 @@ func buildManifestFromRedisFS(ctx context.Context, fsClient client.Client, works
 			entry.Size = int64(len(data))
 			stats.FileCount++
 			stats.TotalBytes += int64(len(data))
-			if len(data) <= rafInlineThreshold {
+			if len(data) <= afsInlineThreshold {
 				entry.Inline = base64.StdEncoding.EncodeToString(data)
 			} else {
 				entry.BlobID = sha256Hex(data)
@@ -180,7 +180,7 @@ func buildManifestFromRedisFS(ctx context.Context, fsClient client.Client, works
 	}
 
 	return manifest{
-		Version:   rafFormatVersion,
+		Version:   afsFormatVersion,
 		Workspace: workspace,
 		Savepoint: savepoint,
 		Entries:   entries,

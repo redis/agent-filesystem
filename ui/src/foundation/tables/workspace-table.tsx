@@ -2,9 +2,9 @@ import { Button, TableHeading, Typography } from "@redislabsdev/redis-ui-compone
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
 import { useMemo, useState } from "react";
-import { formatBytes } from "../api/raf";
-import type { RAFWorkspaceSummary } from "../types/raf";
-import { ToneChip } from "../../components/raf-kit";
+import { formatBytes } from "../api/afs";
+import type { AFSWorkspaceSummary } from "../types/afs";
+import { ToneChip } from "../../components/afs-kit";
 import * as S from "./workspace-table.styles";
 
 type WorkspaceSortField =
@@ -17,7 +17,7 @@ type WorkspaceSortField =
   | "updatedAt";
 
 type Props = {
-  rows: RAFWorkspaceSummary[];
+  rows: AFSWorkspaceSummary[];
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
@@ -184,7 +184,7 @@ export function WorkspaceTable({
             </Button>
           ),
         },
-      ] as ColumnDef<RAFWorkspaceSummary>[],
+      ] as ColumnDef<AFSWorkspaceSummary>[],
     [onOpenWorkspace],
   );
 

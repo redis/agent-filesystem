@@ -21,7 +21,7 @@ func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {
 	cfg.WorkRoot = t.TempDir()
 	cfg.CurrentWorkspace = "newfiles"
 
-	store := newRAFStore(mustRedisClient(t, cfg))
+	store := newAFSStore(mustRedisClient(t, cfg))
 	defer func() { _ = store.rdb.Close() }()
 
 	workspace, created, err := ensureMountWorkspace(context.Background(), cfg, store)
@@ -47,7 +47,7 @@ func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {
 func TestSeedWorkspaceMountKeyUsesCurrentWorkspaceTree(t *testing.T) {
 	t.Helper()
 
-	cfg, treePath, store, closeStore := importRAFWorkspaceForTest(t)
+	cfg, treePath, store, closeStore := importAFSWorkspaceForTest(t)
 	defer closeStore()
 
 	writeTestFile(t, filepath.Join(treePath, "main.go"), "package dirty\n")
@@ -73,7 +73,7 @@ func TestSeedWorkspaceMountKeyUsesCurrentWorkspaceTree(t *testing.T) {
 func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 	t.Helper()
 
-	cfg, _, store, closeStore := importRAFWorkspaceForTest(t)
+	cfg, _, store, closeStore := importAFSWorkspaceForTest(t)
 	defer closeStore()
 
 	ctx := context.Background()
@@ -103,7 +103,7 @@ func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 		t.Fatalf("HeadSavepoint = %q, want a new savepoint after mounted edits", workspaceMeta.HeadSavepoint)
 	}
 
-	data, err := os.ReadFile(filepath.Join(rafWorkspaceTreePath(cfg, "repo"), "mounted.txt"))
+	data, err := os.ReadFile(filepath.Join(afsWorkspaceTreePath(cfg, "repo"), "mounted.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(mounted.txt) returned error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 func TestSyncMountedWorkspaceBackIgnoresMountedSystemArtifacts(t *testing.T) {
 	t.Helper()
 
-	cfg, _, store, closeStore := importRAFWorkspaceForTest(t)
+	cfg, _, store, closeStore := importAFSWorkspaceForTest(t)
 	defer closeStore()
 
 	ctx := context.Background()

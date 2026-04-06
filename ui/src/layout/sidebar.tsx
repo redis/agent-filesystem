@@ -26,7 +26,7 @@ import type {
   SidebarPanelId,
 } from "./navigation-items";
 
-const SIDEBAR_LOCALSTORAGE_KEY = "raf_sidebar_open";
+const SIDEBAR_LOCALSTORAGE_KEY = "afs_sidebar_open";
 
 const bottomItems = [
   { label: "Support", icon: SupportIcon },
@@ -138,7 +138,7 @@ export function AppSidebar() {
                 <S.LogoWrapper>
                   <RedisLogoDarkFullIcon />
                 </S.LogoWrapper>
-              <S.ProductName>Redis Agent Filesystem</S.ProductName>
+              <S.ProductName>Agent Filesystem</S.ProductName>
             </S.LogoWithName>
           ) : (
             <S.CollapsedLogoWrapper>

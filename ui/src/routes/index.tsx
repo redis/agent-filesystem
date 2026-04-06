@@ -19,37 +19,30 @@ import {
   ToneChip,
   WorkspaceCard,
   WorkspaceGrid,
-} from "../components/raf-kit";
-import { useWorkspaces } from "../foundation/hooks/use-raf";
-import { getRAFClientMode } from "../foundation/api/raf";
+} from "../components/afs-kit";
+import { useActivity, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import { getAFSClientMode } from "../foundation/api/afs";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
 });
 
 function OverviewPage() {
-  const workspacesQuery = useWorkspaces();
+  const workspacesQuery = useWorkspaceSummaries();
+  const activityQuery = useActivity(5);
 
-  if (workspacesQuery.isLoading) {
+  if (workspacesQuery.isLoading || activityQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
   const workspaces = workspacesQuery.data ?? [];
-  const backendMode = getRAFClientMode();
-  const activity = workspaces
-    .flatMap((workspace) =>
-      workspace.activity.map((event) => ({
-        ...event,
-        title: `${workspace.name}: ${event.title}`,
-      })),
-    )
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .slice(0, 5);
+  const backendMode = getAFSClientMode();
+  const activity = (activityQuery.data ?? []).map((event) => ({
+    ...event,
+    title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
+  }));
   const dirtyWorkspaces = workspaces.filter((workspace) => workspace.draftState === "dirty").length;
-  const checkpointCount = workspaces.reduce(
-    (sum, workspace) => sum + workspace.savepoints.length,
-    0,
-  );
+  const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
   const healthyWorkspaces = workspaces.filter((workspace) => workspace.status === "healthy").length;
 
   return (
@@ -155,7 +148,7 @@ function OverviewPage() {
                   {workspace.name}
                 </Typography.Heading>
                 <Typography.Body color="secondary" component="p">
-                  {workspace.description}
+                  {workspace.databaseName} · {workspace.redisKey}
                 </Typography.Body>
                 <InlineActions style={{ marginTop: 12 }}>
                   <ToneChip $tone={workspace.status}>{workspace.status}</ToneChip>
@@ -164,7 +157,7 @@ function OverviewPage() {
                 </InlineActions>
                 <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <Tag>{workspace.region}</Tag>
-                  <Tag>{workspace.savepoints.length} checkpoints</Tag>
+                  <Tag>{workspace.checkpointCount} checkpoints</Tag>
                 </div>
               </WorkspaceCard>
             ))}

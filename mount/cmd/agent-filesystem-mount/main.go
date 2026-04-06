@@ -14,9 +14,14 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/mount/internal/afsfs"
 	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 	"github.com/rowantrollope/agent-filesystem/mount/internal/redisconn"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/redisfs"
+)
+
+const (
+	afsDaemonEnv       = "AFS_DAEMON"
+	legacyAFSDaemonEnv = "REDIS_FS_DAEMON"
 )
 
 func main() {
@@ -46,7 +51,7 @@ func main() {
 	}
 
 	// Optional daemon mode: re-exec detached and return in parent.
-	if !*foreground && os.Getenv("REDIS_FS_DAEMON") != "1" {
+	if !*foreground && os.Getenv(afsDaemonEnv) != "1" && os.Getenv(legacyAFSDaemonEnv) != "1" {
 		args := make([]string, 0, len(os.Args))
 		for i := 1; i < len(os.Args); i++ {
 			a := os.Args[i]
@@ -62,7 +67,7 @@ func main() {
 		args = append(args, "--foreground=true")
 
 		cmd := exec.Command(os.Args[0], args...)
-		cmd.Env = append(os.Environ(), "REDIS_FS_DAEMON=1")
+		cmd.Env = append(os.Environ(), afsDaemonEnv+"=1", legacyAFSDaemonEnv+"=1")
 		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		if err != nil {
 			log.Fatalf("daemon mode failed opening %s: %v", os.DevNull, err)
@@ -108,9 +113,9 @@ func main() {
 
 	c := client.New(rdb, redisKey)
 
-	uid, gid := redisfs.GetOwnership()
+	uid, gid := afsfs.GetOwnership()
 
-	opts := &redisfs.Options{
+	opts := &afsfs.Options{
 		AttrTimeout: time.Duration(*attrTimeout * float64(time.Second)),
 		ReadOnly:    *readOnly,
 		AllowOther:  *allowOther,
@@ -119,10 +124,10 @@ func main() {
 		GID:         gid,
 	}
 
-	log.Printf("Mounting Redis FS key %q at %s", redisKey, mountpoint)
+	log.Printf("Mounting AFS key %q at %s", redisKey, mountpoint)
 	log.Printf("Redis: %s (db %d)", *redisAddr, *redisDB)
 
-	server, err := redisfs.Mount(mountpoint, c, opts)
+	server, err := afsfs.Mount(mountpoint, c, opts)
 	if err != nil {
 		log.Fatalf("mount failed: %v", err)
 	}
