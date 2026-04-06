@@ -15,31 +15,27 @@ func (n *FSNode) Create(ctx context.Context, name string, flags uint32, mode uin
 	}
 
 	child := n.newChild(name)
+	exclusive := flags&syscall.O_EXCL != 0
 
-	if err := n.client.Touch(ctx, child.fsPath); err != nil {
-		return nil, nil, 0, mapError(err)
-	}
-
-	if mode != 0 {
-		_ = n.client.Chmod(ctx, child.fsPath, mode&07777)
-	}
-
-	n.root().invalidatePath(child.fsPath)
-
-	st, err := n.client.Stat(ctx, child.fsPath)
+	st, _, err := n.client.CreateFile(ctx, child.fsPath, mode&07777, exclusive)
 	if err != nil {
 		return nil, nil, 0, mapError(err)
 	}
-	attr := statToAttr(st, n.opts.UID, n.opts.GID)
+
+	n.root().invalidatePath(child.fsPath)
+	attr := statToAttr(st)
 	out.Attr = attr
 	out.SetEntryTimeout(n.opts.AttrTimeout)
 	out.SetAttrTimeout(n.opts.AttrTimeout)
 
-	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFREG})
+	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFREG, Ino: st.Inode})
 
-	handle := newFileHandle(child.fsPath, n.client, child)
+	handle := newFileHandle(child.fsPath, st.Inode, n.client, child)
 	if flags&syscall.O_TRUNC != 0 {
-		handle.SetTruncated()
+		if err := n.client.TruncateInode(ctx, st.Inode, 0); err != nil {
+			return nil, nil, 0, mapError(err)
+		}
+		n.root().invalidatePath(child.fsPath)
 	}
 
 	return node, handle, 0, 0
@@ -51,10 +47,21 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32,
 		return nil, 0, syscall.EROFS
 	}
 
-	handle := newFileHandle(n.fsPath, n.client, n)
+	st, err := n.client.Stat(ctx, n.fsPath)
+	if err != nil {
+		return nil, 0, mapError(err)
+	}
+	if st == nil {
+		return nil, 0, syscall.ENOENT
+	}
+
+	handle := newFileHandle(n.fsPath, st.Inode, n.client, n)
 
 	if flags&syscall.O_TRUNC != 0 {
-		handle.SetTruncated()
+		if err := n.client.TruncateInode(ctx, st.Inode, 0); err != nil {
+			return nil, 0, mapError(err)
+		}
+		n.root().invalidatePath(n.fsPath)
 	}
 
 	return handle, 0, 0
@@ -115,7 +122,7 @@ func (n *FSNode) Flush(ctx context.Context, fh fs.FileHandle) syscall.Errno {
 // Release implements fs.NodeReleaser.
 func (n *FSNode) Release(ctx context.Context, fh fs.FileHandle) syscall.Errno {
 	if h, ok := fh.(*FileHandle); ok {
-		return h.Flush(ctx)
+		return h.Release(ctx)
 	}
 	return 0
 }

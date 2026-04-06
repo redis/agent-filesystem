@@ -327,7 +327,7 @@ func (n nfsBackend) mountLocal(cfg config, endpoint string) error {
 	}
 
 	if runtime.GOOS == "darwin" {
-		opts := fmt.Sprintf("vers=3,tcp,port=%d,mountport=%d,nolocks", port, port)
+		opts := darwinNFSMountOptions(port)
 		cmd := exec.Command("/sbin/mount_nfs", "-o", opts, serverPath, cfg.Mountpoint)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("mount_nfs failed: %w (%s)", err, strings.TrimSpace(string(out)))
@@ -413,4 +413,12 @@ func filepathDir(p string) string {
 		return "."
 	}
 	return filepath.Dir(p)
+}
+
+func darwinNFSMountOptions(port int) string {
+	// Disable attribute caching and force synchronous writes for localhost AFS
+	// mounts so data is visible immediately after close. Also disable negative
+	// name caching to reduce transient "both names missing" windows during
+	// rapid rename churn on macOS.
+	return fmt.Sprintf("vers=3,tcp,port=%d,mountport=%d,nolocks,noac,nonegnamecache,sync", port, port)
 }

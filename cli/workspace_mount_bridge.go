@@ -68,13 +68,8 @@ func syncDirectoryToAFSKey(ctx context.Context, rdb *redis.Client, fsKey, source
 	if err := deleteNamespace(ctx, rdb, fsKey); err != nil {
 		return err
 	}
-	if err := createMigrationNamespace(ctx, rdb, fsKey); err != nil {
-		return err
-	}
-	if _, _, err := importDirectoriesBatched(ctx, rdb, fsKey, sourceDir, nil, nil); err != nil {
-		return err
-	}
-	if _, _, _, _, err := importFilesBatched(ctx, rdb, fsKey, sourceDir, nil, nil); err != nil {
+	fsClient := client.New(rdb, fsKey)
+	if _, _, _, _, _, err := importDirectory(ctx, fsClient, sourceDir, nil, nil); err != nil {
 		return err
 	}
 

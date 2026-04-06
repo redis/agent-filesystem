@@ -175,7 +175,7 @@ Commands:
   checkpoint ...       Checkpoint operations (create, list, restore)
 
 Config: %s
-`, bin, configPath())
+`, bin, compactDisplayPath(configPath()))
 }
 
 func userModeLabel(backendName string) string {
@@ -214,14 +214,14 @@ func statusRows(backendName, localPath, redisAddr string, redisDB int, currentWo
 		return []boxRow{
 			{Label: "redis", Value: statusRemoteLabel(redisAddr, redisDB)},
 			{Label: "current workspace", Value: currentWorkspaceLabel(currentWorkspace)},
-			{Label: "config", Value: clr(ansiDim, configPath())},
+			{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		}
 	}
 	return []boxRow{
 		{Label: "local filesystem", Value: localPath},
 		{Label: "redis", Value: statusRemoteLabel(redisAddr, redisDB)},
 		{Label: "current workspace", Value: currentWorkspaceLabel(currentWorkspace)},
-		{Label: "config", Value: clr(ansiDim, configPath())},
+		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 	}
 }
 
@@ -276,7 +276,7 @@ func cmdSetup() error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("  %s Saved to %s\n\n", clr(ansiDim, "▸"), clr(ansiCyan, configPath()))
+	fmt.Printf("  %s Saved to %s\n\n", clr(ansiDim, "▸"), clr(ansiCyan, compactDisplayPath(configPath())))
 
 	if migrateDir != "" {
 		return performMigration(cfg, migrateDir, r)
@@ -646,32 +646,33 @@ func cmdDown() error {
 		err = rdb.Ping(pingCtx).Err()
 		cancel()
 		if err != nil {
-			_ = rdb.Close()
-			return fmt.Errorf("cannot connect to Redis at %s while saving mounted workspace: %w", st.RedisAddr, err)
-		}
-
-		expectedHead := strings.TrimSpace(st.MountedHeadSavepoint)
-		if expectedHead == "" {
-			store := newAFSStore(rdb)
-			workspaceMeta, metaErr := store.getWorkspaceMeta(context.Background(), st.CurrentWorkspace)
-			if metaErr != nil {
-				_ = rdb.Close()
-				return metaErr
-			}
-			expectedHead = workspaceMeta.HeadSavepoint
-		}
-
-		s := startStep("Saving mounted workspace")
-		saved, syncErr := syncMountedWorkspaceBack(context.Background(), cfg, newAFSStore(rdb), rdb, st.CurrentWorkspace, expectedHead)
-		if syncErr != nil {
-			s.fail(syncErr.Error())
-			_ = rdb.Close()
-			return syncErr
-		}
-		if saved {
-			s.succeed(st.CurrentWorkspace)
+			fmt.Printf("  %s mounted workspace could not be saved; continuing shutdown (%v)\n", clr(ansiYellow, "!"), err)
 		} else {
-			s.succeed("no changes")
+			expectedHead := strings.TrimSpace(st.MountedHeadSavepoint)
+			if expectedHead == "" {
+				store := newAFSStore(rdb)
+				workspaceMeta, metaErr := store.getWorkspaceMeta(context.Background(), st.CurrentWorkspace)
+				if metaErr != nil {
+					fmt.Printf("  %s mounted workspace could not be saved; continuing shutdown (%v)\n", clr(ansiYellow, "!"), metaErr)
+				} else {
+					expectedHead = workspaceMeta.HeadSavepoint
+				}
+			}
+
+			if expectedHead != "" {
+				s := startStep("Saving mounted workspace")
+				saved, syncErr := syncMountedWorkspaceBack(context.Background(), cfg, newAFSStore(rdb), rdb, st.CurrentWorkspace, expectedHead)
+				if syncErr != nil {
+					s.fail(syncErr.Error())
+					fmt.Printf("  %s mounted changes for %s were not saved; continuing shutdown\n", clr(ansiYellow, "!"), st.CurrentWorkspace)
+				} else if saved {
+					s.succeed(st.CurrentWorkspace)
+				} else {
+					s.succeed("no changes")
+				}
+			} else {
+				fmt.Printf("  %s mounted workspace head is unavailable; continuing shutdown without saving\n", clr(ansiYellow, "!"))
+			}
 		}
 	}
 
@@ -1012,7 +1013,7 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		boxRow{},
 		boxRow{Value: clr(ansiDim, "1.") + " Import all files into Redis"},
 		boxRow{Value: clr(ansiDim, "2.") + " Move original to archive"},
-		boxRow{Value: clr(ansiDim, "3.") + " Mount Redis FS in place"},
+		boxRow{Value: clr(ansiDim, "3.") + " Mount AFS in place"},
 	)
 	if ignorer != nil {
 		rows = append(rows[:5], append([]boxRow{{Label: "ignore", Value: ignorer.path}}, rows[5:]...)...)
@@ -1458,21 +1459,26 @@ func startRedisDaemon(cfg config) (int, error) {
 }
 
 func deleteNamespace(ctx context.Context, rdb *redis.Client, fsKey string) error {
-	pattern := "rfs:{" + fsKey + "}:*"
-	var cursor uint64
-	for {
-		keys, next, err := rdb.Scan(ctx, cursor, pattern, 500).Result()
-		if err != nil {
-			return err
-		}
-		if len(keys) > 0 {
-			if err := rdb.Del(ctx, keys...).Err(); err != nil {
+	patterns := []string{
+		"afs:{" + fsKey + "}:*",
+		"rfs:{" + fsKey + "}:*",
+	}
+	for _, pattern := range patterns {
+		var cursor uint64
+		for {
+			keys, next, err := rdb.Scan(ctx, cursor, pattern, 500).Result()
+			if err != nil {
 				return err
 			}
-		}
-		cursor = next
-		if cursor == 0 {
-			break
+			if len(keys) > 0 {
+				if err := rdb.Del(ctx, keys...).Err(); err != nil {
+					return err
+				}
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
 		}
 	}
 	return nil
@@ -1517,6 +1523,22 @@ func configPath() string {
 	return filepath.Join(filepath.Dir(exe), "afs.config.json")
 }
 
+func compactDisplayPath(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return p
+	}
+
+	clean := filepath.Clean(p)
+	base := filepath.Base(clean)
+	dirBase := filepath.Base(filepath.Dir(clean))
+	if base == "." || base == string(filepath.Separator) {
+		return clean
+	}
+	if dirBase == "." || dirBase == string(filepath.Separator) || dirBase == "" {
+		return base
+	}
+	return filepath.Join(dirBase, base)
+}
 func saveConfig(cfg config) error {
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

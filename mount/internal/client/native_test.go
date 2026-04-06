@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -140,10 +141,10 @@ func TestNativeBackendSmoke(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Raw key format verification
+// Canonical inode storage verification
 // ---------------------------------------------------------------------------
 
-func TestRawPathKeyFormat(t *testing.T) {
+func TestCanonicalInodeStorageFormat(t *testing.T) {
 	t.Parallel()
 	rdb, ctx := setupTestRedis(t)
 	c := New(rdb, "keytest")
@@ -152,8 +153,16 @@ func TestRawPathKeyFormat(t *testing.T) {
 		t.Fatalf("echo: %v", err)
 	}
 
-	// Verify the inode key uses raw path, not base64
-	inodeKey := "rfs:{keytest}:inode:/hello.txt"
+	st, err := c.Stat(ctx, "/hello.txt")
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if st == nil || st.Inode == 0 {
+		t.Fatalf("expected stable inode id, got %+v", st)
+	}
+
+	inodeID := strconv.FormatUint(st.Inode, 10)
+	inodeKey := "afs:{keytest}:inode:" + inodeID
 	vals, err := rdb.HGetAll(ctx, inodeKey).Result()
 	if err != nil {
 		t.Fatalf("hgetall: %v", err)
@@ -167,31 +176,549 @@ func TestRawPathKeyFormat(t *testing.T) {
 	if vals["content"] != "world" {
 		t.Fatalf("expected content=world, got %q", vals["content"])
 	}
+	if vals["parent"] != rootInodeID {
+		t.Fatalf("expected parent=%s, got %q", rootInodeID, vals["parent"])
+	}
+	if vals["name"] != "hello.txt" {
+		t.Fatalf("expected name=hello.txt, got %q", vals["name"])
+	}
 
-	// Verify children set key format
-	childrenKey := "rfs:{keytest}:children:/"
-	members, err := rdb.SMembers(ctx, childrenKey).Result()
+	rootDirentsKey := "afs:{keytest}:dirents:" + rootInodeID
+	childID, err := rdb.HGet(ctx, rootDirentsKey, "hello.txt").Result()
 	if err != nil {
-		t.Fatalf("smembers: %v", err)
+		t.Fatalf("hget dirent: %v", err)
 	}
-	found := false
-	for _, m := range members {
-		if m == "hello.txt" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected 'hello.txt' in children set, got %v", members)
+	if childID != inodeID {
+		t.Fatalf("expected dirent hello.txt -> %s, got %q", inodeID, childID)
 	}
 
-	// Verify info key format
-	infoKey := "rfs:{keytest}:info"
+	infoKey := "afs:{keytest}:info"
 	infoVals, err := rdb.HGetAll(ctx, infoKey).Result()
 	if err != nil {
 		t.Fatalf("hgetall info: %v", err)
 	}
 	if infoVals["files"] != "1" {
 		t.Fatalf("expected files=1, got %q", infoVals["files"])
+	}
+	if infoVals["directories"] != "1" {
+		t.Fatalf("expected directories=1, got %q", infoVals["directories"])
+	}
+	if infoVals["schema_version"] != schemaVersion {
+		t.Fatalf("expected schema_version=%s, got %q", schemaVersion, infoVals["schema_version"])
+	}
+
+	nextInode, err := rdb.Get(ctx, "afs:{keytest}:next_inode").Result()
+	if err != nil {
+		t.Fatalf("get next_inode: %v", err)
+	}
+	if nextInode != inodeID {
+		t.Fatalf("expected next inode counter to be %s, got %q", inodeID, nextInode)
+	}
+}
+
+func TestRenamePreservesStableInode(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename")
+
+	if err := c.Mkdir(ctx, "/src"); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := c.Mkdir(ctx, "/dst"); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+	if err := c.Echo(ctx, "/src/file.txt", []byte("world")); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	srcDir, err := c.Stat(ctx, "/src")
+	if err != nil {
+		t.Fatalf("stat src dir: %v", err)
+	}
+	if srcDir == nil || srcDir.Inode == 0 {
+		t.Fatalf("expected src dir inode, got %+v", srcDir)
+	}
+
+	before, err := c.Stat(ctx, "/src/file.txt")
+	if err != nil {
+		t.Fatalf("stat before rename: %v", err)
+	}
+	if before == nil || before.Inode == 0 {
+		t.Fatalf("expected inode before rename, got %+v", before)
+	}
+
+	if err := c.Mv(ctx, "/src/file.txt", "/dst/renamed.txt"); err != nil {
+		t.Fatalf("mv: %v", err)
+	}
+
+	after, err := c.Stat(ctx, "/dst/renamed.txt")
+	if err != nil {
+		t.Fatalf("stat after rename: %v", err)
+	}
+	if after == nil {
+		t.Fatal("expected renamed file to exist")
+	}
+	if before.Inode != after.Inode {
+		t.Fatalf("expected stable inode across rename: before=%d after=%d", before.Inode, after.Inode)
+	}
+
+	oldPath, err := c.Stat(ctx, "/src/file.txt")
+	if err != nil {
+		t.Fatalf("stat old path: %v", err)
+	}
+	if oldPath != nil {
+		t.Fatalf("expected old path to be gone, got %+v", oldPath)
+	}
+
+	dstDir, err := c.Stat(ctx, "/dst")
+	if err != nil {
+		t.Fatalf("stat dst dir: %v", err)
+	}
+	if dstDir == nil || dstDir.Inode == 0 {
+		t.Fatalf("expected dst dir inode, got %+v", dstDir)
+	}
+
+	inodeKey := "afs:{rename}:inode:" + strconv.FormatUint(after.Inode, 10)
+	vals, err := rdb.HGetAll(ctx, inodeKey).Result()
+	if err != nil {
+		t.Fatalf("hgetall renamed inode: %v", err)
+	}
+	if vals["parent"] != strconv.FormatUint(dstDir.Inode, 10) {
+		t.Fatalf("expected renamed inode parent=%d, got %q", dstDir.Inode, vals["parent"])
+	}
+	if vals["name"] != "renamed.txt" {
+		t.Fatalf("expected renamed inode name=renamed.txt, got %q", vals["name"])
+	}
+
+	srcDirents := "afs:{rename}:dirents:" + strconv.FormatUint(srcDir.Inode, 10)
+	if exists, err := rdb.HExists(ctx, srcDirents, "file.txt").Result(); err != nil {
+		t.Fatalf("hexists old dirent: %v", err)
+	} else if exists {
+		t.Fatal("expected old dir entry to be removed")
+	}
+
+	dstDirents := "afs:{rename}:dirents:" + strconv.FormatUint(dstDir.Inode, 10)
+	dstChild, err := rdb.HGet(ctx, dstDirents, "renamed.txt").Result()
+	if err != nil {
+		t.Fatalf("hget new dirent: %v", err)
+	}
+	if dstChild != strconv.FormatUint(after.Inode, 10) {
+		t.Fatalf("expected new dirent to point at inode %d, got %q", after.Inode, dstChild)
+	}
+}
+
+func TestCreateFileExclusive(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "create-exclusive")
+
+	st, created, err := c.CreateFile(ctx, "/lock.txt", 0o640, true)
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if !created {
+		t.Fatal("expected file to be newly created")
+	}
+	if st == nil || st.Mode != 0o640 {
+		t.Fatalf("unexpected stat after create: %+v", st)
+	}
+
+	if _, created, err := c.CreateFile(ctx, "/lock.txt", 0o600, false); err != nil {
+		t.Fatalf("reopen create file: %v", err)
+	} else if created {
+		t.Fatal("expected existing file to be reused")
+	}
+
+	if _, _, err := c.CreateFile(ctx, "/lock.txt", 0o600, true); err == nil {
+		t.Fatal("expected exclusive create on existing file to fail")
+	}
+}
+
+func TestRenameReplacesExistingFile(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-replace")
+
+	if err := c.Echo(ctx, "/src.txt", []byte("src")); err != nil {
+		t.Fatalf("echo src: %v", err)
+	}
+	if err := c.Echo(ctx, "/dst.txt", []byte("dst")); err != nil {
+		t.Fatalf("echo dst: %v", err)
+	}
+
+	if err := c.Rename(ctx, "/src.txt", "/dst.txt", 0); err != nil {
+		t.Fatalf("rename replace: %v", err)
+	}
+
+	if st, err := c.Stat(ctx, "/src.txt"); err != nil {
+		t.Fatalf("stat old src: %v", err)
+	} else if st != nil {
+		t.Fatalf("expected old src to be removed, got %+v", st)
+	}
+
+	data, err := c.Cat(ctx, "/dst.txt")
+	if err != nil {
+		t.Fatalf("cat dst after replace: %v", err)
+	}
+	if string(data) != "src" {
+		t.Fatalf("expected replaced content to come from src, got %q", string(data))
+	}
+
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatalf("info after replace: %v", err)
+	}
+	if info.Files != 1 {
+		t.Fatalf("expected file count to remain 1 after replace, got %d", info.Files)
+	}
+}
+
+func TestRenameNoreplace(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-noreplace")
+
+	if err := c.Echo(ctx, "/src.txt", []byte("src")); err != nil {
+		t.Fatalf("echo src: %v", err)
+	}
+	if err := c.Echo(ctx, "/dst.txt", []byte("dst")); err != nil {
+		t.Fatalf("echo dst: %v", err)
+	}
+
+	if err := c.Rename(ctx, "/src.txt", "/dst.txt", RenameNoreplace); err == nil {
+		t.Fatal("expected rename noreplace to fail")
+	}
+
+	srcData, err := c.Cat(ctx, "/src.txt")
+	if err != nil {
+		t.Fatalf("cat src after noreplace: %v", err)
+	}
+	if string(srcData) != "src" {
+		t.Fatalf("unexpected src content after noreplace: %q", string(srcData))
+	}
+	dstData, err := c.Cat(ctx, "/dst.txt")
+	if err != nil {
+		t.Fatalf("cat dst after noreplace: %v", err)
+	}
+	if string(dstData) != "dst" {
+		t.Fatalf("unexpected dst content after noreplace: %q", string(dstData))
+	}
+}
+
+func TestRenameReplacesEmptyDirectory(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-empty-dir")
+
+	if err := c.Mkdir(ctx, "/src/sub"); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := c.Echo(ctx, "/src/sub/file.txt", []byte("payload")); err != nil {
+		t.Fatalf("echo nested file: %v", err)
+	}
+	if err := c.Mkdir(ctx, "/dst"); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+
+	if err := c.Rename(ctx, "/src", "/dst", 0); err != nil {
+		t.Fatalf("rename dir over empty dir: %v", err)
+	}
+
+	data, err := c.Cat(ctx, "/dst/sub/file.txt")
+	if err != nil {
+		t.Fatalf("cat moved nested file: %v", err)
+	}
+	if string(data) != "payload" {
+		t.Fatalf("unexpected nested content after dir replace: %q", string(data))
+	}
+}
+
+func TestDirectoryTimestampsChangeOnMutation(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "dir-times")
+
+	if err := c.Mkdir(ctx, "/dir"); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	beforeCreate, err := c.Stat(ctx, "/dir")
+	if err != nil {
+		t.Fatalf("stat before create: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	if _, _, err := c.CreateFile(ctx, "/dir/a.txt", 0o644, true); err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	afterCreate, err := c.Stat(ctx, "/dir")
+	if err != nil {
+		t.Fatalf("stat after create: %v", err)
+	}
+	if afterCreate.Mtime <= beforeCreate.Mtime || afterCreate.Ctime <= beforeCreate.Ctime {
+		t.Fatalf("dir timestamps after create = mtime=%d ctime=%d, want > mtime=%d ctime=%d", afterCreate.Mtime, afterCreate.Ctime, beforeCreate.Mtime, beforeCreate.Ctime)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	if err := c.Rm(ctx, "/dir/a.txt"); err != nil {
+		t.Fatalf("remove file: %v", err)
+	}
+	afterRemove, err := c.Stat(ctx, "/dir")
+	if err != nil {
+		t.Fatalf("stat after remove: %v", err)
+	}
+	if afterRemove.Mtime <= afterCreate.Mtime || afterRemove.Ctime <= afterCreate.Ctime {
+		t.Fatalf("dir timestamps after remove = mtime=%d ctime=%d, want > mtime=%d ctime=%d", afterRemove.Mtime, afterRemove.Ctime, afterCreate.Mtime, afterCreate.Ctime)
+	}
+}
+
+func TestRenameTouchesBothParentDirectories(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-dir-times")
+
+	if err := c.Mkdir(ctx, "/src"); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := c.Mkdir(ctx, "/dst"); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+	if _, _, err := c.CreateFile(ctx, "/src/a.txt", 0o644, true); err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+
+	srcBefore, err := c.Stat(ctx, "/src")
+	if err != nil {
+		t.Fatalf("stat src before rename: %v", err)
+	}
+	dstBefore, err := c.Stat(ctx, "/dst")
+	if err != nil {
+		t.Fatalf("stat dst before rename: %v", err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	if err := c.Rename(ctx, "/src/a.txt", "/dst/a.txt", 0); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+
+	srcAfter, err := c.Stat(ctx, "/src")
+	if err != nil {
+		t.Fatalf("stat src after rename: %v", err)
+	}
+	dstAfter, err := c.Stat(ctx, "/dst")
+	if err != nil {
+		t.Fatalf("stat dst after rename: %v", err)
+	}
+	if srcAfter.Mtime <= srcBefore.Mtime || srcAfter.Ctime <= srcBefore.Ctime {
+		t.Fatalf("src dir timestamps after rename = mtime=%d ctime=%d, want > mtime=%d ctime=%d", srcAfter.Mtime, srcAfter.Ctime, srcBefore.Mtime, srcBefore.Ctime)
+	}
+	if dstAfter.Mtime <= dstBefore.Mtime || dstAfter.Ctime <= dstBefore.Ctime {
+		t.Fatalf("dst dir timestamps after rename = mtime=%d ctime=%d, want > mtime=%d ctime=%d", dstAfter.Mtime, dstAfter.Ctime, dstBefore.Mtime, dstBefore.Ctime)
+	}
+}
+
+func TestRenameRejectsNonEmptyDirectoryReplace(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "rename-dir-not-empty")
+
+	if err := c.Mkdir(ctx, "/src"); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if err := c.Mkdir(ctx, "/dst"); err != nil {
+		t.Fatalf("mkdir dst: %v", err)
+	}
+	if err := c.Echo(ctx, "/dst/file.txt", []byte("keep")); err != nil {
+		t.Fatalf("echo dst file: %v", err)
+	}
+
+	if err := c.Rename(ctx, "/src", "/dst", 0); err == nil {
+		t.Fatal("expected rename over non-empty directory to fail")
+	}
+}
+
+func TestFileLocksConflictAndUnlockAll(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "locks")
+
+	if err := c.Echo(ctx, "/file.txt", []byte("content")); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	st, err := c.Stat(ctx, "/file.txt")
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	lockA := &FileLock{Start: 0, End: 99, Type: syscall.F_WRLCK, PID: 1001}
+	lockB := &FileLock{Start: 50, End: 120, Type: syscall.F_RDLCK, PID: 1002}
+
+	if err := c.Setlk(ctx, st.Inode, "handle-a", lockA, false); err != nil {
+		t.Fatalf("setlk handle-a: %v", err)
+	}
+
+	conflict, err := c.Getlk(ctx, st.Inode, "handle-b", lockB)
+	if err != nil {
+		t.Fatalf("getlk handle-b: %v", err)
+	}
+	if conflict == nil || conflict.Type != syscall.F_WRLCK {
+		t.Fatalf("expected conflicting write lock, got %+v", conflict)
+	}
+
+	if err := c.Setlk(ctx, st.Inode, "handle-b", lockB, false); err == nil {
+		t.Fatal("expected conflicting lock to fail")
+	}
+
+	if err := c.UnlockAll(ctx, st.Inode, "handle-a"); err != nil {
+		t.Fatalf("unlock all handle-a: %v", err)
+	}
+	if err := c.Setlk(ctx, st.Inode, "handle-b", lockB, false); err != nil {
+		t.Fatalf("setlk handle-b after unlock: %v", err)
+	}
+}
+
+func TestFileLocksBlockingWait(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "locks-wait")
+
+	if err := c.Echo(ctx, "/file.txt", []byte("content")); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	st, err := c.Stat(ctx, "/file.txt")
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	first := &FileLock{Start: 0, End: 99, Type: syscall.F_WRLCK, PID: 1}
+	second := &FileLock{Start: 0, End: 99, Type: syscall.F_WRLCK, PID: 2}
+
+	if err := c.Setlk(ctx, st.Inode, "handle-a", first, false); err != nil {
+		t.Fatalf("setlk handle-a: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		waitCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		done <- c.Setlk(waitCtx, st.Inode, "handle-b", second, true)
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	if err := c.UnlockAll(ctx, st.Inode, "handle-a"); err != nil {
+		t.Fatalf("unlock all handle-a: %v", err)
+	}
+
+	if err := <-done; err != nil {
+		t.Fatalf("blocking setlk failed: %v", err)
+	}
+}
+
+func TestInodeRangeIO(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "range-io")
+
+	if err := c.Echo(ctx, "/file.txt", []byte("hello")); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	st, err := c.Stat(ctx, "/file.txt")
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+
+	chunk, err := c.ReadInodeAt(ctx, st.Inode, 1, 3)
+	if err != nil {
+		t.Fatalf("read inode at: %v", err)
+	}
+	if string(chunk) != "ell" {
+		t.Fatalf("read inode at = %q, want ell", string(chunk))
+	}
+
+	if err := c.WriteInodeAt(ctx, st.Inode, []byte("y"), 1); err != nil {
+		t.Fatalf("write inode at: %v", err)
+	}
+	data, err := c.Cat(ctx, "/file.txt")
+	if err != nil {
+		t.Fatalf("cat after write: %v", err)
+	}
+	if string(data) != "hyllo" {
+		t.Fatalf("content after write = %q", string(data))
+	}
+
+	if err := c.TruncateInode(ctx, st.Inode, 3); err != nil {
+		t.Fatalf("truncate inode: %v", err)
+	}
+	data, err = c.Cat(ctx, "/file.txt")
+	if err != nil {
+		t.Fatalf("cat after truncate: %v", err)
+	}
+	if string(data) != "hyl" {
+		t.Fatalf("content after truncate = %q", string(data))
+	}
+}
+
+func TestInodeWriteRefreshesPathCacheBeforeMetadataUpdate(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := NewWithCache(rdb, "range-cache", time.Hour)
+
+	st, created, err := c.CreateFile(ctx, "/cached.txt", 0o644, false)
+	if err != nil {
+		t.Fatalf("create file: %v", err)
+	}
+	if !created {
+		t.Fatal("expected cached.txt to be created")
+	}
+	if st == nil {
+		t.Fatal("expected stat result for created file")
+	}
+
+	initial, err := c.Stat(ctx, "/cached.txt")
+	if err != nil {
+		t.Fatalf("stat before write: %v", err)
+	}
+	if initial == nil || initial.Size != 0 {
+		t.Fatalf("expected zero-sized cached stat before write, got %+v", initial)
+	}
+
+	if err := c.WriteInodeAt(ctx, st.Inode, []byte("hello"), 0); err != nil {
+		t.Fatalf("write inode at: %v", err)
+	}
+
+	afterWrite, err := c.Stat(ctx, "/cached.txt")
+	if err != nil {
+		t.Fatalf("stat after write: %v", err)
+	}
+	if afterWrite == nil || afterWrite.Size != 5 {
+		t.Fatalf("expected immediate path stat size 5 after inode write, got %+v", afterWrite)
+	}
+
+	now := time.Now().UnixMilli()
+	if err := c.Utimens(ctx, "/cached.txt", now, now); err != nil {
+		t.Fatalf("utimens after write: %v", err)
+	}
+
+	afterMeta, err := c.Stat(ctx, "/cached.txt")
+	if err != nil {
+		t.Fatalf("stat after metadata update: %v", err)
+	}
+	if afterMeta == nil || afterMeta.Size != 5 {
+		t.Fatalf("expected metadata update to preserve size 5, got %+v", afterMeta)
+	}
+
+	data, err := c.Cat(ctx, "/cached.txt")
+	if err != nil {
+		t.Fatalf("cat after metadata update: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Fatalf("content after metadata update = %q, want hello", string(data))
+	}
+
+	size, err := rdb.HGet(ctx, "afs:{range-cache}:inode:"+strconv.FormatUint(st.Inode, 10), "size").Result()
+	if err != nil {
+		t.Fatalf("hget size: %v", err)
+	}
+	if size != "5" {
+		t.Fatalf("redis inode size = %q, want 5", size)
 	}
 }
 
@@ -208,7 +735,7 @@ func TestHashTagInKeys(t *testing.T) {
 	var allKeys []string
 	var cursor uint64
 	for {
-		keys, next, err := rdb.Scan(ctx, cursor, "rfs:{htag}:*", 100).Result()
+		keys, next, err := rdb.Scan(ctx, cursor, "afs:{htag}:*", 100).Result()
 		if err != nil {
 			t.Fatalf("scan: %v", err)
 		}
@@ -220,7 +747,7 @@ func TestHashTagInKeys(t *testing.T) {
 	}
 
 	if len(allKeys) == 0 {
-		t.Fatal("expected keys matching rfs:{htag}:*, got none")
+		t.Fatal("expected keys matching afs:{htag}:*, got none")
 	}
 	for _, k := range allKeys {
 		if !strings.Contains(k, "{htag}") {

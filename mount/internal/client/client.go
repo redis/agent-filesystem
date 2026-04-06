@@ -8,18 +8,32 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	RenameNoreplace uint32 = 0x1
+	RenameExchange  uint32 = 0x2
+)
+
 // Client provides the filesystem operation surface used by the mount layer.
 type Client interface {
 	Stat(ctx context.Context, path string) (*StatResult, error)
+	StatInode(ctx context.Context, inode uint64) (*StatResult, error)
 	Cat(ctx context.Context, path string) ([]byte, error)
 	Echo(ctx context.Context, path string, data []byte) error
 	EchoCreate(ctx context.Context, path string, data []byte, mode uint32) error
+	CreateFile(ctx context.Context, path string, mode uint32, exclusive bool) (*StatResult, bool, error)
 	EchoAppend(ctx context.Context, path string, data []byte) error
 	Touch(ctx context.Context, path string) error
+	ReadInodeAt(ctx context.Context, inode uint64, off int64, size int) ([]byte, error)
+	WriteInodeAt(ctx context.Context, inode uint64, data []byte, off int64) error
+	TruncateInode(ctx context.Context, inode uint64, size int64) error
+	Getlk(ctx context.Context, inode uint64, handleID string, lk *FileLock) (*FileLock, error)
+	Setlk(ctx context.Context, inode uint64, handleID string, lk *FileLock, wait bool) error
+	UnlockAll(ctx context.Context, inode uint64, handleID string) error
 	Mkdir(ctx context.Context, path string) error
 	Rm(ctx context.Context, path string) error
 	Ls(ctx context.Context, path string) ([]string, error)
 	LsLong(ctx context.Context, path string) ([]LsEntry, error)
+	Rename(ctx context.Context, src, dst string, flags uint32) error
 	Mv(ctx context.Context, src, dst string) error
 	Ln(ctx context.Context, target, linkpath string) error
 	Readlink(ctx context.Context, path string) (string, error)

@@ -7,6 +7,7 @@ import (
 
 // StatResult holds parsed FS.STAT response.
 type StatResult struct {
+	Inode uint64
 	Type  string // "file", "dir", "symlink"
 	Mode  uint32 // POSIX permission bits
 	UID   uint32
@@ -19,9 +20,12 @@ type StatResult struct {
 
 // LsEntry holds one entry from FS.LS LONG.
 type LsEntry struct {
+	Inode uint64
 	Name  string
 	Type  string
 	Mode  uint32
+	UID   uint32
+	GID   uint32
 	Size  int64
 	Mtime int64
 }
@@ -33,6 +37,13 @@ type InfoResult struct {
 	Symlinks       int64
 	TotalDataBytes int64
 	TotalInodes    int64
+}
+
+type FileLock struct {
+	Start uint64
+	End   uint64
+	Type  uint32
+	PID   uint32
 }
 
 // parseStat parses the flat [field, value, ...] array from FS.STAT.
@@ -51,6 +62,7 @@ func parseStat(res []interface{}) (*StatResult, error) {
 	}
 
 	sr := &StatResult{}
+	sr.Inode = uint64(toInt64(m["inode"]))
 	sr.Type = toString(m["type"])
 	sr.Mode = parseOctalMode(toString(m["mode"]))
 	sr.UID = uint32(toInt64(m["uid"]))
@@ -71,9 +83,12 @@ func parseLsLong(res []interface{}) ([]LsEntry, error) {
 			continue
 		}
 		e := LsEntry{
+			Inode: uint64(toInt64(valueAt(arr, 5))),
 			Name:  toString(arr[0]),
 			Type:  toString(arr[1]),
 			Mode:  parseOctalMode(toString(arr[2])),
+			UID:   uint32(toInt64(valueAt(arr, 6))),
+			GID:   uint32(toInt64(valueAt(arr, 7))),
 			Size:  toInt64(arr[3]),
 			Mtime: toInt64(arr[4]),
 		}
@@ -118,6 +133,13 @@ func toString(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
+}
+
+func valueAt(values []interface{}, idx int) interface{} {
+	if idx < 0 || idx >= len(values) {
+		return nil
+	}
+	return values[idx]
 }
 
 func toInt64(v interface{}) int64 {

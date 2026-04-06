@@ -5,7 +5,7 @@ import (
 	"syscall"
 )
 
-// mapError maps a Redis FS error to a syscall errno.
+// mapError maps an AFS error to a syscall errno.
 func mapError(err error) syscall.Errno {
 	if err == nil {
 		return 0
@@ -27,12 +27,15 @@ func mapError(err error) syscall.Errno {
 		return syscall.EEXIST
 	case strings.Contains(msg, "directory not empty"):
 		return syscall.ENOTEMPTY
+	case strings.Contains(msg, "operation not supported"):
+		return syscall.ENOTSUP
 	case strings.Contains(msg, "too many levels of symbolic links"):
 		return syscall.ELOOP
 	case strings.Contains(msg, "path depth exceeds limit"),
 		strings.Contains(msg, "mode must be"),
 		strings.Contains(msg, "uid out of range"),
 		strings.Contains(msg, "gid out of range"),
+		strings.Contains(msg, "invalid lock"),
 		strings.Contains(msg, "cannot move a directory into its own subtree"),
 		strings.Contains(msg, "syntax error"):
 		return syscall.EINVAL

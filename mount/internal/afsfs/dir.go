@@ -18,7 +18,7 @@ func (n *FSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*
 		out.Attr = cached.(fuse.Attr)
 		out.SetEntryTimeout(n.opts.AttrTimeout)
 		out.SetAttrTimeout(n.opts.AttrTimeout)
-		node := n.NewInode(ctx, child, fs.StableAttr{Mode: out.Attr.Mode & syscall.S_IFMT})
+		node := n.NewInode(ctx, child, fs.StableAttr{Mode: out.Attr.Mode & syscall.S_IFMT, Ino: out.Attr.Ino})
 		return node, 0
 	}
 
@@ -30,14 +30,14 @@ func (n *FSNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut) (*
 		return nil, syscall.ENOENT
 	}
 
-	attr := statToAttr(st, n.opts.UID, n.opts.GID)
+	attr := statToAttr(st)
 	n.attrCache.Set(child.fsPath, attr)
 
 	out.Attr = attr
 	out.SetEntryTimeout(n.opts.AttrTimeout)
 	out.SetAttrTimeout(n.opts.AttrTimeout)
 
-	node := n.NewInode(ctx, child, fs.StableAttr{Mode: attr.Mode & syscall.S_IFMT})
+	node := n.NewInode(ctx, child, fs.StableAttr{Mode: attr.Mode & syscall.S_IFMT, Ino: st.Inode})
 	return node, 0
 }
 
@@ -67,6 +67,7 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		result = append(result, fuse.DirEntry{
 			Name: e.Name,
 			Mode: mode,
+			Ino:  e.Inode,
 		})
 
 		// Pre-populate attr cache from the long listing.
@@ -74,7 +75,7 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 		if n.fsPath == "/" {
 			childPath = "/" + e.Name
 		}
-		n.attrCache.Set(childPath, lsEntryToAttr(&e, n.opts.UID, n.opts.GID))
+		n.attrCache.Set(childPath, lsEntryToAttr(&e))
 	}
 
 	n.dirCache.Set(n.fsPath, result)
@@ -82,7 +83,7 @@ func (n *FSNode) Readdir(ctx context.Context) (fs.DirStream, syscall.Errno) {
 }
 
 // lsEntryToAttr converts an LsEntry to fuse.Attr (partial — only has mtime, mode, size).
-func lsEntryToAttr(e *client.LsEntry, uid, gid uint32) fuse.Attr {
+func lsEntryToAttr(e *client.LsEntry) fuse.Attr {
 	var mode uint32
 	switch e.Type {
 	case "file":
@@ -104,10 +105,11 @@ func lsEntryToAttr(e *client.LsEntry, uid, gid uint32) fuse.Attr {
 	}
 
 	return fuse.Attr{
+		Ino:       e.Inode,
 		Mode:      mode,
 		Nlink:     nlink,
 		Size:      size,
-		Owner:     fuse.Owner{Uid: uid, Gid: gid},
+		Owner:     fuse.Owner{Uid: e.UID, Gid: e.GID},
 		Mtime:     uint64(e.Mtime / 1000),
 		Mtimensec: uint32((e.Mtime % 1000) * 1_000_000),
 		Blocks:    (size + 511) / 512,
@@ -137,12 +139,12 @@ func (n *FSNode) Mkdir(ctx context.Context, name string, mode uint32, out *fuse.
 	if err != nil {
 		return nil, mapError(err)
 	}
-	attr := statToAttr(st, n.opts.UID, n.opts.GID)
+	attr := statToAttr(st)
 	out.Attr = attr
 	out.SetEntryTimeout(n.opts.AttrTimeout)
 	out.SetAttrTimeout(n.opts.AttrTimeout)
 
-	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFDIR})
+	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFDIR, Ino: st.Inode})
 	return node, 0
 }
 
@@ -180,7 +182,7 @@ func (n *FSNode) Rename(ctx context.Context, name string, newParent fs.InodeEmbe
 	}
 	newPath := newParentNode.newChild(newName).fsPath
 
-	if err := n.client.Mv(ctx, oldPath, newPath); err != nil {
+	if err := n.client.Rename(ctx, oldPath, newPath, flags); err != nil {
 		return mapError(err)
 	}
 

@@ -33,6 +33,18 @@ type Handler interface {
 	HandleLimit() int
 }
 
+// HandleRenamer is an optional extension that lets handlers preserve stable
+// file handles across rename by remapping any cached subtree paths.
+type HandleRenamer interface {
+	RenameHandle(fs billy.Filesystem, oldPath, newPath []string) error
+}
+
+// VerifierInvalidator is an optional extension that lets handlers drop cached
+// directory listing snapshots after namespace mutations.
+type VerifierInvalidator interface {
+	InvalidateVerifier(path string)
+}
+
 // UnixChange extends the billy `Change` interface with support for special files.
 type UnixChange interface {
 	billy.Change

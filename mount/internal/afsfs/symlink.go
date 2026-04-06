@@ -26,12 +26,12 @@ func (n *FSNode) Symlink(ctx context.Context, target, name string, out *fuse.Ent
 	if err != nil {
 		return nil, mapError(err)
 	}
-	attr := statToAttr(st, n.opts.UID, n.opts.GID)
+	attr := statToAttr(st)
 	out.Attr = attr
 	out.SetEntryTimeout(n.opts.AttrTimeout)
 	out.SetAttrTimeout(n.opts.AttrTimeout)
 
-	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFLNK})
+	node := n.NewInode(ctx, child, fs.StableAttr{Mode: syscall.S_IFLNK, Ino: st.Inode})
 	return node, 0
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io/fs"
 	"reflect"
+	"sync"
 
 	"github.com/willscott/go-nfs"
 
@@ -38,6 +39,7 @@ func NewCachingHandlerWithVerifierLimit(h nfs.Handler, limit int, verifierLimit 
 // CachingHandler implements to/from handle via an LRU cache.
 type CachingHandler struct {
 	nfs.Handler
+	mu              sync.Mutex
 	activeHandles   *lru.Cache[uuid.UUID, entry]
 	reverseHandles  map[string][]uuid.UUID
 	activeVerifiers *lru.Cache[uint64, verifier]
@@ -53,9 +55,12 @@ type entry struct {
 // In stateless nfs (when it's serving a unix fs) this can be the device + inode
 // but we can generalize with a stateful local cache of handed out IDs.
 func (c *CachingHandler) ToHandle(f billy.Filesystem, path []string) []byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	joinedPath := f.Join(path...)
 
-	if handle := c.searchReverseCache(f, joinedPath); handle != nil {
+	if handle := c.searchReverseCacheLocked(f, joinedPath); handle != nil {
 		return handle
 	}
 
@@ -67,7 +72,7 @@ func (c *CachingHandler) ToHandle(f billy.Filesystem, path []string) []byte {
 	evictedKey, evictedPath, ok := c.activeHandles.GetOldest()
 	if evicted := c.activeHandles.Add(id, entry{f, newPath}); evicted && ok {
 		rk := evictedPath.f.Join(evictedPath.p...)
-		c.evictReverseCache(rk, evictedKey)
+		c.evictReverseCacheLocked(rk, evictedKey)
 	}
 
 	if _, ok := c.reverseHandles[joinedPath]; !ok {
@@ -81,6 +86,9 @@ func (c *CachingHandler) ToHandle(f billy.Filesystem, path []string) []byte {
 
 // FromHandle converts from an opaque handle to the file it represents
 func (c *CachingHandler) FromHandle(fh []byte) (billy.Filesystem, []string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	id, err := uuid.FromBytes(fh)
 	if err != nil {
 		return nil, []string{}, err
@@ -102,7 +110,7 @@ func (c *CachingHandler) FromHandle(fh []byte) (billy.Filesystem, []string, erro
 	return nil, []string{}, &nfs.NFSStatusError{NFSStatus: nfs.NFSStatusStale}
 }
 
-func (c *CachingHandler) searchReverseCache(f billy.Filesystem, path string) []byte {
+func (c *CachingHandler) searchReverseCacheLocked(f billy.Filesystem, path string) []byte {
 	uuids, exists := c.reverseHandles[path]
 
 	if !exists {
@@ -120,7 +128,7 @@ func (c *CachingHandler) searchReverseCache(f billy.Filesystem, path string) []b
 	return nil
 }
 
-func (c *CachingHandler) evictReverseCache(path string, handle uuid.UUID) {
+func (c *CachingHandler) evictReverseCacheLocked(path string, handle uuid.UUID) {
 	uuids, exists := c.reverseHandles[path]
 
 	if !exists {
@@ -136,14 +144,48 @@ func (c *CachingHandler) evictReverseCache(path string, handle uuid.UUID) {
 }
 
 func (c *CachingHandler) InvalidateHandle(fs billy.Filesystem, handle []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	//Remove from cache
 	id, _ := uuid.FromBytes(handle)
 	entry, ok := c.activeHandles.Get(id)
 	if ok {
 		rk := entry.f.Join(entry.p...)
-		c.evictReverseCache(rk, id)
+		c.evictReverseCacheLocked(rk, id)
 	}
 	c.activeHandles.Remove(id)
+	return nil
+}
+
+// RenameHandle preserves stable file handles across rename by remapping any
+// cached paths under oldPath onto the newPath subtree.
+func (c *CachingHandler) RenameHandle(fs billy.Filesystem, oldPath, newPath []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, id := range c.activeHandles.Keys() {
+		current, ok := c.activeHandles.Peek(id)
+		if !ok || !reflect.DeepEqual(current.f, fs) {
+			continue
+		}
+		if !hasPrefix(current.p, oldPath) {
+			continue
+		}
+
+		oldJoined := current.f.Join(current.p...)
+		c.evictReverseCacheLocked(oldJoined, id)
+
+		updated := make([]string, 0, len(newPath)+len(current.p)-len(oldPath))
+		updated = append(updated, newPath...)
+		if len(current.p) > len(oldPath) {
+			updated = append(updated, current.p[len(oldPath):]...)
+		}
+		c.activeHandles.Add(id, entry{f: current.f, p: updated})
+
+		newJoined := current.f.Join(updated...)
+		c.reverseHandles[newJoined] = append(c.reverseHandles[newJoined], id)
+	}
 	return nil
 }
 
@@ -186,14 +228,35 @@ func hashPathAndContents(path string, contents []fs.FileInfo) uint64 {
 }
 
 func (c *CachingHandler) VerifierFor(path string, contents []fs.FileInfo) uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	id := hashPathAndContents(path, contents)
 	c.activeVerifiers.Add(id, verifier{path, contents})
 	return id
 }
 
 func (c *CachingHandler) DataForVerifier(path string, id uint64) []fs.FileInfo {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if cache, ok := c.activeVerifiers.Get(id); ok {
-		return cache.contents
+		if cache.path == path {
+			return cache.contents
+		}
 	}
 	return nil
+}
+
+func (c *CachingHandler) InvalidateVerifier(path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, id := range c.activeVerifiers.Keys() {
+		cache, ok := c.activeVerifiers.Peek(id)
+		if !ok || cache.path != path {
+			continue
+		}
+		c.activeVerifiers.Remove(id)
+	}
 }

@@ -52,6 +52,7 @@ func onSymlink(ctx context.Context, w *response, userHandle Handler) error {
 	if err != nil {
 		return &NFSStatusError{NFSStatusAccess, err}
 	}
+	invalidateVerifiers(userHandle, fs, path, append(path, string(obj.Filename)))
 
 	fp := userHandle.ToHandle(fs, append(path, string(obj.Filename)))
 	changer := userHandle.Change(fs)

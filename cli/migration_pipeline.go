@@ -62,15 +62,15 @@ func newMigrationKeyBuilder(fsKey string) migrationKeyBuilder {
 }
 
 func (k migrationKeyBuilder) inode(p string) string {
-	return "rfs:{" + k.fsKey + "}:inode:" + p
+	return "afs:{" + k.fsKey + "}:inode:" + p
 }
 
 func (k migrationKeyBuilder) children(p string) string {
-	return "rfs:{" + k.fsKey + "}:children:" + p
+	return "afs:{" + k.fsKey + "}:children:" + p
 }
 
 func (k migrationKeyBuilder) info() string {
-	return "rfs:{" + k.fsKey + "}:info"
+	return "afs:{" + k.fsKey + "}:info"
 }
 
 func namespaceExists(ctx context.Context, rdb *redis.Client, fsKey string) (bool, error) {

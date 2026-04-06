@@ -173,6 +173,11 @@ On macOS AFS uses NFS. On Linux AFS uses FUSE.
 
 If no workspace exists yet, setup will ask for one and create it before mounting.
 
+Current macOS/NFS caveats:
+
+- overwriting the same path in place is not atomic under contention; a tight truncate-then-rewrite cycle can briefly expose an empty file to concurrent readers. If you need atomic replacement semantics, write a temp file and rename it over the destination.
+- macOS may create `._*` AppleDouble sidecar files on the NFS mount to preserve Finder metadata, resource-fork data, and some extended attributes. These files can show up in listings, tree walks, and grep results.
+
 ## Most Useful Commands
 
 ```bash

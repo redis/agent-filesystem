@@ -13,28 +13,36 @@ func newKeyBuilder(fsKey string) keyBuilder {
 	return keyBuilder{fsKey: fsKey}
 }
 
-func (k keyBuilder) inode(p string) string {
-	return "rfs:{" + k.fsKey + "}:inode:" + p
+func (k keyBuilder) inode(id string) string {
+	return "afs:{" + k.fsKey + "}:inode:" + id
 }
 
-func (k keyBuilder) children(p string) string {
-	return "rfs:{" + k.fsKey + "}:children:" + p
+func (k keyBuilder) dirents(id string) string {
+	return "afs:{" + k.fsKey + "}:dirents:" + id
 }
 
 func (k keyBuilder) info() string {
-	return "rfs:{" + k.fsKey + "}:info"
+	return "afs:{" + k.fsKey + "}:info"
+}
+
+func (k keyBuilder) nextInode() string {
+	return "afs:{" + k.fsKey + "}:next_inode"
+}
+
+func (k keyBuilder) locks(id string) string {
+	return "afs:{" + k.fsKey + "}:locks:" + id
 }
 
 func (k keyBuilder) inodePrefix() string {
-	return "rfs:{" + k.fsKey + "}:inode:"
+	return "afs:{" + k.fsKey + "}:inode:"
 }
 
-func (k keyBuilder) childrenPrefix() string {
-	return "rfs:{" + k.fsKey + "}:children:"
+func (k keyBuilder) direntsPrefix() string {
+	return "afs:{" + k.fsKey + "}:dirents:"
 }
 
 func (k keyBuilder) scanPattern() string {
-	return "rfs:{" + k.fsKey + "}:*"
+	return "afs:{" + k.fsKey + "}:*"
 }
 
 func normalizePath(p string) string {

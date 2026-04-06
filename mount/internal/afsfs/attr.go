@@ -8,7 +8,7 @@ import (
 )
 
 // statToAttr converts a StatResult to a fuse.Attr.
-func statToAttr(st *client.StatResult, uid, gid uint32) fuse.Attr {
+func statToAttr(st *client.StatResult) fuse.Attr {
 	var mode uint32
 	switch st.Type {
 	case "file":
@@ -25,10 +25,11 @@ func statToAttr(st *client.StatResult, uid, gid uint32) fuse.Attr {
 	}
 
 	attr := fuse.Attr{
+		Ino:       st.Inode,
 		Mode:      mode,
 		Nlink:     nlink,
 		Size:      uint64(st.Size),
-		Owner:     fuse.Owner{Uid: uid, Gid: gid},
+		Owner:     fuse.Owner{Uid: st.UID, Gid: st.GID},
 		Atime:     uint64(st.Atime / 1000),
 		Atimensec: uint32((st.Atime % 1000) * 1_000_000),
 		Mtime:     uint64(st.Mtime / 1000),

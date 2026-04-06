@@ -3,6 +3,7 @@ package nfs_test
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"os"
@@ -240,6 +241,11 @@ func TestNFS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	oldFile, err := target.Open("/f-0010.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldFile.Close()
 
 	if err := target.Rename("/f-0010.txt", "/g-0010.txt"); err != nil {
 		t.Fatal(err)
@@ -251,9 +257,13 @@ func TestNFS(t *testing.T) {
 	if new.Sys() != oldFA.Sys() {
 		t.Fatal("rename failed to update")
 	}
+	buf = make([]byte, 1)
+	if _, err := oldFile.Read(buf); err != nil && err != io.EOF {
+		t.Fatalf("old handle should remain readable after rename: %v", err)
+	}
 	_, _, err = target.Lookup("/f-0010.txt", false)
 	if err == nil {
-		t.Fatal("old handle should be invalid")
+		t.Fatal("old path should be missing after rename")
 	}
 
 	// for test nfs.ReadDirPlus in case of empty directory

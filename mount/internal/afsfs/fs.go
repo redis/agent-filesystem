@@ -39,7 +39,7 @@ type FSNode struct {
 	attrCache *cache.Cache
 	dirCache  *cache.Cache
 	opts      *Options
-	fsPath    string // absolute path in the Redis FS (e.g. "/", "/foo/bar")
+	fsPath    string // absolute path in AFS mount storage (e.g. "/", "/foo/bar")
 }
 
 // root returns the FSRoot from any node.
@@ -77,7 +77,7 @@ func (n *FSNode) newChild(name string) *FSNode {
 	}
 }
 
-// Mount mounts the Redis FS at the given mountpoint.
+// Mount mounts the AFS filesystem at the given mountpoint.
 func Mount(mountpoint string, c client.Client, opts *Options) (*fuse.Server, error) {
 	if opts.AttrTimeout == 0 {
 		opts.AttrTimeout = time.Second
@@ -163,7 +163,7 @@ func (n *FSNode) Getattr(ctx context.Context, fh fs.FileHandle, out *fuse.AttrOu
 		return syscall.ENOENT
 	}
 
-	attr := statToAttr(st, n.opts.UID, n.opts.GID)
+	attr := statToAttr(st)
 	n.attrCache.Set(n.fsPath, attr)
 	out.Attr = attr
 	out.SetTimeout(n.opts.AttrTimeout)
@@ -194,8 +194,15 @@ func (n *FSNode) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAttr
 	uid, uidOk := in.GetUID()
 	gid, gidOk := in.GetGID()
 	if uidOk || gidOk {
-		newUID := n.opts.UID
-		newGID := n.opts.GID
+		st, err := n.client.Stat(ctx, n.fsPath)
+		if err != nil {
+			return mapError(err)
+		}
+		if st == nil {
+			return syscall.ENOENT
+		}
+		newUID := st.UID
+		newGID := st.GID
 		if uidOk {
 			newUID = uid
 		}
