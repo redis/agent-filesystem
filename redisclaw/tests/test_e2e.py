@@ -1,8 +1,8 @@
 """
 E2E tests for RedisClaw.
 
-Requires sandbox docker-compose to be running:
-    cd sandbox && docker-compose up -d
+Requires sandbox docker compose to be running:
+    cd sandbox && docker compose up -d
 
 Run with:
     pytest tests/test_e2e.py -v
@@ -18,7 +18,7 @@ from redisclaw.tools import ToolExecutor, TOOLS
 
 SANDBOX_URL = "http://localhost:8090"
 REDIS_URL = "redis://localhost:6380"
-FS_KEY = "sandbox"  # Must match the key used by sandbox docker-compose
+FS_KEY = "sandbox"  # Must match the key used by sandbox docker compose
 
 
 @pytest.fixture
@@ -471,4 +471,3 @@ class TestMemorySystem:
         updated = manager.get_memory("memory")
         assert len(updated) > original_len
         assert "Appended content" in updated
-

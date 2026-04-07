@@ -1,6 +1,7 @@
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 NPM ?= npm
+DOCKER_COMPOSE ?= docker compose
 UI_DIR ?= ui
 WEB_DEV_SCRIPT := scripts/web-dev.sh
 UI_NODE_MODULES := $(UI_DIR)/node_modules
@@ -81,7 +82,7 @@ uninstall-skill-local:
 
 # Build and start MCP server (HTTP) with Redis
 mcp-up:
-	docker-compose up -d --build
+	$(DOCKER_COMPOSE) up -d --build
 	@echo ""
 	@echo "Agent Filesystem MCP server running at http://localhost:8089/sse"
 	@echo "Health check: http://localhost:8089/health"
@@ -90,11 +91,11 @@ mcp-up:
 
 # Stop MCP server and Redis
 mcp-down:
-	docker-compose down
+	$(DOCKER_COMPOSE) down
 
 # View MCP server logs
 mcp-logs:
-	docker-compose logs -f mcp-server
+	$(DOCKER_COMPOSE) logs -f mcp-server
 
 # Add MCP server to Auggie CLI (HTTP transport)
 install-mcp-auggie:

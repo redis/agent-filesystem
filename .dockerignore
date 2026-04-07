@@ -1,0 +1,24 @@
+.git
+.gitignore
+.claude
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+
+# Local build artifacts
+/afs
+/afs-server
+/redis-qmd
+/module/*.so
+/module/*.xo
+/mount/agent-filesystem-mount
+/mount/agent-filesystem-nfs
+/sandbox/sandbox
+/sandbox/sandbox-cli
+
+# Frontend dependencies
+/ui/node_modules
+
