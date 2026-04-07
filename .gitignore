@@ -4,7 +4,6 @@
 *.dSYM/
 /afs
 /afs-server
-/redis-qmd
 mount/agent-filesystem-mount
 mount/agent-filesystem-nfs
 sandbox/sandbox

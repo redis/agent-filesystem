@@ -201,12 +201,12 @@ redis-cli FS.GREP vol / "*TODO*"
 redis-cli FS.GREP vol /src "*error*" NOCASE
 ```
 
-**BM25-ranked search (RedisSearch via redis-qmd):**
+**Workspace search via AFS CLI:**
 ```bash
-redis-qmd --key vol index create
-redis-qmd --key vol search "TODO auth"
-redis-qmd --key vol query "\"disk full\" AND retry path:/logs/"
-redis-qmd --key vol grep "TODO"
+afs grep --workspace vol "TODO auth"
+afs grep --workspace vol --path /logs "disk full"
+afs grep --workspace vol -E "timeout|retry"
+afs grep --workspace vol -l "TODO"
 ```
 
 **Copy, move, delete:**

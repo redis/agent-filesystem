@@ -143,6 +143,10 @@ func main() {
 		if err := cmdStatus(); err != nil {
 			fatal(err)
 		}
+	case "grep":
+		if err := cmdGrep(args); err != nil {
+			fatal(err)
+		}
 	case "workspace":
 		if err := cmdWorkspace(args); err != nil {
 			fatal(err)
@@ -175,6 +179,7 @@ Commands:
                        and mountpoint for this run
   down                 Stop and unmount
   status               Show current status
+  grep [flags] <pat>   Search a workspace directly in Redis
   workspace ...        Workspace operations (create, list, current, use, run, clone, fork, delete, import)
   checkpoint ...       Checkpoint operations (create, list, restore)
 
