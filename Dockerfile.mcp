@@ -16,5 +16,4 @@ ENV MCP_PORT=8089
 EXPOSE 8089
 
 # Run MCP server with HTTP transport
-CMD ["agent-filesystem-mcp", "--transport", "http", "--port", "8089"]
-
+CMD ["sh", "-lc", "agent-filesystem-mcp --transport http --port \"${MCP_PORT}\""]

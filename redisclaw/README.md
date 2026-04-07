@@ -14,7 +14,7 @@ An OpenClaw-style task-solving coding agent with Agent Filesystem backed persist
 
 ```bash
 # Start the sandbox
-cd ../sandbox && docker-compose up -d
+cd ../sandbox && docker compose up -d
 
 # Install RedisClaw
 pip install -e .
@@ -170,4 +170,3 @@ pytest tests/test_e2e.py -v
 | `--session` | (none) | Resume a session by ID |
 | `--task` | (none) | Run a task and exit |
 | `--bash` | (none) | Run a command and exit |
-

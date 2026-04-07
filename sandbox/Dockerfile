@@ -3,6 +3,10 @@
 
 FROM golang:1.21-bookworm AS builder
 
+# Copy local Go replacements needed by mount/go.mod.
+WORKDIR /build
+COPY third_party/go-nfs/ /build/third_party/go-nfs/
+
 # Build agent-filesystem-mount
 WORKDIR /build/mount
 COPY mount/go.mod mount/go.sum ./
@@ -60,4 +64,3 @@ COPY sandbox/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
-
