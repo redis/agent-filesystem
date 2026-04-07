@@ -22,8 +22,8 @@ Open the bundled starter ignore file at [assets/.afsignore](assets/.afsignore) a
 2. Ensure `agent-filesystem` is built with `make`.
 3. Configure `afs` to point at the shared Redis instance.
 4. Create or update `~/.codex/.afsignore` before migration.
-5. On the source machine, run `./afs workspace import --clone-at-source .codex ~/.codex`, then `./afs workspace use .codex`, then `./afs up`.
-6. Explain that the original directory becomes `~/.codex.pre-afs`, the imported working copy returns at `~/.codex`, and the workspace name is `.codex`.
+5. On the source machine, run `./afs workspace import --mount-at-source .codex ~/.codex`, then `./afs workspace use .codex`.
+6. Explain that the original directory becomes `~/.codex.pre-afs`, the imported workspace is mounted at `~/.codex`, and the workspace name is `.codex`.
 7. On each additional machine, move aside any existing `~/.codex`, configure the current workspace as `.codex`, set `mountpoint` to that machine's `~/.codex`, then run `./afs up`.
 8. Verify with `./afs status` and `ls -la ~/.codex`.
 

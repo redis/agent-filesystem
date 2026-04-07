@@ -146,6 +146,18 @@ func NewHandler(service *Service, allowOrigin string) http.Handler {
 					return
 				}
 				writeJSON(w, http.StatusOK, response)
+			case http.MethodPut:
+				var input UpdateWorkspaceRequest
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+				response, err := service.UpdateWorkspace(r.Context(), workspace, input)
+				if err != nil {
+					writeError(w, err)
+					return
+				}
+				writeJSON(w, http.StatusOK, response)
 			case http.MethodDelete:
 				if err := service.DeleteWorkspace(r.Context(), workspace); err != nil {
 					writeError(w, err)
@@ -168,7 +180,7 @@ func cors(next http.Handler, allowOrigin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return

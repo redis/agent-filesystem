@@ -29,25 +29,9 @@ export type NavigationTitleParts = {
   page: string;
 };
 
-const workspacePanelChildren: ReadonlyArray<NavigationRouteItem> = [
-  {
-    kind: "route",
-    label: "Catalog",
-    path: "/workspaces",
-    icon: ClusterIcon,
-    title: "Workspaces",
-  },
-];
-
 export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Overview", path: "/", icon: DashboardIcon },
-  {
-    kind: "panel",
-    label: "Workspaces",
-    icon: ClusterIcon,
-    panelId: "workspaces",
-    children: workspacePanelChildren,
-  },
+  { kind: "route", label: "Workspaces", path: "/workspaces", icon: ClusterIcon },
   {
     kind: "route",
     label: "Activity",

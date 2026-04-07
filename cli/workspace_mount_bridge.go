@@ -5,11 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/rowantrollope/agent-filesystem/mount/client"
 )
 
@@ -25,7 +23,7 @@ var mountedArtifactNames = map[string]struct{}{
 }
 
 func mountRedisKeyForWorkspace(workspace string) string {
-	return "afs.mount." + workspace
+	return workspaceRedisKey(workspace)
 }
 
 func ensureMountWorkspace(ctx context.Context, cfg config, store *afsStore) (string, bool, error) {
@@ -50,53 +48,23 @@ func ensureMountWorkspace(ctx context.Context, cfg config, store *afsStore) (str
 	return workspace, true, nil
 }
 
-func seedWorkspaceMountKey(ctx context.Context, cfg config, store *afsStore, rdb *redis.Client, workspace string) (string, string, error) {
-	workspaceMeta, _, err := ensureMaterializedWorkspace(ctx, store, cfg, workspace)
+func seedWorkspaceMountKey(ctx context.Context, store *afsStore, workspace string) (string, string, bool, error) {
+	mountKey, headSavepoint, initialized, err := store.ensureWorkspaceRoot(ctx, workspace)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
-
-	treePath := afsWorkspaceTreePath(cfg, workspace)
-	mountKey := mountRedisKeyForWorkspace(workspace)
-	if err := syncDirectoryToAFSKey(ctx, rdb, mountKey, treePath); err != nil {
-		return "", "", err
-	}
-	return mountKey, workspaceMeta.HeadSavepoint, nil
+	ensureWorkspaceSearchIndex(ctx, store.rdb, mountKey)
+	return mountKey, headSavepoint, initialized, nil
 }
 
-func syncDirectoryToAFSKey(ctx context.Context, rdb *redis.Client, fsKey, sourceDir string) error {
-	if err := deleteNamespace(ctx, rdb, fsKey); err != nil {
-		return err
-	}
-	fsClient := client.New(rdb, fsKey)
-	if _, _, _, _, _, err := importDirectory(ctx, fsClient, sourceDir, nil, nil); err != nil {
-		return err
-	}
-
-	rootInfo, err := os.Stat(sourceDir)
-	if err != nil {
-		return err
-	}
-	return applyMetadata(ctx, client.New(rdb, fsKey), "/", rootInfo)
-}
-
-func syncMountedWorkspaceBack(ctx context.Context, cfg config, store *afsStore, rdb *redis.Client, workspace, expectedHead string) (bool, error) {
-	savepointID := generatedSavepointName()
-	mountKey := mountRedisKeyForWorkspace(workspace)
-
-	mountedManifest, blobs, stats, err := buildManifestFromAFS(ctx, client.New(rdb, mountKey), workspace, savepointID)
+func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string) (bool, error) {
+	rootManifest, blobs, stats, err := buildManifestFromAFS(ctx, client.New(store.rdb, workspaceRedisKey(workspace)), workspace, savepointID)
 	if err != nil {
 		return false, err
 	}
 
-	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, mountedManifest, blobs, stats)
+	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, rootManifest, blobs, stats)
 	if err != nil {
-		if err == errAFSWorkspaceConflict {
-			return false, fmt.Errorf("workspace %q moved while it was mounted; inspect it before stopping AFS", workspace)
-		}
-		return false, err
-	}
-	if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
 		return false, err
 	}
 	return saved, nil

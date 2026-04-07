@@ -66,6 +66,7 @@ type state struct {
 	ReadOnly             bool      `json:"read_only"`
 	MountEndpoint        string    `json:"mount_endpoint,omitempty"`
 	Mountpoint           string    `json:"mountpoint"`
+	CreatedMountpoint    bool      `json:"created_mountpoint,omitempty"`
 	RedisKey             string    `json:"redis_key"`
 	RedisLog             string    `json:"redis_log"`
 	MountLog             string    `json:"mount_log"`
@@ -168,7 +169,10 @@ func printUsage() {
 Commands:
   setup                Interactive setup
   config ...           Show or change basic Redis and mount settings non-interactively
-  up [flags]           Start AFS services with optional one-shot overrides
+  up                   Start AFS services using the saved config
+  up <workspace> <mountpoint>
+                       Start AFS services using config, overriding workspace
+                       and mountpoint for this run
   down                 Stop and unmount
   status               Show current status
   workspace ...        Workspace operations (create, list, current, use, run, clone, fork, delete, import)
@@ -199,7 +203,7 @@ func statusTitle(prefix, backendName, workspace, localPath string) string {
 	if backendName == mountBackendNone {
 		return prefix + " " + clr(ansiBold, "afs no mounted filesystem")
 	}
-	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace: %s mounted at %s (via %s)", currentWorkspaceLabel(workspace), localPath, userModeLabel(backendName)))
+	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace mounted via %s", userModeLabel(backendName)))
 }
 
 func localSurfacePath(cfg config, backendName string) string {
@@ -673,45 +677,6 @@ func cmdDown() error {
 	}
 
 	var rdb *redis.Client
-	if st.MountBackend != mountBackendNone && !st.ReadOnly && strings.TrimSpace(st.CurrentWorkspace) != "" && strings.TrimSpace(st.RedisKey) != "" {
-		redisCfg := cfg
-		redisCfg.RedisAddr = st.RedisAddr
-		redisCfg.RedisDB = st.RedisDB
-
-		rdb = redis.NewClient(buildRedisOptions(redisCfg, 8))
-		pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		err = rdb.Ping(pingCtx).Err()
-		cancel()
-		if err != nil {
-			fmt.Printf("  %s mounted workspace could not be saved; continuing shutdown (%v)\n", clr(ansiYellow, "!"), err)
-		} else {
-			expectedHead := strings.TrimSpace(st.MountedHeadSavepoint)
-			if expectedHead == "" {
-				store := newAFSStore(rdb)
-				workspaceMeta, metaErr := store.getWorkspaceMeta(context.Background(), st.CurrentWorkspace)
-				if metaErr != nil {
-					fmt.Printf("  %s mounted workspace could not be saved; continuing shutdown (%v)\n", clr(ansiYellow, "!"), metaErr)
-				} else {
-					expectedHead = workspaceMeta.HeadSavepoint
-				}
-			}
-
-			if expectedHead != "" {
-				s := startStep("Saving mounted workspace")
-				saved, syncErr := syncMountedWorkspaceBack(context.Background(), cfg, newAFSStore(rdb), rdb, st.CurrentWorkspace, expectedHead)
-				if syncErr != nil {
-					s.fail(syncErr.Error())
-					fmt.Printf("  %s mounted changes for %s were not saved; continuing shutdown\n", clr(ansiYellow, "!"), st.CurrentWorkspace)
-				} else if saved {
-					s.succeed(st.CurrentWorkspace)
-				} else {
-					s.succeed("no changes")
-				}
-			} else {
-				fmt.Printf("  %s mounted workspace head is unavailable; continuing shutdown without saving\n", clr(ansiYellow, "!"))
-			}
-		}
-	}
 
 	// Always attempt unmount — even if the daemon crashed, the stale mount
 	// may still be in the mount table and block access to the mountpoint.
@@ -732,7 +697,11 @@ func cmdDown() error {
 		s.succeed(fmt.Sprintf("pid %d", st.MountPID))
 	}
 
-	if rdb != nil && strings.TrimSpace(st.RedisKey) != "" && !backend.IsMounted(st.Mountpoint) {
+	if shouldCleanLegacyMountCache(st) && !backend.IsMounted(st.Mountpoint) {
+		redisCfg := cfg
+		redisCfg.RedisAddr = st.RedisAddr
+		redisCfg.RedisDB = st.RedisDB
+		rdb = redis.NewClient(buildRedisOptions(redisCfg, 4))
 		s := startStep("Cleaning mount cache")
 		if err := deleteNamespace(context.Background(), rdb, st.RedisKey); err != nil {
 			s.fail(err.Error())
@@ -768,6 +737,14 @@ func cmdDown() error {
 				fmt.Printf("  %s mount still active, archive preserved at %s\n",
 					clr(ansiYellow, "!"), st.ArchivePath)
 			}
+		}
+	}
+
+	if st.CreatedMountpoint && st.ArchivePath == "" && !backend.IsMounted(st.Mountpoint) {
+		removeErr := removeEmptyMountpoint(st.Mountpoint)
+		if removeErr != nil {
+			fmt.Printf("  %s empty mountpoint at %s could not be removed automatically (%v)\n",
+				clr(ansiYellow, "!"), st.Mountpoint, removeErr)
 		}
 	}
 
@@ -918,18 +895,29 @@ func startServices(cfg config) error {
 	} else {
 		workspaceStep.succeed(workspace)
 	}
-	prepareStep := startStep("Preparing mounted workspace")
-	mountKey, mountedHeadSavepoint, err := seedWorkspaceMountKey(ctx, cfg, store, rdb, workspace)
+	prepareStep := startStep("Opening live workspace")
+	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
 	if err != nil {
 		prepareStep.fail(err.Error())
 		return err
 	}
-	prepareStep.succeed(workspace)
+	if initialized {
+		prepareStep.succeed(workspace + " (initialized)")
+	} else {
+		prepareStep.succeed(workspace)
+	}
 
 	mountCfg := cfg
 	mountCfg.RedisKey = mountKey
 
 	s = startStep("Mounting filesystem")
+	createdMountpoint := false
+	if _, statErr := os.Stat(mountCfg.Mountpoint); errors.Is(statErr, os.ErrNotExist) {
+		createdMountpoint = true
+	} else if statErr != nil {
+		s.fail(statErr.Error())
+		return fmt.Errorf("check mountpoint: %w", statErr)
+	}
 	if err := os.MkdirAll(mountCfg.Mountpoint, 0o755); err != nil {
 		s.fail(err.Error())
 		return fmt.Errorf("create mountpoint: %w", err)
@@ -958,6 +946,7 @@ func startServices(cfg config) error {
 		ReadOnly:             cfg.ReadOnly,
 		MountEndpoint:        started.Endpoint,
 		Mountpoint:           mountCfg.Mountpoint,
+		CreatedMountpoint:    createdMountpoint,
 		RedisKey:             mountCfg.RedisKey,
 		RedisLog:             cfg.RedisLog,
 		MountLog:             cfg.MountLog,
@@ -1385,44 +1374,8 @@ func importDirectory(ctx context.Context, fsClient importClient, source string, 
 }
 
 func scanDirectory(source string, ignorer *migrationIgnore) (importStats, error) {
-	var stats importStats
-	err := filepath.WalkDir(source, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == source {
-			return nil
-		}
-
-		skip, err := ignorer.matches(source, path, d)
-		if err != nil {
-			return err
-		}
-		if skip {
-			stats.Ignored++
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case d.Type()&os.ModeSymlink != 0:
-			stats.Symlinks++
-		case d.IsDir():
-			stats.Dirs++
-		default:
-			stats.Files++
-			stats.Bytes += info.Size()
-		}
-		return nil
-	})
-	return stats, err
+	report, err := scanDirectoryReport(source, ignorer, 0)
+	return report.Stats, err
 }
 
 func formatBytes(size int64) string {
@@ -1519,6 +1472,29 @@ func deleteNamespace(ctx context.Context, rdb *redis.Client, fsKey string) error
 		}
 	}
 	return nil
+}
+
+func shouldCleanLegacyMountCache(st state) bool {
+	redisKey := strings.TrimSpace(st.RedisKey)
+	if redisKey == "" {
+		return false
+	}
+	workspace := strings.TrimSpace(st.CurrentWorkspace)
+	if workspace == "" {
+		return true
+	}
+	return redisKey != workspaceRedisKey(workspace)
+}
+
+func removeEmptyMountpoint(path string) error {
+	err := os.Remove(path)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+		return nil
+	}
+	return err
 }
 
 func terminatePID(pid int, timeout time.Duration) error {

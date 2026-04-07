@@ -86,3 +86,15 @@ func (s *afsStore) audit(ctx context.Context, workspace, op string, extra map[st
 func (s *afsStore) listAudit(ctx context.Context, workspace string, limit int64) ([]auditRecord, error) {
 	return s.cp.ListAudit(ctx, workspace, limit)
 }
+
+func (s *afsStore) ensureWorkspaceRoot(ctx context.Context, workspace string) (string, string, bool, error) {
+	return controlplane.EnsureWorkspaceRoot(ctx, s.cp, workspace)
+}
+
+func (s *afsStore) syncWorkspaceRoot(ctx context.Context, workspace string, m manifest) error {
+	return controlplane.SyncWorkspaceRoot(ctx, s.cp, workspace, m)
+}
+
+func workspaceRedisKey(workspace string) string {
+	return controlplane.WorkspaceFSKey(workspace)
+}

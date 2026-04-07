@@ -17,8 +17,10 @@ func resetAFSWorkspaceHead(ctx context.Context, cfg config, store *afsStore, ser
 	result := afsWorkspaceResetResult{
 		treePath: afsWorkspaceTreePath(cfg, workspace),
 	}
+	shouldMaterializeLocalTree := false
 
 	if _, err := os.Stat(result.treePath); err == nil {
+		shouldMaterializeLocalTree = true
 		archivePath, err := archiveLocalTree(cfg, workspace)
 		if err != nil {
 			return result, err
@@ -26,6 +28,13 @@ func resetAFSWorkspaceHead(ctx context.Context, cfg config, store *afsStore, ser
 		result.archivePath = archivePath
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return result, err
+	}
+	if !shouldMaterializeLocalTree {
+		if _, err := os.Stat(afsWorkspaceStatePath(cfg, workspace)); err == nil {
+			shouldMaterializeLocalTree = true
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return result, err
+		}
 	}
 
 	if err := service.RestoreCheckpoint(ctx, workspace, savepoint); err != nil {
@@ -35,8 +44,10 @@ func resetAFSWorkspaceHead(ctx context.Context, cfg config, store *afsStore, ser
 		return result, err
 	}
 
-	if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
-		return result, err
+	if shouldMaterializeLocalTree {
+		if err := materializeWorkspace(ctx, store, cfg, workspace); err != nil {
+			return result, err
+		}
 	}
 
 	return result, nil

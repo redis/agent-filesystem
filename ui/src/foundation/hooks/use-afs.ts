@@ -11,6 +11,7 @@ import type {
   GetWorkspaceFileContentInput,
   GetWorkspaceTreeInput,
   RestoreSavepointInput,
+  UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
 } from "../types/afs";
 
@@ -34,11 +35,12 @@ export function useWorkspaceSummaries() {
   );
 }
 
-export function useWorkspace(workspaceId: string) {
+export function useWorkspace(workspaceId: string, enabled = true) {
   return useQuery(
     queryOptions({
       queryKey: afsKeys.workspace(workspaceId),
       queryFn: () => afsApi.getWorkspace(workspaceId),
+      enabled,
     }),
   );
 }
@@ -121,6 +123,17 @@ export function useDeleteWorkspaceMutation() {
     mutationFn: (workspaceId: string) => afsApi.deleteWorkspace(workspaceId),
     onSuccess: async () => {
       await invalidate();
+    },
+  });
+}
+
+export function useUpdateWorkspaceMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UpdateWorkspaceInput) => afsApi.updateWorkspace(input),
+    onSuccess: async (_, variables) => {
+      await invalidate(variables.workspaceId);
     },
   });
 }

@@ -49,7 +49,7 @@ func (c *nativeClient) ensureRoot(ctx context.Context) error {
 	}
 
 	pipe := c.rdb.TxPipeline()
-	pipe.HSet(ctx, c.keys.inode(rootInodeID), c.inodeFields(root, false))
+	pipe.HSet(ctx, c.keys.inode(rootInodeID), c.inodeFieldsAtPath(root, "/", false))
 	pipe.HSet(ctx, c.keys.info(), map[string]interface{}{
 		"schema_version":   schemaVersion,
 		"files":            0,
@@ -280,7 +280,7 @@ func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData
 	if inode == nil || inode.ID == "" {
 		return errors.New("missing inode id")
 	}
-	if err := c.saveInodeDirect(ctx, inode, true); err != nil {
+	if err := c.saveInodeAtPath(ctx, p, inode, true); err != nil {
 		return err
 	}
 	c.cachePath(p, inode)
@@ -291,11 +291,18 @@ func (c *nativeClient) saveInodeMeta(ctx context.Context, p string, inode *inode
 	if inode == nil || inode.ID == "" {
 		return errors.New("missing inode id")
 	}
-	if err := c.saveInodeDirect(ctx, inode, false); err != nil {
+	if err := c.saveInodeAtPath(ctx, p, inode, false); err != nil {
 		return err
 	}
 	c.cachePath(p, inode)
 	return nil
+}
+
+func (c *nativeClient) saveInodeAtPath(ctx context.Context, p string, inode *inodeData, includeContent bool) error {
+	if inode == nil || inode.ID == "" {
+		return errors.New("missing inode id")
+	}
+	return c.rdb.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, includeContent)).Err()
 }
 
 func (c *nativeClient) saveInodeDirect(ctx context.Context, inode *inodeData, includeContent bool) error {
@@ -345,7 +352,7 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	now := nowMs()
 
 	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, c.keys.inode(id), c.inodeFields(inode, inode.Type == "file"))
+	pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, inode.Type == "file"))
 	pipe.HSet(ctx, c.keys.dirents(parent.ID), name, id)
 	c.queueTouchTimes(pipe, parent.ID, now)
 	c.queueCreateInfo(pipe, inode)
@@ -422,7 +429,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 			Content: content,
 		}
 		if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFields(inode, true))
+			pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, true))
 			pipe.HSet(ctx, direntsKey, name, inode.ID)
 			c.queueTouchTimes(pipe, parentInode.ID, now)
 			c.queueCreateInfo(pipe, inode)
@@ -524,9 +531,11 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 				pipe.HDel(ctx, c.keys.dirents(oldParentID), oldName)
 				pipe.HSet(ctx, c.keys.dirents(newParent.ID), newName, nextSrc.ID)
 				pipe.HSet(ctx, c.keys.inode(nextSrc.ID), map[string]interface{}{
-					"parent":   nextSrc.Parent,
-					"name":     nextSrc.Name,
-					"ctime_ms": nextSrc.CtimeMs,
+					"parent":         nextSrc.Parent,
+					"name":           nextSrc.Name,
+					"ctime_ms":       nextSrc.CtimeMs,
+					"path":           dst,
+					"path_ancestors": indexedPathAncestors(dst),
 				})
 				c.queueTouchTimes(pipe, oldParentID, nextSrc.CtimeMs)
 				if newParent.ID != oldParentID {
@@ -556,6 +565,9 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 			c.invalidateInode(parentOf(dst))
 			c.invalidatePrefix(resolvedSrc)
 			c.invalidatePrefix(dst)
+			if err := c.refreshIndexedSubtree(ctx, dst, srcInode); err != nil {
+				return err
+			}
 			return nil
 		case errors.Is(err, errNeedDirWatch):
 			watchDstDirID = nextDstDirID
@@ -656,6 +668,53 @@ func (c *nativeClient) inodeFields(inode *inodeData, includeContent bool) map[st
 		fields["content"] = inode.Content
 	}
 	return fields
+}
+
+func (c *nativeClient) inodeFieldsAtPath(inode *inodeData, p string, includeContent bool) map[string]interface{} {
+	fields := c.inodeFields(inode, includeContent)
+	fields["path"] = p
+	fields["path_ancestors"] = indexedPathAncestors(p)
+	return fields
+}
+
+func (c *nativeClient) refreshIndexedSubtree(ctx context.Context, rootPath string, inode *inodeData) error {
+	if inode == nil || inode.ID == "" {
+		return nil
+	}
+	pipe := c.rdb.Pipeline()
+	if err := c.queueRefreshIndexedSubtree(ctx, pipe, rootPath, inode); err != nil {
+		return err
+	}
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (c *nativeClient) queueRefreshIndexedSubtree(ctx context.Context, pipe redis.Pipeliner, currentPath string, inode *inodeData) error {
+	pipe.HSet(ctx, c.keys.inode(inode.ID), map[string]interface{}{
+		"path":           currentPath,
+		"path_ancestors": indexedPathAncestors(currentPath),
+	})
+	if inode.Type != "dir" {
+		return nil
+	}
+
+	entries, err := c.loadDirEntries(ctx, inode.ID)
+	if err != nil {
+		return err
+	}
+	for name, childID := range entries {
+		child, err := c.loadInodeByID(ctx, childID)
+		if err != nil {
+			return err
+		}
+		if child == nil {
+			continue
+		}
+		if err := c.queueRefreshIndexedSubtree(ctx, pipe, joinPath(currentPath, name), child); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) queueCreateInfo(pipe redis.Pipeliner, inode *inodeData) {
@@ -772,6 +831,28 @@ func toInt(v interface{}) int64 {
 
 func nowMs() int64 {
 	return time.Now().UnixMilli()
+}
+
+func indexedPathAncestors(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" || trimmed == "/" {
+		return "/"
+	}
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	parts := strings.Split(strings.TrimPrefix(trimmed, "/"), "/")
+	ancestors := make([]string, 0, len(parts)+1)
+	current := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		current += "/" + part
+		ancestors = append(ancestors, current)
+	}
+	if len(ancestors) == 0 {
+		return "/"
+	}
+	return strings.Join(ancestors, ",")
 }
 
 func splitComponents(p string) []string {

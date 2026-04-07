@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
+	"strconv"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/rowantrollope/agent-filesystem/cli/internal/controlplane"
 	"github.com/rowantrollope/agent-filesystem/mount/client"
 )
 
@@ -45,40 +47,65 @@ func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {
 	}
 }
 
-func TestSeedWorkspaceMountKeyUsesCurrentWorkspaceTree(t *testing.T) {
+func TestSeedWorkspaceMountKeyUsesWorkspaceHeadInsteadOfLocalTree(t *testing.T) {
 	t.Helper()
 
-	cfg, treePath, store, closeStore := importAFSWorkspaceForTest(t)
+	cfg, store, closeStore := seedWorkspaceMountBridgeFixture(t)
 	defer closeStore()
 
-	writeTestFile(t, filepath.Join(treePath, "main.go"), "package dirty\n")
+	writeTestFile(t, filepath.Join(afsWorkspaceTreePath(cfg, "repo"), "main.go"), "package local\n")
 
 	ctx := context.Background()
-	mountKey, head, err := seedWorkspaceMountKey(ctx, cfg, store, store.rdb, "repo")
+	mountKey, head, initialized, err := seedWorkspaceMountKey(ctx, store, "repo")
 	if err != nil {
 		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
 	}
+	if !initialized {
+		t.Fatal("expected first workspace mount open to initialize the live workspace root")
+	}
 	if head != "initial" {
 		t.Fatalf("head = %q, want %q", head, "initial")
+	}
+	if mountKey != workspaceRedisKey("repo") {
+		t.Fatalf("mountKey = %q, want %q", mountKey, workspaceRedisKey("repo"))
 	}
 
 	data, err := client.New(store.rdb, mountKey).Cat(ctx, "/main.go")
 	if err != nil {
 		t.Fatalf("Cat(/main.go) returned error: %v", err)
 	}
-	if string(data) != "package dirty\n" {
-		t.Fatalf("mounted main.go = %q, want %q", string(data), "package dirty\n")
+	if string(data) != "package main\n" {
+		t.Fatalf("mounted main.go = %q, want %q", string(data), "package main\n")
+	}
+
+	st, err := client.New(store.rdb, mountKey).Stat(ctx, "/main.go")
+	if err != nil {
+		t.Fatalf("Stat(/main.go) returned error: %v", err)
+	}
+	if st == nil || st.Inode == 0 {
+		t.Fatalf("expected inode for /main.go, got %+v", st)
+	}
+
+	vals, err := store.rdb.HGetAll(ctx, "afs:{"+mountKey+"}:inode:"+strconv.FormatUint(st.Inode, 10)).Result()
+	if err != nil {
+		t.Fatalf("HGetAll(main.go inode) returned error: %v", err)
+	}
+	if vals["path"] != "/main.go" {
+		t.Fatalf("path = %q, want %q", vals["path"], "/main.go")
+	}
+	if vals["path_ancestors"] != "/main.go" {
+		t.Fatalf("path_ancestors = %q, want %q", vals["path_ancestors"], "/main.go")
 	}
 }
 
 func TestSeedWorkspaceMountKeyUsesCanonicalAFSKeysOnly(t *testing.T) {
 	t.Helper()
 
-	cfg, _, store, closeStore := importAFSWorkspaceForTest(t)
+	_, store, closeStore := seedWorkspaceMountBridgeFixture(t)
 	defer closeStore()
 
 	ctx := context.Background()
-	mountKey, _, err := seedWorkspaceMountKey(ctx, cfg, store, store.rdb, "repo")
+	mountKey, _, _, err := seedWorkspaceMountKey(ctx, store, "repo")
 	if err != nil {
 		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
 	}
@@ -100,9 +127,6 @@ func TestSeedWorkspaceMountKeyUsesCanonicalAFSKeysOnly(t *testing.T) {
 	}
 
 	for _, key := range keys {
-		if strings.HasPrefix(key, "afs:{"+mountKey+"}:children:") {
-			t.Fatalf("unexpected legacy children key: %s", key)
-		}
 		if key == "afs:{"+mountKey+"}:inode:/" {
 			t.Fatalf("unexpected legacy path-keyed root inode key: %s", key)
 		}
@@ -117,14 +141,57 @@ func TestSeedWorkspaceMountKeyUsesCanonicalAFSKeysOnly(t *testing.T) {
 	}
 }
 
-func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
+func TestSeedWorkspaceMountKeyKeepsExistingLiveWorkspaceRoot(t *testing.T) {
 	t.Helper()
 
-	cfg, _, store, closeStore := importAFSWorkspaceForTest(t)
+	_, store, closeStore := seedWorkspaceMountBridgeFixture(t)
 	defer closeStore()
 
 	ctx := context.Background()
-	mountKey, head, err := seedWorkspaceMountKey(ctx, cfg, store, store.rdb, "repo")
+	mountKey, _, initialized, err := seedWorkspaceMountKey(ctx, store, "repo")
+	if err != nil {
+		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
+	}
+	if !initialized {
+		t.Fatal("expected first workspace mount open to initialize the live workspace root")
+	}
+
+	fsClient := client.New(store.rdb, mountKey)
+	if err := fsClient.Echo(ctx, "/live.txt", []byte("live change\n")); err != nil {
+		t.Fatalf("Echo(/live.txt) returned error: %v", err)
+	}
+
+	secondKey, secondHead, initializedAgain, err := seedWorkspaceMountKey(ctx, store, "repo")
+	if err != nil {
+		t.Fatalf("second seedWorkspaceMountKey() returned error: %v", err)
+	}
+	if initializedAgain {
+		t.Fatal("expected repeated workspace mount open to reuse the live workspace root")
+	}
+	if secondKey != mountKey {
+		t.Fatalf("second mountKey = %q, want %q", secondKey, mountKey)
+	}
+	if secondHead != "initial" {
+		t.Fatalf("second head = %q, want %q", secondHead, "initial")
+	}
+
+	data, err := fsClient.Cat(ctx, "/live.txt")
+	if err != nil {
+		t.Fatalf("Cat(/live.txt) returned error: %v", err)
+	}
+	if string(data) != "live change\n" {
+		t.Fatalf("live.txt = %q, want %q", string(data), "live change\n")
+	}
+}
+
+func TestSaveWorkspaceRootCheckpointSavesLiveWorkspaceChangesIntoWorkspace(t *testing.T) {
+	t.Helper()
+
+	cfg, store, closeStore := seedWorkspaceMountBridgeFixture(t)
+	defer closeStore()
+
+	ctx := context.Background()
+	mountKey, head, _, err := seedWorkspaceMountKey(ctx, store, "repo")
 	if err != nil {
 		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
 	}
@@ -134,9 +201,9 @@ func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 		t.Fatalf("Echo(/mounted.txt) returned error: %v", err)
 	}
 
-	saved, err := syncMountedWorkspaceBack(ctx, cfg, store, store.rdb, "repo", head)
+	saved, err := saveWorkspaceRootCheckpoint(ctx, store, "repo", head, "mounted-save")
 	if err != nil {
-		t.Fatalf("syncMountedWorkspaceBack() returned error: %v", err)
+		t.Fatalf("saveWorkspaceRootCheckpoint() returned error: %v", err)
 	}
 	if !saved {
 		t.Fatal("expected mounted workspace sync to create a new savepoint")
@@ -150,23 +217,36 @@ func TestSyncMountedWorkspaceBackSavesMountChangesIntoWorkspace(t *testing.T) {
 		t.Fatalf("HeadSavepoint = %q, want a new savepoint after mounted edits", workspaceMeta.HeadSavepoint)
 	}
 
-	data, err := os.ReadFile(filepath.Join(afsWorkspaceTreePath(cfg, "repo"), "mounted.txt"))
+	manifest, err := store.getManifest(ctx, "repo", workspaceMeta.HeadSavepoint)
 	if err != nil {
-		t.Fatalf("ReadFile(mounted.txt) returned error: %v", err)
+		t.Fatalf("getManifest(new head) returned error: %v", err)
+	}
+	entry, ok := manifest.Entries["/mounted.txt"]
+	if !ok {
+		t.Fatal("expected /mounted.txt in saved workspace manifest")
+	}
+	data, err := controlplane.ManifestEntryData(entry, func(blobID string) ([]byte, error) {
+		return store.getBlob(ctx, "repo", blobID)
+	})
+	if err != nil {
+		t.Fatalf("ManifestEntryData(/mounted.txt) returned error: %v", err)
 	}
 	if string(data) != "hello from mount\n" {
-		t.Fatalf("mounted.txt = %q, want %q", string(data), "hello from mount\n")
+		t.Fatalf("saved /mounted.txt = %q, want %q", string(data), "hello from mount\n")
+	}
+	if _, err := os.Stat(afsWorkspaceTreePath(cfg, "repo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no local workspace tree after mounted sync, stat err = %v", err)
 	}
 }
 
-func TestSyncMountedWorkspaceBackIgnoresMountedSystemArtifacts(t *testing.T) {
+func TestSaveWorkspaceRootCheckpointIgnoresMountedSystemArtifacts(t *testing.T) {
 	t.Helper()
 
-	cfg, _, store, closeStore := importAFSWorkspaceForTest(t)
+	cfg, store, closeStore := seedWorkspaceMountBridgeFixture(t)
 	defer closeStore()
 
 	ctx := context.Background()
-	mountKey, head, err := seedWorkspaceMountKey(ctx, cfg, store, store.rdb, "repo")
+	mountKey, head, _, err := seedWorkspaceMountKey(ctx, store, "repo")
 	if err != nil {
 		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
 	}
@@ -179,9 +259,9 @@ func TestSyncMountedWorkspaceBackIgnoresMountedSystemArtifacts(t *testing.T) {
 		t.Fatalf("Echo(/._root.txt) returned error: %v", err)
 	}
 
-	saved, err := syncMountedWorkspaceBack(ctx, cfg, store, store.rdb, "repo", head)
+	saved, err := saveWorkspaceRootCheckpoint(ctx, store, "repo", head, "artifact-only")
 	if err != nil {
-		t.Fatalf("syncMountedWorkspaceBack() returned error: %v", err)
+		t.Fatalf("saveWorkspaceRootCheckpoint() returned error: %v", err)
 	}
 	if saved {
 		t.Fatal("expected mounted system artifacts to be ignored during sync")
@@ -194,6 +274,32 @@ func TestSyncMountedWorkspaceBackIgnoresMountedSystemArtifacts(t *testing.T) {
 	if workspaceMeta.HeadSavepoint != head {
 		t.Fatalf("HeadSavepoint = %q, want %q when only ignored mount artifacts changed", workspaceMeta.HeadSavepoint, head)
 	}
+	if _, err := os.Stat(afsWorkspaceTreePath(cfg, "repo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected no local workspace tree after artifact-only sync, stat err = %v", err)
+	}
+}
+
+func seedWorkspaceMountBridgeFixture(t *testing.T) (config, *afsStore, func()) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNone
+	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "repo"
+	saveTempConfig(t, cfg)
+
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+	seedWorkspaceFromDirectory(t, store, "repo", "initial", sourceDir)
+	return loadedCfg, store, closeStore
 }
 
 func mustRedisClient(t *testing.T, cfg config) *redis.Client {

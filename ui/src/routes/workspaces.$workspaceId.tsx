@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader, Typography } from "@redislabsdev/redis-ui-components";
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
+import { z } from "zod";
 import {
   CardHeader,
   EditorArea,
@@ -44,7 +45,9 @@ import {
   useWorkspaceFileContent,
   useWorkspaceTree,
 } from "../foundation/hooks/use-afs";
+import { ActivityTable } from "../foundation/tables/activity-table";
 import type {
+  AFSActivityEvent,
   AFSDraftState,
   AFSWorkspaceDetail,
   AFSWorkspaceSource,
@@ -52,22 +55,27 @@ import type {
   AFSWorkspaceView,
 } from "../foundation/types/afs";
 
-type StudioTab = "overview" | "files" | "activity";
+type StudioTab = "overview" | "files" | "checkpoints" | "activity";
+
+const workspaceStudioSearchSchema = z.object({
+  tab: z.enum(["overview", "files", "checkpoints", "activity"]).optional(),
+});
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
+  validateSearch: workspaceStudioSearchSchema,
   component: WorkspaceStudioPage,
 });
 
 function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
+  const search = Route.useSearch();
   const workspaceQuery = useWorkspace(workspaceId);
   const deleteWorkspace = useDeleteWorkspaceMutation();
   const updateFile = useUpdateWorkspaceFileMutation();
   const createSavepoint = useCreateSavepointMutation();
   const restoreSavepoint = useRestoreSavepointMutation();
 
-  const [tab, setTab] = useState<StudioTab>("overview");
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
   const [currentPath, setCurrentPath] = useState("/");
   const [selectedPath, setSelectedPath] = useState("");
@@ -77,6 +85,7 @@ function WorkspaceStudioPage() {
   const [rollbackTarget, setRollbackTarget] = useState("");
 
   const workspace = workspaceQuery.data;
+  const tab = search.tab ?? "overview";
   const activeSavepoint =
     workspace?.savepoints.find((savepoint) => savepoint.id === workspace.headSavepointId) ?? null;
 
@@ -143,6 +152,15 @@ function WorkspaceStudioPage() {
   );
   const lastActivity = workspace?.activity[0] ?? null;
   const tabCopy = describeTab(tab);
+
+  function setStudioTab(nextTab: StudioTab) {
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId },
+      search: nextTab === "overview" ? {} : { tab: nextTab },
+      replace: true,
+    });
+  }
 
   if (workspaceQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -254,13 +272,16 @@ function WorkspaceStudioPage() {
             <SectionTitle eyebrow="Studio Views" title={tabCopy.title} body={tabCopy.body} />
           </SectionHeader>
           <Tabs>
-            <TabButton $active={tab === "overview"} onClick={() => setTab("overview")}>
+            <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
               Overview
             </TabButton>
-            <TabButton $active={tab === "files"} onClick={() => setTab("files")}>
+            <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
               Files
             </TabButton>
-            <TabButton $active={tab === "activity"} onClick={() => setTab("activity")}>
+            <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
+              Checkpoints
+            </TabButton>
+            <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
               Activity
             </TabButton>
           </Tabs>
@@ -274,7 +295,7 @@ function WorkspaceStudioPage() {
               <SectionHeader>
                 <SectionTitle
                   title="Workspace state"
-                  body="These are the signals an operator needs before browsing files or restoring a checkpoint."
+                  body="These are the signals an operator needs before opening files or stepping into checkpoint work."
                 />
               </SectionHeader>
               <StateGrid>
@@ -305,8 +326,46 @@ function WorkspaceStudioPage() {
             <SectionCard $span={8}>
               <SectionHeader>
                 <SectionTitle
+                  title="Capability surface"
+                  body="Capability flags tell the UI which surfaces are live controls versus read-only inspection points."
+                />
+              </SectionHeader>
+              <CapabilityGrid>
+                {capabilityCards.map((capability) => (
+                  <CapabilityCard key={capability.title} $enabled={capability.enabled}>
+                    <CapabilityStatus $enabled={capability.enabled}>
+                      {capability.enabled ? "Enabled" : "Unavailable"}
+                    </CapabilityStatus>
+                    <CapabilityTitle>{capability.title}</CapabilityTitle>
+                    <CapabilityBody>{capability.body}</CapabilityBody>
+                  </CapabilityCard>
+                ))}
+              </CapabilityGrid>
+            </SectionCard>
+          </SectionGrid>
+
+          <SectionGrid>
+            <SectionCard $span={12}>
+              <SectionHeader>
+                <SectionTitle
+                  title="Recent motion"
+                  body="A short activity preview keeps the latest workspace changes adjacent to the state summary."
+                />
+              </SectionHeader>
+              <EventList events={workspace.activity.slice(0, 5)} />
+            </SectionCard>
+          </SectionGrid>
+        </>
+      ) : null}
+
+      {tab === "checkpoints" ? (
+        <>
+          <SectionGrid>
+            <SectionCard $span={8}>
+              <SectionHeader>
+                <SectionTitle
                   title="Checkpoint history"
-                  body="Recovery points are immutable. The studio should make it easy to compare them and promote one back to head."
+                  body="Recovery points live under each workspace so you can compare history, browse older state, and restore with confidence."
                 />
               </SectionHeader>
               <SavepointGrid>
@@ -329,6 +388,20 @@ function WorkspaceStudioPage() {
                       <Button
                         size="medium"
                         variant="secondary-fill"
+                        onClick={() => {
+                          setBrowserView(
+                            savepoint.id === workspace.headSavepointId
+                              ? "head"
+                              : `checkpoint:${savepoint.id}`,
+                          );
+                          setStudioTab("files");
+                        }}
+                      >
+                        Browse
+                      </Button>
+                      <Button
+                        size="medium"
+                        variant="secondary-fill"
                         disabled={
                           !workspace.capabilities.restoreCheckpoint ||
                           restoreSavepoint.isPending ||
@@ -348,37 +421,132 @@ function WorkspaceStudioPage() {
                 ))}
               </SavepointGrid>
             </SectionCard>
+
+            <SectionCard $span={4}>
+              <SectionHeader>
+                <SectionTitle
+                  title="Checkpoint summary"
+                  body="The most useful checkpoint facts should be visible before you choose restore or browse."
+                />
+              </SectionHeader>
+              <StateGrid>
+                <StateCard>
+                  <StateLabel>Checkpoints</StateLabel>
+                  <StateValue>{workspace.savepoints.length}</StateValue>
+                </StateCard>
+                <StateCard>
+                  <StateLabel>Current head</StateLabel>
+                  <StateValue>{activeSavepoint?.name ?? "None"}</StateValue>
+                </StateCard>
+                <StateCard>
+                  <StateLabel>Latest checkpoint</StateLabel>
+                  <StateValue>
+                    {workspace.savepoints[0]
+                      ? new Date(workspace.savepoints[0].createdAt).toLocaleString()
+                      : "n/a"}
+                  </StateValue>
+                </StateCard>
+                <StateCard>
+                  <StateLabel>Restore</StateLabel>
+                  <StateValue>
+                    {workspace.capabilities.restoreCheckpoint ? "Available" : "Unavailable"}
+                  </StateValue>
+                </StateCard>
+              </StateGrid>
+            </SectionCard>
           </SectionGrid>
 
           <SectionGrid>
-            <SectionCard $span={7}>
+            <SectionCard $span={12}>
               <SectionHeader>
                 <SectionTitle
-                  title="Capability surface"
-                  body="Capability flags tell the UI which parts of the studio should present as live controls versus view-only instrumentation."
+                  title="Checkpoint actions"
+                  body="Create and restore checkpoints here so recovery work stays in one dedicated view."
                 />
               </SectionHeader>
-              <CapabilityGrid>
-                {capabilityCards.map((capability) => (
-                  <CapabilityCard key={capability.title} $enabled={capability.enabled}>
-                    <CapabilityStatus $enabled={capability.enabled}>
-                      {capability.enabled ? "Enabled" : "Unavailable"}
-                    </CapabilityStatus>
-                    <CapabilityTitle>{capability.title}</CapabilityTitle>
-                    <CapabilityBody>{capability.body}</CapabilityBody>
-                  </CapabilityCard>
-                ))}
-              </CapabilityGrid>
-            </SectionCard>
+              <ActionStack>
+                <Field>
+                  Restore target
+                  <Select
+                    value={rollbackTarget}
+                    onChange={(event) => setRollbackTarget(event.target.value)}
+                  >
+                    {workspace.savepoints.map((savepoint) => (
+                      <option key={savepoint.id} value={savepoint.id}>
+                        {savepoint.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <InlineActions>
+                  <Button
+                    size="medium"
+                    variant="secondary-fill"
+                    disabled={
+                      !workspace.capabilities.restoreCheckpoint ||
+                      restoreSavepoint.isPending ||
+                      rollbackTarget === workspace.headSavepointId
+                    }
+                    onClick={() =>
+                      restoreSavepoint.mutate({
+                        workspaceId: workspace.id,
+                        savepointId: rollbackTarget,
+                      })
+                    }
+                  >
+                    Restore checkpoint
+                  </Button>
+                </InlineActions>
 
-            <SectionCard $span={5}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Recent motion"
-                  body="A short audit preview keeps recent workspace activity adjacent to state and checkpoint context."
-                />
-              </SectionHeader>
-              <EventList events={workspace.activity.slice(0, 3)} />
+                {workspace.capabilities.createCheckpoint ? (
+                  <FormGrid
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (savepointName.trim() === "") {
+                        return;
+                      }
+
+                      createSavepoint.mutate({
+                        workspaceId: workspace.id,
+                        name: savepointName,
+                        note: savepointNote,
+                      });
+                      setSavepointName("");
+                      setSavepointNote("");
+                    }}
+                  >
+                    <Field>
+                      Checkpoint name
+                      <TextInput
+                        value={savepointName}
+                        onChange={(event) => setSavepointName(event.target.value)}
+                        placeholder="after-editor-pass"
+                      />
+                    </Field>
+                    <Field>
+                      Checkpoint note
+                      <TextArea
+                        value={savepointNote}
+                        onChange={(event) => setSavepointNote(event.target.value)}
+                        placeholder="Why this checkpoint exists."
+                      />
+                    </Field>
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      type="submit"
+                      disabled={createSavepoint.isPending}
+                    >
+                      Create checkpoint
+                    </Button>
+                  </FormGrid>
+                ) : (
+                  <PanelNote>
+                    Checkpoint creation is unavailable in this transport because it needs a connected
+                    working copy rather than canonical saved state alone.
+                  </PanelNote>
+                )}
+              </ActionStack>
             </SectionCard>
           </SectionGrid>
         </>
@@ -588,11 +756,11 @@ function WorkspaceStudioPage() {
           </SectionGrid>
 
           <SectionGrid>
-            <SectionCard $span={5}>
+            <SectionCard $span={12}>
               <SectionHeader>
                 <SectionTitle
                   title="Current view"
-                  body="The browser keeps working copy, saved head, and checkpoints visually distinct so operators know what they are looking at."
+                  body="The browser keeps working copy, saved head, and checkpoints visually distinct so operators know what they are looking at. Restore and checkpoint creation live in the dedicated checkpoint tab."
                 />
               </SectionHeader>
               <StateGrid>
@@ -614,98 +782,6 @@ function WorkspaceStudioPage() {
                 </StateCard>
               </StateGrid>
             </SectionCard>
-
-            <SectionCard $span={7}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Checkpoint actions"
-                  body="Restore stays close to the browser because operators often need to compare state before and after intervention."
-                />
-              </SectionHeader>
-              <ActionStack>
-                <Field>
-                  Restore target
-                  <Select
-                    value={rollbackTarget}
-                    onChange={(event) => setRollbackTarget(event.target.value)}
-                  >
-                    {workspace.savepoints.map((savepoint) => (
-                      <option key={savepoint.id} value={savepoint.id}>
-                        {savepoint.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <InlineActions>
-                  <Button
-                    size="medium"
-                    variant="secondary-fill"
-                    disabled={
-                      !workspace.capabilities.restoreCheckpoint ||
-                      restoreSavepoint.isPending ||
-                      rollbackTarget === workspace.headSavepointId
-                    }
-                    onClick={() =>
-                      restoreSavepoint.mutate({
-                        workspaceId: workspace.id,
-                        savepointId: rollbackTarget,
-                      })
-                    }
-                  >
-                    Restore checkpoint
-                  </Button>
-                </InlineActions>
-
-                {workspace.capabilities.createCheckpoint ? (
-                  <FormGrid
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      if (savepointName.trim() === "") {
-                        return;
-                      }
-
-                      createSavepoint.mutate({
-                        workspaceId: workspace.id,
-                        name: savepointName,
-                        note: savepointNote,
-                      });
-                      setSavepointName("");
-                      setSavepointNote("");
-                    }}
-                  >
-                    <Field>
-                      Checkpoint name
-                      <TextInput
-                        value={savepointName}
-                        onChange={(event) => setSavepointName(event.target.value)}
-                        placeholder="after-editor-pass"
-                      />
-                    </Field>
-                    <Field>
-                      Checkpoint note
-                      <TextArea
-                        value={savepointNote}
-                        onChange={(event) => setSavepointNote(event.target.value)}
-                        placeholder="Why this checkpoint exists."
-                      />
-                    </Field>
-                    <Button
-                      size="medium"
-                      variant="secondary-fill"
-                      type="submit"
-                      disabled={createSavepoint.isPending}
-                    >
-                      Create checkpoint
-                    </Button>
-                  </FormGrid>
-                ) : (
-                  <PanelNote>
-                    Checkpoint creation is unavailable in this transport because it needs a connected
-                    working copy rather than canonical saved state alone.
-                  </PanelNote>
-                )}
-              </ActionStack>
-            </SectionCard>
           </SectionGrid>
         </>
       ) : null}
@@ -716,10 +792,13 @@ function WorkspaceStudioPage() {
             <SectionHeader>
               <SectionTitle
                 title="Workspace activity"
-                body="Per-workspace activity reads as an audit lane for file edits, checkpoint creation, and imports."
+                body="Per-workspace activity should be sortable and actionable so operators can jump straight to the relevant surface."
               />
             </SectionHeader>
-            <EventList events={workspace.activity} />
+            <ActivityTable
+              rows={workspace.activity}
+              onOpenActivity={(event) => setStudioTab(activityDestinationTab(event))}
+            />
           </SectionCard>
           <SectionCard $span={4}>
             <SectionHeader>
@@ -862,11 +941,31 @@ function buildCapabilityCards(workspace: AFSWorkspaceDetail) {
   ];
 }
 
+function activityDestinationTab(event: AFSActivityEvent): StudioTab {
+  if (event.scope === "savepoint") {
+    return "checkpoints";
+  }
+  if (event.scope === "file") {
+    return "files";
+  }
+  if (event.scope === "workspace") {
+    return "overview";
+  }
+  return "activity";
+}
+
 function describeTab(tab: StudioTab) {
   if (tab === "files") {
     return {
       title: "Filesystem browser and editor",
       body: "File browsing should feel instrumented, with clear separation between saved views and mutable draft edits.",
+    };
+  }
+
+  if (tab === "checkpoints") {
+    return {
+      title: "Checkpoint history and restore",
+      body: "Checkpoint work belongs in its own view so recovery history, restore actions, and new savepoints stay together.",
     };
   }
 
