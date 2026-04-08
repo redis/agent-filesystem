@@ -198,22 +198,19 @@ func cmdImport(args []string) error {
 func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting bool) (importStats, *migrationIgnore, time.Duration, error) {
 	reader := bufio.NewReader(os.Stdin)
 	interactive := isInteractiveTerminal()
-	exclusions := newAFSImportExclusions()
 
 	for {
-		baseIgnorer, err := loadMigrationIgnore(sourceDir)
+		ignorer, err := loadMigrationIgnore(sourceDir)
 		if err != nil {
 			return importStats{}, nil, 0, err
 		}
-		ignorer := applyAFSImportExclusions(baseIgnorer, exclusions)
 
 		step := startStep("Scanning source directory")
-		scan, err := scanDirectoryReport(sourceDir, ignorer, afsImportReviewLargestLimit)
+		total, err := scanDirectory(sourceDir, ignorer)
 		if err != nil {
 			step.fail(err.Error())
 			return importStats{}, nil, 0, err
 		}
-		total := scan.Stats
 		scanDuration := step.elapsed()
 		step.succeed(formatAFSImportSummary(total))
 
@@ -228,69 +225,27 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 			{Label: "scan", Value: formatAFSImportSummary(total)},
 			{Label: "estimate", Value: "~" + formatStepDuration(estimate)},
 		}
-		if baseIgnorer != nil {
-			value := baseIgnorer.path
-			if baseIgnorer.legacy {
+		if ignorer != nil {
+			value := ignorer.path
+			if ignorer.legacy {
 				value += " (legacy filename)"
 			}
 			rows = append(rows, boxRow{Label: "ignore", Value: value})
 		} else {
 			rows = append(rows, boxRow{Label: "ignore", Value: clr(ansiDim, "none")})
 		}
-		if !exclusions.empty() {
-			rows = append(rows, boxRow{Label: "exclude", Value: exclusions.preview(3)})
-		}
 		if replaceExisting {
 			rows = append(rows, boxRow{Label: "replace", Value: "existing workspace state will be removed"})
 		}
 		rows = append(rows,
 			boxRow{},
-			boxRow{Value: clr(ansiDim, "Tip: review the largest items below, or edit .afsignore to make exclusions persistent.")},
+			boxRow{Value: clr(ansiDim, "Tip: use .afsignore to skip caches, dependencies, logs, or build output before import.")},
 		)
-		if hasAFSImportReviewCandidates(scan) {
-			rows = append(rows, boxRow{})
-			if len(scan.LargestFiles) > 0 {
-				rows = append(rows, boxRow{Value: clr(ansiBold, "Largest files")})
-				for _, item := range scan.LargestFiles {
-					rows = append(rows, boxRow{
-						Value: fmt.Sprintf("%s · %s", formatBytes(item.Bytes), item.Path),
-					})
-				}
-			}
-			if len(scan.LargestDirs) > 0 {
-				if len(scan.LargestFiles) > 0 {
-					rows = append(rows, boxRow{})
-				}
-				rows = append(rows, boxRow{Value: clr(ansiBold, "Largest directories")})
-				for _, item := range scan.LargestDirs {
-					rows = append(rows, boxRow{
-						Value: fmt.Sprintf("%s · %d files · %s/", formatBytes(item.Bytes), item.Files, item.Path),
-					})
-				}
-			}
-		}
 		printBox(clr(ansiBold, "Import plan"), rows)
 
-		if hasAFSImportReviewCandidates(scan) {
-			reviewLarge, err := promptYesNo(reader, os.Stdout, "  Review largest files and directories?", false)
-			if err != nil {
-				return importStats{}, nil, 0, err
-			}
-			if reviewLarge {
-				changed, err := reviewAFSImportExclusions(reader, os.Stdout, sourceDir, scan, &exclusions)
-				if err != nil {
-					return importStats{}, nil, 0, err
-				}
-				if changed {
-					fmt.Println()
-					continue
-				}
-			}
-		}
-
 		editLabel := "  Create or edit .afsignore before importing?"
-		if baseIgnorer != nil {
-			editLabel = fmt.Sprintf("  Edit %s before importing?", filepath.Base(baseIgnorer.path))
+		if ignorer != nil {
+			editLabel = fmt.Sprintf("  Edit %s before importing?", filepath.Base(ignorer.path))
 		}
 		editIgnore, err := promptYesNo(reader, os.Stdout, editLabel, false)
 		if err != nil {
@@ -298,8 +253,8 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 		}
 		if editIgnore {
 			ignorePath := filepath.Join(sourceDir, afsIgnoreFilename)
-			if baseIgnorer != nil && !baseIgnorer.legacy {
-				ignorePath = baseIgnorer.path
+			if ignorer != nil && !ignorer.legacy {
+				ignorePath = ignorer.path
 			}
 			if err := ensureAFSIgnoreTemplate(ignorePath); err != nil {
 				return importStats{}, nil, 0, err
@@ -604,10 +559,10 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 	workspaceInfo, localState, err := requireMaterializedWorkspace(ctx, store, cfg, workspace)
 	if err != nil {
 		if errors.Is(err, errAFSWorkspaceConflict) {
-			return false, fmt.Errorf("%w: workspace %q moved since this tree was materialized; reopen it before creating a checkpoint", errAFSWorkspaceConflict, workspace)
+			return false, fmt.Errorf("workspace %q moved since this tree was materialized; reopen it before creating a checkpoint", workspace)
 		}
 		if errors.Is(err, errAFSWorkspaceNotMaterialized) {
-			return false, fmt.Errorf("%w: workspace %q has no working copy yet; run '%s workspace run %s -- /bin/sh' first", errAFSWorkspaceNotMaterialized, workspace, filepath.Base(os.Args[0]), workspace)
+			return false, fmt.Errorf("workspace %q has no working copy yet; run '%s workspace run %s -- /bin/sh' first", workspace, filepath.Base(os.Args[0]), workspace)
 		}
 		return false, err
 	}
@@ -642,7 +597,7 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 	saved, err := saveAFSManifest(ctx, store, workspace, localState.HeadSavepoint, savepointID, localManifest, blobs, stats)
 	if err != nil {
 		if errors.Is(err, errAFSWorkspaceConflict) {
-			return false, fmt.Errorf("%w: checkpoint conflict: workspace %q moved while saving; reopen it before retrying", errAFSWorkspaceConflict, workspace)
+			return false, fmt.Errorf("checkpoint conflict: workspace %q moved while saving; reopen it before retrying", workspace)
 		}
 		return false, err
 	}
@@ -667,71 +622,6 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 		})
 	}
 	return true, nil
-}
-
-func saveAFSWorkspaceOrLiveRoot(ctx context.Context, cfg config, store *afsStore, workspace, savepointID string, printResult bool) (bool, error) {
-	if activeMountedLiveWorkspace(workspace) {
-		return saveLiveWorkspaceCheckpoint(ctx, store, workspace, savepointID, printResult)
-	}
-
-	saved, err := saveAFSWorkspace(ctx, cfg, store, workspace, savepointID, printResult)
-	if err == nil || !errors.Is(err, errAFSWorkspaceNotMaterialized) {
-		return saved, err
-	}
-
-	return saveLiveWorkspaceCheckpoint(ctx, store, workspace, savepointID, printResult)
-}
-
-func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace, savepointID string, printResult bool) (bool, error) {
-	workspaceInfo, metaErr := store.getWorkspaceMeta(ctx, workspace)
-	if metaErr != nil {
-		return false, metaErr
-	}
-	if _, _, _, err := store.ensureWorkspaceRoot(ctx, workspace); err != nil {
-		return false, err
-	}
-	saved, err := saveWorkspaceRootCheckpoint(ctx, store, workspace, workspaceInfo.HeadSavepoint, savepointID)
-	if err != nil {
-		if errors.Is(err, errAFSWorkspaceConflict) {
-			return false, fmt.Errorf("checkpoint conflict: workspace %q moved while saving; reopen it before retrying", workspace)
-		}
-		return false, err
-	}
-	if !saved {
-		if printResult {
-			fmt.Println("No changes to save")
-		}
-		return false, nil
-	}
-
-	if printResult {
-		printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "save complete"), []boxRow{
-			{Label: "workspace", Value: workspace},
-			{Label: "savepoint", Value: savepointID},
-			{Label: "source", Value: "live workspace"},
-		})
-	}
-	return true, nil
-}
-
-func activeMountedLiveWorkspace(workspace string) bool {
-	st, err := loadState()
-	if err != nil {
-		return false
-	}
-	if strings.TrimSpace(st.CurrentWorkspace) != workspace {
-		return false
-	}
-
-	backendName := strings.TrimSpace(st.MountBackend)
-	if backendName == "" {
-		backendName = mountBackendNone
-	}
-	if backendName == mountBackendNone {
-		return false
-	}
-
-	return strings.TrimSpace(st.RedisKey) == workspaceRedisKey(workspace)
 }
 
 func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats) (bool, error) {

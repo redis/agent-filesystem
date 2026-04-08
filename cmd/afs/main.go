@@ -177,10 +177,7 @@ func printUsage() {
 Commands:
   setup                Interactive setup
   config ...           Show or change basic Redis and mount settings non-interactively
-  up                   Start AFS services using the saved config
-  up <workspace> <mountpoint>
-                       Start AFS services using config, overriding workspace
-                       and mountpoint for this run
+  up [flags]           Start AFS services with optional one-shot overrides
   down                 Stop and unmount
   status               Show current status
   grep [flags] <pat>   Search a workspace directly in Redis
@@ -213,7 +210,7 @@ func statusTitle(prefix, backendName, workspace, localPath string) string {
 	if backendName == mountBackendNone {
 		return prefix + " " + clr(ansiBold, "afs no mounted filesystem")
 	}
-	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace mounted via %s", userModeLabel(backendName)))
+	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace: %s mounted at %s (via %s)", currentWorkspaceLabel(workspace), localPath, userModeLabel(backendName)))
 }
 
 func localSurfacePath(cfg config, backendName string) string {
@@ -1384,8 +1381,44 @@ func importDirectory(ctx context.Context, fsClient importClient, source string, 
 }
 
 func scanDirectory(source string, ignorer *migrationIgnore) (importStats, error) {
-	report, err := scanDirectoryReport(source, ignorer, 0)
-	return report.Stats, err
+	var stats importStats
+	err := filepath.WalkDir(source, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == source {
+			return nil
+		}
+
+		skip, err := ignorer.matches(source, path, d)
+		if err != nil {
+			return err
+		}
+		if skip {
+			stats.Ignored++
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case d.Type()&os.ModeSymlink != 0:
+			stats.Symlinks++
+		case d.IsDir():
+			stats.Dirs++
+		default:
+			stats.Files++
+			stats.Bytes += info.Size()
+		}
+		return nil
+	})
+	return stats, err
 }
 
 func formatBytes(size int64) string {
@@ -1505,29 +1538,6 @@ func deleteNamespace(ctx context.Context, rdb *redis.Client, fsKey string) error
 		}
 	}
 	return nil
-}
-
-func shouldCleanLegacyMountCache(st state) bool {
-	redisKey := strings.TrimSpace(st.RedisKey)
-	if redisKey == "" {
-		return false
-	}
-	workspace := strings.TrimSpace(st.CurrentWorkspace)
-	if workspace == "" {
-		return true
-	}
-	return redisKey != workspaceRedisKey(workspace)
-}
-
-func removeEmptyMountpoint(path string) error {
-	err := os.Remove(path)
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
-		return nil
-	}
-	return err
 }
 
 func terminatePID(pid int, timeout time.Duration) error {

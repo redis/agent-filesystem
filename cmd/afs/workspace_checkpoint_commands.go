@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
@@ -176,7 +177,7 @@ func cmdWorkspaceCurrent(args []string) error {
 	}
 
 	printBox(clr(ansiBold, "current workspace"), []boxRow{
-		{Label: "workspace", Value: currentWorkspaceLabel(cfg.CurrentWorkspace)},
+		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
 	})
 	return nil
 }
@@ -319,17 +320,29 @@ func cmdWorkspaceClone(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceCloneUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 4 {
+	if len(args) != 3 && len(args) != 4 {
 		return fmt.Errorf("%s", workspaceCloneUsageText(filepath.Base(os.Args[0])))
 	}
-	workspace := args[2]
-	targetDir := args[3]
-	if err := validateAFSName("workspace", workspace); err != nil {
+
+	cfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
 		return err
 	}
+	defer closeStore()
 
-	cfg, _, _, err := openAFSStore(context.Background())
+	workspace := ""
+	targetDir := ""
+	if len(args) == 4 {
+		workspace = args[2]
+		targetDir = args[3]
+	} else {
+		targetDir = args[2]
+	}
+	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
 	if err != nil {
+		return err
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
@@ -381,16 +394,8 @@ func cmdWorkspaceFork(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceForkUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 4 {
+	if len(args) != 3 && len(args) != 4 {
 		return fmt.Errorf("%s", workspaceForkUsageText(filepath.Base(os.Args[0])))
-	}
-	sourceWorkspace := args[2]
-	newWorkspace := args[3]
-	if err := validateAFSName("workspace", sourceWorkspace); err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", newWorkspace); err != nil {
-		return err
 	}
 
 	cfg, store, closeStore, err := openAFSStore(context.Background())
@@ -398,6 +403,25 @@ func cmdWorkspaceFork(args []string) error {
 		return err
 	}
 	defer closeStore()
+
+	sourceWorkspace := ""
+	newWorkspace := ""
+	if len(args) == 4 {
+		sourceWorkspace = args[2]
+		newWorkspace = args[3]
+	} else {
+		newWorkspace = args[2]
+	}
+	sourceWorkspace, err = resolveWorkspaceName(context.Background(), cfg, store, sourceWorkspace)
+	if err != nil {
+		return err
+	}
+	if err := validateAFSName("workspace", sourceWorkspace); err != nil {
+		return err
+	}
+	if err := validateAFSName("workspace", newWorkspace); err != nil {
+		return err
+	}
 
 	ctx := context.Background()
 	service := controlPlaneServiceFromStore(cfg, store)
@@ -418,11 +442,14 @@ func cmdWorkspaceImport(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceImportUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	cloneAtSource := false
+	mountAtSource := false
 	importArgs := []string{"import"}
 	for _, arg := range args[2:] {
-		if arg == "--clone-at-source" || arg == "--mount-at-source" {
-			cloneAtSource = true
+		if arg == "--clone-at-source" {
+			return fmt.Errorf(`unknown flag "--clone-at-source"; use "--mount-at-source" instead`)
+		}
+		if arg == "--mount-at-source" {
+			mountAtSource = true
 			continue
 		}
 		importArgs = append(importArgs, arg)
@@ -435,19 +462,22 @@ func cmdWorkspaceImport(args []string) error {
 	if err := cmdImport(importArgs); err != nil {
 		return err
 	}
-	if !cloneAtSource {
+	if !mountAtSource {
 		return nil
 	}
 
 	workspace := importArgs[len(importArgs)-2]
-	return cloneWorkspaceAtSource(workspace, sourceDir)
+	return mountWorkspaceAtSource(workspace, sourceDir)
 }
 
-func cloneWorkspaceAtSource(workspace, sourceDir string) error {
-	cfg, _, _, err := openAFSStore(context.Background())
+func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
+	ctx := context.Background()
+
+	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
 	}
+	defer closeStore()
 
 	targetDir, err := expandPath(sourceDir)
 	if err != nil {
@@ -460,6 +490,23 @@ func cloneWorkspaceAtSource(workspace, sourceDir string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a directory", targetDir)
 	}
+	if entry, mounted := mountTableEntry(targetDir); mounted {
+		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", targetDir, entry)
+	}
+
+	existingState, err := loadStateForMountAtSource()
+	if err != nil {
+		return err
+	}
+
+	mountCfg, err := prepareMountedConfig(cfg, workspace, targetDir)
+	if err != nil {
+		return err
+	}
+	backend, backendName, err := backendForConfig(mountCfg)
+	if err != nil {
+		return err
+	}
 
 	backupDir := targetDir + ".pre-afs"
 	if _, err := os.Stat(backupDir); err == nil {
@@ -468,20 +515,115 @@ func cloneWorkspaceAtSource(workspace, sourceDir string) error {
 		return err
 	}
 
-	if err := os.Rename(targetDir, backupDir); err != nil {
+	prepareStep := startStep("Opening live workspace")
+	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
+	if err != nil {
+		prepareStep.fail(err.Error())
 		return err
 	}
-	if err := materializeWorkspaceToPath(context.Background(), cfg, workspace, targetDir); err != nil {
-		_ = os.Rename(backupDir, targetDir)
+	if initialized {
+		prepareStep.succeed(workspace + " (initialized)")
+	} else {
+		prepareStep.succeed(workspace)
+	}
+
+	rollbackArchive := false
+	cleanupMountpoint := false
+	var started mountStartResult
+	defer func() {
+		if err == nil {
+			return
+		}
+		if started.PID > 0 && processAlive(started.PID) {
+			_ = terminatePID(started.PID, 2*time.Second)
+		}
+		if backend != nil {
+			_ = backend.Unmount(targetDir)
+		}
+		if cleanupMountpoint {
+			_ = os.RemoveAll(targetDir)
+			_ = os.Remove(targetDir)
+		}
+		if rollbackArchive {
+			_ = os.Rename(backupDir, targetDir)
+		}
+	}()
+
+	archiveStep := startStep("Archiving source directory")
+	if err := os.Rename(targetDir, backupDir); err != nil {
+		archiveStep.fail(err.Error())
+		return err
+	}
+	rollbackArchive = true
+	cleanupMountpoint = true
+	archiveStep.succeed(backupDir)
+
+	mountStep := startStep("Mounting workspace at source")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		mountStep.fail(err.Error())
+		return err
+	}
+	started, err = backend.Start(mountCfg)
+	if err != nil {
+		mountStep.fail(err.Error())
+		return err
+	}
+	if err := backend.WaitForMount(mountCfg, started, 8*time.Second); err != nil {
+		mountStep.fail("timeout")
+		return fmt.Errorf("mount did not become ready: %w", err)
+	}
+	mountStep.succeed(targetDir)
+
+	st := state{
+		StartedAt:            time.Now().UTC(),
+		ManageRedis:          existingState.ManageRedis,
+		RedisPID:             existingState.RedisPID,
+		RedisAddr:            mountCfg.RedisAddr,
+		RedisDB:              mountCfg.RedisDB,
+		CurrentWorkspace:     workspace,
+		MountedHeadSavepoint: mountedHeadSavepoint,
+		MountPID:             started.PID,
+		MountBackend:         backendName,
+		ReadOnly:             mountCfg.ReadOnly,
+		MountEndpoint:        started.Endpoint,
+		Mountpoint:           mountCfg.Mountpoint,
+		RedisKey:             mountKey,
+		RedisLog:             mountCfg.RedisLog,
+		MountLog:             mountCfg.MountLog,
+		RedisServerBin:       mountCfg.RedisServerBin,
+		MountBin:             mountCfg.MountBin,
+		ArchivePath:          backupDir,
+	}
+	if err := saveState(st); err != nil {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace cloned at source"), []boxRow{
+	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace mounted at source"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "path", Value: targetDir},
 		{Label: "backup", Value: backupDir},
+		{Label: "stop", Value: filepath.Base(os.Args[0]) + " down"},
 	})
 	return nil
+}
+
+func loadStateForMountAtSource() (state, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state{}, nil
+		}
+		return state{}, err
+	}
+
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	if backendName != mountBackendNone || strings.TrimSpace(st.ArchivePath) != "" {
+		return state{}, fmt.Errorf("AFS already has an active mounted filesystem state; run '%s down' first", filepath.Base(os.Args[0]))
+	}
+	return st, nil
 }
 
 func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
@@ -518,12 +660,8 @@ func cmdCheckpointList(args []string) error {
 		fmt.Fprint(os.Stderr, checkpointListUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 3 {
+	if len(args) != 2 && len(args) != 3 {
 		return fmt.Errorf("%s", checkpointListUsageText(filepath.Base(os.Args[0])))
-	}
-	workspace := args[2]
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
 	}
 
 	cfg, store, closeStore, err := openAFSStore(context.Background())
@@ -531,6 +669,18 @@ func cmdCheckpointList(args []string) error {
 		return err
 	}
 	defer closeStore()
+
+	workspace := ""
+	if len(args) == 3 {
+		workspace = args[2]
+	}
+	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	if err != nil {
+		return err
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
 
 	service := controlPlaneServiceFromStore(cfg, store)
 	checkpoints, err := service.ListCheckpoints(context.Background(), workspace, 100)
@@ -541,7 +691,7 @@ func cmdCheckpointList(args []string) error {
 	for _, meta := range checkpoints {
 		rows = append(rows, boxRow{
 			Label: meta.Name,
-			Value: fmt.Sprintf("%s · %s", meta.CreatedAt, formatBytes(meta.TotalBytes)),
+			Value: fmt.Sprintf("%s · %s", formatDisplayTimestamp(meta.CreatedAt), formatBytes(meta.TotalBytes)),
 		})
 	}
 	if len(rows) == 0 {
@@ -556,19 +706,8 @@ func cmdCheckpointCreate(args []string) error {
 		fmt.Fprint(os.Stderr, checkpointCreateUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 3 && len(args) != 4 {
+	if len(args) != 2 && len(args) != 3 && len(args) != 4 {
 		return fmt.Errorf("%s", checkpointCreateUsageText(filepath.Base(os.Args[0])))
-	}
-	workspace := args[2]
-	checkpointID := generatedSavepointName()
-	if len(args) == 4 {
-		checkpointID = args[3]
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
-	if err := validateAFSName("checkpoint", checkpointID); err != nil {
-		return err
 	}
 
 	cfg, store, closeStore, err := openAFSStore(context.Background())
@@ -576,6 +715,30 @@ func cmdCheckpointCreate(args []string) error {
 		return err
 	}
 	defer closeStore()
+
+	workspace := ""
+	checkpointID := generatedSavepointName()
+	switch len(args) {
+	case 4:
+		workspace = args[2]
+		checkpointID = args[3]
+	case 3:
+		if hasCurrentWorkspaceSelection(cfg) {
+			checkpointID = args[2]
+		} else {
+			workspace = args[2]
+		}
+	}
+	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	if err != nil {
+		return err
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
+	if err := validateAFSName("checkpoint", checkpointID); err != nil {
+		return err
+	}
 
 	saved, err := saveAFSWorkspaceOrLiveRoot(context.Background(), cfg, store, workspace, checkpointID, false)
 	if err != nil {
@@ -598,11 +761,27 @@ func cmdCheckpointRestore(args []string) error {
 		fmt.Fprint(os.Stderr, checkpointRestoreUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 4 {
+	if len(args) != 3 && len(args) != 4 {
 		return fmt.Errorf("%s", checkpointRestoreUsageText(filepath.Base(os.Args[0])))
 	}
-	workspace := args[2]
-	checkpointID := args[3]
+	cfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	workspace := ""
+	checkpointID := ""
+	if len(args) == 4 {
+		workspace = args[2]
+		checkpointID = args[3]
+	} else {
+		checkpointID = args[2]
+	}
+	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	if err != nil {
+		return err
+	}
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
@@ -644,6 +823,10 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	return nil
 }
 
+func hasCurrentWorkspaceSelection(cfg config) bool {
+	return selectedWorkspaceName(cfg) != ""
+}
+
 func workspaceUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s workspace <subcommand>
@@ -654,10 +837,10 @@ Subcommands:
   current                                      Show the current workspace
   use <workspace>                              Set the current workspace
   run [workspace] [--readonly] -- <command...> Materialize and run in a workspace cwd
-  clone <workspace> <directory>               Clone a workspace into a local directory
-  fork <source-workspace> <new-workspace>     Fork a workspace at its current head
+  clone [workspace] <directory>                Clone a workspace into a local directory
+  fork [source-workspace] <new-workspace>      Fork a workspace at its current head
   delete <workspace>...                       Delete workspaces and local materialized state
-  import [--force] [--clone-at-source] <workspace> <directory>
+  import [--force] [--mount-at-source] <workspace> <directory>
                                                Import a local directory into a workspace
 
 Examples:
@@ -724,18 +907,22 @@ Set the current workspace AFS will use when a workspace argument is omitted.
 
 func workspaceCloneUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s workspace clone <workspace> <directory>
+  %s workspace clone [workspace] <directory>
 
 Clone a workspace into a local directory at its current saved head.
 The destination must not already contain files.
+
+If [workspace] is omitted, AFS uses the current workspace.
 `, bin)
 }
 
 func workspaceForkUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s workspace fork <source-workspace> <new-workspace>
+  %s workspace fork [source-workspace] <new-workspace>
 
 Create a new workspace from the source workspace's current saved head.
+
+If [source-workspace] is omitted, AFS uses the current workspace.
 `, bin)
 }
 
@@ -749,14 +936,14 @@ Delete one or more workspaces from Redis and remove their local materialized sta
 
 func workspaceImportUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s workspace import [--force] [--clone-at-source] <workspace> <directory>
+  %s workspace import [--force] [--mount-at-source] <workspace> <directory>
 
 Import a local directory into a workspace.
 
 Options:
   --force            Replace an existing workspace
-  --clone-at-source  Replace the source directory with a materialized workspace copy
-                     and keep the original directory as <directory>.pre-afs
+  --mount-at-source  Archive the source directory to <directory>.pre-afs and
+                     mount the imported workspace at the original path
 `, bin)
 }
 
@@ -765,9 +952,9 @@ func checkpointUsageText(bin string) string {
   %s checkpoint <subcommand>
 
 Subcommands:
-  list <workspace>                     List checkpoints for a workspace
-  create <workspace> [checkpoint]     Create a checkpoint from the local working copy
-  restore <workspace> <checkpoint>    Restore a workspace to a checkpoint
+  list [workspace]                     List checkpoints for a workspace
+  create [workspace] [checkpoint]     Create a checkpoint from the current workspace state
+  restore [workspace] <checkpoint>    Restore a workspace to a checkpoint
 
 Examples:
   %s checkpoint list demo
@@ -780,7 +967,7 @@ Run '%s checkpoint <subcommand> --help' for details.
 
 func checkpointListUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s checkpoint list <workspace>
+  %s checkpoint list [workspace]
 
 List checkpoints for a workspace, newest first.
 `, bin)
@@ -788,7 +975,7 @@ List checkpoints for a workspace, newest first.
 
 func checkpointCreateUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s checkpoint create <workspace> [checkpoint]
+  %s checkpoint create [workspace] [checkpoint]
 
 Create a checkpoint from the workspace's current local working copy.
 If [checkpoint] is omitted, AFS generates a timestamped name.
@@ -797,7 +984,7 @@ If [checkpoint] is omitted, AFS generates a timestamped name.
 
 func checkpointRestoreUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s checkpoint restore <workspace> <checkpoint>
+  %s checkpoint restore [workspace] <checkpoint>
 
 Restore the workspace working copy to the selected checkpoint.
 `, bin)

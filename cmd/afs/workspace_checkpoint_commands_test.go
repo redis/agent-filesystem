@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/rowantrollope/agent-filesystem/cli/internal/controlplane"
+	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
 	"github.com/rowantrollope/agent-filesystem/mount/client"
 )
 
