@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/mount/client"
 )
 
 func WorkspaceFSKey(workspace string) string {

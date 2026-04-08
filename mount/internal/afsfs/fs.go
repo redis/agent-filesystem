@@ -12,8 +12,8 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/cache"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
+	"github.com/redis/agent-filesystem/mount/internal/cache"
+	"github.com/redis/agent-filesystem/mount/internal/client"
 )
 
 // Options configures the FUSE mount.

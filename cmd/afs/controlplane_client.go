@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
-	"github.com/rowantrollope/agent-filesystem/internal/worktree"
+	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/worktree"
 )
 
 func controlPlaneConfigFromCLI(cfg config) controlplane.Config {

@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/go-git/go-billy/v5"
+	"github.com/redis/agent-filesystem/mount/internal/client"
+	"github.com/redis/agent-filesystem/mount/internal/nfsfs"
+	"github.com/redis/agent-filesystem/mount/internal/redisconn"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/nfsfs"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/redisconn"
 	"github.com/willscott/go-nfs"
 	"github.com/willscott/go-nfs/helpers"
 )

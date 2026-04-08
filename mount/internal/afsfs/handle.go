@@ -10,7 +10,7 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
+	"github.com/redis/agent-filesystem/mount/internal/client"
 )
 
 var nextHandleID uint64

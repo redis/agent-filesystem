@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
+	"github.com/redis/agent-filesystem/sandbox/internal/executor"
 )
 
 // MCP JSON-RPC types

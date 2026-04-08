@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func MaterializeWorkspace(ctx context.Context, store *controlplane.Store, cfg Config, workspace string, onProgress func(ImportStats)) error {

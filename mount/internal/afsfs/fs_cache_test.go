@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/mount/internal/cache"
+	"github.com/redis/agent-filesystem/mount/internal/cache"
 )
 
 func TestInvalidatePathPrefix(t *testing.T) {

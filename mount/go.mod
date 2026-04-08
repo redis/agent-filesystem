@@ -1,4 +1,4 @@
-module github.com/rowantrollope/agent-filesystem/mount
+module github.com/redis/agent-filesystem/mount
 
 go 1.21
 

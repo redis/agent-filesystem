@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 type afsWorkspaceResetResult struct{}

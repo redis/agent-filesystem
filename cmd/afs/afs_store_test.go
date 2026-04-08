@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
 )
 
 func TestAFSKeyHelpers(t *testing.T) {

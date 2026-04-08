@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
+	"github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
 )
 
 func setupTestRedis(t *testing.T) (*redis.Client, context.Context) {

@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
+	"github.com/redis/agent-filesystem/sandbox/internal/executor"
 )
 
 // Server handles HTTP requests for the sandbox.

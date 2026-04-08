@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/rowantrollope/agent-filesystem/mount/client"
+	"github.com/redis/agent-filesystem/mount/client"
 )
 
 func TestWorkspaceRunSyncsChangesBackToLiveWorkspaceWithoutCheckpoint(t *testing.T) {

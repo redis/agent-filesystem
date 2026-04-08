@@ -10,7 +10,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func BuildManifestFromDirectory(root, workspace, savepoint string, opts BuildManifestOptions) (controlplane.Manifest, map[string][]byte, ManifestStats, error) {

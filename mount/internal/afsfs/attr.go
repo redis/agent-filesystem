@@ -4,7 +4,7 @@ import (
 	"syscall"
 
 	"github.com/hanwen/go-fuse/v2/fuse"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
+	"github.com/redis/agent-filesystem/mount/internal/client"
 )
 
 // statToAttr converts a StatResult to a fuse.Attr.

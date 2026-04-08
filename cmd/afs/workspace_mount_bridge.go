@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rowantrollope/agent-filesystem/mount/client"
+	"github.com/redis/agent-filesystem/mount/client"
 )
 
 const workspaceMountTreeMaxDepth = 4096

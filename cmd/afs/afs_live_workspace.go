@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/mount/client"
+	"github.com/redis/agent-filesystem/mount/client"
 )
 
 func liveWorkspaceManifest(ctx context.Context, store *afsStore, workspace, savepointID string) (manifest, map[string][]byte, error) {

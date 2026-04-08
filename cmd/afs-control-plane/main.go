@@ -8,7 +8,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func main() {

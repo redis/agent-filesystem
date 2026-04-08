@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
+	"github.com/redis/agent-filesystem/sandbox/internal/executor"
 )
 
 func (s *MCPServer) callTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {

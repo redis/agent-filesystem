@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
-	"github.com/rowantrollope/agent-filesystem/mount/client"
 )
 
 func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {

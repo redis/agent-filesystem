@@ -11,8 +11,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/rowantrollope/agent-filesystem/sandbox/internal/api"
-	"github.com/rowantrollope/agent-filesystem/sandbox/internal/executor"
+	"github.com/redis/agent-filesystem/sandbox/internal/api"
+	"github.com/redis/agent-filesystem/sandbox/internal/executor"
 )
 
 func main() {

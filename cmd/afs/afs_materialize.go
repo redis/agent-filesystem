@@ -1,6 +1,6 @@
 package main
 
-import "github.com/rowantrollope/agent-filesystem/internal/worktree"
+import "github.com/redis/agent-filesystem/internal/worktree"
 
 type manifestBlobLoader = worktree.BlobLoader
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/mount/internal/cache"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/cache"
 )
 
 const maxSymlinkDepth = 40

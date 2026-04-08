@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
 )
 
 type afsStore struct {

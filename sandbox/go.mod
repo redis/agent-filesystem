@@ -1,4 +1,4 @@
-module github.com/rowantrollope/agent-filesystem/sandbox
+module github.com/redis/agent-filesystem/sandbox
 
 go 1.21
 

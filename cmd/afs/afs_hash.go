@@ -4,8 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/rowantrollope/agent-filesystem/internal/controlplane"
-	"github.com/rowantrollope/agent-filesystem/internal/worktree"
+	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/worktree"
 )
 
 func buildManifestFromDirectory(root, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {

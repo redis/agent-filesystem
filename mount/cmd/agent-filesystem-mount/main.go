@@ -13,10 +13,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/agent-filesystem/mount/internal/afsfs"
+	"github.com/redis/agent-filesystem/mount/internal/client"
+	"github.com/redis/agent-filesystem/mount/internal/redisconn"
 	"github.com/redis/go-redis/v9"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/afsfs"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/client"
-	"github.com/rowantrollope/agent-filesystem/mount/internal/redisconn"
 )
 
 const (

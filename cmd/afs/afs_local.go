@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 
-	"github.com/rowantrollope/agent-filesystem/internal/worktree"
+	"github.com/redis/agent-filesystem/internal/worktree"
 )
 
 var errAFSWorkspaceConflict = worktree.ErrWorkspaceConflict
