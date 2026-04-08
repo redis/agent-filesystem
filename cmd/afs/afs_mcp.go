@@ -355,7 +355,7 @@ func (s *afsMCPServer) tools() []mcpTool {
 		},
 		{
 			Name:        "checkpoint_create",
-			Description: "Create a new checkpoint from the current materialized working copy",
+			Description: "Create a new checkpoint from the current live workspace state",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -366,7 +366,7 @@ func (s *afsMCPServer) tools() []mcpTool {
 		},
 		{
 			Name:        "checkpoint_restore",
-			Description: "Restore a workspace to a checkpoint and rematerialize the local working copy",
+			Description: "Restore a workspace to a checkpoint in the live workspace root",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -742,15 +742,14 @@ func (s *afsMCPServer) toolCheckpointRestore(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
-	result, err := resetAFSWorkspaceHead(ctx, s.cfg, s.store, s.service, workspace, checkpointID)
+	_, err = resetAFSWorkspaceHead(ctx, s.service, workspace, checkpointID)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"workspace":    workspace,
-		"checkpoint":   checkpointID,
-		"tree_path":    result.treePath,
-		"archive_path": result.archivePath,
+		"workspace":  workspace,
+		"checkpoint": checkpointID,
+		"mode":       "live-workspace",
 	}, nil
 }
 
@@ -1279,22 +1278,8 @@ func (s *afsMCPServer) refreshWorkspaceLiveState(ctx context.Context, workspace 
 	if err != nil {
 		return false, err
 	}
-	if workspaceLocalCachePresent(s.cfg, workspace) {
-		_, _, _, err := materializeAFSWorkspaceFromLiveRoot(ctx, s.cfg, s.store, workspace, nil)
-		return dirty, err
-	}
 	meta.DirtyHint = dirty
 	return dirty, s.store.putWorkspaceMeta(ctx, meta)
-}
-
-func workspaceLocalCachePresent(cfg config, workspace string) bool {
-	if _, err := os.Stat(afsWorkspaceTreePath(cfg, workspace)); err == nil {
-		return true
-	}
-	if _, err := os.Stat(afsWorkspaceStatePath(cfg, workspace)); err == nil {
-		return true
-	}
-	return false
 }
 
 func ensureWorkspaceParentDirs(ctx context.Context, fsClient client.Client, normalizedPath string) error {

@@ -183,7 +183,7 @@ func TestCheckpointCreateUsesLiveWorkspaceRootWithoutLocalTree(t *testing.T) {
 	}
 }
 
-func TestCheckpointRestoreArchivesAndRematerializesWorkspace(t *testing.T) {
+func TestCheckpointRestoreLeavesLocalWorkspaceUntouched(t *testing.T) {
 	t.Helper()
 
 	cfg, treePath, store, closeStore := importAFSWorkspaceForTest(t)
@@ -202,6 +202,10 @@ func TestCheckpointRestoreArchivesAndRematerializesWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(treePath, "scratch.txt"), []byte("temp\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile(scratch.txt) returned error: %v", err)
 	}
+	localStateBefore, err := loadAFSLocalState(cfg, "repo")
+	if err != nil {
+		t.Fatalf("loadAFSLocalState(before restore) returned error: %v", err)
+	}
 
 	if err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "initial"}); err != nil {
 		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
@@ -215,47 +219,39 @@ func TestCheckpointRestoreArchivesAndRematerializesWorkspace(t *testing.T) {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
 
+	liveMain, err := client.New(store.rdb, workspaceRedisKey("repo")).Cat(context.Background(), "/main.go")
+	if err != nil {
+		t.Fatalf("Cat(/main.go) returned error: %v", err)
+	}
+	if string(liveMain) != "package main\n" {
+		t.Fatalf("live main.go after restore = %q, want %q", string(liveMain), "package main\n")
+	}
+
 	localState, err := loadAFSLocalState(cfg, "repo")
 	if err != nil {
 		t.Fatalf("loadAFSLocalState() returned error: %v", err)
 	}
-	if localState.Dirty {
-		t.Fatal("expected local state to be clean after restore")
+	if localState.Dirty != localStateBefore.Dirty {
+		t.Fatalf("local Dirty = %v, want %v", localState.Dirty, localStateBefore.Dirty)
 	}
-	if localState.HeadSavepoint != "initial" {
-		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, "initial")
+	if localState.HeadSavepoint != localStateBefore.HeadSavepoint {
+		t.Fatalf("local HeadSavepoint = %q, want %q", localState.HeadSavepoint, localStateBefore.HeadSavepoint)
 	}
 
 	mainBytes, err := os.ReadFile(filepath.Join(treePath, "main.go"))
 	if err != nil {
 		t.Fatalf("ReadFile(main.go) returned error: %v", err)
 	}
-	if string(mainBytes) != "package main\n" {
-		t.Fatalf("main.go after restore = %q, want %q", string(mainBytes), "package main\n")
+	if string(mainBytes) != "package dirty\n" {
+		t.Fatalf("local main.go after restore = %q, want %q", string(mainBytes), "package dirty\n")
 	}
-	if _, err := os.Stat(filepath.Join(treePath, "scratch.txt")); !os.IsNotExist(err) {
-		t.Fatalf("expected scratch.txt to be removed after restore, got err=%v", err)
+	if _, err := os.Stat(filepath.Join(treePath, "scratch.txt")); err != nil {
+		t.Fatalf("expected scratch.txt to remain in the untouched local tree, got err=%v", err)
 	}
 
 	archiveDir := afsWorkspaceArchiveDir(cfg, "repo")
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
-		t.Fatalf("ReadDir(archive) returned error: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("expected restore to create an archive entry")
-	}
-
-	foundScratch := false
-	for _, entry := range entries {
-		candidate := filepath.Join(archiveDir, entry.Name(), "scratch.txt")
-		if _, err := os.Stat(candidate); err == nil {
-			foundScratch = true
-			break
-		}
-	}
-	if !foundScratch {
-		t.Fatal("expected archived tree to contain scratch.txt")
+	if _, err := os.Stat(archiveDir); !os.IsNotExist(err) {
+		t.Fatalf("expected restore to skip local archiving in mounted mode, got err=%v", err)
 	}
 }
 

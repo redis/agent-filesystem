@@ -136,10 +136,11 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
-	loadedCfg, _, _, err := openAFSStore(context.Background())
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
+	defer closeStore()
 	treePath := afsWorkspaceTreePath(loadedCfg, "repo")
 	targetFile := filepath.Join(treePath, "main.go")
 
@@ -157,12 +158,20 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
 	}
 
+	liveMain, err := client.New(store.rdb, workspaceRedisKey("repo")).Cat(context.Background(), "/main.go")
+	if err != nil {
+		t.Fatalf("Cat(/main.go) returned error: %v", err)
+	}
+	if string(liveMain) != "package updated\n" {
+		t.Fatalf("live main.go after restore = %q, want %q", string(liveMain), "package updated\n")
+	}
+
 	restored, err := os.ReadFile(targetFile)
 	if err != nil {
 		t.Fatalf("ReadFile(main.go) returned error: %v", err)
 	}
-	if string(restored) != "package updated\n" {
-		t.Fatalf("main.go after restore = %q, want %q", string(restored), "package updated\n")
+	if string(restored) != "package broken\n" {
+		t.Fatalf("local main.go after restore = %q, want %q", string(restored), "package broken\n")
 	}
 
 	listOutput, err := captureStdout(t, func() error {

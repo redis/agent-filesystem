@@ -63,7 +63,7 @@ func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace
 		return false, err
 	}
 
-	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, rootManifest, blobs, stats)
+	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, rootManifest, blobs, stats, false)
 	if err != nil {
 		return false, err
 	}

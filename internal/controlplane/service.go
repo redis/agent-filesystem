@@ -196,14 +196,15 @@ type CreateWorkspaceRequest = createWorkspaceRequest
 type UpdateWorkspaceRequest = updateWorkspaceRequest
 
 type SaveCheckpointRequest struct {
-	Workspace    string
-	ExpectedHead string
-	CheckpointID string
-	Manifest     Manifest
-	Blobs        map[string][]byte
-	FileCount    int
-	DirCount     int
-	TotalBytes   int64
+	Workspace             string
+	ExpectedHead          string
+	CheckpointID          string
+	Manifest              Manifest
+	Blobs                 map[string][]byte
+	FileCount             int
+	DirCount              int
+	TotalBytes            int64
+	SkipWorkspaceRootSync bool
 }
 
 func NewService(cfg Config, store *Store) *Service {
@@ -612,8 +613,10 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 		}
 		return false, err
 	}
-	if err := SyncWorkspaceRoot(ctx, s.store, input.Workspace, input.Manifest); err != nil {
-		return false, err
+	if !input.SkipWorkspaceRootSync {
+		if err := SyncWorkspaceRoot(ctx, s.store, input.Workspace, input.Manifest); err != nil {
+			return false, err
+		}
 	}
 
 	if err := s.store.Audit(ctx, input.Workspace, "save", map[string]any{

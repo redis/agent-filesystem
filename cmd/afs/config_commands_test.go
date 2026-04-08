@@ -455,7 +455,7 @@ func TestCmdCheckpointHelpListsSubcommands(t *testing.T) {
 	}
 }
 
-func TestCmdCheckpointRestoreHelpExplainsArchiveBehavior(t *testing.T) {
+func TestCmdCheckpointRestoreHelpExplainsLiveRestoreBehavior(t *testing.T) {
 	t.Helper()
 
 	out, err := captureStderr(t, func() error {
@@ -466,7 +466,7 @@ func TestCmdCheckpointRestoreHelpExplainsArchiveBehavior(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Restore the workspace working copy to the selected checkpoint",
+		"Restore the workspace live state to the selected checkpoint",
 		"checkpoint restore [workspace] <checkpoint>",
 	} {
 		if !strings.Contains(out, want) {

@@ -594,7 +594,7 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 		return false, nil
 	}
 
-	saved, err := saveAFSManifest(ctx, store, workspace, localState.HeadSavepoint, savepointID, localManifest, blobs, stats)
+	saved, err := saveAFSManifest(ctx, store, workspace, localState.HeadSavepoint, savepointID, localManifest, blobs, stats, true)
 	if err != nil {
 		if errors.Is(err, errAFSWorkspaceConflict) {
 			return false, fmt.Errorf("checkpoint conflict: workspace %q moved while saving; reopen it before retrying", workspace)
@@ -624,21 +624,22 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 	return true, nil
 }
 
-func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats) (bool, error) {
+func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats, syncWorkspaceRoot bool) (bool, error) {
 	cfg, err := loadAFSConfig()
 	if err != nil {
 		return false, err
 	}
 	service := controlPlaneServiceFromStore(cfg, store)
 	saved, err := service.SaveCheckpoint(ctx, controlplane.SaveCheckpointRequest{
-		Workspace:    workspace,
-		ExpectedHead: expectedHead,
-		CheckpointID: savepointID,
-		Manifest:     controlPlaneManifestFromAFS(localManifest),
-		Blobs:        blobs,
-		FileCount:    stats.FileCount,
-		DirCount:     stats.DirCount,
-		TotalBytes:   stats.TotalBytes,
+		Workspace:             workspace,
+		ExpectedHead:          expectedHead,
+		CheckpointID:          savepointID,
+		Manifest:              controlPlaneManifestFromAFS(localManifest),
+		Blobs:                 blobs,
+		FileCount:             stats.FileCount,
+		DirCount:              stats.DirCount,
+		TotalBytes:            stats.TotalBytes,
+		SkipWorkspaceRootSync: !syncWorkspaceRoot,
 	})
 	if errors.Is(err, controlplane.ErrWorkspaceConflict) || err == redis.TxFailedErr {
 		return false, errAFSWorkspaceConflict

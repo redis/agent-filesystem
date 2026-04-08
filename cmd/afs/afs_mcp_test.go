@@ -5,8 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 )
@@ -166,6 +169,51 @@ func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
 	}
 	if _, ok := manifest.Entries["/notes/todo.md"]; !ok {
 		t.Fatal("expected checkpoint manifest to include /notes/todo.md")
+	}
+}
+
+func TestAFSMCPFileWriteDoesNotRematerializeLocalWorkspaceCache(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	treePath := afsWorkspaceTreePath(server.cfg, "repo")
+	if err := os.MkdirAll(treePath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(treePath) returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(treePath, "local-only.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(local-only.txt) returned error: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := saveAFSLocalState(server.cfg, afsLocalState{
+		Version:        afsFormatVersion,
+		Workspace:      "repo",
+		HeadSavepoint:  "initial",
+		Dirty:          false,
+		MaterializedAt: now,
+		LastScanAt:     now,
+	}); err != nil {
+		t.Fatalf("saveAFSLocalState() returned error: %v", err)
+	}
+
+	writeResult := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/notes/todo.md",
+		"content": "# TODO\n- item 1\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	localOnly, err := os.ReadFile(filepath.Join(treePath, "local-only.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile(local-only.txt) returned error: %v", err)
+	}
+	if string(localOnly) != "keep me\n" {
+		t.Fatalf("local-only.txt = %q, want %q", string(localOnly), "keep me\n")
+	}
+	if _, err := os.Stat(filepath.Join(treePath, "notes", "todo.md")); !os.IsNotExist(err) {
+		t.Fatalf("expected mounted MCP edit to leave the local cache untouched, got err=%v", err)
 	}
 }
 

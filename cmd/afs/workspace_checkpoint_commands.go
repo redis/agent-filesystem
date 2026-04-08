@@ -800,7 +800,7 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	defer closeStore()
 
 	service := controlPlaneServiceFromStore(cfg, store)
-	resetResult, err := resetAFSWorkspaceHead(ctx, cfg, store, service, workspace, checkpointID)
+	_, err = resetAFSWorkspaceHead(ctx, service, workspace, checkpointID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("checkpoint %q does not exist", checkpointID)
@@ -814,10 +814,6 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	rows := []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
-		{Label: "path", Value: resetResult.treePath},
-	}
-	if resetResult.archivePath != "" {
-		rows = append(rows, boxRow{Label: "archive", Value: resetResult.archivePath})
 	}
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint restored"), rows)
 	return nil
@@ -881,7 +877,7 @@ Notes:
   If <workspace> is omitted, AFS uses the current workspace selected with
   '%s workspace use <workspace>'.
   Create a checkpoint explicitly with '%s checkpoint create <workspace> [checkpoint]'
-  when you want to persist the current working copy.
+  when you want to persist the current workspace state.
 
 Examples:
   %s workspace run demo -- /bin/sh
@@ -977,7 +973,7 @@ func checkpointCreateUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s checkpoint create [workspace] [checkpoint]
 
-Create a checkpoint from the workspace's current local working copy.
+Create a checkpoint from the workspace's current live state.
 If [checkpoint] is omitted, AFS generates a timestamped name.
 `, bin)
 }
@@ -986,6 +982,6 @@ func checkpointRestoreUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s checkpoint restore [workspace] <checkpoint>
 
-Restore the workspace working copy to the selected checkpoint.
+Restore the workspace live state to the selected checkpoint.
 `, bin)
 }
