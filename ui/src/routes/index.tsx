@@ -2,7 +2,6 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import styled from "styled-components";
 import {
-  EventList,
   HeroBody,
   HeroCard,
   HeroLayout,
@@ -20,25 +19,21 @@ import {
   Tag,
 } from "../components/afs-kit";
 import { formatBytes } from "../foundation/api/afs";
-import { useActivity, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import { useDatabaseScope, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
 });
 
 function OverviewPage() {
-  const workspacesQuery = useWorkspaceSummaries();
-  const activityQuery = useActivity(5);
+  const workspacesQuery = useScopedWorkspaceSummaries();
+  const { selectedDatabase, setOpenDatabaseDialogOpen } = useDatabaseScope();
 
-  if (workspacesQuery.isLoading || activityQuery.isLoading) {
+  if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const workspaces = workspacesQuery.data ?? [];
-  const activity = (activityQuery.data ?? []).map((event) => ({
-    ...event,
-    title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
-  }));
+  const workspaces = workspacesQuery.data;
 
   if (workspaces.length === 0) {
     return (
@@ -47,14 +42,27 @@ function OverviewPage() {
           <HeroLayout>
             <HeroBody>
               <SectionTitle
-                eyebrow="Getting Started"
-                title="Create your first agent workspace"
-                body="Agent Filesystem gives every agent a durable workspace you can browse in the browser, checkpoint before risky changes, and restore when you need to recover fast. Start blank, import existing work, or register a managed workspace and operate on it from one place."
+                eyebrow={selectedDatabase == null ? "Database Scope" : "Getting Started"}
+                title={
+                  selectedDatabase == null
+                    ? "Open a Redis database"
+                    : `No workspaces in ${selectedDatabase.displayName} yet`
+                }
+                body={
+                  selectedDatabase == null
+                    ? "Choose a Redis database to make it the active scope for Overview, Workspaces, and Activity. Once it is open, this page becomes the summary dashboard for that database."
+                    : "This database is open and ready. Add a workspace here to start filling Overview, Workspaces, and Activity for this scope."
+                }
               />
               <InlineActions>
-                <Link to="/workspaces">
-                  <Button size="medium">Add workspace</Button>
-                </Link>
+                {selectedDatabase != null ? (
+                  <Link to="/workspaces">
+                    <Button size="medium">Add workspace</Button>
+                  </Link>
+                ) : null}
+                <Button size="medium" variant="secondary-fill" onClick={() => setOpenDatabaseDialogOpen(true)}>
+                  Open database
+                </Button>
               </InlineActions>
               <BenefitGrid>
                 <BenefitCard>
@@ -121,15 +129,9 @@ function OverviewPage() {
   const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
   const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
   const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
-  const importedWorkspaces = workspaces.filter((workspace) => workspace.source !== "blank").length;
-  const blankWorkspaces = workspaces.length - importedWorkspaces;
-  const regionCount = new Set(workspaces.map((workspace) => workspace.region)).size;
-  const latestCheckpointAt = workspaces
-    .filter((workspace) => workspace.checkpointCount > 0)
-    .map((workspace) => workspace.lastCheckpointAt)
-    .sort((left, right) => right.localeCompare(left))[0];
   const largestWorkspace = [...workspaces].sort((left, right) => right.totalBytes - left.totalBytes)[0];
   const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
+  const averageDepth = workspaces.length === 0 ? "0.0" : (checkpointCount / workspaces.length).toFixed(1);
 
   return (
     <PageStack>
@@ -162,14 +164,33 @@ function OverviewPage() {
           </div>
           <StatDetail>{dirtyWorkspaces} workspace{dirtyWorkspaces === 1 ? "" : "s"} currently carrying draft changes.</StatDetail>
         </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Largest Workspace</StatLabel>
+            <StatValue>{formatBytes(largestWorkspace.totalBytes)}</StatValue>
+          </div>
+          <StatDetail>{largestWorkspace.name}</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Average Depth</StatLabel>
+            <StatValue>{averageDepth}</StatValue>
+          </div>
+          <StatDetail>Average number of checkpoints per workspace.</StatDetail>
+        </StatCard>
       </StatGrid>
 
       <SectionGrid>
-        <SectionCard $span={7}>
+        <SectionCard $span={12}>
           <SectionHeader>
             <SectionTitle
               eyebrow="Health"
-              title=""
+              title="Workspace health"
+              body={
+                selectedDatabase == null
+                  ? "Health signals appear here once a database is open and carrying workspaces."
+                  : `Health signals for ${selectedDatabase.displayName}.`
+              }
             />
           </SectionHeader>
           <SignalList>
@@ -214,87 +235,6 @@ function OverviewPage() {
               </SignalBar>
             </SignalRow>
           </SignalList>
-        </SectionCard>
-
-        <SectionCard $span={5}>
-          <SectionHeader>
-            <SectionTitle
-              eyebrow="Recent Activity"
-              title="Latest activity"
-              body="Recent activity belongs on the overview as a quick confidence check that the registry, studio, and audit feed are all moving together."
-            />
-          </SectionHeader>
-          <EventList events={activity} />
-        </SectionCard>
-      </SectionGrid>
-
-      <SectionGrid>
-        <SectionCard $span={6}>
-          <SectionHeader>
-            <SectionTitle
-              eyebrow="Recovery"
-              title="Checkpoint readiness"
-              body="Checkpoint data is most useful when it is summarized as readiness, not buried inside an individual workspace."
-            />
-          </SectionHeader>
-          <HighlightGrid>
-            <HighlightCard>
-              <HighlightLabel>Coverage</HighlightLabel>
-              <HighlightValue>{checkpointCoverage}%</HighlightValue>
-              <HighlightBody>Workspaces already carrying checkpoint history.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Without checkpoints</HighlightLabel>
-              <HighlightValue>{workspaces.length - workspacesWithCheckpoints}</HighlightValue>
-              <HighlightBody>Workspaces that should create their first recovery point.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Average depth</HighlightLabel>
-              <HighlightValue>
-                {workspaces.length === 0 ? "0.0" : (checkpointCount / workspaces.length).toFixed(1)}
-              </HighlightValue>
-              <HighlightBody>Average number of checkpoints per workspace.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Latest checkpoint</HighlightLabel>
-              <HighlightValue>
-                {latestCheckpointAt ? new Date(latestCheckpointAt).toLocaleDateString() : "n/a"}
-              </HighlightValue>
-              <HighlightBody>Most recent checkpoint creation time across the fleet.</HighlightBody>
-            </HighlightCard>
-          </HighlightGrid>
-        </SectionCard>
-
-        <SectionCard $span={6}>
-          <SectionHeader>
-            <SectionTitle
-              eyebrow="Posture"
-              title="Workspace mix"
-              body="A compact mix view helps you see how the registry is composed without turning Overview into another catalog."
-            />
-          </SectionHeader>
-          <HighlightGrid>
-            <HighlightCard>
-              <HighlightLabel>Imported</HighlightLabel>
-              <HighlightValue>{importedWorkspaces}</HighlightValue>
-              <HighlightBody>Workspaces brought in from Git or Redis Cloud.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Blank</HighlightLabel>
-              <HighlightValue>{blankWorkspaces}</HighlightValue>
-              <HighlightBody>Workspaces created directly inside Agent Filesystem.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Regions</HighlightLabel>
-              <HighlightValue>{regionCount}</HighlightValue>
-              <HighlightBody>Distinct regions represented in the current registry.</HighlightBody>
-            </HighlightCard>
-            <HighlightCard>
-              <HighlightLabel>Largest workspace</HighlightLabel>
-              <HighlightValue>{formatBytes(largestWorkspace.totalBytes)}</HighlightValue>
-              <HighlightBody>{largestWorkspace.name}</HighlightBody>
-            </HighlightCard>
-          </HighlightGrid>
         </SectionCard>
       </SectionGrid>
     </PageStack>
@@ -493,44 +433,4 @@ const SignalFill = styled.div<{ $value: number }>`
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, #aa3bff, #47bfff);
-`;
-
-const HighlightGrid = styled.div`
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-
-  @media (max-width: 720px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const HighlightCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 20px;
-  padding: 18px;
-  background: rgba(255, 255, 255, 0.78);
-`;
-
-const HighlightLabel = styled.div`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const HighlightValue = styled.div`
-  margin-top: 10px;
-  color: var(--afs-ink);
-  font-size: 1.9rem;
-  font-weight: 700;
-  letter-spacing: -0.04em;
-`;
-
-const HighlightBody = styled.p`
-  margin: 8px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.65;
 `;

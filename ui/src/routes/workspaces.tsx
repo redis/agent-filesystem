@@ -24,8 +24,11 @@ import {
   useWorkspaceTree,
   useUpdateWorkspaceMutation,
   useWorkspace,
-  useWorkspaceSummaries,
 } from "../foundation/hooks/use-afs";
+import {
+  useDatabaseScope,
+  useScopedWorkspaceSummaries,
+} from "../foundation/database-scope";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
 import type { AFSWorkspaceSource, AFSWorkspaceView } from "../foundation/types/afs";
 
@@ -44,12 +47,12 @@ type WorkspaceFormState = {
 
 type DialogMode = "create" | "edit" | null;
 
-function createInitialFormState(): WorkspaceFormState {
+function createInitialFormState(databaseName = "agentfs-dev-us-east-1"): WorkspaceFormState {
   return {
     name: "",
     description: "",
     cloudAccount: "Redis Cloud / Product",
-    databaseName: "agentfs-dev-us-east-1",
+    databaseName,
     region: "us-east-1",
     source: "blank",
   };
@@ -57,7 +60,8 @@ function createInitialFormState(): WorkspaceFormState {
 
 function WorkspacesPage() {
   const navigate = useNavigate();
-  const workspacesQuery = useWorkspaceSummaries();
+  const workspacesQuery = useScopedWorkspaceSummaries();
+  const { selectedDatabase, setOpenDatabaseDialogOpen } = useDatabaseScope();
   const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
@@ -67,7 +71,9 @@ function WorkspacesPage() {
   const [previewWorkspaceId, setPreviewWorkspaceId] = useState<string | null>(null);
   const [previewPath, setPreviewPath] = useState("/");
   const [previewSelectedPath, setPreviewSelectedPath] = useState("");
-  const [form, setForm] = useState<WorkspaceFormState>(createInitialFormState);
+  const [form, setForm] = useState<WorkspaceFormState>(() =>
+    createInitialFormState(selectedDatabase?.databaseName),
+  );
 
   const editingWorkspaceQuery = useWorkspace(
     editingWorkspaceId ?? "",
@@ -116,11 +122,26 @@ function WorkspacesPage() {
     setPreviewSelectedPath("");
   }, [previewWorkspaceId]);
 
+  useEffect(() => {
+    if (dialogMode !== "create" || selectedDatabase == null) {
+      return;
+    }
+
+    setForm((current) => ({ ...current, databaseName: selectedDatabase.databaseName }));
+  }, [dialogMode, selectedDatabase]);
+
+  const workspaces = workspacesQuery.data;
+
+  useEffect(() => {
+    if (previewWorkspaceId != null && !workspaces.some((workspace) => workspace.id === previewWorkspaceId)) {
+      setPreviewWorkspaceId(null);
+    }
+  }, [previewWorkspaceId, workspaces]);
+
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const workspaces = workspacesQuery.data ?? [];
   const isDialogOpen = dialogMode != null;
   const isEditing = dialogMode === "edit" && editingWorkspaceId != null;
   const formBusy =
@@ -131,13 +152,18 @@ function WorkspacesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
-    setForm(createInitialFormState());
+    setForm(createInitialFormState(selectedDatabase?.databaseName));
   }
 
   function openCreateDialog() {
+    if (selectedDatabase == null) {
+      setOpenDatabaseDialogOpen(true);
+      return;
+    }
+
     setDialogMode("create");
     setEditingWorkspaceId(null);
-    setForm(createInitialFormState());
+    setForm(createInitialFormState(selectedDatabase.databaseName));
   }
 
   function openEditDialog(workspaceId: string) {
@@ -368,7 +394,7 @@ function WorkspacesPage() {
                 body={
                   isEditing
                     ? "Update the workspace metadata without leaving the registry."
-                    : "Create a workspace and choose how it should enter the registry."
+                    : `Create a workspace inside ${selectedDatabase?.displayName ?? "the current database"}.`
                 }
               />
               <Button size="medium" variant="secondary-fill" onClick={closeDialog}>
@@ -459,8 +485,9 @@ function WorkspacesPage() {
                   />
                 </Field>
                 <Field>
-                  Database hosting
+                  Current database
                   <TextInput
+                    disabled
                     value={form.databaseName}
                     onChange={(event) => updateForm("databaseName", event.target.value)}
                     placeholder="agentfs-dev-us-east-1"

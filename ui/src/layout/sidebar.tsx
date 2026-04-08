@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SideBar } from "@redislabsdev/redis-ui-components";
 import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
   DocumentationIcon,
   DoubleChevronLeftIcon,
   DoubleChevronRightIcon,
@@ -14,17 +12,8 @@ import {
   RedisLogoDarkMinIcon,
 } from "@redislabsdev/redis-ui-icons/multicolor";
 import * as S from "./sidebar.styles";
-import {
-  getNavigationPanel,
-  getSidebarPanelForPath,
-  isNavigationItemActive,
-  navigationItems,
-} from "./navigation-items";
-import type {
-  NavigationItem,
-  NavigationRouteItem,
-  SidebarPanelId,
-} from "./navigation-items";
+import { isNavigationItemActive, navigationItems } from "./navigation-items";
+import type { NavigationItem } from "./navigation-items";
 
 const SIDEBAR_LOCALSTORAGE_KEY = "afs_sidebar_open";
 
@@ -50,22 +39,10 @@ export function AppSidebar() {
   const navigate = useNavigate();
 
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
-  const [activePanel, setActivePanel] = useState<SidebarPanelId>(() =>
-    getSidebarPanelForPath(location.pathname),
-  );
-  const subPanels = navigationItems.filter(
-    (item): item is Extract<NavigationItem, { kind: "panel" }> => item.kind === "panel",
-  );
-  const visiblePanel = isExpanded ? activePanel : "root";
-  const activePanelIndex = ["root", ...subPanels.map((item) => item.panelId)].indexOf(visiblePanel);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_LOCALSTORAGE_KEY, JSON.stringify(isExpanded));
   }, [isExpanded]);
-
-  useEffect(() => {
-    setActivePanel(getSidebarPanelForPath(location.pathname));
-  }, [location.pathname]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -80,21 +57,7 @@ export function AppSidebar() {
 
   const handleNavigate = (path: string) => void navigate({ to: path });
 
-  const handlePanelOpen = (panelId: Exclude<SidebarPanelId, "root">) => {
-    if (!isExpanded) {
-      setIsExpanded(true);
-    }
-
-    setActivePanel(panelId);
-
-    const panel = getNavigationPanel(panelId);
-    const defaultRoute = panel?.children[0];
-    if (defaultRoute) {
-      handleNavigate(defaultRoute.path);
-    }
-  };
-
-  const renderRouteItem = (item: NavigationRouteItem) => (
+  const renderRouteItem = (item: NavigationItem) => (
     <SideBar.Item
       key={item.path}
       isActive={isNavigationItemActive(item, location.pathname)}
@@ -106,38 +69,15 @@ export function AppSidebar() {
     </SideBar.Item>
   );
 
-  const renderRootItem = (item: NavigationItem) => {
-    if (item.kind === "route") {
-      return renderRouteItem(item);
-    }
-
-    return (
-      <SideBar.Item
-        key={item.panelId}
-        isActive={isNavigationItemActive(item, location.pathname)}
-        tooltipProps={{ text: item.label, placement: "right" }}
-        onClick={() => handlePanelOpen(item.panelId)}
-      >
-        <SideBar.Item.Icon icon={item.icon} aria-label={item.label} />
-        <SideBar.Item.Text>{item.label}</SideBar.Item.Text>
-        {isExpanded ? (
-          <S.ItemChevron aria-hidden="true">
-            <ChevronRightIcon customSize="16px" />
-          </S.ItemChevron>
-        ) : null}
-      </SideBar.Item>
-    );
-  };
-
   return (
     <S.SidebarContainer>
       <SideBar isExpanded={isExpanded}>
         <S.CenterSidebarHeader onToggle={() => setIsExpanded((prev) => !prev)}>
           {isExpanded ? (
-              <S.LogoWithName>
-                <S.LogoWrapper>
-                  <RedisLogoDarkFullIcon />
-                </S.LogoWrapper>
+            <S.LogoWithName>
+              <S.LogoWrapper>
+                <RedisLogoDarkFullIcon />
+              </S.LogoWrapper>
               <S.ProductName>Agent Filesystem</S.ProductName>
             </S.LogoWithName>
           ) : (
@@ -155,32 +95,7 @@ export function AppSidebar() {
         </S.CenterSidebarHeader>
 
         <SideBar.ScrollContainer>
-          <S.NavigationViewport>
-            <S.NavigationTrack
-              $activeIndex={Math.max(activePanelIndex, 0)}
-              $panelCount={subPanels.length + 1}
-            >
-              <S.NavigationPanel>
-                <SideBar.ItemsContainer>{navigationItems.map(renderRootItem)}</SideBar.ItemsContainer>
-              </S.NavigationPanel>
-
-              {subPanels.map((panel) => (
-                <S.NavigationPanel key={panel.panelId}>
-                  <S.SubmenuHeader
-                    type="button"
-                    aria-label={`Back to main navigation from ${panel.label}`}
-                    onClick={() => setActivePanel("root")}
-                  >
-                    <S.BackButton>
-                      <ChevronLeftIcon customSize="16px" />
-                    </S.BackButton>
-                    <S.SubmenuTitle>{panel.label}</S.SubmenuTitle>
-                  </S.SubmenuHeader>
-                  <SideBar.ItemsContainer>{panel.children.map(renderRouteItem)}</SideBar.ItemsContainer>
-                </S.NavigationPanel>
-              ))}
-            </S.NavigationTrack>
-          </S.NavigationViewport>
+          <SideBar.ItemsContainer>{navigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
 
           <S.Spacer />
           <SideBar.Divider fullWidth />

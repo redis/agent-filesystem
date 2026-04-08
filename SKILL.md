@@ -15,10 +15,10 @@ Agent Filesystem is a Redis module that provides a complete POSIX-like filesyste
 
 ```bash
 cd /home/ubuntu/git/agent-filesystem
-make          # builds module/fs.so + mount/agent-filesystem-mount + afs
+make          # builds module/fs.so + mount/agent-filesystem-mount + afs + afs-control-plane
 make module   # builds only the Redis module (module/fs.so)
 make mount    # builds only the FUSE mount binary
-make cli      # builds only the afs CLI
+make commands # builds afs + afs-control-plane
 ```
 
 ## CLI Commands

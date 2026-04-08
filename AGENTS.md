@@ -5,10 +5,10 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ## Build & Test
 
 ```bash
-make                # build module/fs.so + mount/agent-filesystem-mount + mount/agent-filesystem-nfs + afs
+make                # build module/fs.so + mount/agent-filesystem-mount + mount/agent-filesystem-nfs + afs + afs-control-plane
 make module         # build module/fs.so only
 make mount          # build mount/agent-filesystem-mount + mount/agent-filesystem-nfs
-make cli            # build afs only
+make commands       # build afs + afs-control-plane
 make clean          # remove compiled artifacts
 
 # CLI lifecycle helper:
@@ -28,9 +28,28 @@ redis-server --loadmodule ./module/fs.so
 redis-cli MODULE LOAD $(pwd)/module/fs.so
 ```
 
-CLI coverage exists under `cli/`; run `cd cli && go test ./...` for automated checks. Module testing is still manual via `redis-cli`.
+Go coverage for the workspace/control-plane app now lives under `cmd/` and `internal/`; run `go test ./cmd/afs ./cmd/afs-control-plane ./internal/...` for automated checks. Module testing is still manual via `redis-cli`.
 
-## Architecture
+## Current Repo Map
+
+This repo now has three active layers:
+
+- `module/`: the original Redis module that provides the `FS.*` command family.
+- `mount/`: the inode-keyed Go client plus the FUSE and NFS exposure layer.
+- `cmd/` + `internal/` + `ui/`: the newer workspace/checkpoint/control-plane product surface, where Redis stores manifests/blobs/savepoints and AFS materializes local working copies.
+
+Useful supporting areas:
+
+- `tests/`: Python integration coverage for the Redis module.
+- `sandbox/`: isolated process runner.
+- `redisclaw/`: Python coding-agent experiment on top of the sandbox and AFS.
+- `skills/`: installable skill docs for agent use.
+
+For a file-by-file walkthrough of the current tree, read `docs/repo-walkthrough.md`.
+
+Legacy Python packaging paths such as `agent_filesystem/` and `mcp_server/` are being removed from this repo and should not be treated as active architecture.
+
+## Low-Level Redis Module Architecture
 
 Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
 
@@ -54,11 +73,12 @@ Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custo
 
 - **Auto-create / auto-delete**: First write to a key creates it with root `/`; deleting everything removes the key.
 - **Symlink resolution** (`fsResolvePath`): follows up to 40 levels, supports absolute and relative targets.
-- **Bloom filters for GREP**: each file inode has a 256-byte bloom filter built from lowercased trigrams. `FS.GREP` skips files whose bloom filter proves the literal portion of the pattern cannot match.
 - **Binary detection in GREP**: files with NUL bytes in the first 8KB report "Binary file matches" instead of content.
 - **Parent auto-creation** (`fsEnsureParents`): write commands like `FS.ECHO` and `FS.MKDIR PARENTS` recursively create missing ancestor directories.
 - **FS.ECHO APPEND flag**: `FS.ECHO key path content APPEND` appends instead of overwriting, matching the shell `echo >>` pattern. `FS.APPEND` is retained as a backward-compatible alias.
 - **RDB format version 0**: serializes all inodes with path/type/metadata/payload; bloom filters are rebuilt on load, not persisted.
+
+Note: older docs referenced trigram bloom filters in `module/fs.c`, but the current source no longer uses that GREP acceleration path. Treat the current implementation in `module/fs.c` as the source of truth.
 
 ### Command Pattern
 

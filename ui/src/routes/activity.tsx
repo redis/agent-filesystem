@@ -1,49 +1,43 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button, Loader } from "@redislabsdev/redis-ui-components";
-import { PageStack, SectionCard, SectionGrid, SectionHeader, SectionTitle } from "../components/afs-kit";
-import { useActivity } from "../foundation/hooks/use-afs";
-import { ActivityTable } from "../foundation/tables/activity-table";
-import type { AFSActivityEvent } from "../foundation/types/afs";
+import { createFileRoute } from "@tanstack/react-router";
+import { Loader } from "@redislabsdev/redis-ui-components";
+import { EventList, PageStack, SectionCard, SectionGrid, SectionTitle } from "../components/afs-kit";
+import { useDatabaseScope, useScopedActivity } from "../foundation/database-scope";
 
 export const Route = createFileRoute("/activity")({
   component: ActivityPage,
 });
 
 function ActivityPage() {
-  const navigate = useNavigate();
-  const activityQuery = useActivity(100);
+  const activityQuery = useScopedActivity(50);
+  const { selectedDatabase } = useDatabaseScope();
 
   if (activityQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const events = activityQuery.data ?? [];
-
-  function openActivity(event: AFSActivityEvent) {
-    if (event.workspaceId == null) {
-      return;
-    }
-
-    void navigate({
-      to: "/workspaces/$workspaceId",
-      params: { workspaceId: event.workspaceId },
-      search: activityDestinationSearch(event),
-    });
-  }
+  const events = activityQuery.data.map((event) => ({
+    ...event,
+    title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
+  }));
 
   return (
     <PageStack>
-      <ActivityTable rows={events} onOpenActivity={openActivity} />
+      <SectionGrid>
+        <SectionCard $span={12}>
+          <SectionTitle
+            eyebrow="Audit"
+            title="Workspace activity"
+            body={
+              selectedDatabase == null
+                ? "Open a Redis database to scope the activity feed."
+                : `Activity across workspaces in ${selectedDatabase.displayName}.`
+            }
+          />
+          <div style={{ marginTop: 16 }}>
+            <EventList events={events} />
+          </div>
+        </SectionCard>
+      </SectionGrid>
     </PageStack>
   );
-}
-
-function activityDestinationSearch(event: AFSActivityEvent) {
-  if (event.scope === "savepoint") {
-    return { tab: "checkpoints" as const };
-  }
-  if (event.scope === "file") {
-    return { tab: "files" as const };
-  }
-  return {};
 }

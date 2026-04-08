@@ -138,6 +138,33 @@ If you want a second line of work:
 ./afs workspace fork my-repo my-repo-experiment
 ```
 
+## MCP Server
+
+AFS includes a workspace-first MCP server directly in the Go CLI:
+
+```bash
+./afs mcp
+```
+
+That command serves MCP over stdio and is meant to be launched by an MCP
+client on demand. A minimal config looks like:
+
+```json
+{
+  "mcpServers": {
+    "afs": {
+      "command": "/absolute/path/to/afs",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The MCP surface is workspace-oriented: list/select/create/fork workspaces,
+read and edit files, grep a workspace, and create or restore checkpoints.
+File-edit tools update the materialized working copy and leave the workspace
+dirty until `checkpoint_create` is called explicitly.
+
 ## The Basic Model
 
 AFS has two main concepts:
@@ -243,23 +270,30 @@ Notes:
 
 ## What Gets Stored Where
 
-- Redis stores the saved workspace state
+- Redis stores both the live workspace working copy and the immutable checkpoint history
 - your chosen mountpoint is the live local folder in mounted filesystem mode
 - AFS creates local working copies under `~/.afs/workspaces` only for `workspace run`
 - `afs.config.json` stores local CLI configuration next to the `afs` binary
 
-You can think of Redis as the saved source of truth.
+You can think of Redis as the source of truth for both:
+
+- the live mutable workspace root
+- the explicit checkpoint history
 
 In mounted filesystem mode:
 
 - you work in your chosen mountpoint
 - you can mostly ignore `~/.afs/workspaces`
+- edits go straight into the live Redis-backed workspace root
+- `afs down` just unmounts; it does not create or sync a separate draft
 
 In `workspace run` mode:
 
-- AFS materializes a local working copy under `~/.afs/workspaces`
+- AFS materializes a local working copy under `~/.afs/workspaces` from the live workspace root
 - your command runs there
-- AFS saves changes back to Redis when the command exits
+- when the command exits, AFS syncs changes back into the live workspace root
+- `--readonly` discards the process changes instead of syncing them back
+- use `afs checkpoint create <workspace> [name]` to persist edits as a checkpoint
 
 ## Build
 
@@ -299,9 +333,9 @@ make web-dev
 
 That target:
 
-- builds `afs-server`
+- builds `afs-control-plane`
 - installs UI dependencies if `ui/node_modules` is missing
-- starts `afs-server` on `http://127.0.0.1:8091`
+- starts `afs-control-plane` on `http://127.0.0.1:8091`
 - starts the Vite dev server on `http://127.0.0.1:5173`
 - wires the UI to the control plane with `VITE_AFS_API_BASE_URL`
 
@@ -328,16 +362,18 @@ If you do not want a mounted filesystem, AFS also has a command-oriented mode:
 
 This is useful when:
 
-- you want to run one command and save the results back automatically
+- you want to run one command and decide later whether to checkpoint the result
 - you are driving AFS from another agent or script
 - you do not want to keep a mounted directory around
-- you want a more explicit “open, run, save” workflow
+- you want a more explicit “open, run, checkpoint” workflow
 
 `workspace run`:
 
 - makes sure the workspace exists locally
 - runs your command with that workspace as the current working directory
-- captures any changes and saves them back to Redis when the command exits
+- leaves any edits in the local working copy
+- does not create a checkpoint; use `afs checkpoint create <workspace> [name]`
+  when you want to persist the current draft
 
 For example:
 
@@ -352,7 +388,8 @@ This repo includes:
 - the `afs` CLI
 - the Redis module
 - mount daemons for local filesystem access
-- Python and MCP integrations
+- the workspace-first MCP server built into `afs`
+- sandbox and web tooling
 
 But if you are brand new here, start with:
 

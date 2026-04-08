@@ -1,6 +1,6 @@
 ---
 name: agent-filesystem
-description: Persistent filesystem storage in Redis for agent memories, documents, state, and tasks. NOT for binaries or executables. Use via MCP tools, Python library, or redis-cli.
+description: Persistent filesystem storage in Redis for agent memories, documents, state, and tasks. NOT for binaries or executables. Use via `afs mcp`, the `afs` CLI, mounted workspaces, or redis-cli.
 ---
 
 # Agent Filesystem: Distributed Filesystem for Agents
@@ -25,27 +25,27 @@ Agent Filesystem provides persistent, distributed filesystem storage backed by R
 
 ## Integration Methods (in order of preference)
 
-### 1. MCP Server (if available)
-If the `agent-filesystem` MCP server is configured, use native tools:
-```
-fs_read, fs_write, fs_lines, fs_replace, fs_insert, fs_grep, fs_find, fs_ls
-```
+### 1. `afs mcp`
+If the local AFS MCP server is configured, use the workspace-first tools exposed
+by `afs mcp`.
 
-### 2. Python Library
-```python
-from agent_filesystem import AgentFilesystem
-fs = AgentFilesystem(redis_client, "myvolume")
-content = fs.read("/memories/context.md")
-fs.write("/tasks/todo.md", "# Tasks\n- Item 1")
-```
-
-### 3. CLI (`agent-filesystem` command)
+### 2. Mounted workspace + `afs` CLI
+For day-to-day work, mount a workspace and use normal local tools for browsing
+and editing:
 ```bash
-agent-filesystem cat myvolume /memories/context.md
-agent-filesystem echo myvolume /tasks/todo.md "# Tasks"
+./afs up
+cd ~/afs
+ls
+cat notes/todo.md
 ```
 
-### 4. Direct redis-cli
+For direct workspace search without mount-level scan overhead, use `afs grep`:
+```bash
+./afs grep --workspace myvolume "TODO auth"
+./afs grep --workspace myvolume --path /logs -E "timeout|retry"
+```
+
+### 3. Direct redis-cli
 ```bash
 redis-cli FS.CAT myvolume /memories/context.md
 redis-cli FS.ECHO myvolume /tasks/todo.md "# Tasks"
@@ -154,6 +154,7 @@ FS.TREE project / DEPTH 2
 - All paths are **absolute** (start with `/`)
 - No working directory — every command needs full path
 - `FS.GREP` uses **glob patterns** (`*pattern*`), not regex
+- `afs mcp` is workspace-first and auto-saves file edits as AFS savepoints
 - Parent directories are **auto-created** by `FS.ECHO`
 - Symlinks resolve automatically (max 40 levels)
 - Delete entire filesystem: `DEL volumename`

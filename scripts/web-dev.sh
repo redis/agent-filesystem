@@ -23,13 +23,13 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 if [ ! -x "$server_bin" ]; then
-	echo "error: afs-server binary not found at $server_bin" >&2
-	echo "Run 'make cli' first." >&2
+	echo "error: afs-control-plane binary not found at $server_bin" >&2
+	echo "Run 'make commands' or 'make afs-control-plane' first." >&2
 	exit 1
 fi
 
 if [ ! -f "$repo_root/afs.config.json" ]; then
-	echo "error: missing afs.config.json next to afs-server" >&2
+	echo "error: missing afs.config.json next to afs-control-plane" >&2
 	echo "Run './afs setup' from $repo_root, then rerun 'make web-dev'." >&2
 	exit 1
 fi
@@ -47,7 +47,7 @@ attempt=0
 until curl -fsS "$api_base_url/healthz" >/dev/null 2>&1; do
 	if ! kill -0 "$server_pid" 2>/dev/null; then
 		wait "$server_pid" 2>/dev/null || true
-		echo "error: afs-server exited before becoming ready" >&2
+		echo "error: afs-control-plane exited before becoming ready" >&2
 		exit 1
 	fi
 	attempt=$((attempt + 1))

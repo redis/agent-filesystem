@@ -1,7 +1,6 @@
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 NPM ?= npm
-DOCKER_COMPOSE ?= docker compose
 UI_DIR ?= ui
 WEB_DEV_SCRIPT := scripts/web-dev.sh
 UI_NODE_MODULES := $(UI_DIR)/node_modules
@@ -11,9 +10,9 @@ AFS_WEB_API_BASE_URL ?= http://127.0.0.1:8091
 AFS_WEB_UI_HOST ?= 127.0.0.1
 AFS_WEB_UI_PORT ?= 5173
 
-.PHONY: all module mount cli clean test install uninstall install-skill install-skill-local uninstall-skill-local mcp-up mcp-down mcp-logs install-mcp-auggie uninstall-mcp-auggie web-install web-server web-ui web-dev
+.PHONY: all module mount commands afs afs-control-plane clean test install uninstall install-skill install-skill-local uninstall-skill-local web-install web-server web-ui web-dev
 
-all: module mount cli
+all: module mount commands
 
 module:
 	$(MAKE) -C module
@@ -21,10 +20,15 @@ module:
 mount:
 	$(MAKE) -C mount
 
-cli:
-	$(MAKE) -C cli
+commands: afs afs-control-plane
 
-install: cli
+afs:
+	go build -o afs ./cmd/afs
+
+afs-control-plane:
+	go build -o afs-control-plane ./cmd/afs-control-plane
+
+install: afs
 	@mkdir -p "$(BINDIR)"
 	@ln -sf "$(PWD)/afs" "$(BINDIR)/afs"
 	@echo "Installed afs -> $(BINDIR)/afs"
@@ -36,8 +40,7 @@ uninstall:
 clean:
 	$(MAKE) -C module clean
 	$(MAKE) -C mount clean
-	$(MAKE) -C cli clean
-	$(RM) fs.so fs.xo path.xo
+	$(RM) afs afs-control-plane afs-server fs.so fs.xo path.xo
 
 test: module
 	$(MAKE) -C module test
@@ -47,14 +50,14 @@ $(UI_NODE_MODULES):
 
 web-install: $(UI_NODE_MODULES)
 
-web-server: cli
-	./afs-server --listen "$(AFS_WEB_SERVER_ADDR)" --allow-origin "$(AFS_WEB_ALLOW_ORIGIN)"
+web-server: afs-control-plane
+	./afs-control-plane --listen "$(AFS_WEB_SERVER_ADDR)" --allow-origin "$(AFS_WEB_ALLOW_ORIGIN)"
 
 web-ui: $(UI_NODE_MODULES)
 	cd "$(UI_DIR)" && VITE_AFS_API_BASE_URL="$(AFS_WEB_API_BASE_URL)" $(NPM) run dev -- --host "$(AFS_WEB_UI_HOST)" --port "$(AFS_WEB_UI_PORT)"
 
-web-dev: cli $(UI_NODE_MODULES)
-	@AFS_WEB_SERVER_BIN="$(PWD)/afs-server" \
+web-dev: commands $(UI_NODE_MODULES)
+	@AFS_WEB_SERVER_BIN="$(PWD)/afs-control-plane" \
 	AFS_WEB_SERVER_ADDR="$(AFS_WEB_SERVER_ADDR)" \
 	AFS_WEB_ALLOW_ORIGIN="$(AFS_WEB_ALLOW_ORIGIN)" \
 	AFS_WEB_API_BASE_URL="$(AFS_WEB_API_BASE_URL)" \
@@ -79,30 +82,3 @@ install-skill-local:
 uninstall-skill-local:
 	@rm -rf ~/.claude/skills/agent-filesystem
 	@echo "Uninstalled agent-filesystem skill from ~/.claude/skills/"
-
-# Build and start MCP server (HTTP) with Redis
-mcp-up:
-	$(DOCKER_COMPOSE) up -d --build
-	@echo ""
-	@echo "Agent Filesystem MCP server running at http://localhost:8089/sse"
-	@echo "Health check: http://localhost:8089/health"
-	@echo ""
-	@echo "To add to Auggie, run: make install-mcp-auggie"
-
-# Stop MCP server and Redis
-mcp-down:
-	$(DOCKER_COMPOSE) down
-
-# View MCP server logs
-mcp-logs:
-	$(DOCKER_COMPOSE) logs -f mcp-server
-
-# Add MCP server to Auggie CLI (HTTP transport)
-install-mcp-auggie:
-	auggie mcp add-json --replace agent-filesystem '{"type":"sse","url":"http://localhost:8089/sse"}'
-	@echo "Added agent-filesystem MCP server to Auggie (HTTP/SSE)"
-
-# Remove MCP server from Auggie CLI
-uninstall-mcp-auggie:
-	auggie mcp remove agent-filesystem
-	@echo "Removed agent-filesystem MCP server from Auggie"

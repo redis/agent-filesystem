@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "agent-filesystem": {
-      "command": "agent-filesystem-mcp",
-      "env": {
-        "REDIS_URL": "redis://localhost:6379/0"
-      }
+      "command": "/absolute/path/to/afs",
+      "args": ["mcp"]
     }
   }
 }
-

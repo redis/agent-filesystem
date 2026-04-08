@@ -118,9 +118,9 @@ afs:{ws}:blobref:<sha256>
 
 ### Run
 
-- materialize if needed
+- materialize from the live workspace root if needed
 - launch a real process in `tree/`
-- save changes back as a new checkpoint unless `--readonly` is used
+- sync changes back into the live workspace root unless `--readonly` is used
 
 ### Restore
 
