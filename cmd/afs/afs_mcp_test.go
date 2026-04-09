@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func TestAFSMCPServerInitializeAndToolsList(t *testing.T) {
@@ -118,6 +119,13 @@ func TestAFSMCPFileWriteLeavesWorkspaceDirtyAndReadReturnsContent(t *testing.T) 
 	if !workspaceMeta.DirtyHint {
 		t.Fatal("expected MCP edit to leave the live workspace dirty")
 	}
+	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	if err != nil {
+		t.Fatalf("Get(root_dirty) returned error: %v", err)
+	}
+	if rootDirty != "1" {
+		t.Fatalf("root_dirty = %q, want %q", rootDirty, "1")
+	}
 }
 
 func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
@@ -161,6 +169,13 @@ func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
 	}
 	if workspaceMeta.DirtyHint {
 		t.Fatal("expected explicit checkpoint to leave the live workspace clean")
+	}
+	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	if err != nil {
+		t.Fatalf("Get(root_dirty) returned error: %v", err)
+	}
+	if rootDirty != "0" {
+		t.Fatalf("root_dirty = %q, want %q", rootDirty, "0")
 	}
 
 	manifest, err := server.store.getManifest(context.Background(), "repo", "after-edit")

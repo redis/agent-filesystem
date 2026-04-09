@@ -2,38 +2,41 @@ import styled from "styled-components";
 
 export const HeaderContainer = styled.header`
   display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  height: 7rem;
+  justify-content: flex-start;
+  gap: 16px;
+  min-height: 5.25rem;
   background-color: ${({ theme }) => theme.semantic.color.background.neutral0};
   border-bottom: 1px solid
     ${({ theme }) => theme.semantic.color.border.neutral200};
-  padding: 1.2rem 2rem 1.2rem 3.2rem;
+  padding: 1rem 2rem 1rem 3.2rem;
   align-items: center;
 
-  @media (max-width: 1080px) {
+  @media (max-width: 720px) {
     height: auto;
-    padding: 1.2rem 1.4rem 1.2rem 1.8rem;
+    padding: 1rem 1.4rem 1rem 1.8rem;
     flex-direction: column;
     align-items: stretch;
   }
 `;
 
 export const HeaderTitleGroup = styled.div`
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
   min-width: 0;
 `;
 
 export const HeaderActions = styled.div`
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
+  flex-wrap: nowrap;
+  gap: 8px;
   align-items: center;
   justify-content: flex-end;
+  margin-left: auto;
 
-  @media (max-width: 1080px) {
+  @media (max-width: 720px) {
     justify-content: flex-start;
+    margin-left: 0;
   }
 `;
 
@@ -45,33 +48,28 @@ export const TitlePage = styled.span`
   color: ${({ theme }) => theme.semantic.color.text.neutral900};
 `;
 
-export const ScopeText = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral600};
-  font-size: 13px;
-  line-height: 1.5;
-`;
-
 export const DatabaseTrigger = styled.button`
-  min-width: 320px;
-  border: 1px solid ${({ theme }) => theme.semantic.color.border.neutral200};
-  border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 253, 0.92)),
-    ${({ theme }) => theme.semantic.color.background.neutral0};
-  padding: 12px 14px;
-  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
   cursor: pointer;
-  display: grid;
-  gap: 4px;
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    color 160ms ease,
+    opacity 160ms ease;
 
   &:hover:enabled {
-    transform: translateY(-1px);
-    border-color: rgba(170, 59, 255, 0.24);
-    box-shadow: 0 12px 24px rgba(8, 6, 13, 0.08);
+    opacity: 0.78;
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${({ theme }) => theme.semantic.color.border.brand500};
+    outline-offset: 4px;
   }
 
   &:disabled {
@@ -80,41 +78,25 @@ export const DatabaseTrigger = styled.button`
   }
 
   @media (max-width: 720px) {
-    min-width: 0;
-    width: 100%;
+    justify-content: flex-start;
   }
-`;
-
-export const DatabaseTriggerLabel = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral600};
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-`;
-
-export const DatabaseTriggerValueRow = styled.span`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
 `;
 
 export const DatabaseTriggerValue = styled.span`
   color: ${({ theme }) => theme.semantic.color.text.neutral900};
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-export const DatabaseTriggerMeta = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral600};
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
 `;
 
 export const TriggerCaret = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral500};
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  color: ${({ theme }) => theme.semantic.color.icon.neutral500};
+`;
+
+export const DatabaseMenuItemText = styled.span<{ $selected: boolean }>`
+  font-weight: ${({ $selected }) => ($selected ? 800 : 600)};
 `;
 
 export const DialogOverlay = styled.div`

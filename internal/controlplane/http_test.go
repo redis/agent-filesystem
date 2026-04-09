@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,13 +20,13 @@ import (
 func TestHTTPBrowseAndRestore(t *testing.T) {
 	t.Helper()
 
-	service := newTestService(t)
-	server := httptest.NewServer(NewHandler(service, "*"))
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/v1/workspaces")
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces")
 	if err != nil {
-		t.Fatalf("GET /v1/workspaces returned error: %v", err)
+		t.Fatalf("GET scoped workspaces returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -33,7 +35,7 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 		t.Fatalf("Decode(workspaces) returned error: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /v1/workspaces status = %d, want %d", resp.StatusCode, http.StatusOK)
+		t.Fatalf("GET scoped workspaces status = %d, want %d", resp.StatusCode, http.StatusOK)
 	}
 	if len(summaries.Items) != 1 {
 		t.Fatalf("len(workspaces.items) = %d, want 1", len(summaries.Items))
@@ -41,13 +43,13 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	if summaries.Items[0].FileCount != 2 {
 		t.Fatalf("summary file_count = %d, want 2", summaries.Items[0].FileCount)
 	}
-	if summaries.Items[0].DatabaseName != "demo-db-us-test-1" {
-		t.Fatalf("summary database_name = %q, want %q", summaries.Items[0].DatabaseName, "demo-db-us-test-1")
+	if summaries.Items[0].DatabaseID != databaseID {
+		t.Fatalf("summary database_id = %q, want %q", summaries.Items[0].DatabaseID, databaseID)
 	}
 
-	resp, err = http.Get(server.URL + "/v1/workspaces/repo")
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo")
 	if err != nil {
-		t.Fatalf("GET /v1/workspaces/repo returned error: %v", err)
+		t.Fatalf("GET scoped workspace detail returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -64,10 +66,13 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	if detail.Capabilities.BrowseWorkingCopy {
 		t.Fatal("detail capabilities unexpectedly expose working-copy browsing")
 	}
+	if detail.DatabaseID != databaseID {
+		t.Fatalf("detail database_id = %q, want %q", detail.DatabaseID, databaseID)
+	}
 
-	resp, err = http.Get(server.URL + "/v1/workspaces/repo/tree?view=head&path=/&depth=1")
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=head&path=/&depth=1")
 	if err != nil {
-		t.Fatalf("GET /v1/workspaces/repo/tree returned error: %v", err)
+		t.Fatalf("GET scoped tree returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -82,9 +87,9 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 		t.Fatalf("tree root items = %#v, want /src and /README.md", tree.Items)
 	}
 
-	resp, err = http.Get(server.URL + "/v1/workspaces/repo/files/content?view=head&path=/README.md")
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/files/content?view=head&path=/README.md")
 	if err != nil {
-		t.Fatalf("GET /v1/workspaces/repo/files/content returned error: %v", err)
+		t.Fatalf("GET scoped file content returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -96,9 +101,13 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 		t.Fatalf("file content = %q, want %q", file.Content, "# demo\n")
 	}
 
-	resp, err = http.Post(server.URL+"/v1/workspaces/repo:restore", "application/json", strings.NewReader(`{"checkpoint_id":"initial"}`))
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+databaseID+"/workspaces/repo:restore",
+		"application/json",
+		strings.NewReader(`{"checkpoint_id":"initial"}`),
+	)
 	if err != nil {
-		t.Fatalf("POST /v1/workspaces/repo:restore returned error: %v", err)
+		t.Fatalf("POST scoped restore returned error: %v", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
@@ -106,9 +115,9 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 		t.Fatalf("POST restore status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
 	}
 
-	resp, err = http.Get(server.URL + "/v1/workspaces/repo")
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo")
 	if err != nil {
-		t.Fatalf("GET /v1/workspaces/repo after restore returned error: %v", err)
+		t.Fatalf("GET scoped workspace detail after restore returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -123,11 +132,11 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 func TestHTTPRejectsUnsupportedWorkingCopyView(t *testing.T) {
 	t.Helper()
 
-	service := newTestService(t)
-	server := httptest.NewServer(NewHandler(service, "*"))
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/v1/workspaces/repo/tree?view=working-copy&path=/&depth=1")
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=working-copy&path=/&depth=1")
 	if err != nil {
 		t.Fatalf("GET working-copy tree returned error: %v", err)
 	}
@@ -139,7 +148,112 @@ func TestHTTPRejectsUnsupportedWorkingCopyView(t *testing.T) {
 	}
 }
 
-func newTestService(t *testing.T) *Service {
+func TestHTTPDatabaseCRUDAndScopedWorkspaces(t *testing.T) {
+	t.Helper()
+
+	manager, primaryDatabaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	secondaryRedis := miniredis.RunT(t)
+	requestBody := fmtJSON(t, upsertDatabaseRequest{
+		Name:        "secondary",
+		Description: "Second test database",
+		RedisAddr:   secondaryRedis.Addr(),
+		RedisDB:     0,
+	})
+
+	resp, err := http.Post(server.URL+"/v1/databases", "application/json", strings.NewReader(requestBody))
+	if err != nil {
+		t.Fatalf("POST /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/databases status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var secondary databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&secondary); err != nil {
+		t.Fatalf("Decode(database) returned error: %v", err)
+	}
+	if secondary.ID == "" {
+		t.Fatal("expected database id to be assigned")
+	}
+
+	createWorkspaceBody := `{"name":"other-db-workspace","description":"debug","source":{"kind":"blank"}}`
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+secondary.ID+"/workspaces",
+		"application/json",
+		strings.NewReader(createWorkspaceBody),
+	)
+	if err != nil {
+		t.Fatalf("POST scoped workspace create returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST scoped workspace create status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + primaryDatabaseID + "/workspaces")
+	if err != nil {
+		t.Fatalf("GET primary scoped workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var primaryWorkspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&primaryWorkspaces); err != nil {
+		t.Fatalf("Decode(primary workspaces) returned error: %v", err)
+	}
+	if len(primaryWorkspaces.Items) != 1 || primaryWorkspaces.Items[0].Name != "repo" {
+		t.Fatalf("primary workspaces = %#v, want only repo", primaryWorkspaces.Items)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + secondary.ID + "/workspaces")
+	if err != nil {
+		t.Fatalf("GET secondary scoped workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var secondaryWorkspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&secondaryWorkspaces); err != nil {
+		t.Fatalf("Decode(secondary workspaces) returned error: %v", err)
+	}
+	if len(secondaryWorkspaces.Items) != 1 || secondaryWorkspaces.Items[0].Name != "other-db-workspace" {
+		t.Fatalf("secondary workspaces = %#v, want only other-db-workspace", secondaryWorkspaces.Items)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases")
+	if err != nil {
+		t.Fatalf("GET /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var databases databaseListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&databases); err != nil {
+		t.Fatalf("Decode(databases) returned error: %v", err)
+	}
+	if len(databases.Items) != 2 {
+		t.Fatalf("len(databases.items) = %d, want 2", len(databases.Items))
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/v1/databases/"+secondary.ID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(DELETE database) returned error: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /v1/databases/:id returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("DELETE /v1/databases/:id status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
+	}
+}
+
+func newTestManager(t *testing.T) (*DatabaseManager, string) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -204,5 +318,32 @@ func newTestService(t *testing.T) *Service {
 		t.Fatalf("MoveWorkspaceHead() returned error: %v", err)
 	}
 
-	return NewService(cfg, store)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal(cfg) returned error: %v", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	databaseID, _ := activeDatabaseIdentity(cfg)
+	return manager, databaseID
+}
+
+func fmtJSON(t *testing.T, value any) string {
+	t.Helper()
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() returned error: %v", err)
+	}
+	return string(data)
 }

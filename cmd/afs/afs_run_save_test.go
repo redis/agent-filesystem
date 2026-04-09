@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
 )
 
@@ -64,6 +65,13 @@ func TestWorkspaceRunSyncsChangesBackToLiveWorkspaceWithoutCheckpoint(t *testing
 	}
 	if !workspaceMeta.DirtyHint {
 		t.Fatal("expected workspace metadata to report a dirty live workspace after run")
+	}
+	rootDirty, err := store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	if err != nil {
+		t.Fatalf("Get(root_dirty) returned error: %v", err)
+	}
+	if rootDirty != "1" {
+		t.Fatalf("root_dirty = %q, want %q", rootDirty, "1")
 	}
 
 	liveGenerated, err := client.New(store.rdb, workspaceRedisKey("repo")).Cat(context.Background(), "/generated.txt")
@@ -146,6 +154,13 @@ func TestCheckpointCreateNoChangesIsANoop(t *testing.T) {
 	if localState.Dirty {
 		t.Fatal("expected local state to remain clean after no-op checkpoint")
 	}
+	rootDirty, err := store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	if err != nil {
+		t.Fatalf("Get(root_dirty) returned error: %v", err)
+	}
+	if rootDirty != "0" {
+		t.Fatalf("root_dirty = %q, want %q", rootDirty, "0")
+	}
 }
 
 func TestCheckpointCreateUsesLiveWorkspaceRootWithoutLocalTree(t *testing.T) {
@@ -172,6 +187,13 @@ func TestCheckpointCreateUsesLiveWorkspaceRootWithoutLocalTree(t *testing.T) {
 	}
 	if workspaceMeta.HeadSavepoint != "live-root-save" {
 		t.Fatalf("workspace head = %q, want %q", workspaceMeta.HeadSavepoint, "live-root-save")
+	}
+	rootDirty, err := store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	if err != nil {
+		t.Fatalf("Get(root_dirty) returned error: %v", err)
+	}
+	if rootDirty != "0" {
+		t.Fatalf("root_dirty = %q, want %q", rootDirty, "0")
 	}
 
 	savedManifest, err := store.getManifest(context.Background(), "repo", "live-root-save")

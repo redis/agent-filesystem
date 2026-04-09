@@ -27,7 +27,7 @@ export const Route = createFileRoute("/")({
 
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
-  const { selectedDatabase, setOpenDatabaseDialogOpen } = useDatabaseScope();
+  const { selectedDatabase } = useDatabaseScope();
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -45,25 +45,22 @@ function OverviewPage() {
                 eyebrow={selectedDatabase == null ? "Database Scope" : "Getting Started"}
                 title={
                   selectedDatabase == null
-                    ? "Open a Redis database"
+                    ? "Choose a Redis database"
                     : `No workspaces in ${selectedDatabase.displayName} yet`
                 }
                 body={
                   selectedDatabase == null
-                    ? "Choose a Redis database to make it the active scope for Overview, Workspaces, and Activity. Once it is open, this page becomes the summary dashboard for that database."
+                    ? "Use the database selector in the page header to choose the active Redis database for Overview, Workspaces, and Activity."
                     : "This database is open and ready. Add a workspace here to start filling Overview, Workspaces, and Activity for this scope."
                 }
               />
-              <InlineActions>
-                {selectedDatabase != null ? (
+              {selectedDatabase != null ? (
+                <InlineActions>
                   <Link to="/workspaces">
                     <Button size="medium">Add workspace</Button>
                   </Link>
-                ) : null}
-                <Button size="medium" variant="secondary-fill" onClick={() => setOpenDatabaseDialogOpen(true)}>
-                  Open database
-                </Button>
-              </InlineActions>
+                </InlineActions>
+              ) : null}
               <BenefitGrid>
                 <BenefitCard>
                   <BenefitKicker>01</BenefitKicker>
@@ -295,9 +292,7 @@ const StarterPanel = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 24px;
   padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 246, 251, 0.92)),
-    rgba(255, 255, 255, 0.86);
+  background: #fff;
 `;
 
 const StarterPreview = styled.div`
@@ -305,9 +300,7 @@ const StarterPreview = styled.div`
   min-height: 230px;
   border-radius: 22px;
   border: 1px solid var(--afs-line);
-  background:
-    radial-gradient(circle at center, rgba(170, 59, 255, 0.12), transparent 48%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 249, 255, 0.92));
+  background: #fff;
   overflow: hidden;
 `;
 
@@ -432,5 +425,5 @@ const SignalFill = styled.div<{ $value: number }>`
   width: ${({ $value }) => `${$value}%`};
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #aa3bff, #47bfff);
+  background: var(--afs-accent);
 `;

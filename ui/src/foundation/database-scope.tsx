@@ -1,37 +1,42 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
-import { getAFSClientMode } from "./api/afs";
-import { useActivity, useWorkspaceSummaries } from "./hooks/use-afs";
-import type { AFSClientMode, AFSWorkspaceSummary } from "./types/afs";
+import { afsApi, getAFSClientMode } from "./api/afs";
+import {
+  useActivity,
+  useDatabases,
+  useDeleteDatabaseMutation,
+  useSaveDatabaseMutation,
+  useWorkspaceSummaries,
+} from "./hooks/use-afs";
+import type { AFSClientMode, SaveDatabaseInput } from "./types/afs";
 
-const SAVED_DATABASES_STORAGE_KEY = "afs_saved_databases_v1";
+const LEGACY_SAVED_DATABASES_STORAGE_KEY = "afs_saved_databases_v1";
 const SELECTED_DATABASE_STORAGE_KEY = "afs_selected_database_v1";
 
 export type AFSDatabaseScopeRecord = {
   id: string;
   displayName: string;
   databaseName: string;
+  description: string;
   endpointLabel: string;
   dbIndex: string;
+  username: string;
+  password: string;
+  useTLS: boolean;
   workspaceCount: number;
-  source: "derived" | "saved";
-  updatedAt?: string;
+  connectionError?: string;
 };
 
-export type OpenDatabaseInput = {
-  displayName: string;
-  databaseName: string;
-  endpointLabel: string;
-  dbIndex: string;
-};
-
-type SavedDatabaseRecord = {
+type LegacySavedDatabaseRecord = {
   id: string;
   displayName: string;
   databaseName: string;
+  description: string;
   endpointLabel: string;
   dbIndex: string;
-  lastOpenedAt: string;
+  username: string;
+  password: string;
+  hidden?: boolean;
 };
 
 type DatabaseScopeContextValue = {
@@ -41,157 +46,62 @@ type DatabaseScopeContextValue = {
   selectedDatabaseId: string | null;
   isLoading: boolean;
   selectDatabase: (databaseId: string) => void;
-  openDatabase: (input: OpenDatabaseInput) => void;
-  isOpenDatabaseDialogOpen: boolean;
-  setOpenDatabaseDialogOpen: (value: boolean) => void;
+  saveDatabase: (input: SaveDatabaseInput) => Promise<void>;
+  removeDatabase: (databaseId: string) => Promise<void>;
 };
 
 const DatabaseScopeContext = createContext<DatabaseScopeContextValue | null>(null);
-
-function slugify(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
-}
-
-function readSavedDatabases(): SavedDatabaseRecord[] {
-  const raw = localStorage.getItem(SAVED_DATABASES_STORAGE_KEY);
-  if (raw == null) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(raw) as SavedDatabaseRecord[];
-  } catch {
-    localStorage.removeItem(SAVED_DATABASES_STORAGE_KEY);
-    return [];
-  }
-}
 
 function readSelectedDatabaseId() {
   return localStorage.getItem(SELECTED_DATABASE_STORAGE_KEY);
 }
 
-function deriveDatabases(workspaces: AFSWorkspaceSummary[]): AFSDatabaseScopeRecord[] {
-  const grouped = new Map<
-    string,
-    {
-      workspaceCount: number;
-      databaseName: string;
-      endpointLabel: string;
-      updatedAt: string;
-    }
-  >();
-
-  for (const workspace of workspaces) {
-    const existing = grouped.get(workspace.databaseId);
-    const nextEndpoint = `${workspace.cloudAccount} · ${workspace.region}`;
-
-    if (existing == null) {
-      grouped.set(workspace.databaseId, {
-        workspaceCount: 1,
-        databaseName: workspace.databaseName,
-        endpointLabel: nextEndpoint,
-        updatedAt: workspace.updatedAt,
-      });
-      continue;
-    }
-
-    grouped.set(workspace.databaseId, {
-      workspaceCount: existing.workspaceCount + 1,
-      databaseName: existing.databaseName,
-      endpointLabel:
-        workspace.updatedAt.localeCompare(existing.updatedAt) > 0
-          ? nextEndpoint
-          : existing.endpointLabel,
-      updatedAt:
-        workspace.updatedAt.localeCompare(existing.updatedAt) > 0
-          ? workspace.updatedAt
-          : existing.updatedAt,
-    });
+function readLegacySavedDatabases(): LegacySavedDatabaseRecord[] {
+  const raw = localStorage.getItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
+  if (raw == null) {
+    return [];
   }
 
-  return [...grouped.entries()]
-    .map(([id, record]) => ({
-      id,
-      displayName: record.databaseName,
-      databaseName: record.databaseName,
-      endpointLabel: record.endpointLabel,
-      dbIndex: "",
-      workspaceCount: record.workspaceCount,
-      source: "derived" as const,
-      updatedAt: record.updatedAt,
-    }))
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  try {
+    return (JSON.parse(raw) as LegacySavedDatabaseRecord[]).filter((record) => !record.hidden);
+  } catch {
+    return [];
+  }
 }
 
-function mergeDatabases(
-  derived: AFSDatabaseScopeRecord[],
-  saved: SavedDatabaseRecord[],
-): AFSDatabaseScopeRecord[] {
-  const merged = new Map<string, AFSDatabaseScopeRecord>();
+function looksLikeRedisAddress(value: string) {
+  const trimmed = value.trim().replace(/^rediss?:\/\//, "");
+  return /^[^:\s]+:\d+$/.test(trimmed);
+}
 
-  for (const record of derived) {
-    merged.set(record.id, record);
-  }
-
-  for (const record of saved) {
-    const existing = merged.get(record.id);
-    merged.set(record.id, {
-      id: record.id,
-      displayName: record.displayName.trim() || existing?.displayName || record.databaseName,
-      databaseName: existing?.databaseName ?? record.databaseName,
-      endpointLabel: record.endpointLabel.trim() || existing?.endpointLabel || "Opened manually",
-      dbIndex: record.dbIndex,
-      workspaceCount: existing?.workspaceCount ?? 0,
-      source: existing?.source ?? "saved",
-      updatedAt: existing?.updatedAt ?? record.lastOpenedAt,
-    });
-  }
-
-  return [...merged.values()].sort((left, right) => left.displayName.localeCompare(right.displayName));
+function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases>>[number]): AFSDatabaseScopeRecord {
+  return {
+    id: input.id,
+    displayName: input.name,
+    databaseName: input.name,
+    description: input.description,
+    endpointLabel: input.redisAddr,
+    dbIndex: String(input.redisDB),
+    username: input.redisUsername,
+    password: input.redisPassword,
+    useTLS: input.redisTLS,
+    workspaceCount: input.workspaceCount,
+    connectionError: input.connectionError,
+  };
 }
 
 export function DatabaseScopeProvider(props: PropsWithChildren) {
-  const workspacesQuery = useWorkspaceSummaries();
-  const derivedDatabases = useMemo(
-    () => deriveDatabases(workspacesQuery.data ?? []),
-    [workspacesQuery.data],
-  );
-  const [savedDatabases, setSavedDatabases] = useState(readSavedDatabases);
+  const clientMode = getAFSClientMode();
+  const databasesQuery = useDatabases();
+  const saveDatabaseMutation = useSaveDatabaseMutation();
+  const deleteDatabaseMutation = useDeleteDatabaseMutation();
   const [selectedDatabaseIdState, setSelectedDatabaseIdState] = useState(readSelectedDatabaseId);
-  const [isOpenDatabaseDialogOpen, setOpenDatabaseDialogOpen] = useState(false);
+  const [legacyMigrated, setLegacyMigrated] = useState(clientMode !== "http");
 
   const databases = useMemo(
-    () => mergeDatabases(derivedDatabases, savedDatabases),
-    [derivedDatabases, savedDatabases],
+    () => (databasesQuery.data ?? []).map(mapDatabaseRecord),
+    [databasesQuery.data],
   );
-  const selectedDatabase = useMemo<AFSDatabaseScopeRecord | null>(() => {
-    if (selectedDatabaseIdState != null) {
-      const matching = databases.find((item) => item.id === selectedDatabaseIdState);
-      if (matching != null) {
-        return matching;
-      }
-    }
-
-    if (databases.length === 0) {
-      return null;
-    }
-
-    return databases[0];
-  }, [databases, selectedDatabaseIdState]);
-  const selectedDatabaseId = selectedDatabase == null ? null : selectedDatabase.id;
-
-  useEffect(() => {
-    localStorage.setItem(SAVED_DATABASES_STORAGE_KEY, JSON.stringify(savedDatabases));
-  }, [savedDatabases]);
-
-  useEffect(() => {
-    if (selectedDatabaseId === null) {
-      localStorage.removeItem(SELECTED_DATABASE_STORAGE_KEY);
-      return;
-    }
-
-    localStorage.setItem(SELECTED_DATABASE_STORAGE_KEY, selectedDatabaseId);
-  }, [selectedDatabaseId]);
 
   useEffect(() => {
     if (selectedDatabaseIdState == null && databases.length > 0) {
@@ -208,41 +118,102 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     }
   }, [databases, selectedDatabaseIdState]);
 
+  useEffect(() => {
+    if (selectedDatabaseIdState == null) {
+      localStorage.removeItem(SELECTED_DATABASE_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(SELECTED_DATABASE_STORAGE_KEY, selectedDatabaseIdState);
+  }, [selectedDatabaseIdState]);
+
+  useEffect(() => {
+    if (clientMode !== "http" || legacyMigrated || databasesQuery.isLoading) {
+      return;
+    }
+
+    const legacy = readLegacySavedDatabases()
+      .filter((record) => looksLikeRedisAddress(record.endpointLabel || record.databaseName));
+    if (legacy.length === 0) {
+      setLegacyMigrated(true);
+      localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      for (const record of legacy) {
+        if (cancelled) {
+          return;
+        }
+        if (databases.some((item) => item.id === record.id)) {
+          continue;
+        }
+        await afsApi.saveDatabase({
+          id: record.id,
+          name: record.displayName || record.databaseName,
+          description: record.description || "",
+          redisAddr: record.endpointLabel || record.databaseName,
+          redisUsername: record.username || "",
+          redisPassword: record.password || "",
+          redisDB: Number.parseInt(record.dbIndex || "0", 10) || 0,
+          redisTLS: record.endpointLabel.startsWith("rediss://"),
+        });
+      }
+      if (!cancelled) {
+        localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
+        setLegacyMigrated(true);
+        await databasesQuery.refetch();
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setLegacyMigrated(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientMode, databases, databasesQuery, legacyMigrated]);
+
+  const selectedDatabase = useMemo<AFSDatabaseScopeRecord | null>(() => {
+    if (selectedDatabaseIdState != null) {
+      const matching = databases.find((item) => item.id === selectedDatabaseIdState);
+      if (matching != null) {
+        return matching;
+      }
+    }
+    return databases[0] ?? null;
+  }, [databases, selectedDatabaseIdState]);
+
   const value = useMemo<DatabaseScopeContextValue>(
     () => ({
-      clientMode: getAFSClientMode(),
+      clientMode,
       databases,
       selectedDatabase,
-      selectedDatabaseId,
-      isLoading: workspacesQuery.isLoading,
+      selectedDatabaseId: selectedDatabase?.id ?? null,
+      isLoading: databasesQuery.isLoading,
       selectDatabase: (databaseId: string) => {
         setSelectedDatabaseIdState(databaseId);
       },
-      openDatabase: (input: OpenDatabaseInput) => {
-        const databaseName = input.databaseName.trim();
-        const displayName = input.displayName.trim() || databaseName;
-        const id = slugify(databaseName === "" ? displayName : databaseName);
-        const now = new Date().toISOString();
-
-        setSavedDatabases((current) => {
-          const next = current.filter((item) => item.id !== id);
-          next.unshift({
-            id,
-            displayName,
-            databaseName,
-            endpointLabel: input.endpointLabel.trim(),
-            dbIndex: input.dbIndex.trim(),
-            lastOpenedAt: now,
-          });
-          return next;
-        });
-        setSelectedDatabaseIdState(id);
-        setOpenDatabaseDialogOpen(false);
+      saveDatabase: async (input: SaveDatabaseInput) => {
+        await saveDatabaseMutation.mutateAsync(input);
       },
-      isOpenDatabaseDialogOpen,
-      setOpenDatabaseDialogOpen,
+      removeDatabase: async (databaseId: string) => {
+        await deleteDatabaseMutation.mutateAsync(databaseId);
+        if (selectedDatabaseIdState === databaseId) {
+          setSelectedDatabaseIdState(null);
+        }
+      },
     }),
-    [databases, isOpenDatabaseDialogOpen, selectedDatabase, selectedDatabaseId, workspacesQuery.isLoading],
+    [
+      clientMode,
+      databases,
+      databasesQuery.isLoading,
+      deleteDatabaseMutation,
+      saveDatabaseMutation,
+      selectedDatabase,
+      selectedDatabaseIdState,
+    ],
   );
 
   return (
@@ -262,46 +233,21 @@ export function useDatabaseScope() {
 }
 
 export function useScopedWorkspaceSummaries() {
-  const query = useWorkspaceSummaries();
   const { selectedDatabaseId } = useDatabaseScope();
-  const data = useMemo(() => {
-    const rows = query.data ?? [];
-    if (selectedDatabaseId == null) {
-      return rows;
-    }
-    return rows.filter((row) => row.databaseId === selectedDatabaseId);
-  }, [query.data, selectedDatabaseId]);
+  const query = useWorkspaceSummaries(selectedDatabaseId);
 
   return {
     ...query,
-    data,
+    data: query.data ?? [],
   };
 }
 
 export function useScopedActivity(limit = 50) {
-  const activityQuery = useActivity(limit);
-  const workspacesQuery = useWorkspaceSummaries();
   const { selectedDatabaseId } = useDatabaseScope();
-
-  const scopedActivity = useMemo(() => {
-    const events = activityQuery.data ?? [];
-    if (selectedDatabaseId == null) {
-      return events;
-    }
-
-    const workspaceIds = new Set(
-      (workspacesQuery.data ?? [])
-        .filter((workspace) => workspace.databaseId === selectedDatabaseId)
-        .map((workspace) => workspace.id),
-    );
-
-    return events.filter((event) => event.workspaceId != null && workspaceIds.has(event.workspaceId));
-  }, [activityQuery.data, selectedDatabaseId, workspacesQuery.data]);
+  const query = useActivity(selectedDatabaseId, limit);
 
   return {
-    ...activityQuery,
-    data: scopedActivity,
-    isLoading: activityQuery.isLoading || workspacesQuery.isLoading,
-    isError: activityQuery.isError || workspacesQuery.isError,
+    ...query,
+    data: query.data ?? [],
   };
 }

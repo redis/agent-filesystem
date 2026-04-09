@@ -86,7 +86,10 @@ func (c *nativeClient) WriteInodeAt(ctx context.Context, inode uint64, payload [
 	// still reflect the pre-write size. Drop them before a follow-up metadata
 	// call rewrites the stale size back into Redis.
 	c.invalidatePrefix("/")
-	return c.adjustTotalData(ctx, delta)
+	if err := c.adjustTotalData(ctx, delta); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) TruncateInode(ctx context.Context, inode uint64, size int64) error {
@@ -128,5 +131,8 @@ func (c *nativeClient) TruncateInode(ctx context.Context, inode uint64, size int
 	// Keep path-based metadata operations from persisting a stale cached size
 	// after an inode-addressed truncate.
 	c.invalidatePrefix("/")
-	return c.adjustTotalData(ctx, delta)
+	if err := c.adjustTotalData(ctx, delta); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }

@@ -281,6 +281,26 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	if workspaceMeta.HeadSavepoint != "initial" {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
+	liveRootKeys, err := store.rdb.Exists(
+		context.Background(),
+		"afs:{repo}:info",
+		"afs:{repo}:inode:1",
+		"afs:{repo}:root_head_savepoint",
+	).Result()
+	if err != nil {
+		t.Fatalf("Exists(live root keys) returned error: %v", err)
+	}
+	if liveRootKeys != 3 {
+		t.Fatalf("expected import to initialize live root, got %d live root keys", liveRootKeys)
+	}
+
+	rootHead, err := store.rdb.Get(context.Background(), "afs:{repo}:root_head_savepoint").Result()
+	if err != nil {
+		t.Fatalf("Get(root_head_savepoint) returned error: %v", err)
+	}
+	if rootHead != "initial" {
+		t.Fatalf("root_head_savepoint = %q, want %q", rootHead, "initial")
+	}
 
 	if _, err := loadAFSLocalState(loadedCfg, "repo"); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected imported workspace to remain unmaterialized, got err=%v", err)

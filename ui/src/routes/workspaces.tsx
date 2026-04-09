@@ -1,36 +1,28 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button, Loader, Typography } from "@redislabsdev/redis-ui-components";
+import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 import {
-  CardHeader,
-  EditorArea,
-  EditorPanel,
   Field,
-  FileButton,
-  FileList,
   FormGrid,
   PageStack,
   SectionTitle,
-  Select,
   TextArea,
   TextInput,
-  TwoColumnFields,
 } from "../components/afs-kit";
 import {
   useCreateWorkspaceMutation,
   useDeleteWorkspaceMutation,
-  useWorkspaceFileContent,
-  useWorkspaceTree,
   useUpdateWorkspaceMutation,
   useWorkspace,
 } from "../foundation/hooks/use-afs";
 import {
+  type AFSDatabaseScopeRecord,
   useDatabaseScope,
   useScopedWorkspaceSummaries,
 } from "../foundation/database-scope";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
-import type { AFSWorkspaceSource, AFSWorkspaceView } from "../foundation/types/afs";
+import type { AFSWorkspaceSource } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
@@ -39,6 +31,7 @@ export const Route = createFileRoute("/workspaces")({
 type WorkspaceFormState = {
   name: string;
   description: string;
+  databaseId: string;
   cloudAccount: string;
   databaseName: string;
   region: string;
@@ -47,58 +40,48 @@ type WorkspaceFormState = {
 
 type DialogMode = "create" | "edit" | null;
 
-function createInitialFormState(databaseName = "agentfs-dev-us-east-1"): WorkspaceFormState {
+function createWorkspaceDefaults(database?: AFSDatabaseScopeRecord | null) {
+  return {
+    databaseId: database?.id ?? "",
+    databaseName: database?.databaseName ?? "",
+    cloudAccount: "Direct Redis",
+    region: "",
+  };
+}
+
+function createInitialFormState(database?: AFSDatabaseScopeRecord | null): WorkspaceFormState {
+  const defaults = createWorkspaceDefaults(database);
   return {
     name: "",
     description: "",
-    cloudAccount: "Redis Cloud / Product",
-    databaseName,
-    region: "us-east-1",
+    databaseId: defaults.databaseId,
+    cloudAccount: defaults.cloudAccount,
+    databaseName: defaults.databaseName,
+    region: defaults.region,
     source: "blank",
   };
 }
 
 function WorkspacesPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const workspacesQuery = useScopedWorkspaceSummaries();
-  const { selectedDatabase, setOpenDatabaseDialogOpen } = useDatabaseScope();
+  const { selectedDatabase, selectedDatabaseId } = useDatabaseScope();
   const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
-  const [previewWorkspaceId, setPreviewWorkspaceId] = useState<string | null>(null);
-  const [previewPath, setPreviewPath] = useState("/");
-  const [previewSelectedPath, setPreviewSelectedPath] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
-    createInitialFormState(selectedDatabase?.databaseName),
+    createInitialFormState(selectedDatabase),
   );
 
   const editingWorkspaceQuery = useWorkspace(
+    selectedDatabaseId,
     editingWorkspaceId ?? "",
     dialogMode === "edit" && editingWorkspaceId != null,
-  );
-  const previewWorkspaceQuery = useWorkspace(
-    previewWorkspaceId ?? "",
-    previewWorkspaceId != null,
-  );
-  const previewTreeQuery = useWorkspaceTree(
-    {
-      workspaceId: previewWorkspaceId ?? "",
-      view: "head" as AFSWorkspaceView,
-      path: previewPath,
-      depth: 1,
-    },
-    previewWorkspaceId != null,
-  );
-  const previewFileQuery = useWorkspaceFileContent(
-    {
-      workspaceId: previewWorkspaceId ?? "",
-      view: "head" as AFSWorkspaceView,
-      path: previewSelectedPath,
-    },
-    previewWorkspaceId != null && previewSelectedPath !== "",
   );
 
   useEffect(() => {
@@ -110,6 +93,7 @@ function WorkspacesPage() {
     setForm({
       name: workspace.name,
       description: workspace.description,
+      databaseId: workspace.databaseId,
       cloudAccount: workspace.cloudAccount,
       databaseName: workspace.databaseName,
       region: workspace.region,
@@ -118,25 +102,15 @@ function WorkspacesPage() {
   }, [dialogMode, editingWorkspaceQuery.data]);
 
   useEffect(() => {
-    setPreviewPath("/");
-    setPreviewSelectedPath("");
-  }, [previewWorkspaceId]);
-
-  useEffect(() => {
     if (dialogMode !== "create" || selectedDatabase == null) {
       return;
     }
 
-    setForm((current) => ({ ...current, databaseName: selectedDatabase.databaseName }));
+    const defaults = createWorkspaceDefaults(selectedDatabase);
+    setForm((current) => ({ ...current, ...defaults }));
   }, [dialogMode, selectedDatabase]);
 
   const workspaces = workspacesQuery.data;
-
-  useEffect(() => {
-    if (previewWorkspaceId != null && !workspaces.some((workspace) => workspace.id === previewWorkspaceId)) {
-      setPreviewWorkspaceId(null);
-    }
-  }, [previewWorkspaceId, workspaces]);
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -152,42 +126,53 @@ function WorkspacesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
-    setForm(createInitialFormState(selectedDatabase?.databaseName));
+    setFormError(null);
+    setForm(createInitialFormState(selectedDatabase));
   }
 
   function openCreateDialog() {
     if (selectedDatabase == null) {
-      setOpenDatabaseDialogOpen(true);
+      void navigate({ to: "/databases" });
       return;
     }
 
     setDialogMode("create");
     setEditingWorkspaceId(null);
-    setForm(createInitialFormState(selectedDatabase.databaseName));
+    setFormError(null);
+    setForm(createInitialFormState(selectedDatabase));
   }
 
   function openEditDialog(workspaceId: string) {
-    setPreviewWorkspaceId(null);
     setDialogMode("edit");
     setEditingWorkspaceId(workspaceId);
+    setFormError(null);
   }
 
   function updateForm<TKey extends keyof WorkspaceFormState>(
     key: TKey,
     value: WorkspaceFormState[TKey],
   ) {
+    setFormError(null);
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function mutationErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message.trim() !== "") {
+      return error.message;
+    }
+    return fallback;
+  }
+
   function openWorkspace(workspaceId: string) {
+    if (selectedDatabaseId == null) {
+      void navigate({ to: "/databases" });
+      return;
+    }
+
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId },
     });
-  }
-
-  function openWorkspacePreview(workspaceId: string) {
-    setPreviewWorkspaceId(workspaceId);
   }
 
   function deleteSelectedWorkspace(workspaceId: string) {
@@ -200,21 +185,21 @@ function WorkspacesPage() {
       return;
     }
 
-    deleteWorkspace.mutate(workspaceId, {
+    deleteWorkspace.mutate({
+      databaseId: selectedDatabaseId ?? "",
+      workspaceId,
+    }, {
       onSuccess: () => {
         if (editingWorkspaceId === workspaceId) {
           closeDialog();
-        }
-        if (previewWorkspaceId === workspaceId) {
-          setPreviewWorkspaceId(null);
         }
       },
     });
   }
 
-  const previewWorkspace = previewWorkspaceQuery.data;
-  const previewItems = previewTreeQuery.data?.items ?? [];
-  const previewFile = previewFileQuery.data;
+  if (location.pathname !== "/workspaces") {
+    return <Outlet />;
+  }
 
   return (
     <PageStack>
@@ -229,154 +214,12 @@ function WorkspacesPage() {
         loading={workspacesQuery.isLoading}
         error={workspacesQuery.isError}
         deletingWorkspaceId={
-          deleteWorkspace.isPending ? deleteWorkspace.variables : null
+          deleteWorkspace.isPending ? deleteWorkspace.variables?.workspaceId ?? null : null
         }
-        onPreviewWorkspace={openWorkspacePreview}
         onOpenWorkspace={openWorkspace}
         onEditWorkspace={openEditDialog}
         onDeleteWorkspace={deleteSelectedWorkspace}
       />
-
-      {previewWorkspaceId != null ? (
-        <DetailPanelOverlay
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setPreviewWorkspaceId(null);
-            }
-          }}
-        >
-          <DetailPanel>
-            <DialogHeader>
-              <SectionTitle
-                eyebrow="Workspace Details"
-                title={previewWorkspace?.name ?? previewWorkspaceId}
-                body="Browse the saved contents of this workspace here, or jump directly to its checkpoint history."
-              />
-              <InlineButtonRow>
-                <Button
-                  size="medium"
-                  onClick={() => {
-                    void navigate({
-                      to: "/workspaces/$workspaceId",
-                      params: { workspaceId: previewWorkspaceId },
-                      search: { tab: "checkpoints" },
-                    });
-                  }}
-                >
-                  Checkpoints
-                </Button>
-                <Button
-                  size="medium"
-                  variant="secondary-fill"
-                  onClick={() => setPreviewWorkspaceId(null)}
-                >
-                  Close
-                </Button>
-              </InlineButtonRow>
-            </DialogHeader>
-
-            <DetailBrowserGrid>
-              <BrowserCard>
-                <CardHeader>
-                  <div>
-                    <Typography.Heading component="h3" size="S">
-                      File browser
-                    </Typography.Heading>
-                    <Typography.Body color="secondary" component="p">
-                      {previewPath}
-                    </Typography.Body>
-                  </div>
-                  <Button
-                    size="medium"
-                    variant="secondary-fill"
-                    disabled={previewPath === "/"}
-                    onClick={() => {
-                      setPreviewPath(parentPath(previewPath));
-                      setPreviewSelectedPath("");
-                    }}
-                  >
-                    Up
-                  </Button>
-                </CardHeader>
-
-                {previewTreeQuery.isLoading ? <PanelNote>Loading directory contents...</PanelNote> : null}
-                {previewTreeQuery.isError ? <PanelNote>Unable to load this directory.</PanelNote> : null}
-
-                <FileList style={{ marginTop: 14 }}>
-                  {previewItems.map((item) => (
-                    <FileButton
-                      key={item.path}
-                      $active={item.path === previewSelectedPath}
-                      onClick={() => {
-                        if (item.kind === "dir") {
-                          setPreviewPath(item.path);
-                          setPreviewSelectedPath("");
-                          return;
-                        }
-                        setPreviewSelectedPath(item.path);
-                      }}
-                    >
-                      <FileButtonHeader>
-                        <Typography.Body component="strong">{item.name}</Typography.Body>
-                        <FileKind>{item.kind}</FileKind>
-                      </FileButtonHeader>
-                      <Typography.Body color="secondary" component="p">
-                        {item.kind !== "dir" ? `${formatItemSize(item.size)} · ` : ""}
-                        {item.modifiedAt
-                          ? new Date(item.modifiedAt).toLocaleString()
-                          : "No modification timestamp"}
-                      </Typography.Body>
-                    </FileButton>
-                  ))}
-                  {!previewTreeQuery.isLoading && previewItems.length === 0 ? (
-                    <PanelNote>This directory is empty.</PanelNote>
-                  ) : null}
-                </FileList>
-              </BrowserCard>
-
-              <EditorPanel>
-                {previewSelectedPath === "" ? (
-                  <PanelNote>Select a file to inspect its contents.</PanelNote>
-                ) : previewFileQuery.isLoading ? (
-                  <PanelNote>Loading file content...</PanelNote>
-                ) : previewFile == null ? (
-                  <PanelNote>Select a file to inspect its contents.</PanelNote>
-                ) : previewFile.binary ? (
-                  <DetailStack>
-                    <CardHeader>
-                      <div>
-                        <Typography.Heading component="h3" size="S">
-                          {previewFile.path}
-                        </Typography.Heading>
-                        <Typography.Body color="secondary" component="p">
-                          Binary asset
-                        </Typography.Body>
-                      </div>
-                    </CardHeader>
-                    <Typography.Body color="secondary" component="p">
-                      This item looks binary, so the details panel is showing metadata instead of raw content.
-                    </Typography.Body>
-                  </DetailStack>
-                ) : (
-                  <DetailStack>
-                    <CardHeader>
-                      <div>
-                        <Typography.Heading component="h3" size="S">
-                          {previewFile.path}
-                        </Typography.Heading>
-                        <Typography.Body color="secondary" component="p">
-                          {previewFile.language}
-                        </Typography.Body>
-                      </div>
-                    </CardHeader>
-                    <EditorArea readOnly value={previewFile.content ?? previewFile.target ?? ""} />
-                  </DetailStack>
-                )}
-              </EditorPanel>
-            </DetailBrowserGrid>
-          </DetailPanel>
-        </DetailPanelOverlay>
-      ) : null}
 
       {isDialogOpen ? (
         <DialogOverlay
@@ -433,6 +276,7 @@ function WorkspacesPage() {
             </SourcePicker>
 
             <FormGrid
+              id="workspace-dialog-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (form.name.trim() === "") {
@@ -442,6 +286,7 @@ function WorkspacesPage() {
                 if (editingWorkspaceId != null) {
                   updateWorkspace.mutate(
                     {
+                      databaseId: form.databaseId,
                       workspaceId: editingWorkspaceId,
                       description: form.description,
                       cloudAccount: form.cloudAccount,
@@ -452,6 +297,9 @@ function WorkspacesPage() {
                       onSuccess: () => {
                         closeDialog();
                       },
+                      onError: (error) => {
+                        setFormError(mutationErrorMessage(error, "Unable to update the workspace."));
+                      },
                     },
                   );
                   return;
@@ -459,6 +307,7 @@ function WorkspacesPage() {
 
                 createWorkspace.mutate(
                   {
+                    databaseId: form.databaseId,
                     name: form.name,
                     description: form.description,
                     cloudAccount: form.cloudAccount,
@@ -470,30 +319,27 @@ function WorkspacesPage() {
                     onSuccess: () => {
                       closeDialog();
                     },
+                    onError: (error) => {
+                      setFormError(
+                        mutationErrorMessage(
+                          error,
+                          "Unable to create the workspace in the selected database.",
+                        ),
+                      );
+                    },
                   },
                 );
               }}
             >
-              <TwoColumnFields>
-                <Field>
-                  Workspace name
-                  <TextInput
-                    disabled={isEditing}
-                    value={form.name}
-                    onChange={(event) => updateForm("name", event.target.value)}
-                    placeholder="customer-portal"
-                  />
-                </Field>
-                <Field>
-                  Current database
-                  <TextInput
-                    disabled
-                    value={form.databaseName}
-                    onChange={(event) => updateForm("databaseName", event.target.value)}
-                    placeholder="agentfs-dev-us-east-1"
-                  />
-                </Field>
-              </TwoColumnFields>
+              <Field>
+                Workspace name
+                <TextInput
+                  disabled={isEditing}
+                  value={form.name}
+                  onChange={(event) => updateForm("name", event.target.value)}
+                  placeholder="customer-portal"
+                />
+              </Field>
 
               <Field>
                 Description
@@ -503,39 +349,13 @@ function WorkspacesPage() {
                   placeholder="What this workspace is for, who owns it, and why it exists."
                 />
               </Field>
+            </FormGrid>
 
-              <TwoColumnFields>
-                <Field>
-                  Cloud account
-                  <TextInput
-                    value={form.cloudAccount}
-                    onChange={(event) => updateForm("cloudAccount", event.target.value)}
-                  />
-                </Field>
-                <Field>
-                  Region
-                  <TextInput
-                    value={form.region}
-                    onChange={(event) => updateForm("region", event.target.value)}
-                  />
-                </Field>
-              </TwoColumnFields>
+            {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
-              <Field>
-                Source
-                <Select
-                  disabled={isEditing}
-                  value={form.source}
-                  onChange={(event) => updateForm("source", event.target.value as AFSWorkspaceSource)}
-                >
-                  <option value="blank">Blank workspace</option>
-                  <option value="git-import">Git import</option>
-                  <option value="cloud-import">Redis Cloud import</option>
-                </Select>
-              </Field>
-
+            <DialogFooter>
               <DialogActions>
-                <Button disabled={formBusy} size="medium" type="submit">
+                <Button disabled={formBusy} size="medium" type="submit" form="workspace-dialog-form">
                   {isEditing
                     ? updateWorkspace.isPending
                       ? "Saving..."
@@ -554,7 +374,7 @@ function WorkspacesPage() {
                   Cancel
                 </Button>
               </DialogActions>
-            </FormGrid>
+            </DialogFooter>
           </DialogCard>
         </DialogOverlay>
       ) : null}
@@ -585,11 +405,9 @@ const DialogCard = styled.div`
   overflow: auto;
   border: 1px solid var(--afs-line);
   border-radius: 24px;
-  padding: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 251, 255, 0.94)),
-    var(--afs-panel);
-  box-shadow: var(--afs-shadow);
+  padding: 24px 24px 0;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
 `;
 
 const DialogHeader = styled.div`
@@ -616,17 +434,16 @@ const SourceOption = styled.button<{ $active: boolean }>`
   border-radius: 18px;
   padding: 14px 15px;
   background: ${({ $active }) =>
-    $active ? "var(--afs-accent-soft)" : "rgba(255, 255, 255, 0.74)"};
+    $active ? "rgba(8, 6, 13, 0.04)" : "#fff"};
   text-align: left;
   cursor: pointer;
   transition:
-    transform 160ms ease,
     border-color 160ms ease,
     background 160ms ease,
     opacity 160ms ease;
 
   &:hover:enabled {
-    transform: translateY(-1px);
+    border-color: var(--afs-line-strong);
   }
 
   &:disabled {
@@ -648,94 +465,36 @@ const SourceBody = styled.p`
   line-height: 1.6;
 `;
 
+const DialogFooter = styled.div`
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  align-items: flex-end;
+  margin: 20px -24px 0;
+  padding: 18px 24px 24px;
+  border-top: 1px solid var(--afs-line);
+  background: #fff;
+
+  @media (max-width: 720px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const DialogError = styled.p`
+  margin: 16px 0 0;
+  color: #c2364a;
+  font-size: 14px;
+  line-height: 1.5;
+`;
+
 const DialogActions = styled.div`
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 10px;
   align-items: center;
-`;
-
-const InlineButtonRow = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-`;
-
-const DetailPanelOverlay = styled(DialogOverlay)`
   justify-content: flex-end;
-  padding: 24px;
+  overflow-x: auto;
 `;
-
-const DetailPanel = styled(DialogCard)`
-  width: min(920px, 100%);
-`;
-
-const DetailBrowserGrid = styled.div`
-  display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
-
-  @media (max-width: 1100px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const BrowserCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 24px;
-  padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 246, 251, 0.92)),
-    rgba(255, 255, 255, 0.8);
-`;
-
-const PanelNote = styled.p`
-  margin: 14px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const FileButtonHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  align-items: center;
-`;
-
-const FileKind = styled.span`
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(8, 6, 13, 0.08);
-  color: var(--afs-muted);
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const DetailStack = styled.div`
-  display: grid;
-  gap: 16px;
-`;
-
-function parentPath(value: string) {
-  if (value === "/" || value === "") {
-    return "/";
-  }
-  const parts = value.split("/").filter(Boolean);
-  parts.pop();
-  return parts.length === 0 ? "/" : `/${parts.join("/")}`;
-}
-
-function formatItemSize(size: number) {
-  if (size === 0) {
-    return "0 KB";
-  }
-  return new Intl.NumberFormat(undefined, {
-    maximumFractionDigits: 1,
-  }).format(size / 1024) + " KB";
-}

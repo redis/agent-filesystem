@@ -2,15 +2,68 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"path"
 	"sort"
+	"strconv"
+	"strings"
 
-	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	workspaceFSRootInodeID       = "1"
+	workspaceFSSchemaVersion     = "2"
+	workspaceFSWriteBatchEntries = 128
+	workspaceFSWriteBatchBytes   = 4 << 20
+)
+
+type workspaceFSNode struct {
+	ID       string
+	Path     string
+	ParentID string
+	Name     string
+	Entry    ManifestEntry
+}
+
 func WorkspaceFSKey(workspace string) string {
 	return workspace
+}
+
+func workspaceRootHeadKey(workspace string) string {
+	return "afs:{" + WorkspaceFSKey(workspace) + "}:root_head_savepoint"
+}
+
+func workspaceRootDirtyKey(workspace string) string {
+	return "afs:{" + WorkspaceFSKey(workspace) + "}:root_dirty"
+}
+
+func WorkspaceRootDirtyKey(workspace string) string {
+	return workspaceRootDirtyKey(workspace)
+}
+
+func WorkspaceRootDirtyState(ctx context.Context, store *Store, workspace string) (dirty bool, known bool, err error) {
+	value, err := store.rdb.Get(ctx, workspaceRootDirtyKey(workspace)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	return strings.TrimSpace(value) == "1", true, nil
+}
+
+func MarkWorkspaceRootDirty(ctx context.Context, store *Store, workspace string) error {
+	return store.rdb.Set(ctx, workspaceRootDirtyKey(workspace), "1", 0).Err()
+}
+
+func MarkWorkspaceRootClean(ctx context.Context, store *Store, workspace, headSavepoint string) error {
+	pipe := store.rdb.TxPipeline()
+	pipe.Set(ctx, workspaceRootHeadKey(workspace), headSavepoint, 0)
+	pipe.Set(ctx, workspaceRootDirtyKey(workspace), "0", 0)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func EnsureWorkspaceRoot(ctx context.Context, store *Store, workspace string) (string, string, bool, error) {
@@ -19,7 +72,7 @@ func EnsureWorkspaceRoot(ctx context.Context, store *Store, workspace string) (s
 		return "", "", false, err
 	}
 
-	exists, err := workspaceRootExists(ctx, store.rdb, workspace)
+	exists, err := workspaceRootExists(ctx, store.rdb, workspace, meta.HeadSavepoint)
 	if err != nil {
 		return "", "", false, err
 	}
@@ -42,11 +95,13 @@ func SyncWorkspaceRoot(ctx context.Context, store *Store, workspace string, m Ma
 	if err := resetWorkspaceFSNamespace(ctx, store.rdb, fsKey); err != nil {
 		return err
 	}
-	fsClient := client.New(store.rdb, fsKey)
-	return materializeManifestToWorkspaceFS(ctx, store, workspace, fsClient, m)
+	if err := materializeManifestToWorkspaceFS(ctx, store, workspace, fsKey, m); err != nil {
+		return err
+	}
+	return MarkWorkspaceRootClean(ctx, store, workspace, m.Savepoint)
 }
 
-func workspaceRootExists(ctx context.Context, rdb *redis.Client, workspace string) (bool, error) {
+func workspaceRootExists(ctx context.Context, rdb *redis.Client, workspace, headSavepoint string) (bool, error) {
 	fsKey := WorkspaceFSKey(workspace)
 	count, err := rdb.Exists(ctx,
 		"afs:{"+fsKey+"}:info",
@@ -55,7 +110,18 @@ func workspaceRootExists(ctx context.Context, rdb *redis.Client, workspace strin
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	if count == 0 {
+		return false, nil
+	}
+
+	rootHead, err := rdb.Get(ctx, workspaceRootHeadKey(workspace)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		return false, err
+	}
+	return rootHead == headSavepoint, nil
 }
 
 func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey string) error {
@@ -85,101 +151,236 @@ func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey str
 	if err := rdb.Del(ctx,
 		"afs:{"+fsKey+"}:info",
 		"afs:{"+fsKey+"}:next_inode",
+		workspaceRootHeadKey(fsKey),
+		workspaceRootDirtyKey(fsKey),
 	).Err(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func materializeManifestToWorkspaceFS(ctx context.Context, store *Store, workspace string, fsClient client.Client, m Manifest) error {
-	rootEntry := ManifestEntry{Type: "dir", Mode: 0o755}
-	if entry, ok := m.Entries["/"]; ok {
-		rootEntry = entry
-	}
-
-	if err := fsClient.Mkdir(ctx, "/"); err != nil {
+func materializeManifestToWorkspaceFS(ctx context.Context, store *Store, workspace, fsKey string, m Manifest) error {
+	nodes, err := buildWorkspaceFSNodes(m)
+	if err != nil {
 		return err
 	}
-
-	dirs, others := manifestPathsForWorkspaceFS(m)
-	for _, manifestPath := range dirs {
-		if err := fsClient.Mkdir(ctx, manifestPath); err != nil {
-			return fmt.Errorf("mkdir %s: %w", manifestPath, err)
-		}
-	}
-
-	for _, manifestPath := range others {
-		entry := m.Entries[manifestPath]
-		switch entry.Type {
-		case "file":
-			data, err := ManifestEntryData(entry, func(blobID string) ([]byte, error) {
-				return store.GetBlob(ctx, workspace, blobID)
-			})
-			if err != nil {
-				return err
-			}
-			if err := fsClient.EchoCreate(ctx, manifestPath, data, manifestEntryModeForWorkspaceFS(entry)); err != nil {
-				return fmt.Errorf("write %s: %w", manifestPath, err)
-			}
-		case "symlink":
-			if err := fsClient.Ln(ctx, entry.Target, manifestPath); err != nil {
-				return fmt.Errorf("symlink %s: %w", manifestPath, err)
-			}
-		default:
-			return fmt.Errorf("unsupported manifest entry type %q", entry.Type)
-		}
-		if err := applyManifestEntryMetadataToWorkspaceFS(ctx, fsClient, manifestPath, entry); err != nil {
-			return err
-		}
-	}
-
-	for i := len(dirs) - 1; i >= 0; i-- {
-		manifestPath := dirs[i]
-		if err := applyManifestEntryMetadataToWorkspaceFS(ctx, fsClient, manifestPath, m.Entries[manifestPath]); err != nil {
-			return err
-		}
-	}
-
-	return applyManifestEntryMetadataToWorkspaceFS(ctx, fsClient, "/", rootEntry)
+	return writeWorkspaceFSNodes(ctx, store, workspace, fsKey, nodes)
 }
 
-func applyManifestEntryMetadataToWorkspaceFS(ctx context.Context, fsClient client.Client, path string, entry ManifestEntry) error {
-	if err := fsClient.Chmod(ctx, path, manifestEntryModeForWorkspaceFS(entry)); err != nil {
-		return fmt.Errorf("chmod %s: %w", path, err)
+func buildWorkspaceFSNodes(m Manifest) ([]workspaceFSNode, error) {
+	entries := workspaceFSManifestEntries(m)
+	paths := workspaceFSOrderedPaths(entries)
+	nodes := make([]workspaceFSNode, 0, len(paths))
+	nodeIDs := map[string]string{
+		"/": workspaceFSRootInodeID,
 	}
-	if err := fsClient.Utimens(ctx, path, entry.MtimeMs, entry.MtimeMs); err != nil {
-		return fmt.Errorf("utimens %s: %w", path, err)
-	}
-	return nil
-}
 
-func manifestPathsForWorkspaceFS(m Manifest) ([]string, []string) {
-	paths := make([]string, 0, len(m.Entries))
-	for manifestPath := range m.Entries {
-		paths = append(paths, manifestPath)
+	rootEntry := entries["/"]
+	if rootEntry.Type != "dir" {
+		return nil, fmt.Errorf("workspace root %q must be a directory", "/")
 	}
-	sort.Strings(paths)
+	nodes = append(nodes, workspaceFSNode{
+		ID:    workspaceFSRootInodeID,
+		Path:  "/",
+		Entry: rootEntry,
+	})
 
-	dirs := make([]string, 0, len(paths))
-	others := make([]string, 0, len(paths))
+	nextID := int64(1)
 	for _, manifestPath := range paths {
 		if manifestPath == "/" {
 			continue
 		}
-		if m.Entries[manifestPath].Type == "dir" {
-			dirs = append(dirs, manifestPath)
-		} else {
-			others = append(others, manifestPath)
+		entry := entries[manifestPath]
+		parentPath := workspaceFSParentPath(manifestPath)
+		parentEntry, ok := entries[parentPath]
+		if !ok {
+			return nil, fmt.Errorf("manifest path %q is missing parent %q", manifestPath, parentPath)
+		}
+		if parentEntry.Type != "dir" {
+			return nil, fmt.Errorf("manifest path %q has non-directory parent %q", manifestPath, parentPath)
+		}
+		parentID, ok := nodeIDs[parentPath]
+		if !ok {
+			return nil, fmt.Errorf("manifest path %q is missing parent inode %q", manifestPath, parentPath)
+		}
+
+		nextID++
+		nodeID := strconv.FormatInt(nextID, 10)
+		nodeIDs[manifestPath] = nodeID
+		nodes = append(nodes, workspaceFSNode{
+			ID:       nodeID,
+			Path:     manifestPath,
+			ParentID: parentID,
+			Name:     path.Base(manifestPath),
+			Entry:    entry,
+		})
+	}
+	return nodes, nil
+}
+
+func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey string, nodes []workspaceFSNode) error {
+	if len(nodes) == 0 {
+		return errors.New("workspace manifest is missing a root entry")
+	}
+
+	var (
+		fileCount    int64
+		dirCount     int64
+		symlinkCount int64
+		totalData    int64
+	)
+
+	pipe := store.rdb.Pipeline()
+	queuedEntries := 0
+	queuedBytes := int64(0)
+	flush := func() error {
+		if queuedEntries == 0 {
+			return nil
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			return err
+		}
+		pipe = store.rdb.Pipeline()
+		queuedEntries = 0
+		queuedBytes = 0
+		return nil
+	}
+	queueCapacity := func(weight int64) error {
+		if queuedEntries >= workspaceFSWriteBatchEntries || (queuedBytes > 0 && queuedBytes+weight > workspaceFSWriteBatchBytes) {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+		queuedEntries++
+		queuedBytes += weight
+		return nil
+	}
+
+	for _, node := range nodes {
+		fields, size, err := workspaceFSNodeFields(ctx, store, workspace, node)
+		if err != nil {
+			return fmt.Errorf("materialize %s: %w", node.Path, err)
+		}
+		switch node.Entry.Type {
+		case "file":
+			fileCount++
+			totalData += size
+		case "dir":
+			dirCount++
+		case "symlink":
+			symlinkCount++
+		default:
+			return fmt.Errorf("unsupported manifest entry type %q", node.Entry.Type)
+		}
+
+		if err := queueCapacity(workspaceFSNodeWeight(node, size)); err != nil {
+			return err
+		}
+		pipe.HSet(ctx, workspaceFSInodeKey(fsKey, node.ID), fields)
+		if node.ParentID != "" {
+			pipe.HSet(ctx, workspaceFSDirentsKey(fsKey, node.ParentID), node.Name, node.ID)
 		}
 	}
 
-	sort.Slice(dirs, func(i, j int) bool {
-		if len(dirs[i]) == len(dirs[j]) {
-			return dirs[i] < dirs[j]
-		}
-		return len(dirs[i]) < len(dirs[j])
+	if err := queueCapacity(512); err != nil {
+		return err
+	}
+	pipe.HSet(ctx, workspaceFSInfoKey(fsKey), map[string]interface{}{
+		"schema_version":   workspaceFSSchemaVersion,
+		"files":            fileCount,
+		"directories":      dirCount,
+		"symlinks":         symlinkCount,
+		"total_data_bytes": totalData,
 	})
-	return dirs, others
+	pipe.Set(ctx, workspaceFSNextInodeKey(fsKey), nodes[len(nodes)-1].ID, 0)
+	return flush()
+}
+
+func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode) (map[string]interface{}, int64, error) {
+	fields := map[string]interface{}{
+		"type":           node.Entry.Type,
+		"mode":           manifestEntryModeForWorkspaceFS(node.Entry),
+		"uid":            0,
+		"gid":            0,
+		"ctime_ms":       node.Entry.MtimeMs,
+		"mtime_ms":       node.Entry.MtimeMs,
+		"atime_ms":       node.Entry.MtimeMs,
+		"parent":         node.ParentID,
+		"name":           node.Name,
+		"path":           node.Path,
+		"path_ancestors": workspaceFSIndexedPathAncestors(node.Path),
+	}
+
+	switch node.Entry.Type {
+	case "dir":
+		fields["size"] = 0
+		return fields, 0, nil
+	case "file":
+		data, err := ManifestEntryData(node.Entry, func(blobID string) ([]byte, error) {
+			return store.GetBlob(ctx, workspace, blobID)
+		})
+		if err != nil {
+			return nil, 0, err
+		}
+		fields["size"] = int64(len(data))
+		fields["content"] = string(data)
+		return fields, int64(len(data)), nil
+	case "symlink":
+		size := node.Entry.Size
+		if size == 0 && node.Entry.Target != "" {
+			size = int64(len(node.Entry.Target))
+		}
+		fields["size"] = size
+		fields["target"] = node.Entry.Target
+		return fields, 0, nil
+	default:
+		return nil, 0, fmt.Errorf("unsupported manifest entry type %q", node.Entry.Type)
+	}
+}
+
+func workspaceFSManifestEntries(m Manifest) map[string]ManifestEntry {
+	entries := make(map[string]ManifestEntry, len(m.Entries)+1)
+	for manifestPath, entry := range m.Entries {
+		entries[workspaceFSNormalizePath(manifestPath)] = entry
+	}
+
+	rootEntry := ManifestEntry{Type: "dir", Mode: 0o755}
+	if entry, ok := entries["/"]; ok {
+		rootEntry = entry
+	}
+	rootEntry.Type = "dir"
+	rootEntry.Mode = manifestEntryModeForWorkspaceFS(rootEntry)
+	entries["/"] = rootEntry
+
+	paths := make([]string, 0, len(entries))
+	for manifestPath := range entries {
+		paths = append(paths, manifestPath)
+	}
+	for _, manifestPath := range paths {
+		for parentPath := workspaceFSParentPath(manifestPath); parentPath != "/"; parentPath = workspaceFSParentPath(parentPath) {
+			if _, ok := entries[parentPath]; ok {
+				continue
+			}
+			entries[parentPath] = ManifestEntry{Type: "dir", Mode: 0o755}
+		}
+	}
+	return entries
+}
+
+func workspaceFSOrderedPaths(entries map[string]ManifestEntry) []string {
+	paths := make([]string, 0, len(entries))
+	for manifestPath := range entries {
+		paths = append(paths, manifestPath)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		leftDepth := workspaceFSPathDepth(paths[i])
+		rightDepth := workspaceFSPathDepth(paths[j])
+		if leftDepth == rightDepth {
+			return paths[i] < paths[j]
+		}
+		return leftDepth < rightDepth
+	})
+	return paths
 }
 
 func manifestEntryModeForWorkspaceFS(entry ManifestEntry) uint32 {
@@ -198,4 +399,88 @@ func manifestEntryModeForWorkspaceFS(entry ManifestEntry) uint32 {
 		}
 	}
 	return entry.Mode
+}
+
+func workspaceFSInodeKey(fsKey, inodeID string) string {
+	return "afs:{" + fsKey + "}:inode:" + inodeID
+}
+
+func workspaceFSDirentsKey(fsKey, inodeID string) string {
+	return "afs:{" + fsKey + "}:dirents:" + inodeID
+}
+
+func workspaceFSInfoKey(fsKey string) string {
+	return "afs:{" + fsKey + "}:info"
+}
+
+func workspaceFSNextInodeKey(fsKey string) string {
+	return "afs:{" + fsKey + "}:next_inode"
+}
+
+func workspaceFSNodeWeight(node workspaceFSNode, contentSize int64) int64 {
+	weight := int64(len(node.Path) + len(node.Name) + 256)
+	switch node.Entry.Type {
+	case "file":
+		return weight + contentSize
+	case "symlink":
+		return weight + int64(len(node.Entry.Target))
+	default:
+		return weight
+	}
+}
+
+func workspaceFSNormalizePath(manifestPath string) string {
+	if manifestPath == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(manifestPath, "/") {
+		manifestPath = "/" + manifestPath
+	}
+	clean := path.Clean(manifestPath)
+	if clean == "." {
+		return "/"
+	}
+	return clean
+}
+
+func workspaceFSParentPath(manifestPath string) string {
+	manifestPath = workspaceFSNormalizePath(manifestPath)
+	if manifestPath == "/" {
+		return "/"
+	}
+	parentPath := path.Dir(manifestPath)
+	if parentPath == "." {
+		return "/"
+	}
+	return parentPath
+}
+
+func workspaceFSPathDepth(manifestPath string) int {
+	manifestPath = workspaceFSNormalizePath(manifestPath)
+	if manifestPath == "/" {
+		return 0
+	}
+	return strings.Count(strings.TrimPrefix(manifestPath, "/"), "/") + 1
+}
+
+func workspaceFSIndexedPathAncestors(manifestPath string) string {
+	trimmed := strings.TrimSpace(workspaceFSNormalizePath(manifestPath))
+	if trimmed == "" || trimmed == "/" {
+		return "/"
+	}
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	parts := strings.Split(strings.TrimPrefix(trimmed, "/"), "/")
+	ancestors := make([]string, 0, len(parts)+1)
+	current := ""
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		current += "/" + part
+		ancestors = append(ancestors, current)
+	}
+	if len(ancestors) == 0 {
+		return "/"
+	}
+	return strings.Join(ancestors, ",")
 }

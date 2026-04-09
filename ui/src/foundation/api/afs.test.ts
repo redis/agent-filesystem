@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { afsApi } from "./afs";
 
 describe("afsApi", () => {
+  const paymentsDatabaseId = "db-payments-portal";
+
   beforeEach(() => {
     window.localStorage.clear();
     afsApi.resetDemo();
@@ -11,6 +13,7 @@ describe("afsApi", () => {
     const workspace = await afsApi.createWorkspace({
       name: "demo-space",
       description: "Testing workspace creation",
+      databaseId: "redis-agentfs-tests-us-test-1-0",
       cloudAccount: "Redis Cloud / Tests",
       databaseName: "agentfs-tests-us-test-1",
       region: "us-test-1",
@@ -18,37 +21,41 @@ describe("afsApi", () => {
     });
 
     expect(workspace.name).toBe("demo-space");
+    expect(workspace.databaseId).toBe("redis-agentfs-tests-us-test-1-0");
     expect(workspace.databaseName).toBe("agentfs-tests-us-test-1");
     expect(workspace.savepoints).toHaveLength(1);
     expect(workspace.savepoints[0]?.name).toBe("initial");
   });
 
   test("updates a file and checkpoints it into a new savepoint", async () => {
-    const workspace = await afsApi.getWorkspace("payments-portal");
+    const workspace = await afsApi.getWorkspace(paymentsDatabaseId, "payments-portal");
     expect(workspace).not.toBeNull();
 
     await afsApi.updateWorkspaceFile({
+      databaseId: paymentsDatabaseId,
       workspaceId: workspace?.id ?? "",
       path: "README.md",
       content: "# Updated",
     });
 
-    const dirtyWorkspace = await afsApi.getWorkspace("payments-portal");
+    const dirtyWorkspace = await afsApi.getWorkspace(paymentsDatabaseId, "payments-portal");
     expect(dirtyWorkspace?.draftState).toBe("dirty");
 
     await afsApi.createSavepoint({
+      databaseId: paymentsDatabaseId,
       workspaceId: dirtyWorkspace?.id ?? "",
       name: "after-update",
       note: "Checkpoint after editing",
     });
 
-    const savedWorkspace = await afsApi.getWorkspace("payments-portal");
+    const savedWorkspace = await afsApi.getWorkspace(paymentsDatabaseId, "payments-portal");
     expect(savedWorkspace?.draftState).toBe("clean");
     expect(savedWorkspace?.savepoints[0]?.name).toBe("after-update");
   });
 
   test("updates workspace metadata", async () => {
     const workspace = await afsApi.updateWorkspace({
+      databaseId: paymentsDatabaseId,
       workspaceId: "payments-portal",
       description: "Updated description",
       cloudAccount: "Redis Cloud / Updated",

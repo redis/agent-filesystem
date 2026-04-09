@@ -135,28 +135,48 @@ export type AFSActivityListResponse = {
 
 export type AFSWorkspaceDetail = AFSWorkspace;
 
+export type AFSDatabase = {
+  id: string;
+  name: string;
+  description: string;
+  redisAddr: string;
+  redisUsername: string;
+  redisPassword: string;
+  redisDB: number;
+  redisTLS: boolean;
+  workspaceCount: number;
+  connectionError?: string;
+};
+
+export type AFSDatabaseListResponse = {
+  items: AFSDatabase[];
+};
+
 export type AFSState = {
   workspaces: AFSWorkspace[];
 };
 
 export type CreateWorkspaceInput = {
+  databaseId: string;
   name: string;
   description: string;
-  cloudAccount: string;
-  databaseName: string;
-  region: string;
+  cloudAccount?: string;
+  databaseName?: string;
+  region?: string;
   source: AFSWorkspaceSource;
 };
 
 export type UpdateWorkspaceInput = {
+  databaseId: string;
   workspaceId: string;
   description: string;
-  cloudAccount: string;
-  databaseName: string;
-  region: string;
+  cloudAccount?: string;
+  databaseName?: string;
+  region?: string;
 };
 
 export type UpdateWorkspaceFileInput = {
+  databaseId: string;
   workspaceId: string;
   path: string;
   content: string;
@@ -164,17 +184,20 @@ export type UpdateWorkspaceFileInput = {
 };
 
 export type CreateSavepointInput = {
+  databaseId: string;
   workspaceId: string;
   name: string;
   note: string;
 };
 
 export type RestoreSavepointInput = {
+  databaseId: string;
   workspaceId: string;
   savepointId: string;
 };
 
 export type GetWorkspaceTreeInput = {
+  databaseId: string;
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;
@@ -182,7 +205,19 @@ export type GetWorkspaceTreeInput = {
 };
 
 export type GetWorkspaceFileContentInput = {
+  databaseId: string;
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;
+};
+
+export type SaveDatabaseInput = {
+  id?: string;
+  name: string;
+  description: string;
+  redisAddr: string;
+  redisUsername: string;
+  redisPassword: string;
+  redisDB: number;
+  redisTLS: boolean;
 };

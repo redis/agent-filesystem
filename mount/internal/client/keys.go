@@ -29,6 +29,10 @@ func (k keyBuilder) nextInode() string {
 	return "afs:{" + k.fsKey + "}:next_inode"
 }
 
+func (k keyBuilder) rootDirty() string {
+	return "afs:{" + k.fsKey + "}:root_dirty"
+}
+
 func (k keyBuilder) locks(id string) string {
 	return "afs:{" + k.fsKey + "}:locks:" + id
 }

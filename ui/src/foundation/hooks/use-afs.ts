@@ -11,45 +11,80 @@ import type {
   GetWorkspaceFileContentInput,
   GetWorkspaceTreeInput,
   RestoreSavepointInput,
+  SaveDatabaseInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
 } from "../types/afs";
 
 const afsKeys = {
   all: ["afs"] as const,
-  workspaceSummaries: () => [...afsKeys.all, "workspace-summaries"] as const,
-  workspace: (workspaceId: string) => [...afsKeys.all, "workspaces", workspaceId] as const,
-  activity: (limit: number) => [...afsKeys.all, "activity", limit] as const,
+  databases: () => [...afsKeys.all, "databases"] as const,
+  workspaceSummaries: (databaseId: string) =>
+    [...afsKeys.all, "databases", databaseId, "workspace-summaries"] as const,
+  workspace: (databaseId: string, workspaceId: string) =>
+    [...afsKeys.all, "databases", databaseId, "workspaces", workspaceId] as const,
+  activity: (databaseId: string, limit: number) =>
+    [...afsKeys.all, "databases", databaseId, "activity", limit] as const,
   workspaceTree: (input: GetWorkspaceTreeInput) =>
-    [...afsKeys.all, "workspaces", input.workspaceId, "tree", input.view, input.path, input.depth ?? 1] as const,
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId,
+      "workspaces",
+      input.workspaceId,
+      "tree",
+      input.view,
+      input.path,
+      input.depth ?? 1,
+    ] as const,
   workspaceFile: (input: GetWorkspaceFileContentInput) =>
-    [...afsKeys.all, "workspaces", input.workspaceId, "files", input.view, input.path] as const,
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId,
+      "workspaces",
+      input.workspaceId,
+      "files",
+      input.view,
+      input.path,
+    ] as const,
 };
 
-export function useWorkspaceSummaries() {
+export function useDatabases() {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.workspaceSummaries(),
-      queryFn: () => afsApi.listWorkspaceSummaries(),
+      queryKey: afsKeys.databases(),
+      queryFn: () => afsApi.listDatabases(),
     }),
   );
 }
 
-export function useWorkspace(workspaceId: string, enabled = true) {
+export function useWorkspaceSummaries(databaseId: string | null, enabled = true) {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.workspace(workspaceId),
-      queryFn: () => afsApi.getWorkspace(workspaceId),
-      enabled,
+      queryKey: afsKeys.workspaceSummaries(databaseId ?? "none"),
+      queryFn: () => afsApi.listWorkspaceSummaries(databaseId ?? ""),
+      enabled: enabled && databaseId != null && databaseId !== "",
     }),
   );
 }
 
-export function useActivity(limit = 50) {
+export function useWorkspace(databaseId: string | null, workspaceId: string, enabled = true) {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.activity(limit),
-      queryFn: () => afsApi.listActivity(limit),
+      queryKey: afsKeys.workspace(databaseId ?? "none", workspaceId),
+      queryFn: () => afsApi.getWorkspace(databaseId ?? "", workspaceId),
+      enabled: enabled && databaseId != null && databaseId !== "" && workspaceId !== "",
+    }),
+  );
+}
+
+export function useActivity(databaseId: string | null, limit = 50, enabled = true) {
+  return useQuery(
+    queryOptions({
+      queryKey: afsKeys.activity(databaseId ?? "none", limit),
+      queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
+      enabled: enabled && databaseId != null && databaseId !== "",
     }),
   );
 }
@@ -59,7 +94,7 @@ export function useWorkspaceTree(input: GetWorkspaceTreeInput, enabled = true) {
     queryOptions({
       queryKey: afsKeys.workspaceTree(input),
       queryFn: () => afsApi.getWorkspaceTree(input),
-      enabled,
+      enabled: enabled && input.databaseId !== "" && input.workspaceId !== "",
     }),
   );
 }
@@ -69,7 +104,7 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
     queryOptions({
       queryKey: afsKeys.workspaceFile(input),
       queryFn: () => afsApi.getWorkspaceFileContent(input),
-      enabled,
+      enabled: enabled && input.databaseId !== "" && input.workspaceId !== "",
     }),
   );
 }
@@ -77,32 +112,33 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
 function useWorkspaceInvalidation() {
   const queryClient = useQueryClient();
 
-  return async (workspaceId?: string) => {
-    const invalidations: Array<Promise<unknown>> = [
-      queryClient.invalidateQueries({ queryKey: afsKeys.workspaceSummaries() }),
-      queryClient.invalidateQueries({
-        predicate: (query) =>
-          Array.isArray(query.queryKey) &&
-          query.queryKey[0] === "afs" &&
-          query.queryKey[1] === "activity",
-      }),
-    ];
-
-    if (workspaceId != null) {
-      invalidations.push(queryClient.invalidateQueries({ queryKey: afsKeys.workspace(workspaceId) }));
-      invalidations.push(
-        queryClient.invalidateQueries({
-          predicate: (query) =>
-            Array.isArray(query.queryKey) &&
-            query.queryKey[0] === "afs" &&
-            query.queryKey[1] === "workspaces" &&
-            query.queryKey[2] === workspaceId,
-        }),
-      );
-    }
-
-    await Promise.all(invalidations);
+  return async () => {
+    await queryClient.invalidateQueries({
+      predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "afs",
+    });
   };
+}
+
+export function useSaveDatabaseMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: SaveDatabaseInput) => afsApi.saveDatabase(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useDeleteDatabaseMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (databaseId: string) => afsApi.deleteDatabase(databaseId),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
 }
 
 export function useCreateWorkspaceMutation() {
@@ -110,8 +146,8 @@ export function useCreateWorkspaceMutation() {
 
   return useMutation({
     mutationFn: (input: CreateWorkspaceInput) => afsApi.createWorkspace(input),
-    onSuccess: async (workspace) => {
-      await invalidate(workspace.id);
+    onSuccess: async () => {
+      await invalidate();
     },
   });
 }
@@ -120,7 +156,8 @@ export function useDeleteWorkspaceMutation() {
   const invalidate = useWorkspaceInvalidation();
 
   return useMutation({
-    mutationFn: (workspaceId: string) => afsApi.deleteWorkspace(workspaceId),
+    mutationFn: (input: { databaseId: string; workspaceId: string }) =>
+      afsApi.deleteWorkspace(input.databaseId, input.workspaceId),
     onSuccess: async () => {
       await invalidate();
     },
@@ -132,8 +169,8 @@ export function useUpdateWorkspaceMutation() {
 
   return useMutation({
     mutationFn: (input: UpdateWorkspaceInput) => afsApi.updateWorkspace(input),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
+    onSuccess: async () => {
+      await invalidate();
     },
   });
 }
@@ -143,8 +180,8 @@ export function useUpdateWorkspaceFileMutation() {
 
   return useMutation({
     mutationFn: (input: UpdateWorkspaceFileInput) => afsApi.updateWorkspaceFile(input),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
+    onSuccess: async () => {
+      await invalidate();
     },
   });
 }
@@ -154,8 +191,8 @@ export function useCreateSavepointMutation() {
 
   return useMutation({
     mutationFn: (input: CreateSavepointInput) => afsApi.createSavepoint(input),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
+    onSuccess: async () => {
+      await invalidate();
     },
   });
 }
@@ -165,8 +202,8 @@ export function useRestoreSavepointMutation() {
 
   return useMutation({
     mutationFn: (input: RestoreSavepointInput) => afsApi.restoreSavepoint(input),
-    onSuccess: async (_, variables) => {
-      await invalidate(variables.workspaceId);
+    onSuccess: async () => {
+      await invalidate();
     },
   });
 }

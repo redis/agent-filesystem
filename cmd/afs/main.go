@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -587,6 +588,24 @@ func tcpAddressAvailable(host string, port int) bool {
 	return true
 }
 
+func prepareRuntimeMountConfig(cfg config, backendName string) (config, error) {
+	if backendName != mountBackendNFS {
+		return cfg, nil
+	}
+	if strings.TrimSpace(cfg.NFSHost) == "" {
+		cfg.NFSHost = "127.0.0.1"
+	}
+	if cfg.NFSPort <= 0 {
+		cfg.NFSPort = 20490
+	}
+	port, _, err := suggestNFSPort(cfg.NFSHost, cfg.NFSPort)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.NFSPort = port
+	return cfg, nil
+}
+
 // ---------------------------------------------------------------------------
 // up — load config and start services
 // ---------------------------------------------------------------------------
@@ -702,6 +721,23 @@ func cmdDown() error {
 		s := startStep("Stopping mount daemon")
 		_ = terminatePID(st.MountPID, 2*time.Second)
 		s.succeed(fmt.Sprintf("pid %d", st.MountPID))
+	}
+	if orphanPIDs, err := orphanMountDaemonPIDs(st); err == nil && len(orphanPIDs) > 0 {
+		s := startStep("Stopping orphaned mount daemons")
+		stopped := make([]string, 0, len(orphanPIDs))
+		for _, pid := range orphanPIDs {
+			if !processAlive(pid) {
+				continue
+			}
+			if err := terminatePID(pid, 2*time.Second); err == nil {
+				stopped = append(stopped, strconv.Itoa(pid))
+			}
+		}
+		if len(stopped) > 0 {
+			s.succeed(strings.Join(stopped, ", "))
+		} else {
+			s.fail("none stopped")
+		}
 	}
 
 	if shouldCleanLegacyMountCache(st) && !backend.IsMounted(st.Mountpoint) {
@@ -892,16 +928,12 @@ func startServices(cfg config) error {
 
 	store := newAFSStore(rdb)
 	workspaceStep := startStep("Ensuring current workspace")
-	workspace, created, err := ensureMountWorkspace(ctx, cfg, store)
+	workspace, err := ensureMountWorkspace(ctx, cfg, store)
 	if err != nil {
 		workspaceStep.fail(err.Error())
 		return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
 	}
-	if created {
-		workspaceStep.succeed(workspace + " (created)")
-	} else {
-		workspaceStep.succeed(workspace)
-	}
+	workspaceStep.succeed(workspace)
 	prepareStep := startStep("Opening live workspace")
 	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
 	if err != nil {
@@ -916,6 +948,11 @@ func startServices(cfg config) error {
 
 	mountCfg := cfg
 	mountCfg.RedisKey = mountKey
+	mountCfg, err = prepareRuntimeMountConfig(mountCfg, backendName)
+	if err != nil {
+		prepareStep.fail(err.Error())
+		return err
+	}
 
 	s = startStep("Mounting filesystem")
 	createdMountpoint := false
@@ -1219,6 +1256,11 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 
 	step = startStep("Mounting filesystem")
 	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		step.fail(err.Error())
+		return err
+	}
+	cfg, err = prepareRuntimeMountConfig(cfg, backendName)
+	if err != nil {
 		step.fail(err.Error())
 		return err
 	}
@@ -1562,6 +1604,62 @@ func processAlive(pid int) bool {
 		return false
 	}
 	return syscall.Kill(pid, 0) == nil
+}
+
+func orphanMountDaemonPIDs(st state) ([]int, error) {
+	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseOrphanMountDaemonPIDs(st, string(out)), nil
+}
+
+func parseOrphanMountDaemonPIDs(st state, psOutput string) []int {
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" || backendName == mountBackendNone {
+		return nil
+	}
+
+	var matches []int
+	for _, rawLine := range strings.Split(psOutput, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 || pid == st.MountPID {
+			continue
+		}
+		command := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+		if mountDaemonMatchesState(backendName, st, command) {
+			matches = append(matches, pid)
+		}
+	}
+	sort.Ints(matches)
+	return matches
+}
+
+func mountDaemonMatchesState(backendName string, st state, command string) bool {
+	switch backendName {
+	case mountBackendNFS:
+		if !strings.Contains(command, "agent-filesystem-nfs") {
+			return false
+		}
+		return strings.Contains(command, "--redis "+st.RedisAddr) &&
+			strings.Contains(command, "--db "+strconv.Itoa(st.RedisDB)) &&
+			strings.Contains(command, "--export "+nfsExportPath(st.RedisKey))
+	case mountBackendFuse:
+		if !strings.Contains(command, "agent-filesystem-mount") {
+			return false
+		}
+		return strings.Contains(command, " "+st.RedisKey+" "+st.Mountpoint)
+	default:
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------

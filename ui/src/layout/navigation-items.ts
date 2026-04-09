@@ -65,6 +65,10 @@ export function getSidebarPanelForPath(pathname: string): SidebarPanelId {
 }
 
 export function resolveNavigationTitleParts(pathname: string): NavigationTitleParts {
+  if (pathname.startsWith("/databases")) {
+    return { page: "Databases" };
+  }
+
   if (pathname.startsWith("/workspaces/")) {
     return {
       section: "Workspaces",

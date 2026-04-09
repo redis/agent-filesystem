@@ -164,7 +164,7 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 	}
 }
 
-func TestLoadConfigForUpPromptsForMissingDatabaseWorkspaceAndMountpoint(t *testing.T) {
+func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -200,6 +200,7 @@ func TestLoadConfigForUpPromptsForMissingDatabaseWorkspaceAndMountpoint(t *testi
 	raw := `{
   "useExistingRedis": true,
   "redisAddr": "` + mr.Addr() + `",
+  "currentWorkspace": "demo",
   "mountBackend": "nfs",
   "nfsBin": "/usr/bin/true"
 }`
@@ -210,7 +211,7 @@ func TestLoadConfigForUpPromptsForMissingDatabaseWorkspaceAndMountpoint(t *testi
 	var output bytes.Buffer
 	got, err := loadConfigForUpWithIO(
 		[]string{},
-		bufio.NewReader(bytes.NewBufferString(stringsJoinLines("7", "", "/tmp/afs-demo"))),
+		bufio.NewReader(bytes.NewBufferString(stringsJoinLines("7", "/tmp/afs-demo"))),
 		&output,
 		true,
 	)
@@ -227,8 +228,8 @@ func TestLoadConfigForUpPromptsForMissingDatabaseWorkspaceAndMountpoint(t *testi
 	if got.Mountpoint != "/tmp/afs-demo" {
 		t.Fatalf("Mountpoint = %q, want %q", got.Mountpoint, "/tmp/afs-demo")
 	}
-	if !strings.Contains(output.String(), "Available workspace: demo") {
-		t.Fatalf("prompt output = %q, want available workspace hint", output.String())
+	if strings.Contains(output.String(), "Available workspace: demo") {
+		t.Fatalf("prompt output = %q, want no workspace prompt", output.String())
 	}
 
 	saved, err := loadConfig()
@@ -243,6 +244,43 @@ func TestLoadConfigForUpPromptsForMissingDatabaseWorkspaceAndMountpoint(t *testi
 	}
 	if saved.Mountpoint != "/tmp/afs-demo" {
 		t.Fatalf("saved Mountpoint = %q, want %q", saved.Mountpoint, "/tmp/afs-demo")
+	}
+}
+
+func TestLoadConfigForUpRejectsMissingWorkspaceEvenWhenPromptingAllowed(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	raw := `{
+  "useExistingRedis": true,
+  "redisAddr": "127.0.0.1:6379",
+  "mountBackend": "nfs",
+  "nfsBin": "/usr/bin/true"
+}`
+	if err := os.WriteFile(configFile, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	_, err := loadConfigForUpWithIO(
+		[]string{},
+		bufio.NewReader(bytes.NewBufferString(stringsJoinLines("7", "/tmp/afs-demo"))),
+		&bytes.Buffer{},
+		true,
+	)
+	if err == nil {
+		t.Fatal("loadConfigForUpWithIO() returned nil error, want missing workspace error")
+	}
+	if !strings.Contains(err.Error(), "no current workspace is selected for 'up'") {
+		t.Fatalf("loadConfigForUpWithIO() error = %q, want missing workspace message", err)
+	}
+	if !strings.Contains(err.Error(), "workspace use <workspace>") {
+		t.Fatalf("loadConfigForUpWithIO() error = %q, want workspace selection guidance", err)
 	}
 }
 
@@ -332,7 +370,8 @@ func TestCmdUpHelpListsPositionalOverrides(t *testing.T) {
 	for _, want := range []string{
 		"up <workspace> <mountpoint>",
 		"Redis connection, mount backend, and readonly mode come from config",
-		"AFS prompts for them in the terminal",
+		"Current workspace must already be selected",
+		"If Redis DB or mountpoint are missing",
 		"config set",
 		"up claude-code ~/.claude",
 	} {

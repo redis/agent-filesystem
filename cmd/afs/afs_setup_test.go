@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -304,6 +305,43 @@ func TestStartServicesFilesystemOnlyUsesRedisWithoutMountpoint(t *testing.T) {
 	}
 	if st.RedisAddr != mr.Addr() {
 		t.Fatalf("RedisAddr = %q, want %q", st.RedisAddr, mr.Addr())
+	}
+}
+
+func TestStartServicesRejectsMissingConfiguredWorkspaceForMountedFilesystem(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNFS
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.CurrentWorkspace = "missing-workspace"
+	cfg.Mountpoint = filepath.Join(t.TempDir(), "mnt")
+
+	if err := resolveConfigPaths(&cfg); err != nil {
+		t.Fatalf("resolveConfigPaths() returned error: %v", err)
+	}
+
+	err := startServices(cfg)
+	if err == nil {
+		t.Fatal("startServices() returned nil error, want missing workspace error")
+	}
+	if !strings.Contains(err.Error(), `workspace "missing-workspace" does not exist`) {
+		t.Fatalf("startServices() error = %q, want missing workspace message", err)
+	}
+
+	store := newAFSStore(mustRedisClient(t, cfg))
+	defer func() { _ = store.rdb.Close() }()
+
+	exists, existsErr := store.workspaceExists(context.Background(), "missing-workspace")
+	if existsErr != nil {
+		t.Fatalf("workspaceExists(missing-workspace) returned error: %v", existsErr)
+	}
+	if exists {
+		t.Fatal("expected startServices() not to auto-create the missing workspace")
 	}
 }
 

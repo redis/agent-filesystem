@@ -8,39 +8,17 @@ import type {
 } from "../foundation/types/afs";
 
 const panelSurface = css`
-  position: relative;
-  overflow: hidden;
   border: 1px solid var(--afs-line);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 251, 255, 0.92)),
-    var(--afs-panel);
-  box-shadow: var(--afs-shadow);
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background:
-      linear-gradient(140deg, rgba(170, 59, 255, 0.08), transparent 36%),
-      radial-gradient(circle at top right, rgba(71, 191, 255, 0.12), transparent 30%);
-    opacity: 0.9;
-  }
-
-  > * {
-    position: relative;
-    z-index: 1;
-  }
+  background: #fff;
+  box-shadow: none;
 `;
 
 const insetSurface = css`
   border: 1px solid var(--afs-line);
   border-radius: 16px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(243, 246, 251, 0.9)),
-    rgba(255, 255, 255, 0.9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  background: #fff;
+  box-shadow: none;
 `;
 
 export const PageStack = styled.div`
@@ -58,21 +36,6 @@ export const PageStack = styled.div`
 
 export const HeroCard = styled(Card)`
   ${panelSurface}
-  background:
-    linear-gradient(135deg, rgba(170, 59, 255, 0.1), rgba(71, 191, 255, 0.12)),
-    var(--afs-panel);
-
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgba(170, 59, 255, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(170, 59, 255, 0.05) 1px, transparent 1px);
-    background-size: 28px 28px;
-    mask-image: linear-gradient(135deg, rgba(0, 0, 0, 0.45), transparent 78%);
-  }
 `;
 
 export const HeroLayout = styled.div`
@@ -221,13 +184,9 @@ export const WorkspaceGrid = styled.div`
 export const WorkspaceCard = styled(Card)`
   ${panelSurface}
   padding: 22px;
-  transition:
-    transform 180ms ease,
-    border-color 180ms ease,
-    box-shadow 180ms ease;
+  transition: border-color 180ms ease;
 
   &:hover {
-    transform: translateY(-2px);
     border-color: var(--afs-line-strong);
   }
 `;

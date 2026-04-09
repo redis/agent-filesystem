@@ -357,6 +357,52 @@ func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
 	}
 }
 
+func TestParseOrphanMountDaemonPIDsMatchesNFSDaemonsForSameWorkspace(t *testing.T) {
+	t.Helper()
+
+	st := state{
+		MountPID:     222,
+		MountBackend: mountBackendNFS,
+		RedisAddr:    "redis.example:6379",
+		RedisDB:      0,
+		RedisKey:     "claude",
+	}
+
+	psOutput := strings.Join([]string{
+		"111 /Users/example/agent-filesystem-nfs --redis redis.example:6379 --db 0 --listen 127.0.0.1:20490 --export /claude --foreground",
+		"222 /Users/example/agent-filesystem-nfs --redis redis.example:6379 --db 0 --listen 127.0.0.1:20491 --export /claude --foreground",
+		"333 /Users/example/agent-filesystem-nfs --redis redis.example:6379 --db 0 --listen 127.0.0.1:20492 --export /other --foreground",
+		"444 /Users/example/agent-filesystem-nfs --redis other.example:6379 --db 0 --listen 127.0.0.1:20493 --export /claude --foreground",
+	}, "\n")
+
+	got := parseOrphanMountDaemonPIDs(st, psOutput)
+	if len(got) != 1 || got[0] != 111 {
+		t.Fatalf("parseOrphanMountDaemonPIDs() = %#v, want [111]", got)
+	}
+}
+
+func TestParseOrphanMountDaemonPIDsMatchesFuseDaemonsForSameMountpoint(t *testing.T) {
+	t.Helper()
+
+	st := state{
+		MountPID:     200,
+		MountBackend: mountBackendFuse,
+		RedisKey:     "demo",
+		Mountpoint:   "/tmp/demo",
+	}
+
+	psOutput := strings.Join([]string{
+		"101 /Users/example/agent-filesystem-mount --foreground demo /tmp/demo",
+		"200 /Users/example/agent-filesystem-mount --foreground demo /tmp/demo",
+		"303 /Users/example/agent-filesystem-mount --foreground demo /tmp/other",
+	}, "\n")
+
+	got := parseOrphanMountDaemonPIDs(st, psOutput)
+	if len(got) != 1 || got[0] != 101 {
+		t.Fatalf("parseOrphanMountDaemonPIDs() = %#v, want [101]", got)
+	}
+}
+
 func captureStderr(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 

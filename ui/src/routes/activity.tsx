@@ -1,13 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Loader } from "@redislabsdev/redis-ui-components";
-import { EventList, PageStack, SectionCard, SectionGrid, SectionTitle } from "../components/afs-kit";
+import { PageStack, SectionCard, SectionGrid, SectionTitle } from "../components/afs-kit";
 import { useDatabaseScope, useScopedActivity } from "../foundation/database-scope";
+import { ActivityTable } from "../foundation/tables/activity-table";
+import type { AFSActivityEvent } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/activity")({
   component: ActivityPage,
 });
 
 function ActivityPage() {
+  const navigate = useNavigate();
   const activityQuery = useScopedActivity(50);
   const { selectedDatabase } = useDatabaseScope();
 
@@ -19,6 +22,25 @@ function ActivityPage() {
     ...event,
     title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
   }));
+
+  function openActivity(event: AFSActivityEvent) {
+    if (event.workspaceId == null) {
+      return;
+    }
+
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: event.workspaceId },
+      search:
+        event.scope === "savepoint"
+          ? { tab: "checkpoints" }
+          : event.scope === "file"
+            ? { tab: "files" }
+            : event.scope === "workspace"
+              ? {}
+              : { tab: "activity" },
+    });
+  }
 
   return (
     <PageStack>
@@ -34,7 +56,7 @@ function ActivityPage() {
             }
           />
           <div style={{ marginTop: 16 }}>
-            <EventList events={events} />
+            <ActivityTable rows={events} onOpenActivity={openActivity} />
           </div>
         </SectionCard>
       </SectionGrid>

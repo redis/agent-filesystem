@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"strings"
 	"testing"
 )
@@ -22,5 +23,33 @@ func TestDarwinNFSMountOptionsDisableCachingAndUseSyncWrites(t *testing.T) {
 		if !strings.Contains(opts, want) {
 			t.Fatalf("darwinNFSMountOptions() = %q, want substring %q", opts, want)
 		}
+	}
+}
+
+func TestPrepareRuntimeMountConfigFallsBackToFreeNFSPort(t *testing.T) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() returned error: %v", err)
+	}
+	defer listener.Close()
+
+	occupiedPort := listener.Addr().(*net.TCPAddr).Port
+	cfg := config{
+		MountBackend: mountBackendNFS,
+		NFSHost:      "127.0.0.1",
+		NFSPort:      occupiedPort,
+	}
+
+	prepared, err := prepareRuntimeMountConfig(cfg, mountBackendNFS)
+	if err != nil {
+		t.Fatalf("prepareRuntimeMountConfig() returned error: %v", err)
+	}
+	if prepared.NFSPort == occupiedPort {
+		t.Fatalf("prepareRuntimeMountConfig() kept occupied port %d", occupiedPort)
+	}
+	if prepared.NFSHost != "127.0.0.1" {
+		t.Fatalf("prepareRuntimeMountConfig() host = %q, want %q", prepared.NFSHost, "127.0.0.1")
 	}
 }

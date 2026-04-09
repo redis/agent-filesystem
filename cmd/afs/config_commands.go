@@ -289,8 +289,12 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 	if !missingDatabase && !missingWorkspace && !missingMountpoint {
 		return false, nil
 	}
+	if missingWorkspace {
+		bin := filepath.Base(os.Args[0])
+		return false, fmt.Errorf("no current workspace is selected for 'up'\nRun '%s workspace use <workspace>' or '%s up <workspace> <mountpoint>'", bin, bin)
+	}
 	if !allowPrompt {
-		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database, workspace, and mountpoint", filepath.Base(os.Args[0]))
+		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and mountpoint", filepath.Base(os.Args[0]))
 	}
 
 	changed := false
@@ -309,27 +313,6 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 			return false, fmt.Errorf("redis db must be >= 0")
 		}
 		cfg.RedisDB = db
-		changed = true
-	}
-
-	if missingWorkspace {
-		defaultWorkspace, hint := suggestUpWorkspace(*cfg)
-		label := "  Workspace"
-		if hint != "" {
-			label += "\n  " + clr(ansiDim, hint)
-		}
-		workspace, err := promptString(r, out, label, defaultWorkspace)
-		if err != nil {
-			return false, err
-		}
-		workspace = strings.TrimSpace(workspace)
-		if workspace == "" {
-			return false, fmt.Errorf("workspace name cannot be empty when starting a mounted filesystem")
-		}
-		if err := validateAFSName("workspace", workspace); err != nil {
-			return false, err
-		}
-		cfg.CurrentWorkspace = workspace
 		changed = true
 	}
 
@@ -554,13 +537,15 @@ starting so future runs use the updated workspace and mountpoint.
 
 Notes:
   Redis connection, mount backend, and readonly mode come from config.
-  If required settings are missing, AFS prompts for them in the terminal.
+  Current workspace must already be selected with '%s workspace use <workspace>'
+  unless you pass <workspace> and <mountpoint> positionally.
+  If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.
   Use '%s config set ...' to change Redis or mount settings persistently.
 
 Examples:
   %s up
   %s up claude-code ~/.claude
-`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin)
+`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {

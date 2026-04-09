@@ -1278,6 +1278,15 @@ func (s *afsMCPServer) refreshWorkspaceLiveState(ctx context.Context, workspace 
 	if err != nil {
 		return false, err
 	}
+	if dirty {
+		if err := s.store.markWorkspaceRootDirty(ctx, workspace); err != nil {
+			return false, err
+		}
+	} else {
+		if err := s.store.markWorkspaceRootClean(ctx, workspace, meta.HeadSavepoint); err != nil {
+			return false, err
+		}
+	}
 	meta.DirtyHint = dirty
 	return dirty, s.store.putWorkspaceMeta(ctx, meta)
 }

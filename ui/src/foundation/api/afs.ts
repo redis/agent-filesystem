@@ -1,5 +1,7 @@
 import { cloneInitialAFSState } from "../mocks/afs";
 import type {
+  AFSDatabase,
+  AFSDatabaseListResponse,
   CreateSavepointInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
@@ -19,28 +21,46 @@ import type {
   AFSWorkspaceSummary,
   AFSWorkspaceView,
   RestoreSavepointInput,
+  SaveDatabaseInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
+const DATABASE_STORAGE_KEY = "afs-ui-demo-databases-v1";
 const DEMO_DELAY_MS = 120;
 const HTTP_BASE_URL = import.meta.env.VITE_AFS_API_BASE_URL?.replace(/\/+$/, "") ?? "";
 
 type AFSClient = {
   mode: AFSClientMode;
-  listWorkspaceSummaries: () => Promise<AFSWorkspaceSummary[]>;
-  getWorkspace: (workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
+  listDatabases: () => Promise<AFSDatabase[]>;
+  saveDatabase: (input: SaveDatabaseInput) => Promise<AFSDatabase>;
+  deleteDatabase: (databaseId: string) => Promise<void>;
+  listWorkspaceSummaries: (databaseId: string) => Promise<AFSWorkspaceSummary[]>;
+  getWorkspace: (databaseId: string, workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<AFSWorkspaceDetail>;
-  deleteWorkspace: (workspaceId: string) => Promise<void>;
+  deleteWorkspace: (databaseId: string, workspaceId: string) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<AFSWorkspaceDetail | null>;
   updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<AFSWorkspaceDetail | null>;
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
-  listActivity: (limit?: number) => Promise<AFSActivityEvent[]>;
+  listActivity: (databaseId: string, limit?: number) => Promise<AFSActivityEvent[]>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
   resetDemo: () => AFSState;
+};
+
+type HTTPDatabase = {
+  id: string;
+  name: string;
+  description?: string;
+  redis_addr: string;
+  redis_username?: string;
+  redis_password?: string;
+  redis_db: number;
+  redis_tls: boolean;
+  workspace_count: number;
+  connection_error?: string;
 };
 
 type HTTPWorkspaceSummary = {
@@ -349,6 +369,24 @@ function saveState(state: AFSState) {
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
+function loadDatabaseState(): AFSDatabase[] {
+  const raw = window.localStorage.getItem(DATABASE_STORAGE_KEY);
+  if (raw == null) {
+    return [];
+  }
+
+  try {
+    return JSON.parse(raw) as AFSDatabase[];
+  } catch {
+    window.localStorage.removeItem(DATABASE_STORAGE_KEY);
+    return [];
+  }
+}
+
+function saveDatabaseState(databases: AFSDatabase[]) {
+  window.localStorage.setItem(DATABASE_STORAGE_KEY, JSON.stringify(databases));
+}
+
 function updateState(mutator: (draft: AFSState) => void) {
   const state = loadState();
   const draft = clone(state);
@@ -383,6 +421,49 @@ function touchWorkspace(workspace: AFSWorkspace) {
 
 function sortWorkspaces(items: AFSWorkspace[]) {
   return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function deriveDemoDatabases(state: AFSState) {
+  const grouped = new Map<string, AFSDatabase>();
+
+  for (const workspace of state.workspaces) {
+    const existing = grouped.get(workspace.databaseId);
+    if (existing == null) {
+      grouped.set(workspace.databaseId, {
+        id: workspace.databaseId,
+        name: workspace.databaseName,
+        description: "",
+        redisAddr: workspace.databaseName,
+        redisUsername: "",
+        redisPassword: "",
+        redisDB: 0,
+        redisTLS: false,
+        workspaceCount: 1,
+      });
+      continue;
+    }
+    existing.workspaceCount += 1;
+  }
+
+  const saved = loadDatabaseState();
+  for (const database of saved) {
+    const existing = grouped.get(database.id);
+    grouped.set(database.id, {
+      ...database,
+      workspaceCount: existing?.workspaceCount ?? database.workspaceCount ?? 0,
+    });
+  }
+
+  return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function requireDemoDatabase(databaseId: string) {
+  const state = loadState();
+  const database = deriveDemoDatabases(state).find((item) => item.id === databaseId);
+  if (database == null) {
+    throw new Error(`Database ${databaseId} was not found.`);
+  }
+  return database;
 }
 
 function normalizeFilePath(value: string) {
@@ -507,16 +588,53 @@ function activityForState(state: AFSState, limit: number) {
 const demoAFSClient: AFSClient = {
   mode: "demo",
 
-  async listWorkspaceSummaries() {
+  async listDatabases() {
     await wait();
-    const state = loadState();
-    return sortWorkspaces(state.workspaces.map(normalizeWorkspace)).map(workspaceToSummary);
+    return deriveDemoDatabases(loadState());
   },
 
-  async getWorkspace(workspaceId: string) {
+  async saveDatabase(input: SaveDatabaseInput) {
+    await wait();
+    const current = loadDatabaseState();
+    const id = input.id?.trim() || slugify(`${input.name}-${input.redisAddr}-${input.redisDB}`);
+    const nextRecord: AFSDatabase = {
+      id,
+      name: input.name.trim(),
+      description: input.description.trim(),
+      redisAddr: input.redisAddr.trim(),
+      redisUsername: input.redisUsername.trim(),
+      redisPassword: input.redisPassword,
+      redisDB: input.redisDB,
+      redisTLS: input.redisTLS,
+      workspaceCount: deriveDemoDatabases(loadState()).find((item) => item.id === id)?.workspaceCount ?? 0,
+    };
+    const next = current.filter((item) => item.id !== id);
+    next.unshift(nextRecord);
+    saveDatabaseState(next);
+    return nextRecord;
+  },
+
+  async deleteDatabase(databaseId: string) {
+    await wait();
+    saveDatabaseState(loadDatabaseState().filter((item) => item.id !== databaseId));
+  },
+
+  async listWorkspaceSummaries(databaseId: string) {
     await wait();
     const state = loadState();
-    const workspace = state.workspaces.find((item) => item.id === workspaceId);
+    return sortWorkspaces(
+      state.workspaces
+        .map(normalizeWorkspace)
+        .filter((workspace) => workspace.databaseId === databaseId),
+    ).map(workspaceToSummary);
+  },
+
+  async getWorkspace(databaseId: string, workspaceId: string) {
+    await wait();
+    const state = loadState();
+    const workspace = state.workspaces.find(
+      (item) => item.id === workspaceId && item.databaseId === databaseId,
+    );
     return workspace == null ? null : normalizeWorkspace(workspace);
   },
 
@@ -551,11 +669,11 @@ This workspace was created from the AFS Web UI.
         id,
         name: input.name.trim(),
         description: input.description.trim(),
-        cloudAccount: input.cloudAccount.trim(),
-        databaseId: `db-${id}`,
-        databaseName: input.databaseName.trim(),
+        cloudAccount: input.cloudAccount?.trim() || "Direct Redis",
+        databaseId: input.databaseId.trim() || `db-${id}`,
+        databaseName: input.databaseName?.trim() || requireDemoDatabase(input.databaseId).name,
         redisKey: `afs:${id}`,
-        region: input.region.trim(),
+        region: input.region?.trim() || "",
         mountedPath: `~/.afs/workspaces/${id}`,
         status: input.source === "blank" ? "healthy" : "syncing",
         source: input.source,
@@ -563,7 +681,7 @@ This workspace was created from the AFS Web UI.
         updatedAt: createdAt,
         draftState: "clean",
         headSavepointId: initialSavepoint.id,
-        tags: [input.region.trim(), sourceLabel(input.source)],
+        tags: [(input.region?.trim() || ""), sourceLabel(input.source)],
         files: baseFiles,
         savepoints: [initialSavepoint],
         activity: [
@@ -590,10 +708,12 @@ This workspace was created from the AFS Web UI.
     return normalizeWorkspace(state.workspaces[0]);
   },
 
-  async deleteWorkspace(workspaceId: string) {
+  async deleteWorkspace(databaseId: string, workspaceId: string) {
     await wait();
     updateState((draft) => {
-      draft.workspaces = draft.workspaces.filter((workspace) => workspace.id !== workspaceId);
+      draft.workspaces = draft.workspaces.filter(
+        (workspace) => !(workspace.id === workspaceId && workspace.databaseId === databaseId),
+      );
     });
   },
 
@@ -601,10 +721,13 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
+      if (workspace.databaseId !== input.databaseId) {
+        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      }
       workspace.description = input.description.trim();
-      workspace.cloudAccount = input.cloudAccount.trim();
-      workspace.databaseName = input.databaseName.trim();
-      workspace.region = input.region.trim();
+      workspace.cloudAccount = input.cloudAccount?.trim() || workspace.cloudAccount;
+      workspace.databaseName = input.databaseName?.trim() || workspace.databaseName;
+      workspace.region = input.region?.trim() || workspace.region;
       workspace.tags = [workspace.region, sourceLabel(workspace.source)].filter(Boolean);
       touchWorkspace(workspace);
       workspace.activity.unshift(
@@ -627,6 +750,9 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
+      if (workspace.databaseId !== input.databaseId) {
+        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      }
       const modifiedAt = nowISO();
       const normalizedPath = normalizeFilePath(input.path).replace(/^\//, "");
       const file = workspace.files.find(
@@ -666,6 +792,9 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
+      if (workspace.databaseId !== input.databaseId) {
+        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      }
       const savepoint = createSavepointRecord(
         input.name.trim(),
         input.note.trim(),
@@ -697,6 +826,9 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
+      if (workspace.databaseId !== input.databaseId) {
+        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      }
       const savepoint = requireSavepoint(workspace, input.savepointId);
       workspace.files = clone(savepoint.filesSnapshot);
       workspace.headSavepointId = savepoint.id;
@@ -718,16 +850,22 @@ This workspace was created from the AFS Web UI.
     return normalizeWorkspace(requireWorkspace(state, input.workspaceId));
   },
 
-  async listActivity(limit = 50) {
+  async listActivity(databaseId: string, limit = 50) {
     await wait();
     const state = loadState();
-    return activityForState(state, limit);
+    return activityForState(state, limit).filter((event) => {
+      const workspace = state.workspaces.find((item) => item.id === event.workspaceId);
+      return workspace?.databaseId === databaseId;
+    });
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
     await wait();
     const state = loadState();
     const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    if (workspace.databaseId !== input.databaseId) {
+      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+    }
     const files = demoFilesForView(workspace, input.view);
 
     return {
@@ -742,6 +880,9 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = loadState();
     const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    if (workspace.databaseId !== input.databaseId) {
+      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+    }
     const files = demoFilesForView(workspace, input.view);
     const normalizedPath = normalizeFilePath(input.path);
     const file = files.find((item) => normalizeFilePath(item.path) === normalizedPath);
@@ -816,6 +957,21 @@ function mapCapabilities(input: HTTPWorkspaceCapabilities): AFSWorkspaceCapabili
     editWorkingCopy: input.edit_working_copy,
     createCheckpoint: input.create_checkpoint,
     restoreCheckpoint: input.restore_checkpoint,
+  };
+}
+
+function mapDatabase(input: HTTPDatabase): AFSDatabase {
+  return {
+    id: input.id,
+    name: input.name,
+    description: input.description ?? "",
+    redisAddr: input.redis_addr,
+    redisUsername: input.redis_username ?? "",
+    redisPassword: input.redis_password ?? "",
+    redisDB: input.redis_db,
+    redisTLS: input.redis_tls,
+    workspaceCount: input.workspace_count,
+    connectionError: input.connection_error,
   };
 }
 
@@ -935,16 +1091,46 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
 const httpAFSClient: AFSClient = {
   mode: "http",
 
-  async listWorkspaceSummaries() {
+  async listDatabases() {
+    const response = await requestJSON<AFSDatabaseListResponse & { items: HTTPDatabase[] }>("/databases");
+    return response.items.map(mapDatabase);
+  },
+
+  async saveDatabase(input: SaveDatabaseInput) {
+    return mapDatabase(
+      await requestJSON<HTTPDatabase>(input.id ? `/databases/${input.id}` : "/databases", {
+        method: input.id ? "PUT" : "POST",
+        body: JSON.stringify({
+          name: input.name,
+          description: input.description,
+          redis_addr: input.redisAddr,
+          redis_username: input.redisUsername,
+          redis_password: input.redisPassword,
+          redis_db: input.redisDB,
+          redis_tls: input.redisTLS,
+        }),
+      }),
+    );
+  },
+
+  async deleteDatabase(databaseId: string) {
+    await requestJSON<void>(`/databases/${databaseId}`, {
+      method: "DELETE",
+    });
+  },
+
+  async listWorkspaceSummaries(databaseId: string) {
     const response = await requestJSON<{
       items: HTTPWorkspaceSummary[];
-    }>("/workspaces");
+    }>(`/databases/${databaseId}/workspaces`);
     return response.items.map(mapWorkspaceSummary);
   },
 
-  async getWorkspace(workspaceId: string) {
+  async getWorkspace(databaseId: string, workspaceId: string) {
     try {
-      return mapWorkspaceDetail(await requestJSON<HTTPWorkspaceDetail>(`/workspaces/${workspaceId}`));
+      return mapWorkspaceDetail(
+        await requestJSON<HTTPWorkspaceDetail>(`/databases/${databaseId}/workspaces/${workspaceId}`),
+      );
     } catch (error) {
       if (error instanceof HTTPError && error.status === 404) {
         return null;
@@ -955,12 +1141,12 @@ const httpAFSClient: AFSClient = {
 
   async createWorkspace(input: CreateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>("/workspaces", {
+      await requestJSON<HTTPWorkspaceDetail>(`/databases/${input.databaseId}/workspaces`, {
         method: "POST",
         body: JSON.stringify({
           name: input.name,
           description: input.description,
-          database_id: slugify(input.databaseName),
+          database_id: input.databaseId,
           database_name: input.databaseName,
           cloud_account: input.cloudAccount,
           region: input.region,
@@ -972,15 +1158,15 @@ const httpAFSClient: AFSClient = {
     );
   },
 
-  async deleteWorkspace(workspaceId: string) {
-    await requestJSON<void>(`/workspaces/${workspaceId}`, {
+  async deleteWorkspace(databaseId: string, workspaceId: string) {
+    await requestJSON<void>(`/databases/${databaseId}/workspaces/${workspaceId}`, {
       method: "DELETE",
     });
   },
 
   async updateWorkspace(input: UpdateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>(`/workspaces/${input.workspaceId}`, {
+      await requestJSON<HTTPWorkspaceDetail>(`/databases/${input.databaseId}/workspaces/${input.workspaceId}`, {
         method: "PUT",
         body: JSON.stringify({
           description: input.description,
@@ -1001,25 +1187,25 @@ const httpAFSClient: AFSClient = {
   },
 
   async restoreSavepoint(input: RestoreSavepointInput) {
-    await requestJSON<void>(`/workspaces/${input.workspaceId}:restore`, {
+    await requestJSON<void>(`/databases/${input.databaseId}/workspaces/${input.workspaceId}:restore`, {
       method: "POST",
       body: JSON.stringify({
         checkpoint_id: input.savepointId,
       }),
     });
 
-    return httpAFSClient.getWorkspace(input.workspaceId);
+    return httpAFSClient.getWorkspace(input.databaseId, input.workspaceId);
   },
 
-  async listActivity(limit = 50) {
-    const response = await requestJSON<HTTPActivityList>(`/activity?limit=${limit}`);
+  async listActivity(databaseId: string, limit = 50) {
+    const response = await requestJSON<HTTPActivityList>(`/databases/${databaseId}/activity?limit=${limit}`);
     return response.items.map(mapActivity);
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
     return mapTreeResponse(
       await requestJSON<HTTPTreeResponse>(
-        `/workspaces/${input.workspaceId}/tree?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}&depth=${input.depth ?? 1}`,
+        `/databases/${input.databaseId}/workspaces/${input.workspaceId}/tree?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}&depth=${input.depth ?? 1}`,
       ),
     );
   },
@@ -1028,7 +1214,7 @@ const httpAFSClient: AFSClient = {
     try {
       return mapFileContent(
         await requestJSON<HTTPFileContent>(
-          `/workspaces/${input.workspaceId}/files/content?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}`,
+          `/databases/${input.databaseId}/workspaces/${input.workspaceId}/files/content?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}`,
         ),
       );
     } catch (error) {

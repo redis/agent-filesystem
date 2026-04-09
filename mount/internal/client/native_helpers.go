@@ -762,6 +762,10 @@ func (c *nativeClient) adjustTotalData(ctx context.Context, delta int64) error {
 	return c.rdb.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta).Err()
 }
 
+func (c *nativeClient) markRootDirty(ctx context.Context) error {
+	return c.rdb.Set(ctx, c.keys.rootDirty(), "1", 0).Err()
+}
+
 func (c *nativeClient) cachePath(p string, inode *inodeData) {
 	if c.cache == nil || inode == nil {
 		return

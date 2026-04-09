@@ -7,18 +7,12 @@ import {
   CardHeader,
   EditorArea,
   EditorPanel,
-  EventList,
   Field,
   FileButton,
   FileList,
   FileStudio,
   FormGrid,
-  HeroBody,
-  HeroCard,
-  HeroLayout,
-  HeroMetaGrid,
   InlineActions,
-  MetaItem,
   MetaRow,
   PageStack,
   SavepointGrid,
@@ -36,6 +30,7 @@ import {
   ToneChip,
 } from "../components/afs-kit";
 import { formatBytes } from "../foundation/api/afs";
+import { useDatabaseScope } from "../foundation/database-scope";
 import {
   useCreateSavepointMutation,
   useDeleteWorkspaceMutation,
@@ -50,8 +45,6 @@ import type {
   AFSActivityEvent,
   AFSDraftState,
   AFSWorkspaceDetail,
-  AFSWorkspaceSource,
-  AFSWorkspaceStatus,
   AFSWorkspaceView,
 } from "../foundation/types/afs";
 
@@ -70,7 +63,8 @@ function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
   const search = Route.useSearch();
-  const workspaceQuery = useWorkspace(workspaceId);
+  const { selectedDatabaseId } = useDatabaseScope();
+  const workspaceQuery = useWorkspace(selectedDatabaseId, workspaceId);
   const deleteWorkspace = useDeleteWorkspaceMutation();
   const updateFile = useUpdateWorkspaceFileMutation();
   const createSavepoint = useCreateSavepointMutation();
@@ -86,8 +80,6 @@ function WorkspaceStudioPage() {
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "overview";
-  const activeSavepoint =
-    workspace?.savepoints.find((savepoint) => savepoint.id === workspace.headSavepointId) ?? null;
 
   useEffect(() => {
     if (workspace == null) {
@@ -112,6 +104,7 @@ function WorkspaceStudioPage() {
 
   const treeQuery = useWorkspaceTree(
     {
+      databaseId: selectedDatabaseId ?? "",
       workspaceId,
       view: browserView,
       path: currentPath,
@@ -122,6 +115,7 @@ function WorkspaceStudioPage() {
 
   const selectedFileQuery = useWorkspaceFileContent(
     {
+      databaseId: selectedDatabaseId ?? "",
       workspaceId,
       view: browserView,
       path: selectedPath,
@@ -145,13 +139,7 @@ function WorkspaceStudioPage() {
     browserView === "working-copy" &&
     selectedFile?.kind === "file";
   const currentViewLabel = useMemo(() => viewLabel(browserView, workspace), [browserView, workspace]);
-  const capabilityCards = workspace ? buildCapabilityCards(workspace) : [];
-  const activityActors = useMemo(
-    () => new Set((workspace?.activity ?? []).map((event) => event.actor)).size,
-    [workspace],
-  );
-  const lastActivity = workspace?.activity[0] ?? null;
-  const tabCopy = describeTab(tab);
+  const latestActivity = workspace?.activity[0] ?? null;
 
   function setStudioTab(nextTab: StudioTab) {
     void navigate({
@@ -162,8 +150,31 @@ function WorkspaceStudioPage() {
     });
   }
 
+  function deleteCurrentWorkspace() {
+    const confirmed = window.confirm(
+      `Delete workspace "${workspace?.name ?? workspaceId}"? This removes it from the workspace registry.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteWorkspace.mutate({
+      databaseId: selectedDatabaseId ?? "",
+      workspaceId,
+    }, {
+      onSuccess: () => {
+        void navigate({ to: "/workspaces" });
+      },
+    });
+  }
+
   if (workspaceQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
+  }
+
+  if (selectedDatabaseId == null) {
+    throw new Error("No database selected.");
   }
 
   if (workspace == null) {
@@ -172,190 +183,101 @@ function WorkspaceStudioPage() {
 
   return (
     <PageStack>
-      <HeroCard>
-        <HeroLayout>
-          <HeroBody>
-            <SectionTitle
-              eyebrow="Workspace Studio"
-              title={workspace.name}
-              body={workspace.description || "AFS workspace studio for browsing, editing, and checkpoint recovery."}
-            />
-            <InlineActions>
-              <ToneChip $tone={workspace.status}>{statusLabel(workspace.status)}</ToneChip>
-              <ToneChip $tone={workspace.draftState}>
-                {draftStateLabel(workspace.draftState)}
-              </ToneChip>
-              <ToneChip $tone={workspace.source}>{sourceLabel(workspace.source)}</ToneChip>
-              <Button
-                size="medium"
-                variant="secondary-fill"
-                disabled={deleteWorkspace.isPending}
-                onClick={() =>
-                  deleteWorkspace.mutate(workspace.id, {
-                    onSuccess: () => {
-                      void navigate({ to: "/workspaces" });
-                    },
-                  })
-                }
-              >
-                Delete workspace
-              </Button>
-            </InlineActions>
-            <MetaRow>
-              <Tag>{workspace.databaseName}</Tag>
-              <Tag>{workspace.redisKey}</Tag>
-              <Tag>{workspace.cloudAccount}</Tag>
-              {workspace.region ? <Tag>{workspace.region}</Tag> : null}
-              {workspace.mountedPath ? <Tag>{workspace.mountedPath}</Tag> : null}
-            </MetaRow>
-            <SummaryStrip>
-              <SummaryPanel>
-                <SummaryLabel>Files</SummaryLabel>
-                <SummaryValue>{workspace.fileCount}</SummaryValue>
-                <SummaryBody>{workspace.folderCount} folders currently addressable in this studio.</SummaryBody>
-              </SummaryPanel>
-              <SummaryPanel>
-                <SummaryLabel>Footprint</SummaryLabel>
-                <SummaryValue>{formatBytes(workspace.totalBytes)}</SummaryValue>
-                <SummaryBody>Content size stays visible so filesystem scale is never abstract.</SummaryBody>
-              </SummaryPanel>
-              <SummaryPanel>
-                <SummaryLabel>Recovery</SummaryLabel>
-                <SummaryValue>{workspace.checkpointCount}</SummaryValue>
-                <SummaryBody>Checkpoints are nearby because safe rollback is part of editing.</SummaryBody>
-              </SummaryPanel>
-            </SummaryStrip>
-          </HeroBody>
-
-          <HeroMetaGrid>
-            <MetaItem>
-              <MetaLabel>Current head</MetaLabel>
-              <MetaValue>{activeSavepoint?.name ?? "No checkpoint yet"}</MetaValue>
-              <MetaBody>
-                {activeSavepoint == null
-                  ? "This workspace has not recorded a checkpoint yet."
-                  : `Created ${new Date(activeSavepoint.createdAt).toLocaleString()} by ${activeSavepoint.author}.`}
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Mutable surface</MetaLabel>
-              <MetaValue>
-                {workspace.capabilities.editWorkingCopy ? "Working copy editable" : "Read-only views"}
-              </MetaValue>
-              <MetaBody>
-                {workspace.capabilities.editWorkingCopy
-                  ? "This studio can commit draft edits directly into the working copy."
-                  : "The current transport supports browsing and restore, but not direct edits."}
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Checkpoint restore</MetaLabel>
-              <MetaValue>
-                {workspace.capabilities.restoreCheckpoint ? "Available" : "Unavailable"}
-              </MetaValue>
-              <MetaBody>
-                Restore controls are surfaced with the history so recovery never feels hidden.
-              </MetaBody>
-            </MetaItem>
-            <MetaItem>
-              <MetaLabel>Last updated</MetaLabel>
-              <MetaValue>{new Date(workspace.updatedAt).toLocaleString()}</MetaValue>
-              <MetaBody>The studio should always make the most recent canonical mutation obvious.</MetaBody>
-            </MetaItem>
-          </HeroMetaGrid>
-        </HeroLayout>
-      </HeroCard>
+      <StudioNavRow>
+        <BreadcrumbButton
+          type="button"
+          onClick={() => {
+            void navigate({ to: "/workspaces" });
+          }}
+        >
+          Workspaces
+        </BreadcrumbButton>
+        <BreadcrumbSeparator>/</BreadcrumbSeparator>
+        <BreadcrumbCurrent>{workspace.name}</BreadcrumbCurrent>
+      </StudioNavRow>
 
       <SectionGrid>
         <SectionCard $span={12}>
-          <SectionHeader>
-            <SectionTitle eyebrow="Studio Views" title={tabCopy.title} body={tabCopy.body} />
-          </SectionHeader>
-          <Tabs>
-            <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
-              Overview
-            </TabButton>
-            <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
-              Files
-            </TabButton>
-            <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
-              Checkpoints
-            </TabButton>
-            <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
-              Activity
-            </TabButton>
-          </Tabs>
+          <TabsToolbar>
+            <Tabs>
+              <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
+                Overview
+              </TabButton>
+              <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
+                Files
+              </TabButton>
+              <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
+                Checkpoints
+              </TabButton>
+              <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
+                Activity
+              </TabButton>
+            </Tabs>
+            <DeleteWorkspaceButton
+              size="medium"
+              disabled={deleteWorkspace.isPending}
+              onClick={deleteCurrentWorkspace}
+            >
+              {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
+            </DeleteWorkspaceButton>
+          </TabsToolbar>
         </SectionCard>
       </SectionGrid>
 
       {tab === "overview" ? (
-        <>
-          <SectionGrid>
-            <SectionCard $span={4}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Workspace state"
-                  body="These are the signals an operator needs before opening files or stepping into checkpoint work."
-                />
-              </SectionHeader>
-              <StateGrid>
-                <StateCard>
-                  <StateLabel>Status</StateLabel>
-                  <StateValue>{statusLabel(workspace.status)}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Draft</StateLabel>
-                  <StateValue>{draftStateLabel(workspace.draftState)}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Source</StateLabel>
-                  <StateValue>{sourceLabel(workspace.source)}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Head savepoint</StateLabel>
-                  <StateValue>{activeSavepoint?.name ?? "None"}</StateValue>
-                </StateCard>
-              </StateGrid>
-              <MetaRow>
-                {workspace.tags.map((tag) => (
-                  <Tag key={tag}>{tag}</Tag>
-                ))}
-              </MetaRow>
-            </SectionCard>
-
-            <SectionCard $span={8}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Capability surface"
-                  body="Capability flags tell the UI which surfaces are live controls versus read-only inspection points."
-                />
-              </SectionHeader>
-              <CapabilityGrid>
-                {capabilityCards.map((capability) => (
-                  <CapabilityCard key={capability.title} $enabled={capability.enabled}>
-                    <CapabilityStatus $enabled={capability.enabled}>
-                      {capability.enabled ? "Enabled" : "Unavailable"}
-                    </CapabilityStatus>
-                    <CapabilityTitle>{capability.title}</CapabilityTitle>
-                    <CapabilityBody>{capability.body}</CapabilityBody>
-                  </CapabilityCard>
-                ))}
-              </CapabilityGrid>
-            </SectionCard>
-          </SectionGrid>
-
-          <SectionGrid>
-            <SectionCard $span={12}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Recent motion"
-                  body="A short activity preview keeps the latest workspace changes adjacent to the state summary."
-                />
-              </SectionHeader>
-              <EventList events={workspace.activity.slice(0, 5)} />
-            </SectionCard>
-          </SectionGrid>
-        </>
+        <SectionGrid>
+          <SectionCard $span={12}>
+            <SectionHeader>
+              <SectionTitle title="Status" />
+            </SectionHeader>
+            <StatusTable>
+              <tbody>
+                <StatusRow>
+                  <StatusLabel>Files</StatusLabel>
+                  <StatusValue>{workspace.fileCount.toLocaleString()}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Folders</StatusLabel>
+                  <StatusValue>{workspace.folderCount.toLocaleString()}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Checkpoints</StatusLabel>
+                  <StatusValue>{workspace.checkpointCount.toLocaleString()}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Size</StatusLabel>
+                  <StatusValue>{formatBytes(workspace.totalBytes)}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Last updated</StatusLabel>
+                  <StatusValue>{new Date(workspace.updatedAt).toLocaleString()}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Latest activity</StatusLabel>
+                  <StatusValue>
+                    {latestActivity == null
+                      ? "No activity yet"
+                      : `${latestActivity.title} · ${new Date(latestActivity.createdAt).toLocaleString()}`}
+                  </StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Database</StatusLabel>
+                  <StatusValue>{workspace.databaseName}</StatusValue>
+                </StatusRow>
+                <StatusRow>
+                  <StatusLabel>Redis key</StatusLabel>
+                  <StatusValue>{workspace.redisKey}</StatusValue>
+                </StatusRow>
+                {workspace.mountedPath ? (
+                  <StatusRow>
+                    <StatusLabel>Mounted path</StatusLabel>
+                    <StatusValue>{workspace.mountedPath}</StatusValue>
+                  </StatusRow>
+                ) : null}
+              </tbody>
+            </StatusTable>
+          </SectionCard>
+        </SectionGrid>
       ) : null}
 
       {tab === "checkpoints" ? (
@@ -409,6 +331,7 @@ function WorkspaceStudioPage() {
                         }
                         onClick={() =>
                           restoreSavepoint.mutate({
+                            databaseId: selectedDatabaseId,
                             workspaceId: workspace.id,
                             savepointId: savepoint.id,
                           })
@@ -420,39 +343,6 @@ function WorkspaceStudioPage() {
                   </SavepointRow>
                 ))}
               </SavepointGrid>
-            </SectionCard>
-
-            <SectionCard $span={4}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Checkpoint summary"
-                  body="The most useful checkpoint facts should be visible before you choose restore or browse."
-                />
-              </SectionHeader>
-              <StateGrid>
-                <StateCard>
-                  <StateLabel>Checkpoints</StateLabel>
-                  <StateValue>{workspace.savepoints.length}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Current head</StateLabel>
-                  <StateValue>{activeSavepoint?.name ?? "None"}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Latest checkpoint</StateLabel>
-                  <StateValue>
-                    {workspace.savepoints[0]
-                      ? new Date(workspace.savepoints[0].createdAt).toLocaleString()
-                      : "n/a"}
-                  </StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Restore</StateLabel>
-                  <StateValue>
-                    {workspace.capabilities.restoreCheckpoint ? "Available" : "Unavailable"}
-                  </StateValue>
-                </StateCard>
-              </StateGrid>
             </SectionCard>
           </SectionGrid>
 
@@ -489,6 +379,7 @@ function WorkspaceStudioPage() {
                     }
                     onClick={() =>
                       restoreSavepoint.mutate({
+                        databaseId: selectedDatabaseId,
                         workspaceId: workspace.id,
                         savepointId: rollbackTarget,
                       })
@@ -507,6 +398,7 @@ function WorkspaceStudioPage() {
                       }
 
                       createSavepoint.mutate({
+                        databaseId: selectedDatabaseId,
                         workspaceId: workspace.id,
                         name: savepointName,
                         note: savepointNote,
@@ -694,6 +586,7 @@ function WorkspaceStudioPage() {
                       onSubmit={(event) => {
                         event.preventDefault();
                         updateFile.mutate({
+                          databaseId: selectedDatabaseId,
                           workspaceId: workspace.id,
                           path: selectedFile.path,
                           content: draftContent,
@@ -755,40 +648,12 @@ function WorkspaceStudioPage() {
             </SectionCard>
           </SectionGrid>
 
-          <SectionGrid>
-            <SectionCard $span={12}>
-              <SectionHeader>
-                <SectionTitle
-                  title="Current view"
-                  body="The browser keeps working copy, saved head, and checkpoints visually distinct so operators know what they are looking at. Restore and checkpoint creation live in the dedicated checkpoint tab."
-                />
-              </SectionHeader>
-              <StateGrid>
-                <StateCard>
-                  <StateLabel>View</StateLabel>
-                  <StateValue>{currentViewLabel}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Draft</StateLabel>
-                  <StateValue>{draftStateLabel(workspace.draftState)}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Files</StateLabel>
-                  <StateValue>{workspace.fileCount}</StateValue>
-                </StateCard>
-                <StateCard>
-                  <StateLabel>Editability</StateLabel>
-                  <StateValue>{editable ? "Writable" : "Protected"}</StateValue>
-                </StateCard>
-              </StateGrid>
-            </SectionCard>
-          </SectionGrid>
         </>
       ) : null}
 
       {tab === "activity" ? (
         <SectionGrid>
-          <SectionCard $span={8}>
+          <SectionCard $span={12}>
             <SectionHeader>
               <SectionTitle
                 title="Workspace activity"
@@ -799,34 +664,6 @@ function WorkspaceStudioPage() {
               rows={workspace.activity}
               onOpenActivity={(event) => setStudioTab(activityDestinationTab(event))}
             />
-          </SectionCard>
-          <SectionCard $span={4}>
-            <SectionHeader>
-              <SectionTitle
-                title="Audit summary"
-                body="A compact readout helps the operator see how lively this workspace has been without parsing the whole feed."
-              />
-            </SectionHeader>
-            <StateGrid>
-              <StateCard>
-                <StateLabel>Events</StateLabel>
-                <StateValue>{workspace.activity.length}</StateValue>
-              </StateCard>
-              <StateCard>
-                <StateLabel>Actors</StateLabel>
-                <StateValue>{activityActors}</StateValue>
-              </StateCard>
-              <StateCard>
-                <StateLabel>Latest event</StateLabel>
-                <StateValue>{lastActivity?.title ?? "None yet"}</StateValue>
-              </StateCard>
-              <StateCard>
-                <StateLabel>Latest timestamp</StateLabel>
-                <StateValue>
-                  {lastActivity ? new Date(lastActivity.createdAt).toLocaleString() : "n/a"}
-                </StateValue>
-              </StateCard>
-            </StateGrid>
           </SectionCard>
         </SectionGrid>
       ) : null}
@@ -890,55 +727,8 @@ function formatItemSize(size: number) {
   return formatBytes(size);
 }
 
-function statusLabel(status: AFSWorkspaceStatus) {
-  if (status === "healthy") return "Healthy";
-  if (status === "syncing") return "Syncing";
-  return "Attention";
-}
-
 function draftStateLabel(state: AFSDraftState) {
   return state === "dirty" ? "Draft dirty" : "Draft clean";
-}
-
-function sourceLabel(source: AFSWorkspaceSource) {
-  if (source === "git-import") return "Git import";
-  if (source === "cloud-import") return "Cloud import";
-  return "Blank";
-}
-
-function buildCapabilityCards(workspace: AFSWorkspaceDetail) {
-  return [
-    {
-      title: "Browse saved head",
-      enabled: workspace.capabilities.browseHead,
-      body: "View the canonical snapshot that currently defines the workspace head.",
-    },
-    {
-      title: "Browse checkpoints",
-      enabled: workspace.capabilities.browseCheckpoints,
-      body: "Inspect immutable recovery points from earlier versions of the workspace.",
-    },
-    {
-      title: "Browse working copy",
-      enabled: workspace.capabilities.browseWorkingCopy,
-      body: "Inspect mutable draft state without collapsing it into the canonical head.",
-    },
-    {
-      title: "Edit working copy",
-      enabled: workspace.capabilities.editWorkingCopy,
-      body: "Write draft changes directly inside the studio when the transport allows it.",
-    },
-    {
-      title: "Create checkpoint",
-      enabled: workspace.capabilities.createCheckpoint,
-      body: "Capture the current workspace as a named recovery point for future restore.",
-    },
-    {
-      title: "Restore checkpoint",
-      enabled: workspace.capabilities.restoreCheckpoint,
-      body: "Promote a saved checkpoint back to head when you need to recover confidently.",
-    },
-  ];
 }
 
 function activityDestinationTab(event: AFSActivityEvent): StudioTab {
@@ -954,170 +744,6 @@ function activityDestinationTab(event: AFSActivityEvent): StudioTab {
   return "activity";
 }
 
-function describeTab(tab: StudioTab) {
-  if (tab === "files") {
-    return {
-      title: "Filesystem browser and editor",
-      body: "File browsing should feel instrumented, with clear separation between saved views and mutable draft edits.",
-    };
-  }
-
-  if (tab === "checkpoints") {
-    return {
-      title: "Checkpoint history and restore",
-      body: "Checkpoint work belongs in its own view so recovery history, restore actions, and new savepoints stay together.",
-    };
-  }
-
-  if (tab === "activity") {
-    return {
-      title: "Workspace audit lane",
-      body: "Activity belongs in the studio because file edits, imports, and checkpoint work need a shared timeline.",
-    };
-  }
-
-  return {
-    title: "Workspace state and recovery",
-    body: "Use the overview to understand current state, capability flags, and the checkpoint history you can safely restore.",
-  };
-}
-
-const SummaryStrip = styled.div`
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-
-  @media (max-width: 860px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const SummaryPanel = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 20px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.76);
-`;
-
-const SummaryLabel = styled.div`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const SummaryValue = styled.div`
-  margin-top: 8px;
-  color: var(--afs-ink);
-  font-size: 1.25rem;
-  font-weight: 700;
-  line-height: 1.35;
-`;
-
-const SummaryBody = styled.p`
-  margin: 8px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const MetaLabel = styled.span`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const MetaValue = styled.span`
-  color: var(--afs-ink);
-  font-size: 1.1rem;
-  font-weight: 700;
-  line-height: 1.4;
-`;
-
-const MetaBody = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
-const StateGrid = styled.div`
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const StateCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 18px;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.74);
-`;
-
-const StateLabel = styled.div`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const StateValue = styled.div`
-  margin-top: 8px;
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.5;
-`;
-
-const CapabilityGrid = styled.div`
-  display: grid;
-  gap: 12px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-
-  @media (max-width: 720px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const CapabilityCard = styled.div<{ $enabled: boolean }>`
-  border: 1px solid
-    ${({ $enabled }) => ($enabled ? "rgba(71, 191, 255, 0.18)" : "var(--afs-line)")};
-  border-radius: 20px;
-  padding: 16px;
-  background: ${({ $enabled }) =>
-    $enabled ? "rgba(71, 191, 255, 0.08)" : "rgba(255, 255, 255, 0.72)"};
-`;
-
-const CapabilityStatus = styled.div<{ $enabled: boolean }>`
-  color: ${({ $enabled }) => ($enabled ? "#095b8a" : "var(--afs-muted)")};
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const CapabilityTitle = styled.div`
-  margin-top: 10px;
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-const CapabilityBody = styled.p`
-  margin: 8px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
-`;
-
 const BrowserBanner = styled.div`
   display: grid;
   gap: 12px;
@@ -1127,6 +753,97 @@ const BrowserBanner = styled.div`
   @media (max-width: 860px) {
     grid-template-columns: 1fr;
   }
+`;
+
+const StudioNavRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+`;
+
+const BreadcrumbButton = styled.button`
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--afs-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const BreadcrumbSeparator = styled.span`
+  color: var(--afs-muted);
+  font-size: 14px;
+`;
+
+const BreadcrumbCurrent = styled.span`
+  color: var(--afs-muted);
+  font-size: 14px;
+  font-weight: 500;
+`;
+
+const TabsToolbar = styled.div`
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+
+  @media (max-width: 860px) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+`;
+
+const DeleteWorkspaceButton = styled(Button)`
+  && {
+    background: ${({ theme }) => theme.semantic.color.background.danger500};
+    border-color: ${({ theme }) => theme.semantic.color.background.danger500};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+  }
+
+  &&:hover:not(:disabled),
+  &&:focus-visible:not(:disabled) {
+    background: ${({ theme }) => theme.semantic.color.background.danger600};
+    border-color: ${({ theme }) => theme.semantic.color.background.danger600};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+  }
+`;
+
+const StatusTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+`;
+
+const StatusRow = styled.tr`
+  border-top: 1px solid var(--afs-line);
+
+  &:first-child {
+    border-top: none;
+  }
+`;
+
+const StatusLabel = styled.th`
+  width: 220px;
+  padding: 14px 0;
+  color: var(--afs-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  vertical-align: top;
+`;
+
+const StatusValue = styled.td`
+  padding: 14px 0;
+  color: var(--afs-ink);
+  font-size: 14px;
+  line-height: 1.5;
+  text-align: left;
 `;
 
 const BrowserMetric = styled.div`
@@ -1156,9 +873,7 @@ const BrowserPanel = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 24px;
   padding: 18px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(243, 246, 251, 0.92)),
-    rgba(255, 255, 255, 0.8);
+  background: #fff;
 `;
 
 const PanelNote = styled.p`

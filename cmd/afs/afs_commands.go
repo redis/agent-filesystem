@@ -165,7 +165,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 	rootDuration := step.elapsed()
-	step.succeed(workspaceRedisKey(workspace))
+	step.succeed("ready for afs up")
 
 	if err := store.audit(ctx, workspace, "import", map[string]any{
 		"savepoint":   initialSavepoint,
@@ -189,8 +189,8 @@ func cmdImport(args []string) error {
 		{Label: "manifest", Value: formatStepDuration(manifestDuration)},
 		{Label: "blobs", Value: formatStepDuration(blobDuration)},
 		{Label: "metadata", Value: formatStepDuration(metadataDuration)},
-		{Label: "live root", Value: formatStepDuration(rootDuration)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace run " + workspace + " -- /bin/sh"},
+		{Label: "live root", Value: "ready (" + formatStepDuration(rootDuration) + ")"},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
 	})
 	return nil
 }

@@ -7,15 +7,13 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"github.com/redis/agent-filesystem/mount/client"
 )
 
 func liveWorkspaceManifest(ctx context.Context, store *afsStore, workspace, savepointID string) (manifest, map[string][]byte, error) {
 	if _, _, _, err := store.ensureWorkspaceRoot(ctx, workspace); err != nil {
 		return manifest{}, nil, err
 	}
-	m, blobs, _, err := buildManifestFromAFS(ctx, client.New(store.rdb, workspaceRedisKey(workspace)), workspace, savepointID)
+	m, blobs, _, err := buildManifestFromWorkspaceRoot(ctx, store.rdb, workspaceRedisKey(workspace), workspace, savepointID)
 	if err != nil {
 		return manifest{}, nil, err
 	}
@@ -84,6 +82,15 @@ func persistAFSMaterializedState(ctx context.Context, cfg config, store *afsStor
 	meta.LastMaterializedAt = now
 	meta.LastKnownMaterializedAt = host
 	meta.DirtyHint = dirty
+	if dirty {
+		if err := store.markWorkspaceRootDirty(ctx, meta.Name); err != nil {
+			return afsLocalState{}, err
+		}
+	} else {
+		if err := store.markWorkspaceRootClean(ctx, meta.Name, meta.HeadSavepoint); err != nil {
+			return afsLocalState{}, err
+		}
+	}
 	if err := store.putWorkspaceMeta(ctx, meta); err != nil {
 		return afsLocalState{}, err
 	}
@@ -106,6 +113,14 @@ func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace
 	workspaceInfo, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return false, err
+	}
+	if dirty, known, err := store.workspaceRootDirtyState(ctx, workspace); err != nil {
+		return false, err
+	} else if known && !dirty {
+		if printResult {
+			fmt.Println("No changes to save")
+		}
+		return false, nil
 	}
 	if _, _, _, err := store.ensureWorkspaceRoot(ctx, workspace); err != nil {
 		return false, err

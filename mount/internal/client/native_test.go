@@ -140,6 +140,38 @@ func TestNativeBackendSmoke(t *testing.T) {
 	}
 }
 
+func TestMutationsMarkRootDirtyButReadsDoNot(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "dirty")
+	keys := newKeyBuilder("dirty")
+
+	if err := c.Echo(ctx, "/note.txt", []byte("hello")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	rootDirty, err := rdb.Get(ctx, keys.rootDirty()).Result()
+	if err != nil {
+		t.Fatalf("Get(rootDirty) returned error: %v", err)
+	}
+	if rootDirty != "1" {
+		t.Fatalf("rootDirty = %q, want %q", rootDirty, "1")
+	}
+
+	if err := rdb.Set(ctx, keys.rootDirty(), "0", 0).Err(); err != nil {
+		t.Fatalf("Set(rootDirty) returned error: %v", err)
+	}
+	if _, err := c.Cat(ctx, "/note.txt"); err != nil {
+		t.Fatalf("Cat() returned error: %v", err)
+	}
+	rootDirty, err = rdb.Get(ctx, keys.rootDirty()).Result()
+	if err != nil {
+		t.Fatalf("Get(rootDirty after cat) returned error: %v", err)
+	}
+	if rootDirty != "0" {
+		t.Fatalf("rootDirty after cat = %q, want %q", rootDirty, "0")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Canonical inode storage verification
 // ---------------------------------------------------------------------------

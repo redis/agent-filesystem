@@ -21,7 +21,6 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
-  onPreviewWorkspace: (workspaceId: string) => void;
   onOpenWorkspace: (workspaceId: string) => void;
   onEditWorkspace: (workspaceId: string) => void;
   onDeleteWorkspace: (workspaceId: string) => void;
@@ -46,7 +45,6 @@ export function WorkspaceTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load workspaces. Please retry.",
-  onPreviewWorkspace,
   onOpenWorkspace,
   onEditWorkspace,
   onDeleteWorkspace,
@@ -111,7 +109,7 @@ export function WorkspaceTable({
               <S.WorkspaceNameButton
                 onClick={(event) => {
                   event.stopPropagation();
-                  onPreviewWorkspace(row.original.id);
+                  onOpenWorkspace(row.original.id);
                 }}
               >
                 {row.original.name}
@@ -209,7 +207,7 @@ export function WorkspaceTable({
           ),
         },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [deletingWorkspaceId, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace, onPreviewWorkspace],
+    [deletingWorkspaceId, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace],
   );
 
   return (
@@ -254,7 +252,7 @@ export function WorkspaceTable({
             }}
             enableSorting
             stripedRows
-            onRowClick={(rowData) => onPreviewWorkspace(rowData.id)}
+            onRowClick={(rowData) => onOpenWorkspace(rowData.id)}
           />
         </S.RegistryTableViewport>
       ) : null}

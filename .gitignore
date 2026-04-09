@@ -11,6 +11,8 @@ sandbox/sandbox
 sandbox/sandbox-cli
 *.rdb
 afs.config.json
+afs.databases.json
+ui/.tanstack/
 
 # Python
 __pycache__/

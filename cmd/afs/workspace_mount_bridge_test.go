@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -13,7 +14,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {
+func TestEnsureMountWorkspaceRejectsMissingCurrentWorkspace(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -26,23 +27,12 @@ func TestEnsureMountWorkspaceCreatesMissingCurrentWorkspace(t *testing.T) {
 	store := newAFSStore(mustRedisClient(t, cfg))
 	defer func() { _ = store.rdb.Close() }()
 
-	workspace, created, err := ensureMountWorkspace(context.Background(), cfg, store)
-	if err != nil {
-		t.Fatalf("ensureMountWorkspace() returned error: %v", err)
+	_, err := ensureMountWorkspace(context.Background(), cfg, store)
+	if err == nil {
+		t.Fatal("ensureMountWorkspace() returned nil error, want missing workspace error")
 	}
-	if workspace != "newfiles" {
-		t.Fatalf("workspace = %q, want %q", workspace, "newfiles")
-	}
-	if !created {
-		t.Fatal("expected ensureMountWorkspace() to create the missing workspace")
-	}
-
-	exists, err := store.workspaceExists(context.Background(), "newfiles")
-	if err != nil {
-		t.Fatalf("workspaceExists(newfiles) returned error: %v", err)
-	}
-	if !exists {
-		t.Fatal("expected newfiles workspace to exist after ensureMountWorkspace()")
+	if !strings.Contains(err.Error(), `workspace "newfiles" does not exist`) {
+		t.Fatalf("ensureMountWorkspace() error = %q, want missing workspace message", err)
 	}
 }
 
@@ -169,6 +159,54 @@ func TestSeedWorkspaceMountKeyKeepsExistingLiveWorkspaceRoot(t *testing.T) {
 	}
 	if string(data) != "live change\n" {
 		t.Fatalf("live.txt = %q, want %q", string(data), "live change\n")
+	}
+}
+
+func TestSeedWorkspaceMountKeyRepairsWorkspaceRootWithoutReadyMarker(t *testing.T) {
+	t.Helper()
+
+	_, store, closeStore := seedWorkspaceMountBridgeFixture(t)
+	defer closeStore()
+
+	ctx := context.Background()
+	fsClient := client.New(store.rdb, workspaceRedisKey("repo"))
+	if err := fsClient.Echo(ctx, "/stale.txt", []byte("stale\n")); err != nil {
+		t.Fatalf("Echo(/stale.txt) returned error: %v", err)
+	}
+
+	mountKey, head, initialized, err := seedWorkspaceMountKey(ctx, store, "repo")
+	if err != nil {
+		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
+	}
+	if !initialized {
+		t.Fatal("expected workspace mount open to repair an unmarked live workspace root")
+	}
+	if head != "initial" {
+		t.Fatalf("head = %q, want %q", head, "initial")
+	}
+
+	staleStat, err := client.New(store.rdb, mountKey).Stat(ctx, "/stale.txt")
+	if err != nil {
+		t.Fatalf("Stat(/stale.txt) returned error: %v", err)
+	}
+	if staleStat != nil {
+		t.Fatalf("expected stale.txt to be cleared during root repair, got %+v", staleStat)
+	}
+
+	data, err := client.New(store.rdb, mountKey).Cat(ctx, "/main.go")
+	if err != nil {
+		t.Fatalf("Cat(/main.go) returned error: %v", err)
+	}
+	if string(data) != "package main\n" {
+		t.Fatalf("mounted main.go = %q, want %q", string(data), "package main\n")
+	}
+
+	rootHead, err := store.rdb.Get(ctx, "afs:{repo}:root_head_savepoint").Result()
+	if err != nil {
+		t.Fatalf("Get(root_head_savepoint) returned error: %v", err)
+	}
+	if rootHead != "initial" {
+		t.Fatalf("root_head_savepoint = %q, want %q", rootHead, "initial")
 	}
 }
 

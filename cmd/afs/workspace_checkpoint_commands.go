@@ -563,6 +563,11 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		mountStep.fail(err.Error())
 		return err
 	}
+	mountCfg, err = prepareRuntimeMountConfig(mountCfg, backendName)
+	if err != nil {
+		mountStep.fail(err.Error())
+		return err
+	}
 	started, err = backend.Start(mountCfg)
 	if err != nil {
 		mountStep.fail(err.Error())
@@ -740,14 +745,18 @@ func cmdCheckpointCreate(args []string) error {
 		return err
 	}
 
+	step := startStep("Saving checkpoint")
 	saved, err := saveAFSWorkspaceOrLiveRoot(context.Background(), cfg, store, workspace, checkpointID, false)
 	if err != nil {
+		step.fail(err.Error())
 		return err
 	}
 	if !saved {
+		step.succeed("no changes")
 		fmt.Println("No changes to checkpoint")
 		return nil
 	}
+	step.succeed(checkpointID)
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint created"), []boxRow{
 		{Label: "workspace", Value: workspace},

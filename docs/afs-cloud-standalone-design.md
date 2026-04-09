@@ -162,32 +162,43 @@ This is the single most important codebase change because it decouples the CLI p
 
 ## Control Plane API Direction
 
-The existing AFS `/v1` contract is a good base and should be preserved.
+The control plane now owns a server-side database registry and routes every
+workspace request through an explicit database scope.
 
-The hosted API should keep the current workspace-first model, but add the missing write/sync operations needed by a remote CLI.
+That keeps the `afs` CLI simple for single-database local development while
+letting the UI and hosted control plane work against multiple Redis backends
+without any global "current database" mutation on the server.
 
-### Keep the existing browse-oriented endpoints
+### Database registry endpoints
 
-- `GET /v1/workspaces`
-- `GET /v1/workspaces/{workspace_id}`
-- `POST /v1/workspaces`
-- `DELETE /v1/workspaces/{workspace_id}`
-- `GET /v1/workspaces/{workspace_id}/tree`
-- `GET /v1/workspaces/{workspace_id}/files/content`
-- `GET /v1/activity`
-- `GET /v1/workspaces/{workspace_id}/activity`
+- `GET /v1/databases`
+- `POST /v1/databases`
+- `PUT /v1/databases/{database_id}`
+- `DELETE /v1/databases/{database_id}`
 
-### Add the missing remote-workflow endpoints
+### Database-scoped browse-oriented endpoints
 
-- `GET /v1/workspaces/{workspace_id}/checkpoints`
-- `POST /v1/workspaces/{workspace_id}/checkpoints`
-- `POST /v1/workspaces/{workspace_id}:restore`
-- `GET /v1/workspaces/{workspace_id}/manifest?view=head|checkpoint:<id>`
-- `POST /v1/workspaces/{workspace_id}/blobs:missing`
-- `PUT /v1/workspaces/{workspace_id}/blobs/{blob_id}`
-- `GET /v1/workspaces/{workspace_id}/blobs/{blob_id}`
-- `POST /v1/workspaces/{workspace_id}/sessions`
-- `DELETE /v1/workspaces/{workspace_id}/sessions/{session_id}`
+- `GET /v1/databases/{database_id}/workspaces`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}`
+- `POST /v1/databases/{database_id}/workspaces`
+- `PUT /v1/databases/{database_id}/workspaces/{workspace_id}`
+- `DELETE /v1/databases/{database_id}/workspaces/{workspace_id}`
+- `GET /v1/databases/{database_id}/activity`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/activity`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/tree`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/files/content`
+- `POST /v1/databases/{database_id}/workspaces/{workspace_id}:restore`
+
+### Future remote-workflow endpoints
+
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/checkpoints`
+- `POST /v1/databases/{database_id}/workspaces/{workspace_id}/checkpoints`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/manifest?view=head|checkpoint:<id>`
+- `POST /v1/databases/{database_id}/workspaces/{workspace_id}/blobs:missing`
+- `PUT /v1/databases/{database_id}/workspaces/{workspace_id}/blobs/{blob_id}`
+- `GET /v1/databases/{database_id}/workspaces/{workspace_id}/blobs/{blob_id}`
+- `POST /v1/databases/{database_id}/workspaces/{workspace_id}/sessions`
+- `DELETE /v1/databases/{database_id}/workspaces/{workspace_id}/sessions/{session_id}`
 
 ### Why split manifest/blob sync from file APIs
 

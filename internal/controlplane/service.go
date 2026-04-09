@@ -617,6 +617,10 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 		if err := SyncWorkspaceRoot(ctx, s.store, input.Workspace, input.Manifest); err != nil {
 			return false, err
 		}
+	} else {
+		if err := MarkWorkspaceRootClean(ctx, s.store, input.Workspace, input.CheckpointID); err != nil {
+			return false, err
+		}
 	}
 
 	if err := s.store.Audit(ctx, input.Workspace, "save", map[string]any{
@@ -1038,14 +1042,7 @@ func createWorkspaceWithMetadata(ctx context.Context, cfg Config, store *Store, 
 }
 
 func applyWorkspaceMetaDefaults(cfg Config, meta WorkspaceMeta) WorkspaceMeta {
-	defaultDatabaseName := strings.TrimSpace(cfg.RedisAddr)
-	if defaultDatabaseName == "" {
-		defaultDatabaseName = "direct-redis"
-	}
-	defaultDatabaseID := "redis-" + slugify(fmt.Sprintf("%s-%d", defaultDatabaseName, cfg.RedisDB))
-	if defaultDatabaseID == "redis-" {
-		defaultDatabaseID = "redis-direct"
-	}
+	defaultDatabaseID, defaultDatabaseName := activeDatabaseIdentity(cfg)
 	if strings.TrimSpace(meta.DatabaseID) == "" {
 		meta.DatabaseID = defaultDatabaseID
 	}
@@ -1062,6 +1059,18 @@ func applyWorkspaceMetaDefaults(cfg Config, meta WorkspaceMeta) WorkspaceMeta {
 		meta.Tags = workspaceTags(strings.TrimSpace(meta.Region), strings.TrimSpace(meta.Source))
 	}
 	return meta
+}
+
+func activeDatabaseIdentity(cfg Config) (databaseID string, databaseName string) {
+	databaseName = strings.TrimSpace(cfg.RedisAddr)
+	if databaseName == "" {
+		databaseName = "direct-redis"
+	}
+	databaseID = "redis-" + slugify(fmt.Sprintf("%s-%d", databaseName, cfg.RedisDB))
+	if databaseID == "redis-" {
+		databaseID = "redis-direct"
+	}
+	return databaseID, databaseName
 }
 
 func workspaceTags(region, source string) []string {

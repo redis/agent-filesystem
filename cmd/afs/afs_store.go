@@ -95,6 +95,18 @@ func (s *afsStore) syncWorkspaceRoot(ctx context.Context, workspace string, m ma
 	return controlplane.SyncWorkspaceRoot(ctx, s.cp, workspace, m)
 }
 
+func (s *afsStore) workspaceRootDirtyState(ctx context.Context, workspace string) (bool, bool, error) {
+	return controlplane.WorkspaceRootDirtyState(ctx, s.cp, workspace)
+}
+
+func (s *afsStore) markWorkspaceRootDirty(ctx context.Context, workspace string) error {
+	return controlplane.MarkWorkspaceRootDirty(ctx, s.cp, workspace)
+}
+
+func (s *afsStore) markWorkspaceRootClean(ctx context.Context, workspace, headSavepoint string) error {
+	return controlplane.MarkWorkspaceRootClean(ctx, s.cp, workspace, headSavepoint)
+}
+
 func workspaceRedisKey(workspace string) string {
 	return controlplane.WorkspaceFSKey(workspace)
 }

@@ -129,7 +129,10 @@ func (c *nativeClient) Touch(ctx context.Context, p string) error {
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	return c.saveInodeMeta(ctx, resolved, inode)
+	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) CreateFile(ctx context.Context, p string, mode uint32, exclusive bool) (*StatResult, bool, error) {
@@ -146,6 +149,11 @@ func (c *nativeClient) CreateFile(ctx context.Context, p string, mode uint32, ex
 		return nil, false, err
 	}
 	c.cachePath(p, inode)
+	if created {
+		if err := c.markRootDirty(ctx); err != nil {
+			return nil, false, err
+		}
+	}
 	return inode.toStat(), created, nil
 }
 
@@ -167,7 +175,10 @@ func (c *nativeClient) Mkdir(ctx context.Context, p string) error {
 		}
 		return errors.New("already exists")
 	}
-	return c.createDir(ctx, p, 0o755)
+	if err := c.createDir(ctx, p, 0o755); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Rm(ctx context.Context, p string) error {
@@ -203,7 +214,10 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	c.queueDeleteInfo(pipe, inode)
 	_, err = pipe.Exec(ctx)
 	c.invalidateInode(parentPath)
-	return err
+	if err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Ls(ctx context.Context, p string) ([]string, error) {
@@ -280,7 +294,10 @@ func (c *nativeClient) Rename(ctx context.Context, src, dst string, flags uint32
 		return errors.New("parent path conflict")
 	}
 
-	return c.renamePath(ctx, resolvedSrc, srcInode, dst, newParent, flags)
+	if err := c.renamePath(ctx, resolvedSrc, srcInode, dst, newParent, flags); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Mv(ctx context.Context, src, dst string) error {
@@ -314,7 +331,10 @@ func (c *nativeClient) Ln(ctx context.Context, target, linkpath string) error {
 		AtimeMs: now,
 		Target:  target,
 	}
-	return c.createInodeAtPath(ctx, linkpath, inode, false)
+	if err := c.createInodeAtPath(ctx, linkpath, inode, false); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Readlink(ctx context.Context, p string) (string, error) {
@@ -334,7 +354,10 @@ func (c *nativeClient) Chmod(ctx context.Context, p string, mode uint32) error {
 		return err
 	}
 	inode.Mode = mode
-	return c.saveInodeMeta(ctx, resolved, inode)
+	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Chown(ctx context.Context, p string, uid, gid uint32) error {
@@ -344,7 +367,10 @@ func (c *nativeClient) Chown(ctx context.Context, p string, uid, gid uint32) err
 	}
 	inode.UID = uid
 	inode.GID = gid
-	return c.saveInodeMeta(ctx, resolved, inode)
+	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error {
@@ -384,7 +410,10 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
-	return c.adjustTotalData(ctx, delta)
+	if err := c.adjustTotalData(ctx, delta); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Utimens(ctx context.Context, p string, atimeMs, mtimeMs int64) error {
@@ -398,7 +427,10 @@ func (c *nativeClient) Utimens(ctx context.Context, p string, atimeMs, mtimeMs i
 	if mtimeMs >= 0 {
 		inode.MtimeMs = mtimeMs
 	}
-	return c.saveInodeMeta(ctx, resolved, inode)
+	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) Info(ctx context.Context) (*InfoResult, error) {
@@ -446,7 +478,10 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	return c.saveInode(ctx, resolved, inode)
+	if err := c.saveInode(ctx, resolved, inode); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, appendMode bool) error {
@@ -485,12 +520,18 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
-	return c.adjustTotalData(ctx, inode.Size-before)
+	if err := c.adjustTotalData(ctx, inode.Size-before); err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) createFile(ctx context.Context, p string, content string, mode uint32) error {
 	_, _, err := c.createFileIfMissing(ctx, p, content, mode, false)
-	return err
+	if err != nil {
+		return err
+	}
+	return c.markRootDirty(ctx)
 }
 
 func (c *nativeClient) createDir(ctx context.Context, p string, mode uint32) error {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -17,20 +16,14 @@ func main() {
 	configPath := flag.String("config", "", "path to afs.config.json")
 	flag.Parse()
 
-	cfg, err := controlplane.LoadConfig(*configPath)
+	manager, err := controlplane.OpenDatabaseManager(*configPath)
 	if err != nil {
 		fatal(err)
 	}
-	store, closeStore, err := controlplane.OpenStore(context.Background(), cfg)
-	if err != nil {
-		fatal(err)
-	}
-	defer closeStore()
-
-	service := controlplane.NewService(cfg, store)
+	defer manager.Close()
 	server := &http.Server{
 		Addr:              *listenAddr,
-		Handler:           controlplane.NewHandler(service, *allowOrigin),
+		Handler:           controlplane.NewHandler(manager, *allowOrigin),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
