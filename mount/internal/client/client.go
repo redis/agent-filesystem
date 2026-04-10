@@ -25,7 +25,15 @@ type Client interface {
 	Touch(ctx context.Context, path string) error
 	ReadInodeAt(ctx context.Context, inode uint64, off int64, size int) ([]byte, error)
 	WriteInodeAt(ctx context.Context, inode uint64, data []byte, off int64) error
+	// WriteInodeAtPath is like WriteInodeAt but lets the caller supply the
+	// associated path so the client can update the path-keyed attribute cache
+	// in place instead of wiping it. Primarily used by the NFS layer, which
+	// always knows the path of the file being written.
+	WriteInodeAtPath(ctx context.Context, inode uint64, path string, data []byte, off int64) error
 	TruncateInode(ctx context.Context, inode uint64, size int64) error
+	// TruncateInodeAtPath is like TruncateInode but lets the caller supply the
+	// path so the attribute cache can be updated in place.
+	TruncateInodeAtPath(ctx context.Context, inode uint64, path string, size int64) error
 	Getlk(ctx context.Context, inode uint64, handleID string, lk *FileLock) (*FileLock, error)
 	Setlk(ctx context.Context, inode uint64, handleID string, lk *FileLock, wait bool) error
 	UnlockAll(ctx context.Context, inode uint64, handleID string) error

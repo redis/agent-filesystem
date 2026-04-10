@@ -1,0 +1,17 @@
+label,op,rounds,median_ms,min_ms,max_ms,stddev_ms,result
+local,_harness_noop,5,1.751,1.726,2.087,0.166,
+local,stat_root,5,5.747,5.423,6.533,0.412,ok
+local,readdir_root,5,3.486,3.253,4.049,0.341,28
+local,tree_walk,5,25.623,24.611,25.843,0.595,1332
+local,tree_walk_dirs,5,24.725,24.250,25.221,0.421,636
+local,ls_recursive,5,50.609,49.784,52.330,0.942,ok
+local,du,5,13.906,13.514,14.781,0.466,57M
+local,grep_text,5,44.928,43.958,48.333,1.768,176
+local,glob_md,5,24.032,23.044,25.218,0.827,359
+local,random_stat,5,3.834,3.521,4.767,0.541,100
+local,random_read,5,5.859,5.148,6.810,0.634,100f/3972590b
+local,head_of_tree,5,7.710,7.293,8.363,0.466,3
+local,write_new_small,5,10.864,9.773,12.045,0.956,50
+local,write_overwrite,5,6.399,6.205,6.598,0.170,50
+local,append_jsonl,5,7.327,7.125,8.383,0.508,100
+local,_cleanup,5,2.975,2.848,5.776,1.243,ok

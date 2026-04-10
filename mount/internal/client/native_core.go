@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/internal/cache"
@@ -18,7 +19,32 @@ type nativeClient struct {
 	key   string
 	keys  keyBuilder
 	cache *cache.Cache
+
+	// dirtyMu protects the markRootDirty throttle window.
+	//
+	// Rationale: every mutating client op (Chmod/Chown/Utimens/Write/
+	// Truncate/CreateFile/Mkdir/Rm/Rename) ends with a
+	// `SET rootDirty "1"` to tell the control plane that the workspace
+	// has unflushed changes. This is idempotent — the value is always
+	// "1" — so doing it on every single op wastes a full Redis round
+	// trip per mutation. Under bursty writes (e.g. a shell loop that
+	// creates 50 files) that is the single largest contributor to the
+	// wall-clock cost of each op.
+	//
+	// Throttle: if we already issued a SET within the recent window
+	// (see markRootDirtyThrottle), skip the round trip. The worst case
+	// is that a reader observing the marker lags by up to that window,
+	// which is acceptable because the marker is a hint, not a lock.
+	dirtyMu       sync.Mutex
+	dirtyLastSent time.Time
 }
+
+// markRootDirtyThrottle is the minimum interval between real Redis
+// writes of the rootDirty marker. Picking ~100ms collapses a burst of
+// sequential metadata ops into a single round trip while still letting
+// a genuinely idle-then-active workspace signal dirtiness within a
+// short human-perceivable delay.
+const markRootDirtyThrottle = 100 * time.Millisecond
 
 type inodeData struct {
 	ID      string
@@ -56,6 +82,18 @@ func newNativeClientWithCache(rdb *redis.Client, key string, ttl time.Duration) 
 func (c *nativeClient) invalidateInode(p string) {
 	if c.cache != nil {
 		c.cache.Invalidate(p)
+		c.cache.Invalidate(dirCacheKey(p))
+	}
+}
+
+// invalidateDirListing drops only the cached READDIR listing for a directory
+// while preserving the directory's own path-cache entry. Use this after
+// creating or deleting a child: the parent inode's identity has not changed,
+// only its listing is now stale. Dropping just the listing lets subsequent
+// path lookups through the parent continue to hit the cache instead of
+// paying a parent re-resolve RTT.
+func (c *nativeClient) invalidateDirListing(p string) {
+	if c.cache != nil {
 		c.cache.Invalidate(dirCacheKey(p))
 	}
 }

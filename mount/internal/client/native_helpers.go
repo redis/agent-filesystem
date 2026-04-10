@@ -122,6 +122,21 @@ func (c *nativeClient) ensureParents(ctx context.Context, p string) error {
 
 	for _, part := range parts {
 		nextPath := joinPath(curPath, part)
+
+		// Cache-first walk: if the parent chain is already warm (typical after
+		// the NFS path cache warming or after a previous op in the same dir),
+		// skip the Redis round trips entirely. Only fall back to Redis on miss
+		// or when the cached entry is not a directory.
+		if c.cache != nil {
+			if cached, ok := c.cache.Get(nextPath); ok {
+				if child, ok := cached.(*inodeData); ok && child != nil && child.Type == "dir" {
+					curPath = nextPath
+					curInode = cloneInodeMeta(child)
+					continue
+				}
+			}
+		}
+
 		childID, err := c.lookupChildID(ctx, curInode.ID, part)
 		switch {
 		case err == nil:
@@ -502,7 +517,15 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 		return err
 	}
 
-	c.invalidateInode(parentOf(childPath))
+	// Only the parent's dir listing is now stale; its path entry is still
+	// valid (same inode id, just a bumped mtime). Update the parent's cached
+	// mtime in place instead of wiping the entry, so the next lookup for a
+	// sibling does not pay a parent re-resolve RTT.
+	parentPath := parentOf(childPath)
+	parent.MtimeMs = now
+	parent.CtimeMs = now
+	c.cachePath(parentPath, parent)
+	c.invalidateDirListing(parentPath)
 	c.cachePath(childPath, inode)
 	return nil
 }
@@ -586,7 +609,18 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	if err != nil {
 		return nil, false, err
 	}
-	c.invalidateInode(parentPath)
+	// Only the parent's dir listing is stale now; keep the parent's own path
+	// entry cached so subsequent stats/creates in the same directory stay
+	// warm. If the child already existed, nothing in the parent changed at
+	// all — we just leave both caches alone.
+	if created {
+		now := nowMs()
+		parentCopy := *parentInode
+		parentCopy.MtimeMs = now
+		parentCopy.CtimeMs = now
+		c.cachePath(parentPath, &parentCopy)
+		c.invalidateDirListing(parentPath)
+	}
 	c.cachePath(p, result)
 	return result, created, nil
 }
@@ -919,6 +953,15 @@ func (c *nativeClient) adjustTotalData(ctx context.Context, delta int64) error {
 }
 
 func (c *nativeClient) markRootDirty(ctx context.Context) error {
+	// Throttle: within the debounce window, skip the Redis round trip.
+	// See the comment on nativeClient.dirtyMu for rationale.
+	c.dirtyMu.Lock()
+	if time.Since(c.dirtyLastSent) < markRootDirtyThrottle {
+		c.dirtyMu.Unlock()
+		return nil
+	}
+	c.dirtyLastSent = time.Now()
+	c.dirtyMu.Unlock()
 	return c.rdb.Set(ctx, c.keys.rootDirty(), "1", 0).Err()
 }
 

@@ -1,0 +1,17 @@
+label,op,rounds,median_ms,min_ms,max_ms,stddev_ms,result
+afs-warm,_harness_noop,5,2.578,2.064,3.221,0.469,
+afs-warm,stat_root,5,6.005,5.269,6.441,0.492,ok
+afs-warm,readdir_root,5,3.617,3.516,3.905,0.160,28
+afs-warm,tree_walk,5,25.704,25.354,25.928,0.267,1332
+afs-warm,tree_walk_dirs,5,23.462,22.952,23.708,0.280,636
+afs-warm,ls_recursive,5,53.702,52.427,54.412,0.735,ok
+afs-warm,du,5,16.103,16.034,17.202,0.494,52M
+afs-warm,grep_text,5,42.010,41.096,122.368,35.730,176
+afs-warm,glob_md,5,23.981,23.491,27.046,1.473,359
+afs-warm,random_stat,5,3.809,3.575,3.920,0.144,100
+afs-warm,random_read,5,5.432,5.377,13.025,3.375,100f/3972590b
+afs-warm,head_of_tree,5,7.767,7.577,8.271,0.266,3
+afs-warm,write_new_small,5,67277.432,52309.499,71360.337,7838.265,50
+afs-warm,write_overwrite,5,4143.337,3892.068,4952.362,429.825,50
+afs-warm,append_jsonl,5,5693.856,5064.186,5853.570,308.874,100
+afs-warm,_cleanup,5,79.506,19.200,22327.408,9949.192,ok

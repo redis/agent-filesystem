@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -19,6 +20,28 @@ import (
 	"github.com/willscott/go-nfs"
 	"github.com/willscott/go-nfs/helpers"
 )
+
+// opCounterHook counts Redis commands. Enabled via AFS_NFS_OPSTATS=1. Used
+// for performance instrumentation; logs delta every second while non-zero.
+type opCounterHook struct {
+	cmds     atomic.Int64
+	pipeCmds atomic.Int64
+}
+
+func (h *opCounterHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *opCounterHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.cmds.Add(1)
+		return next(ctx, cmd)
+	}
+}
+func (h *opCounterHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		h.cmds.Add(1) // one pipeline = one round trip
+		h.pipeCmds.Add(int64(len(cmds)))
+		return next(ctx, cmds)
+	}
+}
 
 type authCompatHandler struct {
 	nfs.Handler
@@ -106,6 +129,24 @@ func main() {
 		TLSEnabled: *redisTLS,
 	}))
 	defer rdb.Close()
+
+	var opHook *opCounterHook
+	if os.Getenv("AFS_NFS_OPSTATS") == "1" {
+		opHook = &opCounterHook{}
+		rdb.AddHook(opHook)
+		go func() {
+			var last, lastPipe int64
+			for range time.Tick(1 * time.Second) {
+				c := opHook.cmds.Load()
+				p := opHook.pipeCmds.Load()
+				if c != last || p != lastPipe {
+					log.Printf("opstats: cmds+pipes=%d (delta %d), pipelined_cmds=%d (delta %d)", c, c-last, p, p-lastPipe)
+					last = c
+					lastPipe = p
+				}
+			}
+		}()
+	}
 
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {

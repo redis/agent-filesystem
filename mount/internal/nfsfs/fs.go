@@ -25,6 +25,9 @@ type FS struct {
 	client   client.Client
 	readOnly bool
 	debug    bool
+	// shadow holds AppleDouble "._*" sidecar files in memory. They are not
+	// persisted to Redis — see appledouble.go for the rationale.
+	shadow *shadowStore
 }
 
 func New(c client.Client, readOnly bool) *FS {
@@ -32,11 +35,42 @@ func New(c client.Client, readOnly bool) *FS {
 		client:   c,
 		readOnly: readOnly,
 		debug:    os.Getenv("AFS_NFS_DEBUG") == "1",
+		shadow:   newShadowStore(),
 	}
 }
 
 func (f *FS) withTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 30*time.Second)
+}
+
+// openShadow is the OpenFile fast path for AppleDouble "._*" sidecar
+// files. It honors O_CREATE / O_EXCL / O_TRUNC semantics against the
+// in-memory shadow store instead of reaching Redis.
+func (f *FS) openShadow(p string, flag int, perm os.FileMode) (billy.File, error) {
+	existing := f.shadow.get(p)
+	if existing == nil {
+		if flag&os.O_CREATE == 0 {
+			return nil, os.ErrNotExist
+		}
+		if f.readOnly {
+			return nil, os.ErrPermission
+		}
+		file, _ := f.shadow.getOrCreate(p, perm.Perm())
+		return &shadowHandle{path: p, store: f.shadow, file: file}, nil
+	}
+	if flag&os.O_EXCL != 0 && flag&os.O_CREATE != 0 {
+		return nil, os.ErrExist
+	}
+	if flag&os.O_TRUNC != 0 {
+		if f.readOnly {
+			return nil, os.ErrPermission
+		}
+		existing.mu.Lock()
+		existing.content = existing.content[:0]
+		existing.mtime = time.Now()
+		existing.mu.Unlock()
+	}
+	return &shadowHandle{path: p, store: f.shadow, file: existing}, nil
 }
 
 func (f *FS) normalize(p string) string {
@@ -67,6 +101,9 @@ func (f *FS) debugf(format string, args ...interface{}) {
 func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, error) {
 	p := f.normalize(filename)
 	f.debugf("OpenFile path=%q flag=%#x perm=%#o", p, flag, perm.Perm())
+	if isAppleDoublePath(p) {
+		return f.openShadow(p, flag, perm)
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
 
@@ -109,7 +146,7 @@ func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, 
 			return nil, os.ErrPermission
 		}
 		f.debugf("OpenFile truncating inode=%d path=%q", st.Inode, p)
-		if err := f.client.TruncateInode(ctx, st.Inode, 0); err != nil {
+		if err := f.client.TruncateInodeAtPath(ctx, st.Inode, p, 0); err != nil {
 			return nil, err
 		}
 		st.Size = 0
@@ -135,6 +172,12 @@ func (f *FS) Create(filename string) (billy.File, error) {
 
 func (f *FS) Stat(filename string) (os.FileInfo, error) {
 	p := f.normalize(filename)
+	if isAppleDoublePath(p) {
+		if sf := f.shadow.get(p); sf != nil {
+			return shadowFileInfo{name: path.Base(p), file: sf}, nil
+		}
+		return nil, os.ErrNotExist
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
 	st, err := f.client.Stat(ctx, p)
@@ -158,18 +201,40 @@ func (f *FS) Rename(oldpath, newpath string) error {
 	if f.readOnly {
 		return os.ErrPermission
 	}
+	oldN := f.normalize(oldpath)
+	newN := f.normalize(newpath)
+	oldShadow := isAppleDoublePath(oldN)
+	newShadow := isAppleDoublePath(newN)
+	if oldShadow && newShadow {
+		if !f.shadow.rename(oldN, newN) {
+			return os.ErrNotExist
+		}
+		return nil
+	}
+	if oldShadow || newShadow {
+		// Crossing between shadow and real world is a macOS-side quirk we
+		// refuse; it never occurs in normal usage.
+		return os.ErrPermission
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Rename(ctx, f.normalize(oldpath), f.normalize(newpath), 0)
+	return f.client.Rename(ctx, oldN, newN, 0)
 }
 
 func (f *FS) Remove(filename string) error {
 	if f.readOnly {
 		return os.ErrPermission
 	}
+	p := f.normalize(filename)
+	if isAppleDoublePath(p) {
+		if !f.shadow.remove(p) {
+			return os.ErrNotExist
+		}
+		return nil
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Rm(ctx, f.normalize(filename))
+	return f.client.Rm(ctx, p)
 }
 
 func (f *FS) Join(elem ...string) string {
@@ -212,6 +277,14 @@ func (f *FS) ReadDir(p string) ([]os.FileInfo, error) {
 		}
 		out = append(out, newFileInfo(entry.Name, st))
 	}
+	// Do NOT merge AppleDouble shadow entries into READDIR. macOS accesses
+	// sidecars via direct LOOKUP/OPEN (the shadow handles those just fine)
+	// and hiding them from READDIR matches the semantics of a native Apple
+	// filesystem, where "._*" files are invisible to directory enumeration.
+	// As a bonus, it avoids a TOCTOU race with tools like rsync that enumerate
+	// a directory then stat each entry: the shadow store mutates during
+	// live Claude Code sessions, and a shadow file could be evicted between
+	// the ReadDir snapshot and the follow-up Stat.
 	return out, nil
 }
 
@@ -257,9 +330,20 @@ func (f *FS) Chmod(name string, mode os.FileMode) error {
 	if f.readOnly {
 		return os.ErrPermission
 	}
+	p := f.normalize(name)
+	if isAppleDoublePath(p) {
+		if sf := f.shadow.get(p); sf != nil {
+			sf.mu.Lock()
+			sf.mode = mode
+			sf.ctime = time.Now()
+			sf.mu.Unlock()
+			return nil
+		}
+		return os.ErrNotExist
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Chmod(ctx, f.normalize(name), uint32(mode.Perm()))
+	return f.client.Chmod(ctx, p, uint32(mode.Perm()))
 }
 
 func (f *FS) Lchown(name string, uid, gid int) error {
@@ -271,18 +355,37 @@ func (f *FS) Chown(name string, uid, gid int) error {
 	if f.readOnly {
 		return os.ErrPermission
 	}
+	p := f.normalize(name)
+	if isAppleDoublePath(p) {
+		// Shadow files do not track uid/gid; treat as a no-op success.
+		if f.shadow.get(p) != nil {
+			return nil
+		}
+		return os.ErrNotExist
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Chown(ctx, f.normalize(name), uint32(uid), uint32(gid))
+	return f.client.Chown(ctx, p, uint32(uid), uint32(gid))
 }
 
 func (f *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	if f.readOnly {
 		return os.ErrPermission
 	}
+	p := f.normalize(name)
+	if isAppleDoublePath(p) {
+		if sf := f.shadow.get(p); sf != nil {
+			sf.mu.Lock()
+			sf.atime = atime
+			sf.mtime = mtime
+			sf.mu.Unlock()
+			return nil
+		}
+		return os.ErrNotExist
+	}
 	ctx, cancel := f.withTimeout()
 	defer cancel()
-	return f.client.Utimens(ctx, f.normalize(name), atime.UnixMilli(), mtime.UnixMilli())
+	return f.client.Utimens(ctx, p, atime.UnixMilli(), mtime.UnixMilli())
 }
 
 type fileInfo struct {
@@ -415,7 +518,9 @@ func (fh *fileHandle) Write(p []byte) (int, error) {
 	ctx, cancel := fh.fs.withTimeout()
 	defer cancel()
 	fh.fs.debugf("Write inode=%d path=%q off=%d len=%d", fh.inode, fh.path, fh.pos, len(p))
-	if err := fh.fs.client.WriteInodeAt(ctx, fh.inode, p, fh.pos); err != nil {
+	// Pass the known path so the client can update the attribute cache in
+	// place and avoid wiping the warm path cache on every write.
+	if err := fh.fs.client.WriteInodeAtPath(ctx, fh.inode, fh.path, p, fh.pos); err != nil {
 		return 0, err
 	}
 	end := fh.pos + int64(len(p))
@@ -495,7 +600,7 @@ func (fh *fileHandle) Truncate(size int64) error {
 	ctx, cancel := fh.fs.withTimeout()
 	defer cancel()
 	fh.fs.debugf("Truncate inode=%d path=%q size=%d", fh.inode, fh.path, size)
-	if err := fh.fs.client.TruncateInode(ctx, fh.inode, size); err != nil {
+	if err := fh.fs.client.TruncateInodeAtPath(ctx, fh.inode, fh.path, size); err != nil {
 		return err
 	}
 	fh.size = size

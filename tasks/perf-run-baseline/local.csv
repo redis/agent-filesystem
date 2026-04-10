@@ -1,0 +1,13 @@
+label,op,rounds,median_ms,min_ms,max_ms,stddev_ms,result
+local,_harness_noop,5,2.089,1.881,2.239,0.144,
+local,stat_root,5,5.835,5.458,6.770,0.500,ok
+local,readdir_root,5,3.963,3.618,4.755,0.454,28
+local,tree_walk,5,25.786,24.889,26.100,0.543,1332
+local,tree_walk_dirs,5,24.317,24.200,25.607,0.597,636
+local,ls_recursive,5,51.000,50.148,52.503,1.010,ok
+local,du,5,14.005,13.842,14.563,0.336,57M
+local,grep_text,5,47.265,44.965,89.120,18.995,176
+local,glob_md,5,25.656,24.248,26.112,0.745,359
+local,random_stat,5,365.191,353.694,368.696,6.587,100
+local,random_read,5,303.233,278.843,318.935,16.658,100f/3972590b
+local,head_of_tree,5,8.629,8.278,9.546,0.474,3
