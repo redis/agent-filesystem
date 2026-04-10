@@ -190,31 +190,24 @@ export const MoreActionsTrigger = styled.button`
 
 export const SearchInput = styled(TableHeading.SearchInput)`
   && {
-    align-self: flex-start;
+    align-self: stretch;
   }
 
-  width: 320px;
+  flex: 1 1 320px;
+  min-width: 0;
+  width: 100%;
   border-radius: 8px !important;
   border: 1px solid ${({ theme }) => theme.semantic.color.border.neutral200} !important;
   background: ${({ theme }) => theme.semantic.color.background.neutral0} !important;
   box-shadow: none !important;
-
-  @media (max-width: 800px) {
-    width: 100%;
-  }
 `;
 
 export const HeadingWrap = styled.div`
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 16px;
   padding: 18px 20px 14px;
-
-  @media (max-width: 800px) {
-    flex-direction: column;
-    align-items: stretch;
-  }
 `;
 
 export const SearchOnlyHeadingWrap = styled(HeadingWrap)`

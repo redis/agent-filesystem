@@ -64,9 +64,9 @@ function OverviewPage() {
               <BenefitGrid>
                 <BenefitCard>
                   <BenefitKicker>01</BenefitKicker>
-                  <BenefitTitle>Bring in real working state</BenefitTitle>
+                  <BenefitTitle>Start a workspace quickly</BenefitTitle>
                   <BenefitBody>
-                    Start with a blank workspace, a Git import, or a Redis Cloud import instead of rebuilding context by hand.
+                    Add a workspace directly from the studio instead of rebuilding the catalog by hand.
                   </BenefitBody>
                 </BenefitCard>
                 <BenefitCard>
@@ -90,10 +90,10 @@ function OverviewPage() {
               <StarterPreview>
                 <StarterCore>Agent Filesystem</StarterCore>
                 <StarterNode $x="8%" $y="14%">
-                  Blank workspace
+                  Add workspace
                 </StarterNode>
                 <StarterNode $x="58%" $y="18%">
-                  Git import
+                  Registry
                 </StarterNode>
                 <StarterNode $x="18%" $y="66%">
                   Browser studio
@@ -109,9 +109,9 @@ function OverviewPage() {
                 <StarterListItem>A registry, studio, and activity view that stay in sync.</StarterListItem>
               </StarterList>
               <StarterTags>
-                <Tag>Blank workspace</Tag>
-                <Tag>Git import</Tag>
-                <Tag>Redis Cloud import</Tag>
+                <Tag>Workspace registry</Tag>
+                <Tag>Browser studio</Tag>
+                <Tag>Checkpoints</Tag>
               </StarterTags>
             </StarterPanel>
           </HeroLayout>

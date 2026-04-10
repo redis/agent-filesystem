@@ -157,9 +157,6 @@ export function ActivityTable({
   return (
     <S.TableCard>
       <S.HeadingWrap>
-        <TableHeading>
-          <TableHeading.Title>Activity across all workspaces</TableHeading.Title>
-        </TableHeading>
         <S.SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}

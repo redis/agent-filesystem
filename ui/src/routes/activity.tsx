@@ -44,22 +44,9 @@ function ActivityPage() {
 
   return (
     <PageStack>
-      <SectionGrid>
-        <SectionCard $span={12}>
-          <SectionTitle
-            eyebrow="Audit"
-            title="Workspace activity"
-            body={
-              selectedDatabase == null
-                ? "Open a Redis database to scope the activity feed."
-                : `Activity across workspaces in ${selectedDatabase.displayName}.`
-            }
-          />
           <div style={{ marginTop: 16 }}>
             <ActivityTable rows={events} onOpenActivity={openActivity} />
           </div>
-        </SectionCard>
-      </SectionGrid>
     </PageStack>
   );
 }

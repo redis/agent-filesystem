@@ -22,7 +22,6 @@ import {
   useScopedWorkspaceSummaries,
 } from "../foundation/database-scope";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
-import type { AFSWorkspaceSource } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
@@ -35,7 +34,6 @@ type WorkspaceFormState = {
   cloudAccount: string;
   databaseName: string;
   region: string;
-  source: AFSWorkspaceSource;
 };
 
 type DialogMode = "create" | "edit" | null;
@@ -58,7 +56,6 @@ function createInitialFormState(database?: AFSDatabaseScopeRecord | null): Works
     cloudAccount: defaults.cloudAccount,
     databaseName: defaults.databaseName,
     region: defaults.region,
-    source: "blank",
   };
 }
 
@@ -97,7 +94,6 @@ function WorkspacesPage() {
       cloudAccount: workspace.cloudAccount,
       databaseName: workspace.databaseName,
       region: workspace.region,
-      source: workspace.source,
     });
   }, [dialogMode, editingWorkspaceQuery.data]);
 
@@ -203,12 +199,6 @@ function WorkspacesPage() {
 
   return (
     <PageStack>
-      <PageActionsRow>
-        <Button size="medium" onClick={openCreateDialog}>
-          Add workspace
-        </Button>
-      </PageActionsRow>
-
       <WorkspaceTable
         rows={workspaces}
         loading={workspacesQuery.isLoading}
@@ -216,6 +206,11 @@ function WorkspacesPage() {
         deletingWorkspaceId={
           deleteWorkspace.isPending ? deleteWorkspace.variables?.workspaceId ?? null : null
         }
+        toolbarAction={(
+          <Button size="medium" onClick={openCreateDialog}>
+            Add workspace
+          </Button>
+        )}
         onOpenWorkspace={openWorkspace}
         onEditWorkspace={openEditDialog}
         onDeleteWorkspace={deleteSelectedWorkspace}
@@ -240,40 +235,7 @@ function WorkspacesPage() {
                     : `Create a workspace inside ${selectedDatabase?.displayName ?? "the current database"}.`
                 }
               />
-              <Button size="medium" variant="secondary-fill" onClick={closeDialog}>
-                Close
-              </Button>
             </DialogHeader>
-
-            <SourcePicker>
-              <SourceOption
-                $active={form.source === "blank"}
-                disabled={isEditing}
-                type="button"
-                onClick={() => updateForm("source", "blank")}
-              >
-                <SourceTitle>Blank workspace</SourceTitle>
-                <SourceBody>Start from an empty filesystem and shape the workspace from scratch.</SourceBody>
-              </SourceOption>
-              <SourceOption
-                $active={form.source === "git-import"}
-                disabled={isEditing}
-                type="button"
-                onClick={() => updateForm("source", "git-import")}
-              >
-                <SourceTitle>Git import</SourceTitle>
-                <SourceBody>Bring in code or configuration that still needs browser-side edits.</SourceBody>
-              </SourceOption>
-              <SourceOption
-                $active={form.source === "cloud-import"}
-                disabled={isEditing}
-                type="button"
-                onClick={() => updateForm("source", "cloud-import")}
-              >
-                <SourceTitle>Redis Cloud import</SourceTitle>
-                <SourceBody>Register an existing managed workspace and operate on it from the studio.</SourceBody>
-              </SourceOption>
-            </SourcePicker>
 
             <FormGrid
               id="workspace-dialog-form"
@@ -313,7 +275,7 @@ function WorkspacesPage() {
                     cloudAccount: form.cloudAccount,
                     databaseName: form.databaseName,
                     region: form.region,
-                    source: form.source,
+                    source: "blank",
                   },
                   {
                     onSuccess: () => {
@@ -393,12 +355,6 @@ const DialogOverlay = styled.div`
   background: rgba(8, 6, 13, 0.36);
 `;
 
-const PageActionsRow = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  width: 100%;
-`;
-
 const DialogCard = styled.div`
   width: min(760px, 100%);
   max-height: min(88vh, 860px);
@@ -411,58 +367,7 @@ const DialogCard = styled.div`
 `;
 
 const DialogHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
   margin-bottom: 18px;
-
-  @media (max-width: 720px) {
-    flex-direction: column;
-  }
-`;
-
-const SourcePicker = styled.div`
-  display: grid;
-  gap: 10px;
-  margin-bottom: 18px;
-`;
-
-const SourceOption = styled.button<{ $active: boolean }>`
-  border: 1px solid
-    ${({ $active }) => ($active ? "var(--afs-line-strong)" : "var(--afs-line)")};
-  border-radius: 18px;
-  padding: 14px 15px;
-  background: ${({ $active }) =>
-    $active ? "rgba(8, 6, 13, 0.04)" : "#fff"};
-  text-align: left;
-  cursor: pointer;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    opacity 160ms ease;
-
-  &:hover:enabled {
-    border-color: var(--afs-line-strong);
-  }
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
-`;
-
-const SourceTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-const SourceBody = styled.p`
-  margin: 6px 0 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
 `;
 
 const DialogFooter = styled.div`

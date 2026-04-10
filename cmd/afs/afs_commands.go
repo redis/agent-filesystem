@@ -180,16 +180,13 @@ func cmdImport(args []string) error {
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace imported"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: initialSavepoint},
+		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
 		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
 		{Label: "ignored", Value: strconv.Itoa(total.Ignored)},
 		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
-		{Label: "scan", Value: formatStepDuration(scanDuration)},
-		{Label: "manifest", Value: formatStepDuration(manifestDuration)},
-		{Label: "blobs", Value: formatStepDuration(blobDuration)},
-		{Label: "metadata", Value: formatStepDuration(metadataDuration)},
-		{Label: "live root", Value: "ready (" + formatStepDuration(rootDuration) + ")"},
+		{Label: "import time", Value: formatStepDuration(scanDuration + manifestDuration + blobDuration + metadataDuration + rootDuration)},
 		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
 	})
 	return nil
@@ -222,6 +219,7 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 		rows := []boxRow{
 			{Label: "source", Value: sourceDir},
 			{Label: "workspace", Value: workspace},
+			{Label: "database", Value: configRemoteLabel(cfg)},
 			{Label: "scan", Value: formatAFSImportSummary(total)},
 			{Label: "estimate", Value: "~" + formatStepDuration(estimate)},
 		}

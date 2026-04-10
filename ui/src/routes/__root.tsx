@@ -1,5 +1,4 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
@@ -19,7 +18,6 @@ function RootLayout() {
           <Outlet />
         </MainContainer>
       </FlexColItem>
-      <TanStackRouterDevtools />
     </FlexRow>
   );
 }

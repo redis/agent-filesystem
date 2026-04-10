@@ -112,18 +112,18 @@ func TestStatusRowsUseNoMountLabelsWhenFilesystemMountIsNone(t *testing.T) {
 		cfgPathOverride = orig
 	}()
 
-	rows := statusRows(mountBackendNone, "/tmp/workspaces", "localhost:6379", 0, "demo")
+	rows := statusRows(mountBackendNone, "localhost:6379", 0)
 	if len(rows) != 3 {
 		t.Fatalf("len(statusRows()) = %d, want 3", len(rows))
 	}
-	if rows[0].Label != "redis" {
-		t.Fatalf("rows[0].Label = %q, want %q", rows[0].Label, "redis")
+	if rows[0].Label != "database" {
+		t.Fatalf("rows[0].Label = %q, want %q", rows[0].Label, "database")
 	}
-	if rows[0].Value != "redis://localhost:6379 (db 0)" {
-		t.Fatalf("rows[0].Value = %q, want %q", rows[0].Value, "redis://localhost:6379 (db 0)")
+	if rows[0].Value != "redis://localhost:6379/0" {
+		t.Fatalf("rows[0].Value = %q, want %q", rows[0].Value, "redis://localhost:6379/0")
 	}
-	if rows[1].Label != "current workspace" || rows[1].Value != "demo" {
-		t.Fatalf("rows[1] = %+v, want current workspace row", rows[1])
+	if rows[1].Label != "mount backend" || rows[1].Value != "none" {
+		t.Fatalf("rows[1] = %+v, want mount backend row", rows[1])
 	}
 	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, filepath.Join(".afs", "afs.config.json")) {
 		t.Fatalf("rows[2] = %+v, want config row", rows[2])
@@ -142,37 +142,31 @@ func TestStatusRowsKeepFilesystemLabelsForMountMode(t *testing.T) {
 		cfgPathOverride = orig
 	}()
 
-	rows := statusRows(mountBackendFuse, "/tmp/mount", "localhost:6379", 0, "")
-	if len(rows) != 4 {
-		t.Fatalf("len(statusRows()) = %d, want 4", len(rows))
+	rows := statusRows(mountBackendFuse, "localhost:6379", 0)
+	if len(rows) != 3 {
+		t.Fatalf("len(statusRows()) = %d, want 3", len(rows))
 	}
-	if rows[0].Label != "local filesystem" || rows[0].Value != "/tmp/mount" {
-		t.Fatalf("rows[0] = %+v, want local filesystem row", rows[0])
+	if rows[0].Label != "database" || rows[0].Value != "redis://localhost:6379/0" {
+		t.Fatalf("rows[0] = %+v, want database row", rows[0])
 	}
-	if rows[1].Label != "redis" || rows[1].Value != "redis://localhost:6379 (db 0)" {
-		t.Fatalf("rows[1] = %+v, want redis row", rows[1])
+	if rows[1].Label != "mount backend" || rows[1].Value != "FUSE" {
+		t.Fatalf("rows[1] = %+v, want mount backend row", rows[1])
 	}
-	if rows[2].Label != "current workspace" || rows[2].Value != "none" {
-		t.Fatalf("rows[2] = %+v, want current workspace row", rows[2])
+	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, filepath.Join(".afs", "afs.config.json")) {
+		t.Fatalf("rows[2] = %+v, want config row", rows[2])
 	}
-	if rows[3].Label != "config" || !strings.Contains(rows[3].Value, filepath.Join(".afs", "afs.config.json")) {
-		t.Fatalf("rows[3] = %+v, want config row", rows[3])
-	}
-	if strings.Contains(stripAnsi(rows[3].Value), "/Users/example/") {
-		t.Fatalf("rows[3] = %+v, did not expect full absolute path", rows[3])
+	if strings.Contains(stripAnsi(rows[2].Value), "/Users/example/") {
+		t.Fatalf("rows[2] = %+v, did not expect full absolute path", rows[2])
 	}
 }
 
 func TestStatusTitleUsesMountedWorkspaceWording(t *testing.T) {
 	t.Helper()
 
-	title := statusTitle("●", mountBackendNFS, "newfiles", "/Users/rowantrollope/abc")
-	want := "Workspace: newfiles mounted at /Users/rowantrollope/abc (via NFS)"
+	title := statusTitle("●", "newfiles", "/Users/rowantrollope/abc", true)
+	want := "AFS workspace newfiles mounted at /Users/rowantrollope/abc"
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
-	}
-	if strings.Contains(title, "afs nfs mount") {
-		t.Fatalf("statusTitle() = %q, should not use legacy mount wording", title)
 	}
 }
 
@@ -193,7 +187,7 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 		t.Fatalf("printReadyBox() returned error: %v", err)
 	}
 
-	want := "Workspace: newfiles mounted at /Users/rowantrollope/abc (via NFS)"
+	want := "AFS workspace newfiles mounted at /Users/rowantrollope/abc"
 	if !strings.Contains(out, want) {
 		t.Fatalf("printReadyBox() output = %q, want substring %q", out, want)
 	}
@@ -296,11 +290,47 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdUp() returned error: %v", err)
 	}
-	if !strings.Contains(out, "afs no mounted filesystem") {
+	if !strings.Contains(out, "AFS workspace demo not mounted") {
 		t.Fatalf("cmdUp() output = %q, want status output", out)
 	}
 	if strings.Contains(out, "Run 'afs down' first") {
 		t.Fatalf("cmdUp() output still contains old already-running error: %q", out)
+	}
+}
+
+func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNone
+	cfg.CurrentWorkspace = "demo"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	out, err := captureStdout(t, func() error {
+		return cmdUpArgs([]string{})
+	})
+	if err != nil {
+		t.Fatalf("cmdUpArgs() returned error: %v", err)
+	}
+	if strings.Contains(out, "Agent Filesystem") || strings.Contains(out, "AFS\n") {
+		t.Fatalf("cmdUpArgs() output = %q, did not expect banner", out)
+	}
+	if !strings.Contains(out, "AFS workspace demo not mounted") {
+		t.Fatalf("cmdUpArgs() output = %q, want ready output", out)
 	}
 }
 

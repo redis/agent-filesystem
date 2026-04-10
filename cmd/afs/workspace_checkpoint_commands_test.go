@@ -65,6 +65,9 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
 	}
+	if !strings.Contains(listOutput, "workspaces on redis://") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want database-scoped title", listOutput)
+	}
 	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, "repo-copy") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want both workspace names", listOutput)
 	}
@@ -180,8 +183,14 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdCheckpoint(list) returned error: %v", err)
 	}
+	if !strings.Contains(listOutput, "checkpoints repo on redis://") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want workspace/database title", listOutput)
+	}
 	if !strings.Contains(listOutput, "initial") || !strings.Contains(listOutput, "after-edit") {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want both checkpoint names", listOutput)
+	}
+	if !strings.Contains(listOutput, "head") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want head marker", listOutput)
 	}
 	if strings.Contains(listOutput, "T") || strings.Contains(listOutput, "Z") {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want human-readable timestamps instead of raw RFC3339", listOutput)

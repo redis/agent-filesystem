@@ -107,7 +107,8 @@ func cmdWorkspaceCreate(args []string) error {
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace created"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: afsInitialCheckpointName},
-		{Label: "run", Value: filepath.Base(os.Args[0]) + " workspace run " + workspace + " -- /bin/sh"},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace run " + workspace + " -- /bin/sh"},
 	})
 	return nil
 }
@@ -147,15 +148,19 @@ func cmdWorkspaceList(args []string) error {
 
 	rows := make([]boxRow, 0, len(workspaces.Items))
 	for _, meta := range workspaces.Items {
+		value := fmt.Sprintf("%s · updated %s", checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt))
+		if meta.Name == selectedWorkspaceName(cfg) {
+			value = "current · " + value
+		}
 		rows = append(rows, boxRow{
 			Label: meta.Name,
-			Value: fmt.Sprintf("%d checkpoints · updated %s", meta.CheckpointCount, meta.UpdatedAt),
+			Value: value,
 		})
 	}
 	if len(rows) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No workspaces found")})
 	}
-	printBox(clr(ansiBold, "workspaces"), rows)
+	printBox(clr(ansiBold, "workspaces on "+configRemoteLabel(cfg)), rows)
 	return nil
 }
 
@@ -176,8 +181,9 @@ func cmdWorkspaceCurrent(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBold, "current workspace"), []boxRow{
+	printBox(clr(ansiBold, "current workspace on "+configRemoteLabel(cfg)), []boxRow{
 		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
+		{Label: "config", Value: configPathLabel()},
 	})
 	return nil
 }
@@ -218,9 +224,10 @@ func cmdWorkspaceUse(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "current workspace updated"), []boxRow{
+	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace selected"), []boxRow{
 		{Label: "workspace", Value: workspace},
-		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "config", Value: configPathLabel()},
 	})
 	return nil
 }
@@ -308,6 +315,8 @@ func cmdWorkspaceDelete(args []string) error {
 
 	rows := make([]boxRow, 0, len(deleted)+1)
 	rows = append(rows, boxRow{Label: "deleted", Value: strconv.Itoa(len(deleted))})
+	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
+	rows = append(rows, boxRow{})
 	for _, name := range deleted {
 		rows = append(rows, boxRow{Value: name})
 	}
@@ -357,6 +366,7 @@ func cmdWorkspaceClone(args []string) error {
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace cloned"), []boxRow{
 		{Label: "workspace", Value: workspace},
+		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "path", Value: clonedPath},
 		{Label: "next", Value: "cd " + clonedPath},
 	})
@@ -430,9 +440,10 @@ func cmdWorkspaceFork(args []string) error {
 	}
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace forked"), []boxRow{
-		{Label: "from", Value: sourceWorkspace},
-		{Label: "new", Value: newWorkspace},
-		{Label: "run", Value: filepath.Base(os.Args[0]) + " workspace run " + newWorkspace + " -- /bin/sh"},
+		{Label: "workspace", Value: newWorkspace},
+		{Label: "source", Value: sourceWorkspace},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace run " + newWorkspace + " -- /bin/sh"},
 	})
 	return nil
 }
@@ -605,6 +616,7 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace mounted at source"), []boxRow{
 		{Label: "workspace", Value: workspace},
+		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "path", Value: targetDir},
 		{Label: "backup", Value: backupDir},
 		{Label: "stop", Value: filepath.Base(os.Args[0]) + " down"},
@@ -694,15 +706,19 @@ func cmdCheckpointList(args []string) error {
 	}
 	rows := make([]boxRow, 0, len(checkpoints))
 	for _, meta := range checkpoints {
+		value := fmt.Sprintf("%s · %s", formatDisplayTimestamp(meta.CreatedAt), formatBytes(meta.TotalBytes))
+		if meta.IsHead {
+			value = "head · " + value
+		}
 		rows = append(rows, boxRow{
 			Label: meta.Name,
-			Value: fmt.Sprintf("%s · %s", formatDisplayTimestamp(meta.CreatedAt), formatBytes(meta.TotalBytes)),
+			Value: value,
 		})
 	}
 	if len(rows) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No checkpoints found")})
 	}
-	printBox(clr(ansiBold, "checkpoints")+" "+workspace, rows)
+	printBox(clr(ansiBold, "checkpoints "+workspace+" on "+configRemoteLabel(cfg)), rows)
 	return nil
 }
 
@@ -753,7 +769,11 @@ func cmdCheckpointCreate(args []string) error {
 	}
 	if !saved {
 		step.succeed("no changes")
-		fmt.Println("No changes to checkpoint")
+		printBox(clr(ansiBold, "checkpoint unchanged"), []boxRow{
+			{Label: "workspace", Value: workspace},
+			{Label: "database", Value: configRemoteLabel(cfg)},
+			{Label: "result", Value: "no changes"},
+		})
 		return nil
 	}
 	step.succeed(checkpointID)
@@ -761,6 +781,7 @@ func cmdCheckpointCreate(args []string) error {
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint created"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
+		{Label: "database", Value: configRemoteLabel(cfg)},
 	})
 	return nil
 }
@@ -823,9 +844,17 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	rows := []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
+		{Label: "database", Value: configRemoteLabel(cfg)},
 	}
 	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint restored"), rows)
 	return nil
+}
+
+func checkpointCountLabel(count int) string {
+	if count == 1 {
+		return "1 checkpoint"
+	}
+	return fmt.Sprintf("%d checkpoints", count)
 }
 
 func hasCurrentWorkspaceSelection(cfg config) bool {

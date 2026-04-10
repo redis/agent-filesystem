@@ -2,7 +2,7 @@ import { Menu, Typography } from "@redislabsdev/redis-ui-components";
 import { MoreactionsIcon } from "@redislabsdev/redis-ui-icons/monochrome";
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { formatBytes } from "../api/afs";
 import type { AFSWorkspaceSummary } from "../types/afs";
 import * as S from "./workspace-table.styles";
@@ -21,6 +21,7 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  toolbarAction?: ReactNode;
   onOpenWorkspace: (workspaceId: string) => void;
   onEditWorkspace: (workspaceId: string) => void;
   onDeleteWorkspace: (workspaceId: string) => void;
@@ -45,6 +46,7 @@ export function WorkspaceTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load workspaces. Please retry.",
+  toolbarAction,
   onOpenWorkspace,
   onEditWorkspace,
   onDeleteWorkspace,
@@ -212,14 +214,14 @@ export function WorkspaceTable({
 
   return (
     <S.TableCard>
-      <S.SearchOnlyHeadingWrap>
+      <S.HeadingWrap>
         <S.SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search workspace, database, ..."
         />
-        
-      </S.SearchOnlyHeadingWrap>
+        {toolbarAction}
+      </S.HeadingWrap>
 
       {loading ? <S.EmptyState>Loading workspaces...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}

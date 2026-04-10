@@ -467,8 +467,10 @@ func TestCmdWorkspaceUseAndCurrentManageSelectionOutsideConfigCommand(t *testing
 	if err != nil {
 		t.Fatalf("cmdWorkspace(current) returned error: %v", err)
 	}
-	if !strings.Contains(out, "demo") {
-		t.Fatalf("workspace current output = %q, want current workspace", out)
+	for _, want := range []string{"current workspace on redis://", "demo", "afs.config.json"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("workspace current output = %q, want substring %q", out, want)
+		}
 	}
 }
 

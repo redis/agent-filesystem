@@ -133,7 +133,9 @@ func cmdConfigShow(args []string) error {
 	if hasSavedConfig {
 		source = "saved"
 	}
-	printBox(clr(ansiBold, "config"), configSummaryRows(cfg, source))
+	rows := configSummaryRows(cfg, source)
+	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	printBox(clr(ansiBold, "config"), rows)
 	return nil
 }
 
@@ -616,8 +618,9 @@ func configSummaryRows(cfg config, source string) []boxRow {
 
 	rows := []boxRow{
 		{Label: "source", Value: source},
-		{Label: "redis", Value: publicRedisURL(cfg)},
-		{Label: "filesystem mount", Value: mountValue},
+		{Label: "database", Value: publicRedisURL(cfg)},
+		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
+		{Label: "mount", Value: mountValue},
 		{Label: "readonly", Value: strconv.FormatBool(cfg.ReadOnly)},
 	}
 	return rows

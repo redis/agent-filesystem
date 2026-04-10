@@ -135,8 +135,8 @@ func TestCheckpointCreateNoChangesIsANoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdCheckpoint(create) returned error: %v", err)
 	}
-	if !strings.Contains(output, "No changes to checkpoint") {
-		t.Fatalf("cmdCheckpoint(create) output = %q, want no changes message", output)
+	if !strings.Contains(output, "checkpoint unchanged") || !strings.Contains(output, "result") || !strings.Contains(output, "no changes") {
+		t.Fatalf("cmdCheckpoint(create) output = %q, want checkpoint unchanged box", output)
 	}
 
 	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")

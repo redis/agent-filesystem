@@ -203,15 +203,44 @@ func userModeLabel(backendName string) string {
 	}
 }
 
-func statusRemoteLabel(addr string, db int) string {
-	return fmt.Sprintf("redis://%s (db %d)", addr, db)
+func redisDatabaseLabel(addr string, db int, tls bool) string {
+	scheme := "redis"
+	if tls {
+		scheme = "rediss"
+	}
+	return fmt.Sprintf("%s://%s/%d", scheme, addr, db)
 }
 
-func statusTitle(prefix, backendName, workspace, localPath string) string {
-	if backendName == mountBackendNone {
-		return prefix + " " + clr(ansiBold, "afs no mounted filesystem")
+func statusRemoteLabel(addr string, db int) string {
+	return redisDatabaseLabel(addr, db, false)
+}
+
+func configRemoteLabel(cfg config) string {
+	return redisDatabaseLabel(cfg.RedisAddr, cfg.RedisDB, cfg.RedisTLS)
+}
+
+func configPathLabel() string {
+	return clr(ansiDim, compactDisplayPath(configPath()))
+}
+
+func commandContextRows(cfg config, workspace string) []boxRow {
+	rows := make([]boxRow, 0, 2)
+	if strings.TrimSpace(workspace) != "" {
+		rows = append(rows, boxRow{Label: "workspace", Value: workspace})
 	}
-	return prefix + " " + clr(ansiBold, fmt.Sprintf("Workspace: %s mounted at %s (via %s)", currentWorkspaceLabel(workspace), localPath, userModeLabel(backendName)))
+	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
+	return rows
+}
+
+func statusTitle(prefix, workspace, localPath string, mounted bool) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return prefix + " " + clr(ansiBold, "AFS no workspace selected")
+	}
+	if mounted {
+		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS workspace %s mounted at %s", workspace, localPath))
+	}
+	return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS workspace %s not mounted", workspace))
 }
 
 func localSurfacePath(cfg config, backendName string) string {
@@ -221,19 +250,15 @@ func localSurfacePath(cfg config, backendName string) string {
 	return cfg.Mountpoint
 }
 
-func statusRows(backendName, localPath, redisAddr string, redisDB int, currentWorkspace string) []boxRow {
-	if backendName == mountBackendNone {
-		return []boxRow{
-			{Label: "redis", Value: statusRemoteLabel(redisAddr, redisDB)},
-			{Label: "current workspace", Value: currentWorkspaceLabel(currentWorkspace)},
-			{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
-		}
+func statusRows(backendName, redisAddr string, redisDB int) []boxRow {
+	mountValue := "none"
+	if backendName != mountBackendNone {
+		mountValue = userModeLabel(backendName)
 	}
 	return []boxRow{
-		{Label: "local filesystem", Value: localPath},
-		{Label: "redis", Value: statusRemoteLabel(redisAddr, redisDB)},
-		{Label: "current workspace", Value: currentWorkspaceLabel(currentWorkspace)},
-		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+		{Label: "database", Value: statusRemoteLabel(redisAddr, redisDB)},
+		{Label: "mount backend", Value: mountValue},
+		{Label: "config", Value: configPathLabel()},
 	}
 }
 
@@ -633,8 +658,6 @@ func cmdUpArgs(args []string) error {
 	if err := cleanupStaleMount(cfg); err != nil {
 		return err
 	}
-
-	printBanner()
 	return startServices(cfg)
 }
 
@@ -833,8 +856,8 @@ func cmdStatus() error {
 		localPath = st.Mountpoint
 	}
 	if backendName == mountBackendNone {
-		title := statusTitle(clr(ansiBGreen, "●"), backendName, currentWorkspace, localPath)
-		rows := statusRows(backendName, localPath, st.RedisAddr, st.RedisDB, currentWorkspace)
+		title := statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
+		rows := statusRows(backendName, st.RedisAddr, st.RedisDB)
 		rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
 		if st.ReadOnly {
 			rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
@@ -847,12 +870,12 @@ func cmdStatus() error {
 
 	var title string
 	if mounted && mountAlive {
-		title = statusTitle(clr(ansiBGreen, "●"), backendName, currentWorkspace, localPath)
+		title = statusTitle(clr(ansiBGreen, "●"), currentWorkspace, localPath, true)
 	} else {
-		title = statusTitle(clr(ansiYellow, "○"), backendName, currentWorkspace, localPath)
+		title = statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
 	}
 
-	rows := statusRows(backendName, localPath, st.RedisAddr, st.RedisDB, currentWorkspace)
+	rows := statusRows(backendName, st.RedisAddr, st.RedisDB)
 	rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
 	if st.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
@@ -1011,8 +1034,13 @@ func startServices(cfg config) error {
 
 func printReadyBox(cfg config, backendName, _ string) {
 	localPath := localSurfacePath(cfg, backendName)
-	title := statusTitle(clr(ansiBGreen, "●"), backendName, cfg.CurrentWorkspace, localPath)
-	rows := statusRows(backendName, localPath, cfg.RedisAddr, cfg.RedisDB, cfg.CurrentWorkspace)
+	titlePrefix := clr(ansiBGreen, "●")
+	mounted := backendName != mountBackendNone
+	if !mounted {
+		titlePrefix = clr(ansiYellow, "○")
+	}
+	title := statusTitle(titlePrefix, cfg.CurrentWorkspace, localPath, mounted)
+	rows := statusRows(backendName, cfg.RedisAddr, cfg.RedisDB)
 
 	if cfg.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
@@ -1077,17 +1105,22 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		return err
 	}
 	planTitle := clr(ansiBold, "Migration plan")
-	rows := statusRows(planBackendName, sourceDir, cfg.RedisAddr, cfg.RedisDB, cfg.CurrentWorkspace)
-	rows = append(rows,
+	rows := []boxRow{
+		{Label: "source", Value: sourceDir},
+		{Label: "workspace", Value: currentWorkspaceLabel(cfg.CurrentWorkspace)},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "mountpoint", Value: sourceDir},
+		{Label: "mount backend", Value: userModeLabel(planBackendName)},
 		boxRow{Label: "archive", Value: archiveDir},
+		boxRow{Label: "config", Value: configPathLabel()},
 		boxRow{},
 		boxRow{Value: clr(ansiDim, "1.") + " Import all files into Redis"},
 		boxRow{Value: clr(ansiDim, "2.") + " Move original to archive"},
 		boxRow{Value: clr(ansiDim, "3.") + " Mount AFS in place"},
-	)
+	}
 	if ignorer != nil {
-		rows = append(rows[:5], append([]boxRow{{Label: "ignore", Value: ignorer.path}}, rows[5:]...)...)
-		rows[7].Value = clr(ansiDim, "1.") + " Import files into Redis (respecting " + filepath.Base(ignorer.path) + ")"
+		rows = append(rows[:6], append([]boxRow{{Label: "ignore", Value: ignorer.path}}, rows[6:]...)...)
+		rows[9].Value = clr(ansiDim, "1.") + " Import files into Redis (respecting " + filepath.Base(ignorer.path) + ")"
 	}
 	printBox(planTitle, rows)
 
@@ -1303,7 +1336,11 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 
 	totalDuration := time.Since(migrationStartedAt)
 	title := clr(ansiBGreen, "●") + " " + clr(ansiBold, "migration complete")
-	readyRows := statusRows(backendName, localSurfacePath(cfg, backendName), cfg.RedisAddr, cfg.RedisDB, cfg.CurrentWorkspace)
+	readyRows := append(commandContextRows(cfg, currentWorkspaceLabel(cfg.CurrentWorkspace)),
+		boxRow{Label: "mountpoint", Value: localSurfacePath(cfg, backendName)},
+		boxRow{Label: "mount backend", Value: userModeLabel(backendName)},
+		boxRow{Label: "config", Value: configPathLabel()},
+	)
 	readyRows = append(readyRows,
 		boxRow{Label: "archive", Value: archiveDir},
 		boxRow{Label: "data", Value: fmt.Sprintf("%d files, %d dirs, %d symlinks, %s", files, importedDirs, links, formatBytes(importedBytes))},
