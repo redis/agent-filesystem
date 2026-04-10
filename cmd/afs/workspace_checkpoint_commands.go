@@ -108,7 +108,7 @@ func cmdWorkspaceCreate(args []string) error {
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: afsInitialCheckpointName},
 		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace run " + workspace + " -- /bin/sh"},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " <folder>"},
 	})
 	return nil
 }
@@ -146,14 +146,18 @@ func cmdWorkspaceList(args []string) error {
 		return err
 	}
 
+	nameWidth := 0
+	selected := selectedWorkspaceName(cfg)
+	for _, meta := range workspaces.Items {
+		if w := runeWidth(workspaceListName(meta.Name, meta.Name == selected)); w > nameWidth {
+			nameWidth = w
+		}
+	}
+
 	rows := make([]boxRow, 0, len(workspaces.Items))
 	for _, meta := range workspaces.Items {
-		value := fmt.Sprintf("%s · updated %s", checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt))
-		if meta.Name == selectedWorkspaceName(cfg) {
-			value = "current · " + value
-		}
+		value := workspaceListLine(meta.Name, checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt), meta.Name == selected, nameWidth)
 		rows = append(rows, boxRow{
-			Label: meta.Name,
 			Value: value,
 		})
 	}
@@ -162,6 +166,24 @@ func cmdWorkspaceList(args []string) error {
 	}
 	printBox(clr(ansiBold, "workspaces on "+configRemoteLabel(cfg)), rows)
 	return nil
+}
+
+func workspaceListName(name string, selected bool) string {
+	prefix := "  "
+	if selected {
+		prefix = clr(ansiBGreen, "✓") + " "
+	}
+	return prefix + clr(ansiBold+ansiWhite, name)
+}
+
+func workspaceListLine(name, checkpointLabel, updated string, selected bool, nameWidth int) string {
+	namePart := padVisibleText(workspaceListName(name, selected), nameWidth)
+	details := clr(ansiDim, checkpointLabel+" · updated "+updated)
+	line := namePart + "   " + details
+	if selected {
+		line += " " + clr(ansiBGreen, "<active>")
+	}
+	return line
 }
 
 func cmdWorkspaceCurrent(args []string) error {
@@ -215,6 +237,14 @@ func cmdWorkspaceUse(args []string) error {
 	if !exists {
 		return fmt.Errorf("workspace %q does not exist", workspace)
 	}
+	if active, err := activeMountedWorkspaceState(); err != nil {
+		return err
+	} else if active.workspace != "" && active.workspace != workspace {
+		if active.mountpoint != "" {
+			return fmt.Errorf("active workspace %q mounted at %s\nRun '%s down' before selecting %q", active.workspace, active.mountpoint, filepath.Base(os.Args[0]), workspace)
+		}
+		return fmt.Errorf("active workspace %q mounted\nRun '%s down' before selecting %q", active.workspace, filepath.Base(os.Args[0]), workspace)
+	}
 
 	cfg.CurrentWorkspace = workspace
 	if err := prepareConfigForSave(&cfg); err != nil {
@@ -230,6 +260,42 @@ func cmdWorkspaceUse(args []string) error {
 		{Label: "config", Value: configPathLabel()},
 	})
 	return nil
+}
+
+type mountedWorkspaceState struct {
+	workspace  string
+	mountpoint string
+}
+
+func activeMountedWorkspaceState() (mountedWorkspaceState, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return mountedWorkspaceState{}, nil
+		}
+		return mountedWorkspaceState{}, err
+	}
+
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	workspace := strings.TrimSpace(st.CurrentWorkspace)
+	if backendName == mountBackendNone || workspace == "" {
+		return mountedWorkspaceState{}, nil
+	}
+	if st.MountPID > 0 && processAlive(st.MountPID) {
+		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.Mountpoint)}, nil
+	}
+
+	backend, _, err := backendForState(st)
+	if err != nil {
+		return mountedWorkspaceState{}, err
+	}
+	if strings.TrimSpace(st.Mountpoint) != "" && backend.IsMounted(st.Mountpoint) {
+		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.Mountpoint)}, nil
+	}
+	return mountedWorkspaceState{}, nil
 }
 
 func cmdWorkspaceRun(args []string) error {
@@ -718,7 +784,7 @@ func cmdCheckpointList(args []string) error {
 	if len(rows) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No checkpoints found")})
 	}
-	printBox(clr(ansiBold, "checkpoints "+workspace+" on "+configRemoteLabel(cfg)), rows)
+	printBox(clr(ansiBold, "checkpoints in workspace: "+workspace), rows)
 	return nil
 }
 

@@ -24,6 +24,7 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
 	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "repo"
 	saveTempConfig(t, cfg)
 
 	sourceDir := t.TempDir()
@@ -71,6 +72,34 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, "repo-copy") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want both workspace names", listOutput)
 	}
+	if !strings.Contains(listOutput, "✓ repo") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want selected workspace checkmark", listOutput)
+	}
+	if !strings.Contains(listOutput, "<active>") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want active marker", listOutput)
+	}
+	if strings.Contains(listOutput, "current ·") {
+		t.Fatalf("cmdWorkspace(list) output = %q, did not expect current marker text", listOutput)
+	}
+	var repoLine, copyLine string
+	for _, line := range strings.Split(listOutput, "\n") {
+		if strings.Contains(line, "repo-copy") {
+			copyLine = line
+		} else if strings.Contains(line, "✓ repo") {
+			repoLine = line
+		}
+	}
+	if repoLine == "" || copyLine == "" {
+		t.Fatalf("cmdWorkspace(list) output = %q, want both workspace rows", listOutput)
+	}
+	repoValueIdx := strings.Index(repoLine, "1 checkpoint")
+	copyValueIdx := strings.Index(copyLine, "1 checkpoint")
+	if repoValueIdx == -1 || copyValueIdx == -1 {
+		t.Fatalf("workspace list output = %q, want checkpoint counts on both rows", listOutput)
+	}
+	if got, want := runeWidth(repoLine[:repoValueIdx]), runeWidth(copyLine[:copyValueIdx]); got != want {
+		t.Fatalf("workspace list columns misaligned:\nrepo: %q\ncopy: %q", repoLine, copyLine)
+	}
 
 	if err := cmdWorkspace([]string{"workspace", "delete", "repo-copy"}); err != nil {
 		t.Fatalf("cmdWorkspace(delete) returned error: %v", err)
@@ -82,6 +111,33 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	}
 	if exists {
 		t.Fatal("expected forked workspace to be deleted")
+	}
+}
+
+func TestWorkspaceCreateSuggestsMountFirst(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	output, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "create", "demo"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+	if !strings.Contains(output, "afs.test up demo <folder>") {
+		t.Fatalf("cmdWorkspace(create) output = %q, want mount-first next hint", output)
+	}
+	if strings.Contains(output, "workspace run demo -- /bin/sh") {
+		t.Fatalf("cmdWorkspace(create) output = %q, did not expect workspace run hint", output)
 	}
 }
 
@@ -183,8 +239,11 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdCheckpoint(list) returned error: %v", err)
 	}
-	if !strings.Contains(listOutput, "checkpoints repo on redis://") {
-		t.Fatalf("cmdCheckpoint(list) output = %q, want workspace/database title", listOutput)
+	if !strings.Contains(listOutput, "checkpoints in workspace: repo") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want workspace title", listOutput)
+	}
+	if strings.Contains(listOutput, "redis://") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, did not expect database in title", listOutput)
 	}
 	if !strings.Contains(listOutput, "initial") || !strings.Contains(listOutput, "after-edit") {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want both checkpoint names", listOutput)

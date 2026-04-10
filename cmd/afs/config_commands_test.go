@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -471,6 +472,67 @@ func TestCmdWorkspaceUseAndCurrentManageSelectionOutsideConfigCommand(t *testing
 		if !strings.Contains(out, want) {
 			t.Fatalf("workspace current output = %q, want substring %q", out, want)
 		}
+	}
+}
+
+func TestCmdWorkspaceUseRejectsSwitchWhileDifferentWorkspaceMounted(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNFS
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.CurrentWorkspace = "alpha"
+	saveTempConfig(t, cfg)
+
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+	for _, name := range []string{"alpha", "beta"} {
+		if err := createEmptyWorkspace(context.Background(), loadedCfg, store, name); err != nil {
+			t.Fatalf("createEmptyWorkspace(%s) returned error: %v", name, err)
+		}
+	}
+
+	if err := saveState(state{
+		StartedAt:        time.Now().UTC(),
+		CurrentWorkspace: "alpha",
+		MountBackend:     mountBackendNFS,
+		MountPID:         os.Getpid(),
+		Mountpoint:       "/tmp/afs-alpha",
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	err = cmdWorkspace([]string{"workspace", "use", "beta"})
+	if err == nil {
+		t.Fatal("cmdWorkspace(use beta) returned nil error, want mounted workspace warning")
+	}
+	for _, want := range []string{`active workspace "alpha"`, "down' before selecting", `"beta"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("cmdWorkspace(use beta) error = %q, want substring %q", err, want)
+		}
+	}
+
+	saved, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if saved.CurrentWorkspace != "alpha" {
+		t.Fatalf("CurrentWorkspace = %q, want %q after rejected switch", saved.CurrentWorkspace, "alpha")
 	}
 }
 
