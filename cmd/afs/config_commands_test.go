@@ -165,6 +165,56 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 	}
 }
 
+func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	base := defaultConfig()
+	base.UseExistingRedis = true
+	base.RedisAddr = "127.0.0.1:6379"
+	base.RedisDB = 0
+	base.CurrentWorkspace = "alpha"
+	base.MountBackend = mountBackendNFS
+	base.Mountpoint = filepath.Join(t.TempDir(), "valid-mountpoint")
+	base.NFSBin = "/usr/bin/true"
+	if err := saveConfig(base); err != nil {
+		t.Fatalf("saveConfig(base) returned error: %v", err)
+	}
+
+	mountpointFile := filepath.Join(t.TempDir(), "afs")
+	if err := os.WriteFile(mountpointFile, []byte("binary"), 0o644); err != nil {
+		t.Fatalf("WriteFile(mountpoint) returned error: %v", err)
+	}
+
+	_, err := loadConfigForUpWithIO([]string{"beta", mountpointFile}, bufio.NewReader(bytes.NewBuffer(nil)), &bytes.Buffer{}, false)
+	if err == nil {
+		t.Fatal("loadConfigForUpWithIO() returned nil error, want existing-file mountpoint rejection")
+	}
+	if !strings.Contains(err.Error(), "exists and is not a directory") {
+		t.Fatalf("loadConfigForUpWithIO() error = %q, want non-directory message", err)
+	}
+
+	saved, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig(saved) returned error: %v", err)
+	}
+	if saved.CurrentWorkspace != base.CurrentWorkspace {
+		t.Fatalf("saved CurrentWorkspace = %q, want %q after rejected mountpoint", saved.CurrentWorkspace, base.CurrentWorkspace)
+	}
+	if saved.Mountpoint != base.Mountpoint {
+		t.Fatalf("saved Mountpoint = %q, want %q after rejected mountpoint", saved.Mountpoint, base.Mountpoint)
+	}
+	if saved.MountBackend != base.MountBackend {
+		t.Fatalf("saved MountBackend = %q, want %q after rejected mountpoint", saved.MountBackend, base.MountBackend)
+	}
+}
+
 func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	t.Helper()
 

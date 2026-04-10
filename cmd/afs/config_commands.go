@@ -159,6 +159,9 @@ func cmdConfigSet(args []string) error {
 	if err := prepareConfigForSave(&cfg); err != nil {
 		return err
 	}
+	if err := validateConfiguredMountpoint(cfg); err != nil {
+		return err
+	}
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
@@ -333,7 +336,14 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		if mountpoint == "" {
 			return false, fmt.Errorf("mountpoint cannot be empty when starting a mounted filesystem")
 		}
-		cfg.Mountpoint = mountpoint
+		resolvedMountpoint, err := expandPath(mountpoint)
+		if err != nil {
+			return false, err
+		}
+		if err := validateMountpointPath(resolvedMountpoint); err != nil {
+			return false, err
+		}
+		cfg.Mountpoint = resolvedMountpoint
 		changed = true
 	}
 
@@ -391,6 +401,9 @@ func persistConfigForUp(cfg *config) error {
 	}
 	persisted := *cfg
 	if err := prepareConfigForSave(&persisted); err != nil {
+		return err
+	}
+	if err := validateConfiguredMountpoint(persisted); err != nil {
 		return err
 	}
 	if err := saveConfig(persisted); err != nil {

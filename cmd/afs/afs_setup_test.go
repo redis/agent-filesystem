@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -264,6 +265,106 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	}
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
+	}
+}
+
+func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
+	t.Helper()
+
+	mountpointFile := filepath.Join(t.TempDir(), "afs")
+	if err := os.WriteFile(mountpointFile, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("WriteFile(mountpoint) returned error: %v", err)
+	}
+
+	cfg := defaultConfig()
+	cfg.UseExistingRedis = true
+	cfg.CurrentWorkspace = "demo"
+	cfg.MountBackend = mountBackendNone
+	cfg.Mountpoint = ""
+
+	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(mountpointFile)))
+	_, err := promptLocalFilesystemSetup(reader, ioDiscard{}, &cfg, false)
+	if err == nil {
+		t.Fatal("promptLocalFilesystemSetup() returned nil error, want existing-file mountpoint rejection")
+	}
+	if !strings.Contains(err.Error(), "exists and is not a directory") {
+		t.Fatalf("promptLocalFilesystemSetup() error = %q, want non-directory message", err)
+	}
+	if cfg.MountBackend != mountBackendNone {
+		t.Fatalf("MountBackend = %q, want %q after rejected mountpoint", cfg.MountBackend, mountBackendNone)
+	}
+	if cfg.Mountpoint != "" {
+		t.Fatalf("Mountpoint = %q, want empty after rejected mountpoint", cfg.Mountpoint)
+	}
+}
+
+func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	mountpointFile := filepath.Join(t.TempDir(), "afs")
+	if err := os.WriteFile(mountpointFile, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("WriteFile(mountpoint) returned error: %v", err)
+	}
+
+	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
+	input := stringsJoinLines(
+		"2",            // existing redis
+		"",             // redis addr default
+		"",             // redis username default
+		"",             // redis password
+		"",             // tls default
+		mountpointFile, // invalid mountpoint
+	)
+	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {
+		t.Fatalf("WriteFile(stdin) returned error: %v", err)
+	}
+
+	stdinFile, err := os.Open(stdinPath)
+	if err != nil {
+		t.Fatalf("Open(stdin) returned error: %v", err)
+	}
+	defer stdinFile.Close()
+
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "setup-stdout-*.txt")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdout) returned error: %v", err)
+	}
+	defer stdoutFile.Close()
+
+	origStdin := os.Stdin
+	origStdout := os.Stdout
+	os.Stdin = stdinFile
+	os.Stdout = stdoutFile
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		os.Stdout = origStdout
+	})
+
+	err = cmdSetup()
+	if err == nil {
+		t.Fatal("cmdSetup() returned nil error, want existing-file mountpoint rejection")
+	}
+	if !strings.Contains(err.Error(), "exists and is not a directory") {
+		t.Fatalf("cmdSetup() error = %q, want non-directory message", err)
+	}
+	if _, statErr := os.Stat(configFile); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("config file stat error = %v, want not-exist after rejected setup", statErr)
 	}
 }
 

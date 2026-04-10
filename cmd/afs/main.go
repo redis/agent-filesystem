@@ -505,6 +505,13 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		cfg.Mountpoint = ""
 		return "", nil
 	}
+	resolvedMountpoint, err := expandPath(mp)
+	if err != nil {
+		return "", err
+	}
+	if err := validateMountpointPath(resolvedMountpoint); err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(cfg.CurrentWorkspace) == "" {
 		workspaceDefault := strings.TrimSpace(filepath.Base(mp))
 		if workspaceDefault == "." || workspaceDefault == string(os.PathSeparator) {
@@ -525,10 +532,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		}
 		cfg.CurrentWorkspace = workspace
 	}
-	cfg.Mountpoint, err = expandPath(mp)
-	if err != nil {
-		return "", err
-	}
+	cfg.Mountpoint = resolvedMountpoint
 	cfg.MountBackend = defaultMountBackend()
 	fmt.Fprintln(out, "  "+clr(ansiDim, "Using "+userModeLabel(cfg.MountBackend)+" for "+cfg.CurrentWorkspace))
 	if cfg.MountBackend == mountBackendNFS {
@@ -1853,9 +1857,79 @@ func prepareConfigForSave(cfg *config) error {
 	return nil
 }
 
+func validateConfiguredMountpoint(cfg config) error {
+	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	if err != nil {
+		return err
+	}
+	if backendName == mountBackendNone || strings.TrimSpace(cfg.Mountpoint) == "" {
+		return nil
+	}
+	return validateMountpointPath(cfg.Mountpoint)
+}
+
+func validateMountpointPath(mountpoint string) error {
+	if strings.TrimSpace(mountpoint) == "" {
+		return nil
+	}
+
+	clean := filepath.Clean(mountpoint)
+	info, err := os.Stat(clean)
+	switch {
+	case err == nil:
+		if !info.IsDir() {
+			return fmt.Errorf("mountpoint %s exists and is not a directory; choose an existing directory or a new path that AFS can create", clean)
+		}
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("check mountpoint %s: %w", clean, err)
+	}
+
+	parent, err := nearestExistingMountParent(clean)
+	if err != nil {
+		return err
+	}
+	probeDir, err := os.MkdirTemp(parent, ".afs-mountpoint-check-*")
+	if err != nil {
+		return fmt.Errorf("mountpoint %s cannot be created as a directory: %w", clean, err)
+	}
+	if err := os.Remove(probeDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove mountpoint probe %s: %w", probeDir, err)
+	}
+	return nil
+}
+
+func nearestExistingMountParent(mountpoint string) (string, error) {
+	current := filepath.Clean(mountpoint)
+	for {
+		info, err := os.Stat(current)
+		switch {
+		case err == nil:
+			if !info.IsDir() {
+				if current == mountpoint {
+					return "", fmt.Errorf("mountpoint %s exists and is not a directory; choose an existing directory or a new path that AFS can create", mountpoint)
+				}
+				return "", fmt.Errorf("mountpoint %s cannot be created because %s exists and is not a directory", mountpoint, current)
+			}
+			return current, nil
+		case !errors.Is(err, os.ErrNotExist):
+			return "", fmt.Errorf("check mountpoint %s: %w", current, err)
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", fmt.Errorf("mountpoint %s cannot be created because no parent directory exists", mountpoint)
+		}
+		current = parent
+	}
+}
+
 func resolveConfigPaths(cfg *config) error {
 	dir := exeDir()
 	if err := prepareConfigForSave(cfg); err != nil {
+		return err
+	}
+	if err := validateConfiguredMountpoint(*cfg); err != nil {
 		return err
 	}
 
