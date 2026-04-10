@@ -6,12 +6,57 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 )
+
+type commandCountHook struct {
+	track func(cmd redis.Cmder)
+}
+
+func (h *commandCountHook) DialHook(next redis.DialHook) redis.DialHook {
+	return next
+}
+
+func (h *commandCountHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if h.track != nil {
+			h.track(cmd)
+		}
+		return next(ctx, cmd)
+	}
+}
+
+func (h *commandCountHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		if h.track != nil {
+			for _, cmd := range cmds {
+				h.track(cmd)
+			}
+		}
+		return next(ctx, cmds)
+	}
+}
+
+func countRootHMGet(cmd redis.Cmder, rootKey string, count *atomic.Int64) {
+	args := cmd.Args()
+	if len(args) < 2 {
+		return
+	}
+	name, ok := args[0].(string)
+	if !ok || !strings.EqualFold(name, "hmget") {
+		return
+	}
+	key, ok := args[1].(string)
+	if !ok || key != rootKey {
+		return
+	}
+	count.Add(1)
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -794,6 +839,88 @@ func TestInodeWriteRefreshesPathCacheBeforeMetadataUpdate(t *testing.T) {
 	}
 	if size != "5" {
 		t.Fatalf("redis inode size = %q, want 5", size)
+	}
+}
+
+func TestWarmPathCachePreloadsDeepExactPaths(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	raw := NewWithCache(rdb, "warm-path-cache", time.Hour)
+	c, ok := raw.(*nativeClient)
+	if !ok {
+		t.Fatalf("client type = %T, want *nativeClient", raw)
+	}
+
+	if err := c.Echo(ctx, "/projects/example/session/subagents/agent-1.jsonl", []byte("hello")); err != nil {
+		t.Fatalf("echo deep file: %v", err)
+	}
+
+	c.cache.InvalidateAll()
+	for _, p := range []string{
+		"/projects",
+		"/projects/example",
+		"/projects/example/session",
+		"/projects/example/session/subagents",
+		"/projects/example/session/subagents/agent-1.jsonl",
+	} {
+		if _, ok := c.cache.Get(p); ok {
+			t.Fatalf("expected cold cache miss for %s", p)
+		}
+	}
+
+	if err := c.WarmPathCache(ctx); err != nil {
+		t.Fatalf("WarmPathCache() returned error: %v", err)
+	}
+
+	for _, p := range []string{
+		"/",
+		"/projects",
+		"/projects/example",
+		"/projects/example/session",
+		"/projects/example/session/subagents",
+		"/projects/example/session/subagents/agent-1.jsonl",
+	} {
+		if _, ok := c.cache.Get(p); !ok {
+			t.Fatalf("expected warmed cache hit for %s", p)
+		}
+	}
+}
+
+func TestResolvePathUsesCachedRootInode(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	raw := NewWithCache(rdb, "warm-root-cache", time.Hour)
+	c, ok := raw.(*nativeClient)
+	if !ok {
+		t.Fatalf("client type = %T, want *nativeClient", raw)
+	}
+
+	if err := c.Echo(ctx, "/projects/example/session/subagents/agent-1.jsonl", []byte("hello")); err != nil {
+		t.Fatalf("echo deep file: %v", err)
+	}
+	if err := c.WarmPathCache(ctx); err != nil {
+		t.Fatalf("WarmPathCache() returned error: %v", err)
+	}
+
+	rootCached, ok := c.cache.Get("/")
+	if !ok {
+		t.Fatal("expected warmed cache hit for /")
+	}
+	c.cache.InvalidateAll()
+	c.cache.Set("/", rootCached)
+
+	var rootLoads atomic.Int64
+	rdb.AddHook(&commandCountHook{
+		track: func(cmd redis.Cmder) {
+			countRootHMGet(cmd, c.keys.inode(rootInodeID), &rootLoads)
+		},
+	})
+
+	if _, err := c.Stat(ctx, "/projects/example/session/subagents/agent-1.jsonl"); err != nil {
+		t.Fatalf("stat deep file: %v", err)
+	}
+	if got := rootLoads.Load(); got != 0 {
+		t.Fatalf("expected cached root inode to avoid redis HMGETs, got %d", got)
 	}
 }
 

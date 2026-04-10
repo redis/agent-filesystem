@@ -56,12 +56,14 @@ func newNativeClientWithCache(rdb *redis.Client, key string, ttl time.Duration) 
 func (c *nativeClient) invalidateInode(p string) {
 	if c.cache != nil {
 		c.cache.Invalidate(p)
+		c.cache.Invalidate(dirCacheKey(p))
 	}
 }
 
 func (c *nativeClient) invalidatePrefix(prefix string) {
 	if c.cache != nil {
 		c.cache.InvalidatePrefix(prefix)
+		c.cache.InvalidatePrefix(dirCachePrefix(prefix))
 	}
 }
 

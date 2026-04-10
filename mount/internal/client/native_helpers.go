@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -17,21 +18,55 @@ const (
 	schemaVersion = "2"
 )
 
+var inodeMetaFields = []string{
+	"type", "mode", "uid", "gid", "size",
+	"ctime_ms", "mtime_ms", "atime_ms", "target",
+	"parent", "name",
+}
+
+var inodeWarmFields = []string{
+	"path",
+	"type", "mode", "uid", "gid", "size",
+	"ctime_ms", "mtime_ms", "atime_ms", "target",
+	"parent", "name",
+}
+
 type namedInode struct {
 	Name  string
 	Path  string
 	Inode *inodeData
 }
 
+type warmedPathEntry struct {
+	path  string
+	inode *inodeData
+}
+
 var errNeedDirWatch = errors.New("need destination dir watch")
 
-func (c *nativeClient) ensureRoot(ctx context.Context) error {
+func (c *nativeClient) loadRootInode(ctx context.Context) (*inodeData, error) {
+	if c.cache != nil {
+		if cached, ok := c.cache.Get("/"); ok {
+			return cloneInodeMeta(cached.(*inodeData)), nil
+		}
+	}
+
 	root, err := c.loadInodeByID(ctx, rootInodeID)
+	if err != nil {
+		return nil, err
+	}
+	if root != nil {
+		c.cachePath("/", root)
+	}
+	return root, nil
+}
+
+func (c *nativeClient) ensureRoot(ctx context.Context) error {
+	root, err := c.loadRootInode(ctx)
 	if err != nil {
 		return err
 	}
 	if root != nil {
-		c.cachePath("/", root)
 		return nil
 	}
 
@@ -77,7 +112,7 @@ func (c *nativeClient) ensureParents(ctx context.Context, p string) error {
 
 	parts := splitComponents(parentPath)
 	curPath := "/"
-	curInode, err := c.loadInodeByID(ctx, rootInodeID)
+	curInode, err := c.loadRootInode(ctx)
 	if err != nil {
 		return err
 	}
@@ -131,20 +166,19 @@ func (c *nativeClient) resolvePath(ctx context.Context, p string, followFinal bo
 
 	p = normalizePath(p)
 	if p == "/" {
-		root, err := c.loadInodeByID(ctx, rootInodeID)
+		root, err := c.loadRootInode(ctx)
 		if err != nil {
 			return "", nil, err
 		}
 		if root == nil {
 			return "", nil, redis.Nil
 		}
-		c.cachePath("/", root)
 		return "/", root, nil
 	}
 
 	components := splitComponents(p)
 	curPath := "/"
-	curInode, err := c.loadInodeByID(ctx, rootInodeID)
+	curInode, err := c.loadRootInode(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -210,7 +244,7 @@ func (c *nativeClient) resolvePath(ctx context.Context, p string, followFinal bo
 			p = normalizePath(rebuilt)
 			components = splitComponents(p)
 			curPath = "/"
-			curInode, err = c.loadInodeByID(ctx, rootInodeID)
+			curInode, err = c.loadRootInode(ctx)
 			if err != nil {
 				return "", nil, err
 			}
@@ -258,14 +292,122 @@ func (c *nativeClient) loadInode(ctx context.Context, p string) (*inodeData, err
 }
 
 func (c *nativeClient) loadInodeByID(ctx context.Context, id string) (*inodeData, error) {
-	vals, err := c.rdb.HMGet(ctx, c.keys.inode(id),
-		"type", "mode", "uid", "gid", "size",
-		"ctime_ms", "mtime_ms", "atime_ms", "target",
-		"parent", "name").Result()
+	vals, err := c.rdb.HMGet(ctx, c.keys.inode(id), inodeMetaFields...).Result()
 	if err != nil {
 		return nil, err
 	}
 	return inodeFromValues(id, vals), nil
+}
+
+func (c *nativeClient) loadInodesByID(ctx context.Context, ids []string) (map[string]*inodeData, error) {
+	if len(ids) == 0 {
+		return map[string]*inodeData{}, nil
+	}
+
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.SliceCmd, len(ids))
+	for i, id := range ids {
+		cmds[i] = pipe.HMGet(ctx, c.keys.inode(id), inodeMetaFields...)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	out := make(map[string]*inodeData, len(ids))
+	for i, id := range ids {
+		vals, err := cmds[i].Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return nil, err
+		}
+		out[id] = inodeFromValues(id, vals)
+	}
+	return out, nil
+}
+
+func (c *nativeClient) WarmPathCache(ctx context.Context) error {
+	if c.cache == nil {
+		return nil
+	}
+
+	const scanCount = 256
+	dirChildren := make(map[string][]namedInode)
+	var cursor uint64
+	for {
+		keys, next, err := c.rdb.Scan(ctx, cursor, c.keys.inodePrefix()+"*", scanCount).Result()
+		if err != nil {
+			return err
+		}
+		entries, err := c.loadWarmBatch(ctx, keys)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			if entry.inode == nil || entry.path == "" {
+				continue
+			}
+			c.cachePath(entry.path, entry.inode)
+			if entry.inode.Type == "dir" {
+				if _, ok := dirChildren[entry.path]; !ok {
+					dirChildren[entry.path] = nil
+				}
+			}
+			if entry.path == "/" {
+				continue
+			}
+			parent := parentOf(entry.path)
+			dirChildren[parent] = append(dirChildren[parent], namedInode{
+				Name:  entry.inode.Name,
+				Path:  entry.path,
+				Inode: cloneInodeMeta(entry.inode),
+			})
+		}
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	for dirPath, children := range dirChildren {
+		sort.Slice(children, func(i, j int) bool { return children[i].Name < children[j].Name })
+		c.cache.Set(dirCacheKey(dirPath), cloneNamedInodes(children))
+	}
+	return nil
+}
+
+func (c *nativeClient) loadWarmBatch(ctx context.Context, keys []string) ([]warmedPathEntry, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.SliceCmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = pipe.HMGet(ctx, key, inodeWarmFields...)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	entries := make([]warmedPathEntry, 0, len(keys))
+	for i, key := range keys {
+		vals, err := cmds[i].Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return nil, err
+		}
+		if len(vals) < len(inodeWarmFields) || vals[0] == nil {
+			continue
+		}
+		id := strings.TrimPrefix(key, c.keys.inodePrefix())
+		inode := inodeFromValues(id, vals[1:])
+		if inode == nil {
+			continue
+		}
+		path := toStr(vals[0])
+		if path == "" {
+			continue
+		}
+		entries = append(entries, warmedPathEntry{path: path, inode: inode})
+	}
+	return entries, nil
 }
 
 func (c *nativeClient) loadContentByID(ctx context.Context, id string) (string, error) {
@@ -584,6 +726,11 @@ func (c *nativeClient) listDirChildren(ctx context.Context, dirPath string, dir 
 	if dir == nil || dir.Type != "dir" {
 		return nil, errors.New("not a directory")
 	}
+	if c.cache != nil {
+		if cached, ok := c.cache.Get(dirCacheKey(dirPath)); ok {
+			return cloneNamedInodes(cached.([]namedInode)), nil
+		}
+	}
 
 	entries, err := c.loadDirEntries(ctx, dir.ID)
 	if err != nil {
@@ -591,12 +738,18 @@ func (c *nativeClient) listDirChildren(ctx context.Context, dirPath string, dir 
 	}
 
 	names := sortNames(entries)
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		ids = append(ids, entries[name])
+	}
+	inodesByID, err := c.loadInodesByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]namedInode, 0, len(names))
 	for _, name := range names {
-		child, err := c.loadInodeByID(ctx, entries[name])
-		if err != nil {
-			return nil, err
-		}
+		child := inodesByID[entries[name]]
 		if child == nil {
 			continue
 		}
@@ -607,6 +760,9 @@ func (c *nativeClient) listDirChildren(ctx context.Context, dirPath string, dir 
 			Path:  childPath,
 			Inode: child,
 		})
+	}
+	if c.cache != nil {
+		c.cache.Set(dirCacheKey(dirPath), cloneNamedInodes(out))
 	}
 	return out, nil
 }
@@ -773,6 +929,14 @@ func (c *nativeClient) cachePath(p string, inode *inodeData) {
 	c.cache.Set(p, cloneInodeMeta(inode))
 }
 
+func dirCacheKey(path string) string {
+	return "\x00dir:" + normalizePath(path)
+}
+
+func dirCachePrefix(path string) string {
+	return "\x00dir:" + normalizePath(path)
+}
+
 func cloneInodeMeta(inode *inodeData) *inodeData {
 	if inode == nil {
 		return nil
@@ -780,6 +944,21 @@ func cloneInodeMeta(inode *inodeData) *inodeData {
 	clone := *inode
 	clone.Content = ""
 	return &clone
+}
+
+func cloneNamedInodes(items []namedInode) []namedInode {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]namedInode, 0, len(items))
+	for _, item := range items {
+		out = append(out, namedInode{
+			Name:  item.Name,
+			Path:  item.Path,
+			Inode: cloneInodeMeta(item.Inode),
+		})
+	}
+	return out
 }
 
 func inodeFromValues(id string, vals []interface{}) *inodeData {

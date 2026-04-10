@@ -27,6 +27,7 @@ func onCreate(ctx context.Context, w *response, userHandle Handler) error {
 		return &NFSStatusError{NFSStatusInval, err}
 	}
 	var attrs *SetFileAttributes
+	exclusiveCreate := false
 	if how == createModeUnchecked || how == createModeGuarded {
 		sattr, err := ReadSetFileAttributes(w.req.Body)
 		if err != nil {
@@ -39,9 +40,7 @@ func onCreate(ctx context.Context, w *response, userHandle Handler) error {
 		if err := xdr.Read(w.req.Body, &verf); err != nil {
 			return &NFSStatusError{NFSStatusInval, err}
 		}
-		Log.Errorf("failing create to indicate lack of support for 'exclusive' mode.")
-		// TODO: support 'exclusive' mode.
-		return &NFSStatusError{NFSStatusNotSupp, os.ErrPermission}
+		exclusiveCreate = true
 	} else {
 		// invalid
 		return &NFSStatusError{NFSStatusNotSupp, os.ErrInvalid}
@@ -76,7 +75,15 @@ func onCreate(ctx context.Context, w *response, userHandle Handler) error {
 		}
 	}
 
-	file, err := fs.Create(newFilePath)
+	var file billy.File
+	if exclusiveCreate {
+		file, err = fs.OpenFile(newFilePath, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o666)
+		if os.IsExist(err) {
+			return &NFSStatusError{NFSStatusExist, err}
+		}
+	} else {
+		file, err = fs.Create(newFilePath)
+	}
 	if err != nil {
 		Log.Errorf("Error Creating: %v", err)
 		return &NFSStatusError{NFSStatusAccess, err}
@@ -88,9 +95,11 @@ func onCreate(ctx context.Context, w *response, userHandle Handler) error {
 
 	fp := userHandle.ToHandle(fs, newFile)
 	changer := userHandle.Change(fs)
-	if err := attrs.Apply(changer, fs, newFilePath); err != nil {
-		Log.Errorf("Error applying attributes: %v\n", err)
-		return &NFSStatusError{NFSStatusIO, err}
+	if attrs != nil {
+		if err := attrs.Apply(changer, fs, newFilePath); err != nil {
+			Log.Errorf("Error applying attributes: %v\n", err)
+			return &NFSStatusError{NFSStatusIO, err}
+		}
 	}
 	invalidateVerifiers(userHandle, fs, path)
 

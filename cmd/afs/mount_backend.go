@@ -416,9 +416,8 @@ func filepathDir(p string) string {
 }
 
 func darwinNFSMountOptions(port int) string {
-	// Disable attribute caching and force synchronous writes for localhost AFS
-	// mounts so data is visible immediately after close. Also disable negative
-	// name caching to reduce transient "both names missing" windows during
-	// rapid rename churn on macOS.
-	return fmt.Sprintf("vers=3,tcp,port=%d,mountport=%d,nolocks,noac,nonegnamecache,sync", port, port)
+	// Keep synchronous writes for close-to-open visibility, but allow the macOS
+	// client to cache positive attrs so repeated LOOKUP/GETATTR bursts do not
+	// round-trip to Redis for every entry during directory-heavy app startup.
+	return fmt.Sprintf("vers=3,tcp,port=%d,mountport=%d,nolocks,nonegnamecache,sync", port, port)
 }

@@ -26,6 +26,11 @@ type authCompatHandler struct {
 
 const nfsHandleCacheLimit = 16384
 
+// macOS directory enumeration will often follow a READDIR/READDIRPLUS with a
+// burst of LOOKUP/GETATTR calls for the same entries. Keep path metadata warm
+// long enough to collapse those repeated round-trips to Redis.
+const nfsClientCacheTTL = time.Hour
+
 func (h authCompatHandler) Mount(ctx context.Context, conn net.Conn, req nfs.MountRequest) (nfs.MountStatus, billy.Filesystem, []nfs.AuthFlavor) {
 	status, fs, flavors := h.Handler.Mount(ctx, conn, req)
 	if status != nfs.MountStatusOk {
@@ -111,9 +116,17 @@ func main() {
 	if redisKey == "" {
 		redisKey = "myfs"
 	}
-	c := client.NewWithCache(rdb, redisKey, time.Second)
+	c := client.NewWithCache(rdb, redisKey, nfsClientCacheTTL)
 	if err := c.Mkdir(ctx, "/"); err != nil {
 		log.Fatalf("failed to initialize key %q: %v", redisKey, err)
+	}
+	if warmer, ok := c.(client.PathCacheWarmer); ok {
+		start := time.Now()
+		if err := warmer.WarmPathCache(ctx); err != nil {
+			log.Printf("warning: path cache warmup failed for %q: %v", redisKey, err)
+		} else {
+			log.Printf("Prewarmed path cache for %q in %s", redisKey, time.Since(start).Round(time.Millisecond))
+		}
 	}
 
 	listener, err := net.Listen("tcp", *listenAddr)

@@ -57,6 +57,12 @@ type Client interface {
 	Grep(ctx context.Context, path, pattern string, nocase bool) ([]GrepMatch, error)
 }
 
+// PathCacheWarmer is implemented by clients that can prewarm exact-path cache
+// entries from backend metadata.
+type PathCacheWarmer interface {
+	WarmPathCache(ctx context.Context) error
+}
+
 // New creates a filesystem client for the given Redis key.
 // It uses the native HASH/SET backend that works with any Redis instance.
 func New(rdb *redis.Client, key string) Client {

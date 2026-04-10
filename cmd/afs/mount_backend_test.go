@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestDarwinNFSMountOptionsDisableCachingAndUseSyncWrites(t *testing.T) {
+func TestDarwinNFSMountOptionsKeepSyncWritesWithoutDisablingPositiveAttrCaching(t *testing.T) {
 	t.Helper()
 
 	opts := darwinNFSMountOptions(20490)
@@ -16,13 +16,15 @@ func TestDarwinNFSMountOptionsDisableCachingAndUseSyncWrites(t *testing.T) {
 		"port=20490",
 		"mountport=20490",
 		"nolocks",
-		"noac",
 		"nonegnamecache",
 		"sync",
 	} {
 		if !strings.Contains(opts, want) {
 			t.Fatalf("darwinNFSMountOptions() = %q, want substring %q", opts, want)
 		}
+	}
+	if strings.Contains(opts, "noac") {
+		t.Fatalf("darwinNFSMountOptions() = %q, should not disable positive attr caching", opts)
 	}
 }
 

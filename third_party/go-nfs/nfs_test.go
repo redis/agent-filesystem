@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"sync"
@@ -290,10 +291,122 @@ func TestNFS(t *testing.T) {
 	}
 }
 
+func TestNFSExclusiveCreate(t *testing.T) {
+	listener, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	mem := NewTrackingFS(memfs.New())
+	defer func() {
+		if opened := mem.ListOpened(); len(opened) > 0 {
+			t.Errorf("Unclosed files: %v", opened)
+		}
+	}()
+
+	r, _ := mem.Create("/test")
+	r.Close()
+
+	handler := helpers.NewNullAuthHandler(mem)
+	cacheHelper := helpers.NewCachingHandler(handler, 1024)
+	go func() {
+		_ = nfs.Serve(listener, cacheHelper)
+	}()
+
+	c, err := rpc.DialTCP(listener.Addr().Network(), listener.Addr().(*net.TCPAddr).String(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	var mounter nfsc.Mount
+	mounter.Client = c
+	target, err := mounter.Mount("/", rpc.AuthNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = mounter.Unmount()
+	}()
+
+	if _, err := createExclusive(target, "/exclusive.txt"); err != nil {
+		t.Fatalf("exclusive create failed: %v", err)
+	}
+	if _, err := mem.Stat("/exclusive.txt"); err != nil {
+		t.Fatalf("stat exclusive create: %v", err)
+	}
+	if _, err := createExclusive(target, "/exclusive.txt"); !os.IsExist(err) {
+		t.Fatalf("second exclusive create error = %v, want os.ErrExist", err)
+	}
+}
+
 type readDirEntry struct {
 	FileId   uint64
 	FileName string
 	Cookie   uint64
+}
+
+func createExclusive(target *nfsc.Target, path string) ([]byte, error) {
+	parentDir, name := filepath.Split(path)
+	if parentDir == "" {
+		parentDir = "/"
+	}
+	_, fh, err := target.Lookup(parentDir)
+	if err != nil {
+		return nil, err
+	}
+
+	type createExclusiveHow struct {
+		Mode uint32
+		Verf [8]byte
+	}
+	type createExclusiveArgs struct {
+		rpc.Header
+		Where nfsc.Diropargs3
+		HW    createExclusiveHow
+	}
+	type createExclusiveRes struct {
+		FH     nfsc.PostOpFH3
+		Attr   nfsc.PostOpAttr
+		DirWcc nfsc.WccData
+	}
+
+	res, err := target.Call(&createExclusiveArgs{
+		Header: rpc.Header{
+			Rpcvers: 2,
+			Prog:    nfsc.Nfs3Prog,
+			Vers:    nfsc.Nfs3Vers,
+			Proc:    nfsc.NFSProc3Create,
+			Cred:    rpc.AuthNull,
+			Verf:    rpc.AuthNull,
+		},
+		Where: nfsc.Diropargs3{
+			FH:       fh,
+			Filename: name,
+		},
+		HW: createExclusiveHow{
+			Mode: 2,
+			Verf: [8]byte{1, 2, 3, 4, 5, 6, 7, 8},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	status, err := xdr.ReadUint32(res)
+	if err != nil {
+		return nil, err
+	}
+	if err := nfsc.NFS3Error(status); err != nil {
+		return nil, err
+	}
+
+	createRes := new(createExclusiveRes)
+	if err := xdr.Read(res, createRes); err != nil {
+		return nil, err
+	}
+	return createRes.FH.FH, nil
 }
 
 // readDir implementation "appropriated" from go-nfs-client implementation of READDIRPLUS
