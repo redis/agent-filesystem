@@ -37,11 +37,35 @@ type ManifestStats struct {
 	TotalBytes int64
 }
 
+// ManifestStatsFromImport returns the manifest-oriented subset of ImportStats.
+// Used by callers that only care about the size of the materialized manifest.
+func ManifestStatsFromImport(s ImportStats) ManifestStats {
+	return ManifestStats{
+		FileCount:  s.Files,
+		DirCount:   s.Dirs,
+		TotalBytes: s.Bytes,
+	}
+}
+
 type IgnoreFunc func(root, path string, d os.DirEntry) (bool, error)
+
+// BlobSink receives non-inline file blobs as they are hashed during a manifest
+// build. A caller that provides a sink takes ownership of persisting the blob
+// bytes (e.g., pipelining to Redis) and allows the builder to drop its own
+// reference so large imports do not hold every file in RAM simultaneously.
+type BlobSink interface {
+	Submit(blobID string, data []byte, size int64) error
+}
 
 type BuildManifestOptions struct {
 	Ignore     IgnoreFunc
 	OnProgress func(ImportStats)
+	// Sink, when set, receives non-inline blobs as they are hashed. When set,
+	// BuildManifestFromDirectory returns a nil blob map (the sink owns them).
+	Sink BlobSink
+	// Workers controls the size of the parallel read+hash worker pool.
+	// Defaults to runtime.NumCPU() when <= 0.
+	Workers int
 }
 
 type BlobLoader func(blobID string) ([]byte, error)

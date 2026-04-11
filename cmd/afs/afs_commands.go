@@ -10,13 +10,62 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/worktree"
 	"github.com/redis/go-redis/v9"
 )
 
 var errImportCancelled = errors.New("import cancelled")
+
+// importBlobSink is a worktree.BlobSink that pipelines blobs to Redis via a
+// BlobWriter and retains each blob body in an in-memory map so the immediately
+// following SyncWorkspaceRoot can fetch them without re-reading Redis. Entries
+// are dropped after the sync step, keeping peak RAM bounded to
+// source_size + (workers × read_buffer) during the build, plus one more pass
+// during sync.
+type importBlobSink struct {
+	mu     sync.Mutex
+	ctx    context.Context
+	writer *controlplane.BlobWriter
+	cache  map[string][]byte
+}
+
+func newImportBlobSink(ctx context.Context, writer *controlplane.BlobWriter) *importBlobSink {
+	return &importBlobSink{
+		ctx:    ctx,
+		writer: writer,
+		cache:  make(map[string][]byte),
+	}
+}
+
+func (s *importBlobSink) Submit(blobID string, data []byte, size int64) error {
+	s.mu.Lock()
+	if _, ok := s.cache[blobID]; ok {
+		s.mu.Unlock()
+		return nil
+	}
+	// Share the byte slice with the writer and the cache; BlobWriter does not
+	// mutate the buffer.
+	s.cache[blobID] = data
+	s.mu.Unlock()
+	return s.writer.Submit(s.ctx, blobID, data, size)
+}
+
+func (s *importBlobSink) Get(blobID string) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	data, ok := s.cache[blobID]
+	return data, ok
+}
+
+func (s *importBlobSink) Drop() {
+	s.mu.Lock()
+	s.cache = nil
+	s.mu.Unlock()
+}
 
 func cmdImport(args []string) error {
 	parsed, err := parseAFSArgs(args[1:], true, false)
@@ -44,19 +93,33 @@ func cmdImport(args []string) error {
 		return fmt.Errorf("%s is not a directory", sourceDir)
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	ctx := context.Background()
+	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	exists, err := store.workspaceExists(context.Background(), workspace)
+	exists, err := store.workspaceExists(ctx, workspace)
 	if err != nil {
 		return err
 	}
 	if exists && !parsed.force {
 		return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
 	}
+
+	lock, err := store.acquireImportLock(ctx, workspace)
+	if err != nil {
+		if errors.Is(err, controlplane.ErrImportInProgress) {
+			return fmt.Errorf("another import is already running for workspace %q; wait for it to finish or clear the stale lock", workspace)
+		}
+		return fmt.Errorf("acquire import lock: %w", err)
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = lock.Release(releaseCtx)
+	}()
 
 	const initialSavepoint = "initial"
 	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, parsed.force)
@@ -72,7 +135,7 @@ func cmdImport(args []string) error {
 
 	if parsed.force {
 		step := startStep("Replacing existing workspace")
-		if err := store.deleteWorkspace(context.Background(), workspace); err != nil {
+		if err := store.deleteWorkspace(ctx, workspace); err != nil {
 			step.fail(err.Error())
 			return err
 		}
@@ -85,16 +148,34 @@ func cmdImport(args []string) error {
 
 	now := time.Now().UTC()
 	defaultMeta := controlplane.ApplyWorkspaceMetaDefaults(controlPlaneConfigFromCLI(cfg), workspaceMeta{Name: workspace})
+
+	writer := store.newBlobWriter(workspace, now)
+	sink := newImportBlobSink(ctx, writer)
+
 	step := startStep("Building manifest")
-	manifest, blobs, stats, err := buildManifestFromDirectoryWithOptions(sourceDir, workspace, initialSavepoint, ignorer, func(progress importStats) {
+	manifest, stats, err := buildManifestStreaming(sourceDir, workspace, initialSavepoint, ignorer, sink, func(progress importStats) {
 		step.update(formatAFSImportProgressLabel("Building manifest", progress, total, step.elapsed()))
 	})
 	if err != nil {
 		step.fail(err.Error())
 		return err
 	}
-	manifestDuration := step.elapsed()
-	step.succeed(formatAFSImportSummary(total))
+	if flushErr := writer.Flush(ctx); flushErr != nil {
+		step.fail(flushErr.Error())
+		return flushErr
+	}
+	if lockErr := lock.Lost(); lockErr != nil {
+		step.fail(lockErr.Error())
+		return lockErr
+	}
+	buildDuration := step.elapsed()
+	blobCount, blobBytes := writer.Totals()
+	if blobCount == 0 {
+		step.succeed(formatAFSImportSummary(total) + " · all files inlined")
+	} else {
+		step.succeed(fmt.Sprintf("%s · %d blobs, %s pipelined", formatAFSImportSummary(total), blobCount, formatBytes(blobBytes)))
+	}
+
 	manifestHash, err := hashManifest(manifest)
 	if err != nil {
 		return err
@@ -129,25 +210,7 @@ func cmdImport(args []string) error {
 		TotalBytes:   stats.TotalBytes,
 	}
 
-	ctx := context.Background()
-	step = startStep("Saving blobs")
-	if err := store.saveBlobs(ctx, workspace, blobs); err != nil {
-		step.fail(err.Error())
-		return err
-	}
-	blobCount, blobBytes := afsBlobTotals(blobs)
-	blobDuration := step.elapsed()
-	if blobCount == 0 {
-		step.succeed("all files inlined")
-	} else {
-		step.succeed(fmt.Sprintf("%d blobs, %s", blobCount, formatBytes(blobBytes)))
-	}
-
 	step = startStep("Writing workspace metadata")
-	if err := store.addBlobRefs(ctx, workspace, manifest, now); err != nil {
-		step.fail(err.Error())
-		return err
-	}
 	if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
 		step.fail(err.Error())
 		return err
@@ -160,12 +223,19 @@ func cmdImport(args []string) error {
 	step.succeed(initialSavepoint)
 
 	step = startStep("Initializing live workspace")
-	if err := store.syncWorkspaceRoot(ctx, workspace, manifest); err != nil {
+	syncOpts := controlplane.SyncOptions{
+		BlobProvider:       sink.Get,
+		SkipNamespaceReset: true,
+	}
+	if err := store.syncWorkspaceRootWithOptions(ctx, workspace, manifest, syncOpts); err != nil {
 		step.fail(err.Error())
 		return err
 	}
 	rootDuration := step.elapsed()
 	step.succeed("ready for afs up")
+
+	// Drop the blob cache now that sync has consumed it.
+	sink.Drop()
 
 	if err := store.audit(ctx, workspace, "import", map[string]any{
 		"savepoint":   initialSavepoint,
@@ -186,10 +256,30 @@ func cmdImport(args []string) error {
 		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
 		{Label: "ignored", Value: strconv.Itoa(total.Ignored)},
 		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
-		{Label: "import time", Value: formatStepDuration(scanDuration + manifestDuration + blobDuration + metadataDuration + rootDuration)},
+		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
+		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
 		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
 	})
 	return nil
+}
+
+// resolveImportWorkers mirrors the logic used inside worktree.BuildManifest so
+// the summary box reports the actual worker count.
+func resolveImportWorkers() int {
+	if raw := strings.TrimSpace(os.Getenv("AFS_IMPORT_WORKERS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return n
+		}
+	}
+	// Keep a conservative default display; the real worker count is sourced
+	// the same way inside worktree.resolveWorkerCount.
+	return worktreeDefaultWorkers()
+}
+
+func worktreeDefaultWorkers() int {
+	// Exported helper lives in worktree; lazily mirror it here so we don't
+	// add another exported surface.
+	return worktree.DefaultImportWorkers()
 }
 
 func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting bool) (importStats, *migrationIgnore, time.Duration, error) {

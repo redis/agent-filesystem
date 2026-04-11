@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/worktree"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -85,13 +86,7 @@ type importClient interface {
 	Utimens(ctx context.Context, path string, atimeMs, mtimeMs int64) error
 }
 
-type importStats struct {
-	Files    int
-	Dirs     int
-	Symlinks int
-	Ignored  int
-	Bytes    int64
-}
+type importStats = worktree.ImportStats
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -183,7 +178,7 @@ Commands:
   status               Show current status
   grep [flags] <pat>   Search a workspace directly in Redis
   mcp                  Start the workspace-first MCP server over stdio
-  workspace ...        Workspace operations (create, list, current, use, run, clone, fork, delete, import)
+  workspace ...        Workspace operations (create, list, current, use, run, clone, delete, import)
   checkpoint ...       Checkpoint operations (create, list, restore)
 
 Config: %s
@@ -961,6 +956,9 @@ func startServices(cfg config) error {
 		return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
 	}
 	workspaceStep.succeed(workspace)
+	if err := store.checkImportLock(ctx, workspace); err != nil {
+		return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
+	}
 	prepareStep := startStep("Opening live workspace")
 	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
 	if err != nil {
@@ -1485,17 +1483,16 @@ func scanDirectory(source string, ignorer *migrationIgnore) (importStats, error)
 			return nil
 		}
 
-		info, err := os.Lstat(path)
-		if err != nil {
-			return err
-		}
-
 		switch {
 		case d.Type()&os.ModeSymlink != 0:
 			stats.Symlinks++
 		case d.IsDir():
 			stats.Dirs++
 		default:
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
 			stats.Files++
 			stats.Bytes += info.Size()
 		}

@@ -95,6 +95,22 @@ func (s *afsStore) syncWorkspaceRoot(ctx context.Context, workspace string, m ma
 	return controlplane.SyncWorkspaceRoot(ctx, s.cp, workspace, m)
 }
 
+func (s *afsStore) syncWorkspaceRootWithOptions(ctx context.Context, workspace string, m manifest, opts controlplane.SyncOptions) error {
+	return controlplane.SyncWorkspaceRootWithOptions(ctx, s.cp, workspace, m, opts)
+}
+
+func (s *afsStore) acquireImportLock(ctx context.Context, workspace string) (*controlplane.ImportLock, error) {
+	return controlplane.AcquireImportLock(ctx, s.cp, workspace)
+}
+
+func (s *afsStore) checkImportLock(ctx context.Context, workspace string) error {
+	return controlplane.CheckImportLock(ctx, s.cp, workspace)
+}
+
+func (s *afsStore) newBlobWriter(workspace string, createdAt time.Time) *controlplane.BlobWriter {
+	return controlplane.NewBlobWriter(s.rdb, workspace, createdAt)
+}
+
 func (s *afsStore) workspaceRootDirtyState(ctx context.Context, workspace string) (bool, bool, error) {
 	return controlplane.WorkspaceRootDirtyState(ctx, s.cp, workspace)
 }

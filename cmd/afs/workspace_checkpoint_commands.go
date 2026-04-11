@@ -592,6 +592,10 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		return err
 	}
 
+	if err := store.checkImportLock(ctx, workspace); err != nil {
+		return fmt.Errorf("cannot mount workspace %q at source: %w", workspace, err)
+	}
+
 	prepareStep := startStep("Opening live workspace")
 	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
 	if err != nil {

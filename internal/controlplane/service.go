@@ -475,6 +475,9 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 	if err := ValidateName("checkpoint", checkpointID); err != nil {
 		return err
 	}
+	if err := CheckImportLock(ctx, s.store, workspace); err != nil {
+		return err
+	}
 	exists, err := s.store.SavepointExists(ctx, workspace, checkpointID)
 	if err != nil {
 		return err
@@ -509,6 +512,9 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 		return false, err
 	}
 	if err := ValidateName("checkpoint", input.ExpectedHead); err != nil {
+		return false, err
+	}
+	if err := CheckImportLock(ctx, s.store, input.Workspace); err != nil {
 		return false, err
 	}
 
@@ -640,6 +646,12 @@ func (s *Service) forkWorkspace(ctx context.Context, sourceWorkspace, newWorkspa
 		return err
 	}
 	if err := ValidateName("workspace", newWorkspace); err != nil {
+		return err
+	}
+	if err := CheckImportLock(ctx, s.store, sourceWorkspace); err != nil {
+		return err
+	}
+	if err := CheckImportLock(ctx, s.store, newWorkspace); err != nil {
 		return err
 	}
 	exists, err := s.store.WorkspaceExists(ctx, newWorkspace)
@@ -970,6 +982,9 @@ type workspaceCreateSpec struct {
 }
 
 func createWorkspaceWithMetadata(ctx context.Context, cfg Config, store *Store, workspace string, spec workspaceCreateSpec) error {
+	if err := CheckImportLock(ctx, store, workspace); err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	metaDefaults := applyWorkspaceMetaDefaults(cfg, WorkspaceMeta{
 		Name:         workspace,

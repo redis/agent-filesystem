@@ -22,11 +22,24 @@ func buildManifestFromDirectoryWithOptions(root, workspace, savepoint string, ig
 		opts.Ignore = ignorer.matches
 	}
 	if onProgress != nil {
-		opts.OnProgress = func(progress worktree.ImportStats) {
-			onProgress(importStats(progress))
-		}
+		opts.OnProgress = onProgress
 	}
 	return worktree.BuildManifestFromDirectory(root, workspace, savepoint, opts)
+}
+
+// buildManifestStreaming is the fast path used by `afs workspace import`. It
+// hands non-inline blobs to the supplied sink so the caller can pipeline them
+// to Redis and drop the in-memory buffers incrementally.
+func buildManifestStreaming(root, workspace, savepoint string, ignorer *migrationIgnore, sink worktree.BlobSink, onProgress func(importStats)) (manifest, manifestStats, error) {
+	opts := worktree.BuildManifestOptions{Sink: sink}
+	if ignorer != nil {
+		opts.Ignore = ignorer.matches
+	}
+	if onProgress != nil {
+		opts.OnProgress = onProgress
+	}
+	m, _, stats, err := worktree.BuildManifestFromDirectory(root, workspace, savepoint, opts)
+	return m, stats, err
 }
 
 func hashManifest(m manifest) (string, error) {

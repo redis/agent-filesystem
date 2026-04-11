@@ -91,11 +91,44 @@ func EnsureWorkspaceRoot(ctx context.Context, store *Store, workspace string) (s
 }
 
 func SyncWorkspaceRoot(ctx context.Context, store *Store, workspace string, m Manifest) error {
+	return SyncWorkspaceRootWithOptions(ctx, store, workspace, m, SyncOptions{})
+}
+
+// SyncOptions tunes SyncWorkspaceRootWithOptions for callers that can avoid
+// round trips the default path must make.
+type SyncOptions struct {
+	// BlobProvider, when set, short-circuits GetBlob for materialized file
+	// nodes. It returns (data, true) if the caller has the blob in memory;
+	// otherwise (nil, false) and the sync falls back to Redis.
+	BlobProvider func(blobID string) ([]byte, bool)
+	// SkipNamespaceReset bypasses the SCAN+DEL pass over the existing FS
+	// namespace. Safe only when the workspace is known to be empty
+	// (fresh import, or right after DeleteWorkspace).
+	SkipNamespaceReset bool
+}
+
+// SyncWorkspaceRootWithOptions materializes a manifest into the live workspace
+// FS namespace. Callers that have already loaded file bodies (e.g., during
+// import) can pass a BlobProvider to avoid reloading them from Redis.
+func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace string, m Manifest, opts SyncOptions) error {
 	fsKey := WorkspaceFSKey(workspace)
-	if err := resetWorkspaceFSNamespace(ctx, store.rdb, fsKey); err != nil {
-		return err
+	if !opts.SkipNamespaceReset {
+		if err := resetWorkspaceFSNamespace(ctx, store.rdb, fsKey); err != nil {
+			return err
+		}
+	} else {
+		// Even when skipping the namespace scan we still need to drop the
+		// cached head/dirty markers so workspaceRootExists re-verifies.
+		if err := store.rdb.Del(ctx,
+			"afs:{"+fsKey+"}:info",
+			"afs:{"+fsKey+"}:next_inode",
+			workspaceRootHeadKey(fsKey),
+			workspaceRootDirtyKey(fsKey),
+		).Err(); err != nil {
+			return err
+		}
 	}
-	if err := materializeManifestToWorkspaceFS(ctx, store, workspace, fsKey, m); err != nil {
+	if err := materializeManifestToWorkspaceFS(ctx, store, workspace, fsKey, m, opts); err != nil {
 		return err
 	}
 	return MarkWorkspaceRootClean(ctx, store, workspace, m.Savepoint)
@@ -159,12 +192,12 @@ func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey str
 	return nil
 }
 
-func materializeManifestToWorkspaceFS(ctx context.Context, store *Store, workspace, fsKey string, m Manifest) error {
+func materializeManifestToWorkspaceFS(ctx context.Context, store *Store, workspace, fsKey string, m Manifest, opts SyncOptions) error {
 	nodes, err := buildWorkspaceFSNodes(m)
 	if err != nil {
 		return err
 	}
-	return writeWorkspaceFSNodes(ctx, store, workspace, fsKey, nodes)
+	return writeWorkspaceFSNodes(ctx, store, workspace, fsKey, nodes, opts)
 }
 
 func buildWorkspaceFSNodes(m Manifest) ([]workspaceFSNode, error) {
@@ -218,7 +251,7 @@ func buildWorkspaceFSNodes(m Manifest) ([]workspaceFSNode, error) {
 	return nodes, nil
 }
 
-func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey string, nodes []workspaceFSNode) error {
+func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey string, nodes []workspaceFSNode, opts SyncOptions) error {
 	if len(nodes) == 0 {
 		return errors.New("workspace manifest is missing a root entry")
 	}
@@ -257,7 +290,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	}
 
 	for _, node := range nodes {
-		fields, size, err := workspaceFSNodeFields(ctx, store, workspace, node)
+		fields, size, err := workspaceFSNodeFields(ctx, store, workspace, node, opts)
 		if err != nil {
 			return fmt.Errorf("materialize %s: %w", node.Path, err)
 		}
@@ -296,7 +329,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	return flush()
 }
 
-func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode) (map[string]interface{}, int64, error) {
+func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode, opts SyncOptions) (map[string]interface{}, int64, error) {
 	fields := map[string]interface{}{
 		"type":           node.Entry.Type,
 		"mode":           manifestEntryModeForWorkspaceFS(node.Entry),
@@ -317,6 +350,11 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 		return fields, 0, nil
 	case "file":
 		data, err := ManifestEntryData(node.Entry, func(blobID string) ([]byte, error) {
+			if opts.BlobProvider != nil {
+				if cached, ok := opts.BlobProvider(blobID); ok {
+					return cached, nil
+				}
+			}
 			return store.GetBlob(ctx, workspace, blobID)
 		})
 		if err != nil {
