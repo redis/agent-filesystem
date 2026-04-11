@@ -3,9 +3,11 @@ package client
 import (
 	"context"
 	"errors"
+	"log"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/internal/cache"
@@ -19,6 +21,17 @@ type nativeClient struct {
 	key   string
 	keys  keyBuilder
 	cache *cache.Cache
+
+	// originID is this client's opaque publisher ID, included on every
+	// outgoing invalidation message. The subscriber skips any message
+	// whose origin matches, so self-publishes are ignored (local cache
+	// state was already updated synchronously at the mutation site).
+	originID string
+
+	// publishDisabled, when set via DisableInvalidationPublishing(), makes
+	// publishInvalidate a no-op. Used by the --disable-cross-client-
+	// invalidation flag. Local cache state still tracks mutations.
+	publishDisabled atomic.Bool
 
 	// dirtyMu protects the markRootDirty throttle window.
 	//
@@ -64,26 +77,44 @@ type inodeData struct {
 
 func newNativeClient(rdb *redis.Client, key string) Client {
 	return &nativeClient{
-		rdb:  rdb,
-		key:  key,
-		keys: newKeyBuilder(key),
+		rdb:      rdb,
+		key:      key,
+		keys:     newKeyBuilder(key),
+		originID: newOriginID(),
 	}
 }
 
 func newNativeClientWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
 	return &nativeClient{
-		rdb:   rdb,
-		key:   key,
-		keys:  newKeyBuilder(key),
-		cache: cache.New(ttl),
+		rdb:      rdb,
+		key:      key,
+		keys:     newKeyBuilder(key),
+		cache:    cache.New(ttl),
+		originID: newOriginID(),
 	}
 }
 
-func (c *nativeClient) invalidateInode(p string) {
+// OriginID returns this client's publisher ID. See client.go for semantics.
+func (c *nativeClient) OriginID() string {
+	return c.originID
+}
+
+// DisableInvalidationPublishing makes subsequent publishInvalidate calls a
+// no-op. Local cache updates are unaffected. This is the implementation of
+// the --disable-cross-client-invalidation escape hatch.
+func (c *nativeClient) DisableInvalidationPublishing() {
+	c.publishDisabled.Store(true)
+}
+
+// invalidateInode drops the path's own cache entry AND (implicitly, via the
+// dirCacheKey entry) any cached directory listing of which it is a child, and
+// broadcasts the same invalidation to peer clients over pub/sub.
+func (c *nativeClient) invalidateInode(ctx context.Context, p string) {
 	if c.cache != nil {
 		c.cache.Invalidate(p)
 		c.cache.Invalidate(dirCacheKey(p))
 	}
+	c.publishInvalidate(ctx, InvalidateOpInode, p)
 }
 
 // invalidateDirListing drops only the cached READDIR listing for a directory
@@ -91,17 +122,182 @@ func (c *nativeClient) invalidateInode(p string) {
 // creating or deleting a child: the parent inode's identity has not changed,
 // only its listing is now stale. Dropping just the listing lets subsequent
 // path lookups through the parent continue to hit the cache instead of
-// paying a parent re-resolve RTT.
-func (c *nativeClient) invalidateDirListing(p string) {
+// paying a parent re-resolve RTT. The same narrow invalidation is broadcast
+// to peer clients.
+func (c *nativeClient) invalidateDirListing(ctx context.Context, p string) {
 	if c.cache != nil {
 		c.cache.Invalidate(dirCacheKey(p))
 	}
+	c.publishInvalidate(ctx, InvalidateOpDir, p)
 }
 
-func (c *nativeClient) invalidatePrefix(prefix string) {
+// invalidatePrefix drops every cached path and dir-listing entry under the
+// given prefix, and broadcasts a matching prefix invalidation to peer
+// clients. Use for subtree-wide events like a directory rename.
+func (c *nativeClient) invalidatePrefix(ctx context.Context, prefix string) {
 	if c.cache != nil {
 		c.cache.InvalidatePrefix(prefix)
 		c.cache.InvalidatePrefix(dirCachePrefix(prefix))
+	}
+	c.publishInvalidate(ctx, InvalidateOpPrefix, prefix)
+}
+
+// publishInvalidate broadcasts an invalidation event on this FS key's pub/sub
+// channel. Failure to publish is logged but never fails the enclosing
+// mutation: local state is already correct, and missing a broadcast merely
+// degrades peers to TTL-based staleness (today's behavior).
+func (c *nativeClient) publishInvalidate(ctx context.Context, op string, paths ...string) {
+	if c.publishDisabled.Load() {
+		return
+	}
+	if len(paths) == 0 {
+		return
+	}
+	// Strip empty strings defensively so we don't confuse peers.
+	cleaned := paths[:0]
+	for _, p := range paths {
+		if p != "" {
+			cleaned = append(cleaned, p)
+		}
+	}
+	if len(cleaned) == 0 {
+		return
+	}
+	payload, err := encodeInvalidate(InvalidateEvent{
+		Origin: c.originID,
+		Op:     op,
+		Paths:  cleaned,
+	})
+	if err != nil {
+		log.Printf("afs: invalidate encode failed op=%s paths=%v: %v", op, cleaned, err)
+		return
+	}
+	if err := c.rdb.Publish(ctx, c.keys.invalidateChannel(), payload).Err(); err != nil {
+		// Best-effort broadcast. Log once per failure; callers never see it.
+		log.Printf("afs: invalidate publish failed op=%s paths=%v: %v", op, cleaned, err)
+	}
+}
+
+// SubscribeInvalidations implements the Client interface. It runs a goroutine
+// that listens on this FS key's pub/sub channel until ctx is cancelled,
+// decoding each message, dropping matching entries from the local client
+// cache, and then invoking handler with the event so callers can drive
+// higher-level cache layers (afsfs attrCache/dirCache, FUSE kernel notifies).
+//
+// Messages whose origin matches this client's ID are filtered out before
+// handler is called: the publisher has already invalidated its own local
+// state at the mutation site, and a second flush would be a pointless waste.
+//
+// Redis outages cause the subscribe loop to log a warning and reconnect with
+// exponential backoff capped at 5 seconds. During an outage, this client
+// falls back to TTL-based staleness for cross-client updates.
+func (c *nativeClient) SubscribeInvalidations(ctx context.Context, handler func(InvalidateEvent)) error {
+	if handler == nil {
+		handler = func(InvalidateEvent) {}
+	}
+	channel := c.keys.invalidateChannel()
+	go c.runInvalidationSubscriber(ctx, channel, handler)
+	return nil
+}
+
+func (c *nativeClient) runInvalidationSubscriber(ctx context.Context, channel string, handler func(InvalidateEvent)) {
+	backoff := 100 * time.Millisecond
+	const maxBackoff = 5 * time.Second
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		sub := c.rdb.Subscribe(ctx, channel)
+		// Wait for the subscription to be confirmed before taking messages.
+		if _, err := sub.Receive(ctx); err != nil {
+			_ = sub.Close()
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("afs: invalidate subscribe to %s failed: %v (retry in %s)", channel, err, backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+		backoff = 100 * time.Millisecond // reset after a successful subscribe
+		ch := sub.Channel()
+		c.consumeInvalidationChannel(ctx, ch, handler)
+		_ = sub.Close()
+		if ctx.Err() != nil {
+			return
+		}
+		// Connection dropped (channel closed without ctx cancellation);
+		// loop around and resubscribe.
+		log.Printf("afs: invalidate subscription to %s dropped, reconnecting", channel)
+	}
+}
+
+func (c *nativeClient) consumeInvalidationChannel(ctx context.Context, ch <-chan *redis.Message, handler func(InvalidateEvent)) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			ev, err := decodeInvalidate([]byte(msg.Payload))
+			if err != nil {
+				log.Printf("afs: invalidate decode failed: %v (payload=%q)", err, msg.Payload)
+				continue
+			}
+			if ev.Origin == c.originID {
+				// Our own mutation — we invalidated locally at the
+				// publish site already.
+				continue
+			}
+			// Drop matching entries from the client-layer cache first so
+			// the higher-level handler sees a consistent state when it
+			// walks caches above us.
+			c.applyRemoteInvalidation(ev)
+			handler(*ev)
+		}
+	}
+}
+
+// applyRemoteInvalidation mirrors the local-invalidate behavior of
+// invalidateInode/invalidateDirListing/invalidatePrefix against an event
+// received from a peer. It does NOT re-broadcast: publishing from a
+// subscriber callback would create an infinite loop.
+func (c *nativeClient) applyRemoteInvalidation(ev *InvalidateEvent) {
+	if c.cache == nil || ev == nil {
+		return
+	}
+	for _, p := range ev.Paths {
+		if p == "" {
+			continue
+		}
+		switch ev.Op {
+		case InvalidateOpInode:
+			c.cache.Invalidate(p)
+			c.cache.Invalidate(dirCacheKey(p))
+			// Peer also bumped the parent's dir listing mtime. Drop it
+			// so our next Ls re-fetches from Redis.
+			c.cache.Invalidate(dirCacheKey(parentOf(p)))
+		case InvalidateOpDir:
+			c.cache.Invalidate(dirCacheKey(p))
+		case InvalidateOpPrefix:
+			c.cache.InvalidatePrefix(p)
+			c.cache.InvalidatePrefix(dirCachePrefix(p))
+		case InvalidateOpContent:
+			// Peer changed file bytes. The path entry carries size and
+			// mtime, both of which are now stale.
+			c.cache.Invalidate(p)
+			c.cache.Invalidate(dirCacheKey(parentOf(p)))
+		}
 	}
 }
 
@@ -172,6 +368,7 @@ func (c *nativeClient) Touch(ctx context.Context, p string) error {
 	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -240,7 +437,7 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 		}
 	}
 
-	c.invalidateInode(resolved)
+	c.invalidateInode(ctx, resolved)
 	pipe := c.rdb.Pipeline()
 	pipe.Del(ctx, c.keys.inode(inode.ID))
 	if inode.Type == "dir" {
@@ -253,7 +450,7 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	}
 	c.queueDeleteInfo(pipe, inode)
 	_, err = pipe.Exec(ctx)
-	c.invalidateInode(parentPath)
+	c.invalidateInode(ctx, parentPath)
 	if err != nil {
 		return err
 	}
@@ -397,6 +594,7 @@ func (c *nativeClient) Chmod(ctx context.Context, p string, mode uint32) error {
 	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -410,6 +608,7 @@ func (c *nativeClient) Chown(ctx context.Context, p string, uid, gid uint32) err
 	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -453,6 +652,7 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 	if err := c.adjustTotalData(ctx, delta); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -470,6 +670,7 @@ func (c *nativeClient) Utimens(ctx context.Context, p string, atimeMs, mtimeMs i
 	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -521,6 +722,7 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
 	return c.markRootDirty(ctx)
 }
 
@@ -563,6 +765,7 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	if err := c.adjustTotalData(ctx, inode.Size-before); err != nil {
 		return err
 	}
+	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
 	return c.markRootDirty(ctx)
 }
 

@@ -145,10 +145,13 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 		// traffic stays warm. macOS NFS tends to burst GETATTR/LOOKUP
 		// immediately after a WRITE, so this matters a lot.
 		c.cachePath(path, data)
+		// Peers still need their copies (path entry + kernel page cache)
+		// dropped — broadcast a content-op for the path.
+		c.publishInvalidate(ctx, InvalidateOpContent, path)
 	} else {
 		// Unknown path (legacy caller): fall back to the old defensive
 		// invalidation to avoid serving stale sizes from cached entries.
-		c.invalidatePrefix("/")
+		c.invalidatePrefix(ctx, "/")
 	}
 	return nil
 }
@@ -213,8 +216,9 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 
 	if path != "" {
 		c.cachePath(path, data)
+		c.publishInvalidate(ctx, InvalidateOpContent, path)
 	} else {
-		c.invalidatePrefix("/")
+		c.invalidatePrefix(ctx, "/")
 	}
 	return nil
 }

@@ -63,6 +63,28 @@ type Client interface {
 	Tree(ctx context.Context, path string, maxDepth int) ([]TreeEntry, error)
 	Find(ctx context.Context, path, pattern string, typeFilter string) ([]string, error)
 	Grep(ctx context.Context, path, pattern string, nocase bool) ([]GrepMatch, error)
+
+	// SubscribeInvalidations runs a goroutine that listens on this FS key's
+	// pub/sub channel and dispatches every cross-client invalidation event
+	// to handler. Messages originating from this client are filtered out
+	// before the handler is invoked. The goroutine runs until ctx is
+	// cancelled, transparently reconnecting on Redis outages.
+	//
+	// The call returns once the subscription has been handed off to the
+	// goroutine, not when the first message arrives. Subscribers are also
+	// responsible for flushing the local per-client cache; that work happens
+	// inside SubscribeInvalidations before handler is called, so handlers
+	// only need to worry about cache layers above the client.
+	SubscribeInvalidations(ctx context.Context, handler func(InvalidateEvent)) error
+
+	// OriginID returns this client's opaque publisher ID. Primarily exposed
+	// for tests that want to verify origin-dedup behavior.
+	OriginID() string
+
+	// DisableInvalidationPublishing turns off outgoing PUBLISH calls. Used
+	// by the --disable-cross-client-invalidation flag. Local cache state
+	// still tracks mutations; other clients just won't be notified.
+	DisableInvalidationPublishing()
 }
 
 // PathCacheWarmer is implemented by clients that can prewarm exact-path cache

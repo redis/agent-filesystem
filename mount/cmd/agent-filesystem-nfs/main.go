@@ -109,6 +109,7 @@ func main() {
 	exportPath := flag.String("export", "/myfs", "Exported NFS path")
 	readOnly := flag.Bool("readonly", false, "Export read-only")
 	foreground := flag.Bool("foreground", true, "Run in foreground")
+	disableInvalidation := flag.Bool("disable-cross-client-invalidation", false, "Disable Redis pub/sub cache invalidation between clients. Falls back to TTL-based staleness.")
 	flag.Parse()
 
 	if !*foreground {
@@ -170,6 +171,25 @@ func main() {
 		}
 	}
 
+	// Cross-client cache invalidation. The NFS mount is the primary
+	// beneficiary here: nfsClientCacheTTL is one hour, so without this a
+	// write on host A is hidden from host B for up to an hour. The
+	// SubscribeInvalidations handler can be a no-op because the client
+	// layer cache is the only cache to flush and SubscribeInvalidations
+	// handles that internally.
+	subscriberCtx, cancelSubscriber := context.WithCancel(context.Background())
+	defer cancelSubscriber()
+	if *disableInvalidation {
+		c.DisableInvalidationPublishing()
+		log.Printf("Cross-client cache invalidation: DISABLED (flag)")
+	} else {
+		if err := c.SubscribeInvalidations(subscriberCtx, nil); err != nil {
+			log.Printf("warning: failed to start invalidation subscriber: %v", err)
+		} else {
+			log.Printf("Cross-client cache invalidation: enabled (channel afs:{%s}:invalidate)", redisKey)
+		}
+	}
+
 	listener, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		log.Fatalf("listen failed on %s: %v", *listenAddr, err)
@@ -196,8 +216,10 @@ func main() {
 	select {
 	case sig := <-sigCh:
 		log.Printf("Received signal %v, shutting down", sig)
+		cancelSubscriber()
 		_ = listener.Close()
 	case err := <-errCh:
+		cancelSubscriber()
 		if err != nil {
 			log.Fatalf("nfs server failed: %v", err)
 		}

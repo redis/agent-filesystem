@@ -525,8 +525,11 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	parent.MtimeMs = now
 	parent.CtimeMs = now
 	c.cachePath(parentPath, parent)
-	c.invalidateDirListing(parentPath)
+	c.invalidateDirListing(ctx, parentPath)
 	c.cachePath(childPath, inode)
+	// Peers also need to know a new inode appeared at childPath so their
+	// cached stat (typically a negative-lookup entry) gets dropped.
+	c.publishInvalidate(ctx, InvalidateOpInode, childPath)
 	return nil
 }
 
@@ -619,7 +622,10 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		parentCopy.MtimeMs = now
 		parentCopy.CtimeMs = now
 		c.cachePath(parentPath, &parentCopy)
-		c.invalidateDirListing(parentPath)
+		c.invalidateDirListing(ctx, parentPath)
+		// Peers need to know a new inode exists at p so their negative
+		// stat cache drops.
+		c.publishInvalidate(ctx, InvalidateOpInode, p)
 	}
 	c.cachePath(p, result)
 	return result, created, nil
@@ -737,10 +743,10 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 		})
 		switch {
 		case err == nil:
-			c.invalidateInode(parentOf(resolvedSrc))
-			c.invalidateInode(parentOf(dst))
-			c.invalidatePrefix(resolvedSrc)
-			c.invalidatePrefix(dst)
+			c.invalidateInode(ctx, parentOf(resolvedSrc))
+			c.invalidateInode(ctx, parentOf(dst))
+			c.invalidatePrefix(ctx, resolvedSrc)
+			c.invalidatePrefix(ctx, dst)
 			if err := c.refreshIndexedSubtree(ctx, dst, srcInode); err != nil {
 				return err
 			}

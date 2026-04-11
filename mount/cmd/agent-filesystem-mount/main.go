@@ -35,6 +35,7 @@ func main() {
 	allowOther := flag.Bool("allow-other", false, "Allow other users to access mount")
 	foreground := flag.Bool("foreground", true, "Run in foreground")
 	debug := flag.Bool("debug", false, "Enable FUSE debug logging")
+	disableInvalidation := flag.Bool("disable-cross-client-invalidation", false, "Disable Redis pub/sub cache invalidation between clients. Falls back to TTL-based staleness.")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags] <redis-key> <mountpoint>\n\n", os.Args[0])
@@ -116,18 +117,27 @@ func main() {
 	uid, gid := afsfs.GetOwnership()
 
 	opts := &afsfs.Options{
-		AttrTimeout: time.Duration(*attrTimeout * float64(time.Second)),
-		ReadOnly:    *readOnly,
-		AllowOther:  *allowOther,
-		Debug:       *debug,
-		UID:         uid,
-		GID:         gid,
+		AttrTimeout:                    time.Duration(*attrTimeout * float64(time.Second)),
+		ReadOnly:                       *readOnly,
+		AllowOther:                     *allowOther,
+		Debug:                          *debug,
+		UID:                            uid,
+		GID:                            gid,
+		DisableCrossClientInvalidation: *disableInvalidation,
 	}
 
 	log.Printf("Mounting AFS key %q at %s", redisKey, mountpoint)
 	log.Printf("Redis: %s (db %d)", *redisAddr, *redisDB)
+	if *disableInvalidation {
+		log.Printf("Cross-client cache invalidation: DISABLED (flag)")
+	}
 
-	server, err := afsfs.Mount(mountpoint, c, opts)
+	// Subscriber lifetime is tied to shutdown; cancelling mountCtx tears
+	// the pub/sub goroutine down.
+	mountCtx, cancelMount := context.WithCancel(context.Background())
+	defer cancelMount()
+
+	server, err := afsfs.Mount(mountCtx, mountpoint, c, opts)
 	if err != nil {
 		log.Fatalf("mount failed: %v", err)
 	}
@@ -139,6 +149,7 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		log.Printf("Received signal %v, unmounting...", sig)
+		cancelMount()
 		err := server.Unmount()
 		if err != nil {
 			log.Printf("Unmount error: %v", err)

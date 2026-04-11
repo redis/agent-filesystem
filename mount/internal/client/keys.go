@@ -37,6 +37,13 @@ func (k keyBuilder) locks(id string) string {
 	return "afs:{" + k.fsKey + "}:locks:" + id
 }
 
+// invalidateChannel is the Redis pub/sub channel name used to broadcast
+// cache invalidation events between clients that share this FS key. The
+// hash tag keeps it colocated on the same cluster slot as the data keys.
+func (k keyBuilder) invalidateChannel() string {
+	return "afs:{" + k.fsKey + "}:invalidate"
+}
+
 func (k keyBuilder) inodePrefix() string {
 	return "afs:{" + k.fsKey + "}:inode:"
 }
