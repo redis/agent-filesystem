@@ -674,6 +674,57 @@ func (c *nativeClient) Utimens(ctx context.Context, p string, atimeMs, mtimeMs i
 	return c.markRootDirty(ctx)
 }
 
+// SetAttrs applies the non-nil fields in upd to the inode at p in one
+// partial HSet. This is the batched fast path for NFS SETATTR / CREATE,
+// collapsing the Chmod + Chown + Utimens triple (3 RTTs) into a single
+// HSet (1 RTT) and skipping the round trip entirely when upd is empty.
+//
+// Reads are through the warm path cache, so resolvePath is typically
+// 0 RTTs. The saved HSet payload contains only the fields that changed —
+// we deliberately do NOT use saveInodeMeta here because that helper writes
+// the full 13-field metadata map via inodeFieldsAtPath, which would rebuild
+// the path_ancestors CSV and ship a dozen unchanged fields over the wire.
+func (c *nativeClient) SetAttrs(ctx context.Context, p string, upd AttrUpdate) error {
+	if upd.IsEmpty() {
+		return nil
+	}
+	resolved, inode, err := c.resolvePath(ctx, p, false)
+	if err != nil {
+		return err
+	}
+
+	// Mutate in-memory inode so the subsequent cachePath reflects the new
+	// state; also build a sparse HSet map of only the fields that changed.
+	fields := make(map[string]interface{}, 5)
+	if upd.Mode != nil {
+		inode.Mode = *upd.Mode
+		fields["mode"] = inode.Mode
+	}
+	if upd.UID != nil {
+		inode.UID = *upd.UID
+		fields["uid"] = inode.UID
+	}
+	if upd.GID != nil {
+		inode.GID = *upd.GID
+		fields["gid"] = inode.GID
+	}
+	if upd.AtimeMs != nil {
+		inode.AtimeMs = *upd.AtimeMs
+		fields["atime_ms"] = inode.AtimeMs
+	}
+	if upd.MtimeMs != nil {
+		inode.MtimeMs = *upd.MtimeMs
+		fields["mtime_ms"] = inode.MtimeMs
+	}
+
+	if err := c.rdb.HSet(ctx, c.keys.inode(inode.ID), fields).Err(); err != nil {
+		return err
+	}
+	c.cachePath(resolved, inode)
+	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
+	return c.markRootDirty(ctx)
+}
+
 func (c *nativeClient) Info(ctx context.Context) (*InfoResult, error) {
 	values, err := c.rdb.HGetAll(ctx, c.keys.info()).Result()
 	if err != nil {

@@ -533,6 +533,29 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	return nil
 }
 
+// createFileIfMissing is the hot-path file create used by CreateFile and the
+// NFS CREATE RPC. It collapses the old WATCH/MULTI four-round-trip sequence
+// into two round trips on the common (uncontended) path by using HSETNX as
+// the atomic name-claim primitive:
+//
+//  1. INCR nextInode                                   (RTT #1)
+//  2. Pipeline:                                        (RTT #2)
+//     - HSETNX dirents:{parent} name id
+//     - HSET   inode:{id} <fields>
+//     - HSET   inode:{parent} ctime_ms/mtime_ms (queueTouchTimes)
+//     - HIncrBy info files/total_data_bytes (queueCreateInfo)
+//
+// On the rare lost-race path the HSETNX returns 0. We then:
+//
+//  3. Cleanup pipeline (RTT #3, rare):
+//     - DEL inode:{id}                            (orphan we just wrote)
+//     - HIncrBy info files -1                     (reverse the optimistic bump)
+//     - HIncrBy info total_data_bytes -len(content) if content was non-empty
+//
+// and fall through to load the existing file via loadInodeByID (one additional
+// read on the existing-file branch, same as today's WATCH/MULTI loser path).
+//
+// See tasks/perf-nfs-followups.md candidate 1 for the full rationale.
 func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, content string, mode uint32, exclusive bool) (*inodeData, bool, error) {
 	p = normalizePath(p)
 	if p == "/" {
@@ -547,88 +570,104 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return nil, false, errors.New("parent path conflict")
 	}
 
-	var (
-		result  *inodeData
-		created bool
-	)
 	direntsKey := c.keys.dirents(parentInode.ID)
 	name := baseName(p)
-	err = c.retryWatch(ctx, []string{direntsKey}, func(tx *redis.Tx) error {
-		childID, err := tx.HGet(ctx, direntsKey, name).Result()
-		switch {
-		case err == nil:
-			existing, err := c.loadInodeByID(ctx, childID)
-			if err != nil {
-				return err
-			}
-			if existing == nil {
-				return redis.TxFailedErr
-			}
-			if existing.Type != "file" {
-				return errors.New("not a file")
-			}
-			if exclusive {
-				return errors.New("already exists")
-			}
-			result = existing
-			created = false
-			return nil
-		case !errors.Is(err, redis.Nil):
-			return err
-		}
 
-		id, err := c.allocInodeID(ctx)
-		if err != nil {
-			return err
-		}
-		now := nowMs()
-		inode := &inodeData{
-			ID:      id,
-			Parent:  parentInode.ID,
-			Name:    name,
-			Type:    "file",
-			Mode:    mode,
-			UID:     0,
-			GID:     0,
-			Size:    int64(len(content)),
-			CtimeMs: now,
-			MtimeMs: now,
-			AtimeMs: now,
-			Content: content,
-		}
-		if _, err := tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, true))
-			pipe.HSet(ctx, direntsKey, name, inode.ID)
-			c.queueTouchTimes(pipe, parentInode.ID, now)
-			c.queueCreateInfo(pipe, inode)
-			return nil
-		}); err != nil {
-			return err
-		}
-		result = inode
-		created = true
-		return nil
-	})
+	// Allocate the inode ID up front. This is one RTT but it must precede
+	// the pipeline because the ID is used as the value of the HSETNX claim
+	// and as the key of the HSet for the inode metadata.
+	id, err := c.allocInodeID(ctx)
 	if err != nil {
 		return nil, false, err
 	}
-	// Only the parent's dir listing is stale now; keep the parent's own path
-	// entry cached so subsequent stats/creates in the same directory stay
-	// warm. If the child already existed, nothing in the parent changed at
-	// all — we just leave both caches alone.
-	if created {
-		now := nowMs()
+
+	now := nowMs()
+	inode := &inodeData{
+		ID:      id,
+		Parent:  parentInode.ID,
+		Name:    name,
+		Type:    "file",
+		Mode:    mode,
+		UID:     0,
+		GID:     0,
+		Size:    int64(len(content)),
+		CtimeMs: now,
+		MtimeMs: now,
+		AtimeMs: now,
+		Content: content,
+	}
+
+	// Optimistic write: claim the name with HSETNX and unconditionally
+	// stage the inode + touch + counter bumps in the same pipeline. We do
+	// this in one go and inspect claim.Val() afterward. On a lost race the
+	// orphan inode and counter bumps are compensated below.
+	pipe := c.rdb.Pipeline()
+	claim := pipe.HSetNX(ctx, direntsKey, name, inode.ID)
+	pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, true))
+	c.queueTouchTimes(pipe, parentInode.ID, now)
+	c.queueCreateInfo(pipe, inode)
+	if _, err := pipe.Exec(ctx); err != nil {
+		return nil, false, err
+	}
+
+	if claim.Val() {
+		// Uncontended: we own the name. Update the parent's cached mtime
+		// in place, drop the parent's dir listing cache (now stale), and
+		// publish the invalidation.
 		parentCopy := *parentInode
 		parentCopy.MtimeMs = now
 		parentCopy.CtimeMs = now
 		c.cachePath(parentPath, &parentCopy)
 		c.invalidateDirListing(ctx, parentPath)
-		// Peers need to know a new inode exists at p so their negative
-		// stat cache drops.
 		c.publishInvalidate(ctx, InvalidateOpInode, p)
+		c.cachePath(p, inode)
+		return inode, true, nil
 	}
-	c.cachePath(p, result)
-	return result, created, nil
+
+	// Lost race: someone else won the HSETNX. Clean up the orphan inode
+	// and compensating counter bumps in a single pipeline (one extra RTT
+	// on this rare path), then fall through to the existing-file handling.
+	cleanup := c.rdb.Pipeline()
+	cleanup.Del(ctx, c.keys.inode(inode.ID))
+	cleanup.HIncrBy(ctx, c.keys.info(), "files", -1)
+	if inode.Size > 0 {
+		cleanup.HIncrBy(ctx, c.keys.info(), "total_data_bytes", -inode.Size)
+	}
+	if _, err := cleanup.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, false, err
+	}
+
+	if exclusive {
+		return nil, false, errors.New("already exists")
+	}
+
+	// Re-resolve the existing child. Use HGet directly (not lookupChildID)
+	// so the redis.Nil case maps to a human-friendly error string for
+	// parity with the old retryWatch loser branch.
+	existingID, err := c.rdb.HGet(ctx, direntsKey, name).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			// The winner removed the entry between HSETNX and our HGet.
+			// Surface this as the same error the resolvePath family uses.
+			return nil, false, errors.New("no such file or directory")
+		}
+		return nil, false, err
+	}
+	existing, err := c.loadInodeByID(ctx, existingID)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing == nil {
+		return nil, false, errors.New("no such file or directory")
+	}
+	if existing.Type != "file" {
+		return nil, false, errors.New("not a file")
+	}
+	// Nothing in the parent directory actually changed from our
+	// perspective, so we leave the parent's cache alone and only
+	// refresh the resolved path entry for the existing file.
+	c.cachePath(p, existing)
+	return existing, false, nil
 }
 
 func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcInode *inodeData, dst string, newParent *inodeData, flags uint32) error {

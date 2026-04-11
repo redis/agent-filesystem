@@ -388,6 +388,77 @@ func (f *FS) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	return f.client.Utimens(ctx, p, atime.UnixMilli(), mtime.UnixMilli())
 }
 
+// SetAttrs is the batched counterpart of Chmod / Chown / Chtimes used by the
+// go-nfs SETATTR and CREATE fast paths. It satisfies third_party/go-nfs's
+// optional BatchSetAttrer interface via structural typing — the go-nfs
+// package uses a type assertion on billy.Change to detect this method and
+// dispatch a single client round trip instead of a sequential Chmod+Lchown+
+// Chtimes triple. See third_party/go-nfs/file.go SetFileAttributes.Apply.
+//
+// Nil pointers mean "do not change this field." An all-nil call returns nil
+// immediately after the shadow / readOnly checks.
+func (f *FS) SetAttrs(
+	name string,
+	mode *os.FileMode,
+	uid *int,
+	gid *int,
+	atime *time.Time,
+	mtime *time.Time,
+) error {
+	if f.readOnly {
+		return os.ErrPermission
+	}
+	p := f.normalize(name)
+	if isAppleDoublePath(p) {
+		sf := f.shadow.get(p)
+		if sf == nil {
+			return os.ErrNotExist
+		}
+		sf.mu.Lock()
+		defer sf.mu.Unlock()
+		if mode != nil {
+			sf.mode = *mode
+			sf.ctime = time.Now()
+		}
+		// uid/gid intentionally ignored for shadow files (see Chown above).
+		if atime != nil {
+			sf.atime = *atime
+		}
+		if mtime != nil {
+			sf.mtime = *mtime
+		}
+		return nil
+	}
+
+	var upd client.AttrUpdate
+	if mode != nil {
+		m := uint32(mode.Perm())
+		upd.Mode = &m
+	}
+	if uid != nil {
+		u := uint32(*uid)
+		upd.UID = &u
+	}
+	if gid != nil {
+		g := uint32(*gid)
+		upd.GID = &g
+	}
+	if atime != nil {
+		ms := atime.UnixMilli()
+		upd.AtimeMs = &ms
+	}
+	if mtime != nil {
+		ms := mtime.UnixMilli()
+		upd.MtimeMs = &ms
+	}
+	if upd.IsEmpty() {
+		return nil
+	}
+	ctx, cancel := f.withTimeout()
+	defer cancel()
+	return f.client.SetAttrs(ctx, p, upd)
+}
+
 type fileInfo struct {
 	name string
 	st   *client.StatResult

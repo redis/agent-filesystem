@@ -1428,3 +1428,930 @@ func TestGrepSingleFile(t *testing.T) {
 		t.Fatalf("expected 2 matches, got %d: %+v", len(matches), matches)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fix 1 — createFileIfMissing HSETNX race behavior
+//
+// These tests exercise the lost-race path in createFileIfMissing. Two
+// goroutines race into CreateFile on the same path, and both are released
+// from a barrier at the same instant. Redis is single-threaded, so exactly
+// one HSETNX wins. The loser must:
+//   (a) DEL the orphan inode it optimistically wrote,
+//   (b) reverse the files / total_data_bytes counter bumps,
+//   (c) report the existing file (or "already exists" under O_EXCL).
+// Without any of those, Info() counters would drift or orphan keys would
+// survive in Redis.
+// ---------------------------------------------------------------------------
+
+func TestCreateFileRaceLoserCleansUpOrphan(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "create-race")
+
+	type raceResult struct {
+		stat    *StatResult
+		created bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan raceResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			st, created, err := c.CreateFile(ctx, "/race.txt", 0o644, false)
+			results <- raceResult{stat: st, created: created, err: err}
+		}()
+	}
+	close(start)
+
+	var gotCreated, gotExisting int
+	var firstInode uint64
+	for i := 0; i < 2; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("unexpected CreateFile error: %v", r.err)
+		}
+		if r.stat == nil {
+			t.Fatalf("CreateFile returned nil stat")
+		}
+		if firstInode == 0 {
+			firstInode = r.stat.Inode
+		} else if r.stat.Inode != firstInode {
+			t.Fatalf("both callers must see the same winning inode ID; got %d and %d",
+				firstInode, r.stat.Inode)
+		}
+		if r.created {
+			gotCreated++
+		} else {
+			gotExisting++
+		}
+	}
+	if gotCreated != 1 {
+		t.Fatalf("expected exactly 1 created=true result, got %d", gotCreated)
+	}
+	if gotExisting != 1 {
+		t.Fatalf("expected exactly 1 created=false result, got %d", gotExisting)
+	}
+
+	// Info.files must be 1, not 2. If the loser did not compensate its
+	// optimistic HIncrBy(files, +1), this would be 2.
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	if info.Files != 1 {
+		t.Fatalf("Info.Files = %d, want 1 (loser counters not compensated)", info.Files)
+	}
+	if info.TotalDataBytes != 0 {
+		t.Fatalf("Info.TotalDataBytes = %d, want 0", info.TotalDataBytes)
+	}
+
+	// Redis should hold exactly two inode keys: the root and the winner's
+	// /race.txt. An extra key means the loser's DEL on its orphan inode
+	// never ran.
+	keys, err := rdb.Keys(ctx, "afs:{create-race}:inode:*").Result()
+	if err != nil {
+		t.Fatalf("keys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 inode keys (root + /race.txt), got %d: %v", len(keys), keys)
+	}
+}
+
+func TestCreateFileRaceLoserCompensatesContentBytes(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "create-race-bytes")
+
+	// Echo() hits createFileIfMissing via createFile with non-empty
+	// content, exercising the total_data_bytes compensation branch on
+	// the lost-race path.
+	const payload = "hello world"
+	type raceResult struct{ err error }
+	start := make(chan struct{})
+	results := make(chan raceResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			err := c.Echo(ctx, "/bytes.txt", []byte(payload))
+			results <- raceResult{err: err}
+		}()
+	}
+	close(start)
+	for i := 0; i < 2; i++ {
+		r := <-results
+		// Echo overwrites on existing-file path, so both goroutines should
+		// succeed regardless of who won the race.
+		if r.err != nil {
+			t.Fatalf("echo: %v", r.err)
+		}
+	}
+
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	if info.Files != 1 {
+		t.Fatalf("Info.Files = %d, want 1", info.Files)
+	}
+	if info.TotalDataBytes != int64(len(payload)) {
+		t.Fatalf("Info.TotalDataBytes = %d, want %d (loser content-delta not compensated)",
+			info.TotalDataBytes, len(payload))
+	}
+
+	keys, err := rdb.Keys(ctx, "afs:{create-race-bytes}:inode:*").Result()
+	if err != nil {
+		t.Fatalf("keys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 inode keys (root + /bytes.txt), got %d: %v", len(keys), keys)
+	}
+}
+
+func TestCreateFileRaceExclusiveLoserReturnsError(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "create-race-excl")
+
+	type raceResult struct {
+		stat    *StatResult
+		created bool
+		err     error
+	}
+	start := make(chan struct{})
+	results := make(chan raceResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			st, created, err := c.CreateFile(ctx, "/excl.txt", 0o600, true)
+			results <- raceResult{stat: st, created: created, err: err}
+		}()
+	}
+	close(start)
+
+	var wins, errs int
+	for i := 0; i < 2; i++ {
+		r := <-results
+		if r.err != nil {
+			if !strings.Contains(r.err.Error(), "already exists") {
+				t.Fatalf("exclusive loser error = %v, want 'already exists'", r.err)
+			}
+			errs++
+			continue
+		}
+		if !r.created {
+			t.Fatalf("exclusive winner must see created=true")
+		}
+		wins++
+	}
+	if wins != 1 {
+		t.Fatalf("expected 1 exclusive winner, got %d", wins)
+	}
+	if errs != 1 {
+		t.Fatalf("expected 1 exclusive loser, got %d", errs)
+	}
+
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	if info.Files != 1 {
+		t.Fatalf("Info.Files = %d, want 1", info.Files)
+	}
+	keys, err := rdb.Keys(ctx, "afs:{create-race-excl}:inode:*").Result()
+	if err != nil {
+		t.Fatalf("keys: %v", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 inode keys, got %d: %v", len(keys), keys)
+	}
+}
+
+func TestCreateFileOverExistingDirectoryPreservesError(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "create-over-dir")
+
+	if err := c.Mkdir(ctx, "/thing"); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	// A CreateFile against an existing directory must fail with a
+	// "not a file" error — callers in the NFS layer string-match on this.
+	_, _, err := c.CreateFile(ctx, "/thing", 0o644, false)
+	if err == nil {
+		t.Fatal("expected CreateFile over a directory to fail")
+	}
+	if !strings.Contains(err.Error(), "not a file") {
+		t.Fatalf("expected 'not a file' error, got %v", err)
+	}
+
+	// The failed create must leave counters untouched. If the lost-race
+	// compensation path doesn't cover this branch, Info.Files would be -1.
+	info, err := c.Info(ctx)
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	if info.Files != 0 {
+		t.Fatalf("Info.Files = %d, want 0 (counter leaked on dir collision)", info.Files)
+	}
+	// ensureRoot seeds directories=1 for the root inode, Mkdir("/thing") adds
+	// another +1 via queueCreateInfo, so the expected post-state is 2. The
+	// failed CreateFile must NOT touch the directories counter either way.
+	if info.Directories != 2 {
+		t.Fatalf("Info.Directories = %d, want 2 (root + /thing)", info.Directories)
+	}
+	if info.TotalDataBytes != 0 {
+		t.Fatalf("Info.TotalDataBytes = %d, want 0", info.TotalDataBytes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fix 2 — batched SetAttrs
+//
+// These tests cover the new Client.SetAttrs fast path: sparse updates,
+// no-op skip, cache-in-place behavior, and parity with the sequential
+// Chmod / Chown / Utimens methods it replaces.
+// ---------------------------------------------------------------------------
+
+func ptrU32(v uint32) *uint32 { return &v }
+func ptrI64(v int64) *int64   { return &v }
+
+// readInodeFields is a small test helper that HMGets selected fields
+// off a file's inode hash directly, bypassing the client's cache.
+func readInodeFields(t *testing.T, rdb *redis.Client, ctx context.Context, fsKey, inodePath string, fields ...string) map[string]string {
+	t.Helper()
+	c := New(rdb, fsKey)
+	st, err := c.Stat(ctx, inodePath)
+	if err != nil {
+		t.Fatalf("stat %s: %v", inodePath, err)
+	}
+	if st == nil {
+		t.Fatalf("stat %s: nil", inodePath)
+	}
+	key := "afs:{" + fsKey + "}:inode:" + strconv.FormatUint(st.Inode, 10)
+	vals, err := rdb.HMGet(ctx, key, fields...).Result()
+	if err != nil {
+		t.Fatalf("hmget %s: %v", key, err)
+	}
+	out := make(map[string]string, len(fields))
+	for i, name := range fields {
+		if vals[i] == nil {
+			out[name] = ""
+			continue
+		}
+		if s, ok := vals[i].(string); ok {
+			out[name] = s
+		}
+	}
+	return out
+}
+
+func TestSetAttrsPartialFieldsOnly(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	const fsKey = "setattrs-partial"
+	c := New(rdb, fsKey)
+
+	// Seed a file with known initial mode/uid/gid and a distinctive
+	// mtime we can later verify is untouched by a mode-only update.
+	if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := c.Chown(ctx, "/f.txt", 1000, 1000); err != nil {
+		t.Fatalf("chown seed: %v", err)
+	}
+	const sentinelMs int64 = 1600000000000
+	if err := c.Utimens(ctx, "/f.txt", sentinelMs, sentinelMs); err != nil {
+		t.Fatalf("utimens seed: %v", err)
+	}
+
+	cases := []struct {
+		name       string
+		upd        AttrUpdate
+		wantFields map[string]string
+	}{
+		{
+			name: "mode_only",
+			upd:  AttrUpdate{Mode: ptrU32(0o600)},
+			wantFields: map[string]string{
+				"mode": strconv.FormatUint(0o600, 10),
+				"uid":  "1000",
+				"gid":  "1000",
+			},
+		},
+		{
+			name: "uid_only",
+			upd:  AttrUpdate{UID: ptrU32(2000)},
+			wantFields: map[string]string{
+				"mode": strconv.FormatUint(0o600, 10),
+				"uid":  "2000",
+				"gid":  "1000",
+			},
+		},
+		{
+			name: "gid_only",
+			upd:  AttrUpdate{GID: ptrU32(2001)},
+			wantFields: map[string]string{
+				"mode": strconv.FormatUint(0o600, 10),
+				"uid":  "2000",
+				"gid":  "2001",
+			},
+		},
+		{
+			name: "atime_only",
+			upd:  AttrUpdate{AtimeMs: ptrI64(1700000000000)},
+			wantFields: map[string]string{
+				"atime_ms": "1700000000000",
+				"mtime_ms": strconv.FormatInt(sentinelMs, 10),
+			},
+		},
+		{
+			name: "mtime_only",
+			upd:  AttrUpdate{MtimeMs: ptrI64(1700000001000)},
+			wantFields: map[string]string{
+				"atime_ms": "1700000000000",
+				"mtime_ms": "1700000001000",
+			},
+		},
+		{
+			name: "mode_and_uid",
+			upd:  AttrUpdate{Mode: ptrU32(0o640), UID: ptrU32(3000)},
+			wantFields: map[string]string{
+				"mode": strconv.FormatUint(0o640, 10),
+				"uid":  "3000",
+				"gid":  "2001",
+			},
+		},
+		{
+			name: "all_five",
+			upd: AttrUpdate{
+				Mode:    ptrU32(0o755),
+				UID:     ptrU32(4000),
+				GID:     ptrU32(4001),
+				AtimeMs: ptrI64(1800000000000),
+				MtimeMs: ptrI64(1800000001000),
+			},
+			wantFields: map[string]string{
+				"mode":     strconv.FormatUint(0o755, 10),
+				"uid":      "4000",
+				"gid":      "4001",
+				"atime_ms": "1800000000000",
+				"mtime_ms": "1800000001000",
+			},
+		},
+	}
+	// Note: these cases are NOT independent — each one builds on the
+	// previous via the running "current state" of /f.txt. This is
+	// intentional so that "uid_only" verifies the mode from "mode_only"
+	// stayed untouched. If we wanted fully independent cases we'd need
+	// to seed a fresh file per case, which would also be fine; this is
+	// terser and exercises the partial-field HSet behavior head-on.
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.SetAttrs(ctx, "/f.txt", tc.upd); err != nil {
+				t.Fatalf("SetAttrs: %v", err)
+			}
+			names := make([]string, 0, len(tc.wantFields))
+			for n := range tc.wantFields {
+				names = append(names, n)
+			}
+			got := readInodeFields(t, rdb, ctx, fsKey, "/f.txt", names...)
+			for _, n := range names {
+				if got[n] != tc.wantFields[n] {
+					t.Errorf("field %q = %q, want %q", n, got[n], tc.wantFields[n])
+				}
+			}
+		})
+	}
+}
+
+func TestSetAttrsEmptyIsNoOp(t *testing.T) {
+	t.Parallel()
+	rdb, _ := setupTestRedis(t)
+	const fsKey = "setattrs-noop"
+
+	// Count ALL Redis commands issued while SetAttrs runs, not just a
+	// specific op. An all-nil AttrUpdate must not hit Redis at all.
+	var ops atomic.Int64
+	hook := &commandCountHook{track: func(cmd redis.Cmder) {
+		ops.Add(1)
+	}}
+	rdb.AddHook(hook)
+
+	c := New(rdb, fsKey)
+	ctx := context.Background()
+	if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	ops.Store(0)
+	if err := c.SetAttrs(ctx, "/f.txt", AttrUpdate{}); err != nil {
+		t.Fatalf("SetAttrs empty: %v", err)
+	}
+	if got := ops.Load(); got != 0 {
+		t.Fatalf("SetAttrs{} issued %d Redis commands, want 0", got)
+	}
+}
+
+func TestSetAttrsCacheUpdatesInPlace(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	const fsKey = "setattrs-cache"
+
+	// Count HMGET commands against the inode hash. If SetAttrs updates
+	// the cache in place, a subsequent Stat must NOT issue any HMGET;
+	// it'll hit the warm cache entry.
+	var hmgetCount atomic.Int64
+	hook := &commandCountHook{track: func(cmd redis.Cmder) {
+		args := cmd.Args()
+		if len(args) < 2 {
+			return
+		}
+		name, _ := args[0].(string)
+		if !strings.EqualFold(name, "hmget") {
+			return
+		}
+		hmgetCount.Add(1)
+	}}
+	rdb.AddHook(hook)
+
+	c := NewWithCache(rdb, fsKey, time.Hour)
+	if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Warm the cache with a Stat once so subsequent reads hit the
+	// path-cache fast path.
+	if _, err := c.Stat(ctx, "/f.txt"); err != nil {
+		t.Fatalf("stat warm: %v", err)
+	}
+
+	hmgetCount.Store(0)
+	if err := c.SetAttrs(ctx, "/f.txt", AttrUpdate{Mode: ptrU32(0o600)}); err != nil {
+		t.Fatalf("SetAttrs: %v", err)
+	}
+	// Immediately Stat again — must be a cache hit, zero HMGETs.
+	st, err := c.Stat(ctx, "/f.txt")
+	if err != nil {
+		t.Fatalf("stat after SetAttrs: %v", err)
+	}
+	if st == nil || st.Mode != 0o600 {
+		t.Fatalf("stat after SetAttrs: got mode=%o, want 0o600", st.Mode)
+	}
+	if got := hmgetCount.Load(); got != 0 {
+		t.Fatalf("post-SetAttrs Stat issued %d HMGETs, want 0 (cache should be updated in place)", got)
+	}
+}
+
+func TestSetAttrsParityWithChmodChownUtimens(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+
+	// Set up two workspaces. On the first, apply Chmod+Chown+Utimens
+	// sequentially. On the second, apply the same mutations through one
+	// SetAttrs call. The resulting inode state must match exactly on the
+	// four mutable metadata fields.
+	const fsSeq = "setattrs-seq"
+	const fsBatch = "setattrs-batch"
+	cSeq := New(rdb, fsSeq)
+	cBatch := New(rdb, fsBatch)
+
+	const (
+		seedMode uint32 = 0o644
+		newMode  uint32 = 0o600
+		newUID   uint32 = 5000
+		newGID   uint32 = 5001
+	)
+	const newAtime int64 = 1900000000000
+	const newMtime int64 = 1900000001000
+
+	for _, c := range []Client{cSeq, cBatch} {
+		if _, _, err := c.CreateFile(ctx, "/p.txt", seedMode, false); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+	}
+
+	if err := cSeq.Chmod(ctx, "/p.txt", newMode); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := cSeq.Chown(ctx, "/p.txt", newUID, newGID); err != nil {
+		t.Fatalf("chown: %v", err)
+	}
+	if err := cSeq.Utimens(ctx, "/p.txt", newAtime, newMtime); err != nil {
+		t.Fatalf("utimens: %v", err)
+	}
+
+	if err := cBatch.SetAttrs(ctx, "/p.txt", AttrUpdate{
+		Mode:    ptrU32(newMode),
+		UID:     ptrU32(newUID),
+		GID:     ptrU32(newGID),
+		AtimeMs: ptrI64(newAtime),
+		MtimeMs: ptrI64(newMtime),
+	}); err != nil {
+		t.Fatalf("SetAttrs: %v", err)
+	}
+
+	seqFields := readInodeFields(t, rdb, ctx, fsSeq, "/p.txt",
+		"mode", "uid", "gid", "atime_ms", "mtime_ms")
+	batchFields := readInodeFields(t, rdb, ctx, fsBatch, "/p.txt",
+		"mode", "uid", "gid", "atime_ms", "mtime_ms")
+	for _, key := range []string{"mode", "uid", "gid", "atime_ms", "mtime_ms"} {
+		if seqFields[key] != batchFields[key] {
+			t.Errorf("field %q: seq=%q batch=%q", key, seqFields[key], batchFields[key])
+		}
+	}
+	if batchFields["mode"] != strconv.FormatUint(uint64(newMode), 10) {
+		t.Errorf("batch mode = %q, want %d", batchFields["mode"], newMode)
+	}
+	if batchFields["uid"] != strconv.FormatUint(uint64(newUID), 10) {
+		t.Errorf("batch uid = %q, want %d", batchFields["uid"], newUID)
+	}
+}
+
+func TestSetAttrsSingleRoundTrip(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+
+	// Count HSET commands against any inode hash under this workspace.
+	// SetAttrs must issue exactly ONE HSET per mutation, even when the
+	// update covers mode+uid+gid+atime+mtime together. The three-method
+	// sequence used to require three HSETs.
+	const fsKey = "setattrs-rtt"
+	var hsetCount atomic.Int64
+	hook := &commandCountHook{track: func(cmd redis.Cmder) {
+		args := cmd.Args()
+		if len(args) < 2 {
+			return
+		}
+		name, _ := args[0].(string)
+		if !strings.EqualFold(name, "hset") {
+			return
+		}
+		key, _ := args[1].(string)
+		if !strings.Contains(key, ":inode:") {
+			return
+		}
+		hsetCount.Add(1)
+	}}
+	rdb.AddHook(hook)
+
+	c := New(rdb, fsKey)
+	if _, _, err := c.CreateFile(ctx, "/rtt.txt", 0o644, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	hsetCount.Store(0)
+	if err := c.SetAttrs(ctx, "/rtt.txt", AttrUpdate{
+		Mode:    ptrU32(0o600),
+		UID:     ptrU32(6000),
+		GID:     ptrU32(6001),
+		AtimeMs: ptrI64(1910000000000),
+		MtimeMs: ptrI64(1910000001000),
+	}); err != nil {
+		t.Fatalf("SetAttrs: %v", err)
+	}
+	if got := hsetCount.Load(); got != 1 {
+		t.Fatalf("SetAttrs issued %d HSETs against an inode hash, want 1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Perf regression guards: command-count assertions
+//
+// These tests pin the number of Redis commands per hot-path operation so any
+// future refactor that accidentally re-adds a round trip shows up as a
+// clear failure rather than a gradual bench drift.
+// ---------------------------------------------------------------------------
+
+// countHook sums every command (including commands issued inside pipelines).
+type countHook struct {
+	total atomic.Int64
+}
+
+func (h *countHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *countHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		h.total.Add(1)
+		return next(ctx, cmd)
+	}
+}
+func (h *countHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		h.total.Add(int64(len(cmds)))
+		return next(ctx, cmds)
+	}
+}
+
+// perfHotPathCommandCounts runs one warm-path SetAttrs and one warm-path
+// legacy Chmod+Chown+Utimens sequence on identically-prepared workspaces,
+// and returns the total Redis command counts for each. This is the
+// building block for the command-count regression guards below: we rely
+// on the invariant that SetAttrs ALWAYS issues strictly fewer commands
+// than the legacy three-method sequence, regardless of what ancillary
+// commands (PUBLISH, SET rootDirty, etc.) the future adds.
+func perfHotPathCommandCounts(t *testing.T) (batchCmds, legacyCmds int64, batchFS, legacyFS string) {
+	t.Helper()
+	rdb, ctx := setupTestRedis(t)
+	batchFS = "perf-batch"
+	legacyFS = "perf-legacy"
+
+	// Shared warmth setup for both clients: create a file, stat it to
+	// prime the path cache, then call one throwaway Chmod to prime
+	// markRootDirty's debounce window. After this, any subsequent
+	// mutation should NOT incur a SET rootDirty hit on top of its HSet.
+	warm := func(fsKey string) Client {
+		c := NewWithCache(rdb, fsKey, time.Hour)
+		if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+			t.Fatalf("create %s: %v", fsKey, err)
+		}
+		if _, err := c.Stat(ctx, "/f.txt"); err != nil {
+			t.Fatalf("warm stat %s: %v", fsKey, err)
+		}
+		if err := c.Chmod(ctx, "/f.txt", 0o644); err != nil {
+			t.Fatalf("prime markRootDirty %s: %v", fsKey, err)
+		}
+		return c
+	}
+
+	cBatch := warm(batchFS)
+	cLegacy := warm(legacyFS)
+
+	var batchHook countHook
+	var legacyHook countHook
+
+	// Install hooks AFTER warmth so we only count the hot-path commands.
+	// commandCountHook uses per-call track fns; we use a raw countHook
+	// here to avoid threading a filter closure.
+	rdb.AddHook(&hookGate{gate: &batchHook, fsKey: batchFS})
+	rdb.AddHook(&hookGate{gate: &legacyHook, fsKey: legacyFS})
+
+	// 5-field SetAttrs: the batched fast path.
+	if err := cBatch.SetAttrs(ctx, "/f.txt", AttrUpdate{
+		Mode:    ptrU32(0o600),
+		UID:     ptrU32(6000),
+		GID:     ptrU32(6001),
+		AtimeMs: ptrI64(1920000000000),
+		MtimeMs: ptrI64(1920000001000),
+	}); err != nil {
+		t.Fatalf("SetAttrs: %v", err)
+	}
+
+	// Equivalent update via the legacy three-method sequence.
+	if err := cLegacy.Chmod(ctx, "/f.txt", 0o600); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := cLegacy.Chown(ctx, "/f.txt", 6000, 6001); err != nil {
+		t.Fatalf("chown: %v", err)
+	}
+	if err := cLegacy.Utimens(ctx, "/f.txt", 1920000000000, 1920000001000); err != nil {
+		t.Fatalf("utimens: %v", err)
+	}
+
+	return batchHook.total.Load(), legacyHook.total.Load(), batchFS, legacyFS
+}
+
+// hookGate filters commands to only those touching keys in fsKey's
+// curly-brace hash tag. This keeps the two per-workspace hooks from
+// counting each other.
+type hookGate struct {
+	gate  *countHook
+	fsKey string
+}
+
+func (h *hookGate) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *hookGate) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		if h.matches(cmd) {
+			h.gate.total.Add(1)
+		}
+		return next(ctx, cmd)
+	}
+}
+func (h *hookGate) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, cmds []redis.Cmder) error {
+		for _, cmd := range cmds {
+			if h.matches(cmd) {
+				h.gate.total.Add(1)
+			}
+		}
+		return next(ctx, cmds)
+	}
+}
+func (h *hookGate) matches(cmd redis.Cmder) bool {
+	args := cmd.Args()
+	// PUBLISH and SUBSCRIBE style commands carry the channel in args[1].
+	// Everything else (HSet, HIncrBy, SET, INCR, ...) also has the key
+	// at args[1]. A substring match on "{fsKey}" picks up both cases
+	// because the channel name includes the same hash tag.
+	tag := "{" + h.fsKey + "}"
+	for _, a := range args {
+		s, ok := a.(string)
+		if !ok {
+			continue
+		}
+		if strings.Contains(s, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSetAttrsCommandsStrictlyLessThanLegacy(t *testing.T) {
+	t.Parallel()
+	batchCmds, legacyCmds, _, _ := perfHotPathCommandCounts(t)
+	if batchCmds >= legacyCmds {
+		t.Fatalf("SetAttrs fast path issued %d commands, legacy issued %d; "+
+			"fast path must be strictly less", batchCmds, legacyCmds)
+	}
+	// Empirically: batch=2 (HSet + PUBLISH), legacy=6 (3× HSet + 3× PUBLISH)
+	// when markRootDirty is throttled. Pin these so a regression that
+	// silently adds a round trip trips the assertion.
+	const maxBatchCmds = 3
+	if batchCmds > maxBatchCmds {
+		t.Fatalf("SetAttrs fast path issued %d commands, want <= %d "+
+			"(regression: extra round trip on the SETATTR hot path)",
+			batchCmds, maxBatchCmds)
+	}
+	t.Logf("perf: SetAttrs=%d commands, legacy=%d commands (%.1fx reduction)",
+		batchCmds, legacyCmds, float64(legacyCmds)/float64(batchCmds))
+}
+
+func TestCreateFileCommandCountIsBounded(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	const fsKey = "createfile-opcount"
+	c := NewWithCache(rdb, fsKey, time.Hour)
+
+	// Warm the root cache so ensureParents/resolvePath on the parent
+	// ("/") hits the cache and does not contribute any RTTs. This
+	// matches the NFS hot path where the mount is already up.
+	if _, err := c.Stat(ctx, "/"); err != nil {
+		t.Fatalf("warm stat /: %v", err)
+	}
+
+	var h countHook
+	rdb.AddHook(&hookGate{gate: &h, fsKey: fsKey})
+
+	if _, _, err := c.CreateFile(ctx, "/first.txt", 0o644, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Post Fix 1, an uncontended CreateFile against a warm root cache
+	// issues roughly:
+	//   INCR nextInode                                         (1)
+	//   pipeline: HSETNX dirents + HSet inode + HSet touchtimes
+	//             + HIncrBy files                              (4)
+	//   PUBLISH invalidate (InvalidateOpDir for parent listing) (1)
+	//   PUBLISH invalidate (InvalidateOpInode for new file)     (1)
+	//   SET rootDirty "1"                                       (1)
+	// = 8 commands.
+	//
+	// Pre-fix the WATCH/MULTI sequence added at least one WATCH, one HGET
+	// inside the tx, and the MULTI/EXEC pair — 3+ extra commands before
+	// the same post-work. The bound below is well under the pre-fix cost
+	// while giving slack for markRootDirty variations.
+	const maxCommands = 10
+	if got := h.total.Load(); got > maxCommands {
+		t.Fatalf("CreateFile issued %d Redis commands, want <= %d (regression)", got, maxCommands)
+	}
+	t.Logf("perf: CreateFile=%d commands (warm root cache)", h.total.Load())
+}
+
+// ---------------------------------------------------------------------------
+// Wall-clock benchmarks (go test -bench)
+//
+// These run against a local redis-server on a free port, so the absolute
+// numbers approximate "warm local Redis" semantics, not the slow-path
+// remote-Redis case the perf docs cover. The *ratio* between pre- and
+// post-fix is what matters: BenchmarkSetAttrsBatched vs. the
+// BenchmarkLegacyChmodChownUtimens baseline is a direct measurement of
+// how much the 3->1 RTT collapse saves per CREATE/SETATTR.
+// ---------------------------------------------------------------------------
+
+func setupBenchRedis(b *testing.B) (*redis.Client, context.Context) {
+	b.Helper()
+	port := freeTCPPortBench(b)
+	cmd := exec.Command(
+		"redis-server",
+		"--port", strconv.Itoa(port),
+		"--save", "",
+		"--appendonly", "no",
+	)
+	if err := cmd.Start(); err != nil {
+		b.Fatalf("start redis-server: %v", err)
+	}
+	b.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	b.Cleanup(cancel)
+
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:" + strconv.Itoa(port)})
+	b.Cleanup(func() { _ = rdb.Close() })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := rdb.Ping(ctx).Err(); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			b.Fatal("redis-server did not become ready")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return rdb, ctx
+}
+
+func freeTCPPortBench(b *testing.B) int {
+	b.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		b.Fatalf("allocate port: %v", err)
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port
+}
+
+func BenchmarkCreateFile(b *testing.B) {
+	rdb, ctx := setupBenchRedis(b)
+	c := New(rdb, "bench-create")
+	_ = c.Mkdir(ctx, "/d")
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		p := "/d/f-" + strconv.Itoa(i) + ".txt"
+		if _, _, err := c.CreateFile(ctx, p, 0o644, false); err != nil {
+			b.Fatalf("create: %v", err)
+		}
+	}
+}
+
+func BenchmarkSetAttrsBatched(b *testing.B) {
+	rdb, ctx := setupBenchRedis(b)
+	c := NewWithCache(rdb, "bench-setattrs-batch", time.Hour)
+	if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+		b.Fatalf("seed: %v", err)
+	}
+	// Warm cache + prime throttle so we're measuring the steady-state
+	// SETATTR hot path after the first tick.
+	if _, err := c.Stat(ctx, "/f.txt"); err != nil {
+		b.Fatalf("warm stat: %v", err)
+	}
+	if err := c.Chmod(ctx, "/f.txt", 0o644); err != nil {
+		b.Fatalf("prime: %v", err)
+	}
+
+	mode := uint32(0o600)
+	uid := uint32(6000)
+	gid := uint32(6001)
+	// Use a monotonically-increasing mtime so no iteration hits the
+	// no-op skip and we measure a real HSET each loop.
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		atime := int64(1920000000000 + i)
+		mtime := int64(1920000001000 + i)
+		if err := c.SetAttrs(ctx, "/f.txt", AttrUpdate{
+			Mode:    &mode,
+			UID:     &uid,
+			GID:     &gid,
+			AtimeMs: &atime,
+			MtimeMs: &mtime,
+		}); err != nil {
+			b.Fatalf("SetAttrs: %v", err)
+		}
+	}
+}
+
+func BenchmarkLegacyChmodChownUtimens(b *testing.B) {
+	rdb, ctx := setupBenchRedis(b)
+	c := NewWithCache(rdb, "bench-setattrs-legacy", time.Hour)
+	if _, _, err := c.CreateFile(ctx, "/f.txt", 0o644, false); err != nil {
+		b.Fatalf("seed: %v", err)
+	}
+	if _, err := c.Stat(ctx, "/f.txt"); err != nil {
+		b.Fatalf("warm stat: %v", err)
+	}
+	if err := c.Chmod(ctx, "/f.txt", 0o644); err != nil {
+		b.Fatalf("prime: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := c.Chmod(ctx, "/f.txt", 0o600); err != nil {
+			b.Fatalf("chmod: %v", err)
+		}
+		if err := c.Chown(ctx, "/f.txt", 6000, 6001); err != nil {
+			b.Fatalf("chown: %v", err)
+		}
+		atime := int64(1920000000000 + i)
+		mtime := int64(1920000001000 + i)
+		if err := c.Utimens(ctx, "/f.txt", atime, mtime); err != nil {
+			b.Fatalf("utimens: %v", err)
+		}
+	}
+}

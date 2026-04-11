@@ -6,6 +6,11 @@ not yet committed. Each item has an estimated win, a risk/scope call, and a
 "decide before you code" section so we don't start implementing something
 whose value we have not yet justified.
 
+> **Status update (post Pass 3):** candidates **1** and **2** (plus the
+> candidate **7** "free rider") have **landed**. See "Part 3" of
+> `tasks/perf-nfs-analysis.md` for the trajectory and benchmark results.
+> Remaining live items: candidates **3**, **4**, **5**, **6**.
+
 ## Current state (after pass 2)
 
 AFS warm-median, ~/.claude on remote Redis:
@@ -38,7 +43,21 @@ Before implementing any item: answer these three questions.
 
 ---
 
-## Candidate 1 — replace `createFileIfMissing` WATCH/MULTI with HSETNX claim
+## Candidate 1 — replace `createFileIfMissing` WATCH/MULTI with HSETNX claim — **LANDED**
+
+The implementation lives at `mount/internal/client/native_helpers.go:536`
+(`createFileIfMissing`). The lost-race path also compensates the
+optimistic `files` and `total_data_bytes` counter bumps in a single
+cleanup pipeline. Race tests:
+`TestCreateFileRaceLoserCleansUpOrphan`,
+`TestCreateFileRaceLoserCompensatesContentBytes`,
+`TestCreateFileRaceExclusiveLoserReturnsError`,
+`TestCreateFileOverExistingDirectoryPreservesError`. Command-count
+guard: `TestCreateFileCommandCountIsBounded` (8 cmds against a warm
+root cache, down from 10-12 pre-fix). Wall-clock micro-bench:
+`BenchmarkCreateFile`.
+
+The original design notes are kept below for archival.
 
 **Where:** `mount/internal/client/native_helpers.go` — `createFileIfMissing`
 currently does:
@@ -106,7 +125,34 @@ simulated "two creators hit the same name" race. Low.
 
 ---
 
-## Candidate 2 — batched `SetAttrs` client method
+## Candidate 2 — batched `SetAttrs` client method — **LANDED**
+
+The implementation lives at:
+- `mount/internal/client/client.go` (`AttrUpdate` struct + `SetAttrs`
+  on the `Client` interface).
+- `mount/internal/client/native_core.go` (`nativeClient.SetAttrs`,
+  partial-field HSet — does not reuse `saveInodeMeta` so the wire
+  payload stays at 1-5 fields).
+- `mount/internal/nfsfs/fs.go` (`FS.SetAttrs` wrapper handling readOnly
+  + AppleDouble shadow + os/client type conversion).
+- `third_party/go-nfs/file.go` (`BatchSetAttrer` optional interface +
+  `SetFileAttributes.Apply` rewrite that builds the diff once and
+  dispatches via type assertion). The legacy fallback path is
+  preserved for memfs and any non-AFS billy.Change consumer.
+
+The "candidate 7" no-op skip is folded in: when the computed diff is
+empty, `Apply` returns nil without touching Redis. End-to-end tests
+exercising both paths:
+`TestSetFileAttributesApplyDispatchesToBatchSetAttrer`,
+`TestSetFileAttributesApplyEmptyDiffIsFreeRider`. Plus the per-layer
+suite (`TestSetAttrsPartialFieldsOnly`, `TestSetAttrsParityWith*`,
+`TestFSSetAttrs*`, etc.).
+
+Measured impact (warm cache, local Redis, see `perf-nfs-analysis.md`
+Part 3): **3.0× fewer Redis commands** (2 vs 6) and **3.3× faster
+wall clock** (37 µs vs 121 µs) than the legacy three-method sequence.
+
+The original design notes are kept below for archival.
 
 **Where:** `third_party/go-nfs/nfs_oncreate.go` + `third_party/go-nfs/file.go`
 (`SetFileAttributes.Apply`) calls `changer.Chmod`, then `changer.Lchown`,
@@ -365,7 +411,14 @@ full CI integration.
 
 ---
 
-## Candidate 7 — cut the Chmod/Chown/Utimens redundancy from the ATTR hot path
+## Candidate 7 — cut the Chmod/Chown/Utimens redundancy from the ATTR hot path — **LANDED**
+
+Folded into candidate 2. The diff computed in `SetFileAttributes.Apply`
+is the empty-diff check; when nothing changed the entire dispatch is
+skipped (zero Redis commands), exercised by
+`TestSetFileAttributesApplyEmptyDiffIsFreeRider`.
+
+The original design notes are kept below for archival.
 
 **Where:** even after candidate 2 (batched `SetAttrs`), the NFS server
 receives a SETATTR RPC whose fields often duplicate what the file already

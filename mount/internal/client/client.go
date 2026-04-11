@@ -13,6 +13,27 @@ const (
 	RenameExchange  uint32 = 0x2
 )
 
+// AttrUpdate is a sparse set of inode attribute changes. A nil pointer in
+// any field means "leave that attribute unchanged." It is used by SetAttrs
+// to collapse the NFS SETATTR hot path's Chmod + Chown + Utimens triple
+// into a single Redis round trip, and to skip the round trip entirely when
+// none of the requested fields actually differ from the current state.
+type AttrUpdate struct {
+	Mode    *uint32
+	UID     *uint32
+	GID     *uint32
+	AtimeMs *int64
+	MtimeMs *int64
+}
+
+// IsEmpty reports whether every field in the update is nil (i.e. the
+// update would change nothing). Callers on the SETATTR hot path should
+// skip the Redis round trip entirely when IsEmpty returns true.
+func (u AttrUpdate) IsEmpty() bool {
+	return u.Mode == nil && u.UID == nil && u.GID == nil &&
+		u.AtimeMs == nil && u.MtimeMs == nil
+}
+
 // Client provides the filesystem operation surface used by the mount layer.
 type Client interface {
 	Stat(ctx context.Context, path string) (*StatResult, error)
@@ -49,6 +70,13 @@ type Client interface {
 	Chown(ctx context.Context, path string, uid, gid uint32) error
 	Truncate(ctx context.Context, path string, size int64) error
 	Utimens(ctx context.Context, path string, atimeMs, mtimeMs int64) error
+	// SetAttrs is the batched counterpart of Chmod / Chown / Utimens. It
+	// writes all non-nil fields in one partial HSet against the inode
+	// hash, collapsing up to three sequential RTTs into a single round
+	// trip on the NFS SETATTR hot path. Callers pass nil pointers for
+	// fields they do not want to change; an all-nil update is a no-op
+	// that returns nil without touching Redis.
+	SetAttrs(ctx context.Context, path string, upd AttrUpdate) error
 	Info(ctx context.Context) (*InfoResult, error)
 
 	Head(ctx context.Context, path string, n int) (string, error)

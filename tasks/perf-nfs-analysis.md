@@ -262,11 +262,138 @@ Run-to-run variance across passes is roughly 30 % — cloud Redis latency is noi
 
 ### Still-standing follow-ups
 
-- **`createFileIfMissing` WATCH/MULTI dance.** The file-creation path still uses 4 sequential RTTs inside a retryWatch. Could be replaced with `HSETNX` on dirents for atomic claim, then a plain pipeline, saving 2 RTTs per create.
-- **`attrs.Apply` runs Chmod → Chown → Utimens sequentially** inside the NFS onCreate handler (`third_party/go-nfs/file.go`). Each is a separate client call. A new batched `SetAttrs(ctx, path, mode, uid, gid, atime, mtime)` client method would collapse these into one HSet + one pipeline, saving another 2 RTTs per create. Needs a small change in the vendored go-nfs fork.
 - **Lua EVALSHA for `WriteInodeAtPath`.** Would collapse the current 2 RTTs to 1 and — more importantly — avoid transferring file content over the wire (read-modify-write server-side). Interesting once Claude Code session jsonls grow past ~1 MB.
 - **Separate Redis string key for file content.** The "elegant" version of the Lua fix. Unlocks native APPEND/SETRANGE/GETRANGE semantics. Schema change with migration cost; only worth it if the ~47 ms/append number becomes a problem again.
 - **The capture script still needs a manual sudo run.** The AppleDouble discovery was made via `AFS_NFS_DEBUG=1` + the new `AFS_NFS_OPSTATS=1` hook, not via fs_usage — so the fs_usage trace is less urgent than before.
+
+## Part 3 — follow-up pass: HSETNX CreateFile + batched SetAttrs
+
+After pass 2, `tasks/perf-nfs-followups.md` candidates 1 and 2 were the
+top remaining wins on the write hot path. Both are now landed.
+
+### Candidate 1 landed: HSETNX `createFileIfMissing`
+
+`mount/internal/client/native_helpers.go:536` was rewritten to replace
+the WATCH/MULTI name-claim dance with an optimistic HSETNX pipeline:
+
+1. `INCR nextInode` — 1 RTT.
+2. Pipeline `HSETNX dirents parent name id` + `HSet inode` +
+   `queueTouchTimes` + `queueCreateInfo` — 1 RTT.
+
+On the rare lost-race path the loser pays one extra RTT to DEL the
+orphan inode and compensate the optimistic `files` / `total_data_bytes`
+counter bumps. In the single-writer Claude Code case contention is
+effectively zero, so the effective cost per create drops from the
+4-RTT WATCH/MULTI flow to 2 RTTs.
+
+### Candidate 2 landed: batched `Client.SetAttrs` + `BatchSetAttrer` fast path
+
+A new `SetAttrs(ctx, path, AttrUpdate)` method was added to the `Client`
+interface (`mount/internal/client/client.go`) and implemented in
+`native_core.go`. It writes only the non-nil fields in one partial HSet
+against the inode hash, skipping the full `inodeFieldsAtPath` map, so
+the wire payload is 1-5 fields instead of 13.
+
+`mount/internal/nfsfs/fs.go` got a `FS.SetAttrs(name, *mode, *uid, *gid,
+*atime, *mtime)` wrapper that handles read-only, AppleDouble shadow
+routing, and os-type -> client-type conversion. It satisfies a new
+optional interface `BatchSetAttrer` declared in
+`third_party/go-nfs/file.go`. `SetFileAttributes.Apply` type-asserts
+changer against `BatchSetAttrer`; when the assertion succeeds (our FS
+does) the entire Chmod + Lchown + Chtimes triple collapses into one
+client call. The "candidate 7" no-op skip is folded in: if the computed
+diff is empty after comparing against the pre-op stat, the whole call
+is skipped and zero Redis commands land.
+
+memfs and upstream go-nfs consumers that do not implement
+BatchSetAttrer still run the legacy Chmod + Lchown + Chtimes path.
+
+### Tests added
+
+- `TestCreateFileRaceLoserCleansUpOrphan` — two goroutines race on the
+  same path; asserts exactly one winner, matching inode IDs on both
+  sides, `Info.Files == 1`, and exactly two inode keys in Redis.
+- `TestCreateFileRaceLoserCompensatesContentBytes` — two Echo calls
+  with non-empty content race; asserts `Info.TotalDataBytes ==
+  len(payload)` (loser's content-byte delta is properly compensated).
+- `TestCreateFileRaceExclusiveLoserReturnsError` — both callers
+  exclusive; asserts exactly one gets `"already exists"`.
+- `TestCreateFileOverExistingDirectoryPreservesError` — collides a
+  create against a dir, asserts `"not a file"` and that counters are
+  untouched (the failed create must not leak an `HIncrBy files -1`).
+- `TestSetAttrsPartialFieldsOnly` — table-driven partial-update
+  verification across mode / uid / gid / atime / mtime permutations.
+- `TestSetAttrsEmptyIsNoOp` — zero Redis commands for
+  `SetAttrs(AttrUpdate{})`.
+- `TestSetAttrsCacheUpdatesInPlace` — post-`SetAttrs` `Stat` hits the
+  path cache (zero HMGETs on the inode hash).
+- `TestSetAttrsParityWithChmodChownUtimens` — two identical workspaces
+  end up with identical inode state after the batched and legacy
+  paths; the HGets match exactly on mode/uid/gid/atime_ms/mtime_ms.
+- `TestSetAttrsSingleRoundTrip` — a 5-field `SetAttrs` issues exactly
+  one `HSet` against the inode hash.
+- `TestFSSetAttrsFlowsThroughToClient`, `TestFSSetAttrsShadowAppleDouble`,
+  `TestFSSetAttrsShadowNotExist`, `TestFSSetAttrsReadOnly`,
+  `TestFSSetAttrsEmptyIsNoOp` — the `nfsfs.FS.SetAttrs` wrapper tests.
+- `TestSetFileAttributesApplyDispatchesToBatchSetAttrer` — end-to-end
+  through the go-nfs `SetFileAttributes.Apply` dispatcher: building a
+  real `SetFileAttributes` and calling `Apply(fs, fs, path)` must hit
+  the fast path with exactly one inode HSET, not three.
+- `TestSetFileAttributesApplyEmptyDiffIsFreeRider` — an `Apply` whose
+  diff is entirely a no-op issues zero inode HSETs (candidate 7
+  free-rider win).
+- `TestSetAttrsCommandsStrictlyLessThanLegacy`,
+  `TestCreateFileCommandCountIsBounded` — regression guards pinning
+  the hot-path command counts.
+- `BenchmarkCreateFile`, `BenchmarkSetAttrsBatched`,
+  `BenchmarkLegacyChmodChownUtimens` — wall-clock benchmarks against a
+  local `redis-server` spawned on a free port.
+
+### Results
+
+Command counts, warm cache, local `redis-server`:
+
+| op | pre-Fix 1+2 | post-Fix 1+2 | reduction |
+|---|---:|---:|---:|
+| CreateFile (uncontended) | 10-12 cmds | **8 cmds** | -2-4 cmds |
+| SetAttrs (5-field update) | 6 cmds (legacy 3x HSet + 3x PUBLISH) | **2 cmds** | **3.0x** |
+
+Wall clock, local `redis-server` (Apple M4, Apple Redis 7.2, go test -bench=.):
+
+| op | ns/op | allocs/op |
+|---|---:|---:|
+| `BenchmarkCreateFile` | 266,128 ns | 398 |
+| `BenchmarkSetAttrsBatched` (5 fields) | **36,581 ns** | **39** |
+| `BenchmarkLegacyChmodChownUtimens` | 121,209 ns | 171 |
+
+On local Redis the batched SetAttrs path is **3.3× faster** than the
+equivalent Chmod + Chown + Utimens triple and uses **4.4× fewer
+allocations**. The absolute savings of 84 µs/op scales linearly with
+RTT, so on a 20 ms-RTT remote Redis this is the predicted ~40-80 ms
+saved per SETATTR and CREATE that was called out as the expected win
+in `perf-nfs-followups.md`.
+
+Wall-clock numbers on the 20 ms-RTT cloud Redis will need a separate
+pass against the actual backing store (this repository was tested
+against the user's local Redis at 127.0.0.1:6379). The command-count
+reduction is the stable, machine-independent proof that the fix lands.
+
+### Still-standing follow-ups
+
+Deferred per the decision framework in `perf-nfs-followups.md`:
+
+- **Lua EVALSHA for `WriteInodeAtPath`** (candidate 3). Not needed for
+  the typical 10-500 KB session.jsonl sizes; revisit if measured
+  workloads move past ~1 MB.
+- **Separate Redis string key for file content** (candidate 4). Schema
+  change with migration cost; parked unless candidate 3 is also
+  insufficient.
+- **Collapsing the three NFS-write stats** (candidate 5). CPU-only
+  win, profile first.
+- **Writeback buffer on the NFS server.** Not yet needed; the two
+  fixes above close the hot-path gap to the point where remote-Redis
+  perception should be noticeably better. Re-measure in a real Claude
+  Code session before escalating.
 
 
 ## Re-benchmark plan
