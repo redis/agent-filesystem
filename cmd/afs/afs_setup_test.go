@@ -61,12 +61,9 @@ func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
-	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	cfg, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
-	}
-	if migrateDir != "" {
-		t.Fatalf("migrateDir = %q, want empty", migrateDir)
 	}
 	if cfg.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNone)
@@ -90,7 +87,7 @@ func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
 
-	if _, _, err := runSetupWizard(reader, &output, defaultConfig(), true); err != nil {
+	if _, err := runSetupWizard(reader, &output, defaultConfig(), true); err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
 
@@ -116,10 +113,16 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	existing.MountBackend = mountBackendNone
 	existing.Mountpoint = ""
 
-	reader := bufio.NewReader(bytes.NewBufferString("2\n\n"))
+	// Menu (edit mode) → pick option 2 (filesystem mount) → keep as none →
+	// back to menu → pick 4 to save and exit.
+	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
+		"2",
+		"",
+		"4",
+	)))
 	var output bytes.Buffer
 
-	if _, _, err := runSetupWizard(reader, &output, existing, false); err != nil {
+	if _, err := runSetupWizard(reader, &output, existing, false); err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
 
@@ -145,14 +148,12 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
 		"3",
 		"repo-two",
+		"4",
 	)))
 
-	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
-	}
-	if migrateDir != "" {
-		t.Fatalf("migrateDir = %q, want empty", migrateDir)
 	}
 	if cfg.CurrentWorkspace != "repo-two" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "repo-two")
@@ -169,14 +170,12 @@ func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
 		"3",
 		"none",
+		"4",
 	)))
 
-	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
-	}
-	if migrateDir != "" {
-		t.Fatalf("migrateDir = %q, want empty", migrateDir)
 	}
 	if cfg.CurrentWorkspace != "" {
 		t.Fatalf("CurrentWorkspace = %q, want empty", cfg.CurrentWorkspace)
@@ -204,17 +203,15 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	existing.NFSPort = busyAddr.Port
 
 	input := stringsJoinLines(
-		"2", // filesystem mount only
+		"2", // filesystem mount
 		"/tmp/afs-mount",
+		"4", // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
-	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
-	}
-	if migrateDir != "" {
-		t.Fatalf("migrateDir = %q, want empty", migrateDir)
 	}
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
@@ -235,6 +232,139 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	}
 }
 
+func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
+	t.Helper()
+
+	existing := defaultConfig()
+	existing.UseExistingRedis = true
+	existing.RedisAddr = "redis.example:6379"
+	existing.CurrentWorkspace = "demo"
+	existing.MountBackend = mountBackendNone
+
+	// Pick option 3 (workspace) → set it → pick 3 again → clear → finally 4.
+	input := stringsJoinLines(
+		"3", "repo-two",
+		"3", "none",
+		"4",
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+	var output bytes.Buffer
+
+	cfg, err := runSetupWizard(reader, &output, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if cfg.CurrentWorkspace != "" {
+		t.Fatalf("CurrentWorkspace = %q, want empty after second edit", cfg.CurrentWorkspace)
+	}
+	if strings.Count(output.String(), "What would you like to change?") < 3 {
+		t.Fatalf("menu should have been shown 3 times (two edits + final exit), got:\n%s", output.String())
+	}
+}
+
+func TestRunSetupWizardEditModeUnknownChoiceReprompts(t *testing.T) {
+	t.Helper()
+
+	existing := defaultConfig()
+	existing.UseExistingRedis = true
+	existing.CurrentWorkspace = "demo"
+
+	// Unknown choice "9" → menu re-displayed → pick 4 to exit.
+	input := stringsJoinLines("9", "4")
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+	var output bytes.Buffer
+
+	if _, err := runSetupWizard(reader, &output, existing, false); err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if !strings.Contains(output.String(), "Unknown choice") {
+		t.Fatalf("expected unknown-choice warning, got:\n%s", output.String())
+	}
+	if strings.Count(output.String(), "What would you like to change?") < 2 {
+		t.Fatalf("menu should have been shown at least twice after unknown choice")
+	}
+}
+
+func TestCmdSetupDoesNotStartServices(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
+	input := stringsJoinLines(
+		"2", // existing Redis
+		"",  // default addr
+		"",  // default user
+		"",  // no password
+		"",  // no tls
+		"",  // no mounted filesystem
+	)
+	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {
+		t.Fatalf("WriteFile(stdin) returned error: %v", err)
+	}
+	stdinFile, err := os.Open(stdinPath)
+	if err != nil {
+		t.Fatalf("Open(stdin) returned error: %v", err)
+	}
+	defer stdinFile.Close()
+
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "setup-stdout-*.txt")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdout) returned error: %v", err)
+	}
+	defer stdoutFile.Close()
+
+	origStdin := os.Stdin
+	origStdout := os.Stdout
+	os.Stdin = stdinFile
+	os.Stdout = stdoutFile
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		os.Stdout = origStdout
+	})
+
+	if err := cmdSetup(); err != nil {
+		t.Fatalf("cmdSetup() returned error: %v", err)
+	}
+
+	if _, statErr := os.Stat(configFile); statErr != nil {
+		t.Fatalf("config file stat error = %v, want saved config", statErr)
+	}
+
+	// cmdSetup must not have produced any running-state file.
+	if _, statErr := os.Stat(statePath()); statErr == nil {
+		t.Fatal("cmdSetup() should not have written state (it should not start services)")
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state stat error = %v, want ErrNotExist", statErr)
+	}
+
+	if _, err := stdoutFile.Seek(0, 0); err != nil {
+		t.Fatalf("Seek(stdout) returned error: %v", err)
+	}
+	outputBytes, err := os.ReadFile(stdoutFile.Name())
+	if err != nil {
+		t.Fatalf("ReadFile(stdout) returned error: %v", err)
+	}
+	output := string(outputBytes)
+	if !strings.Contains(output, "Run ") || !strings.Contains(output, " up") {
+		t.Fatalf("cmdSetup() output should mention running 'afs up' afterward; got:\n%s", output)
+	}
+}
+
 func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testing.T) {
 	t.Helper()
 
@@ -244,18 +374,16 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	existing.MountBackend = mountBackendNone
 
 	input := stringsJoinLines(
-		"2",        // filesystem mount only
+		"2",        // filesystem mount
 		"/tmp/afs", // requested mountpoint
 		"newfiles", // workspace name to create/use
+		"4",        // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
-	cfg, migrateDir, err := runSetupWizard(reader, ioDiscard{}, existing, false)
+	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
-	}
-	if migrateDir != "" {
-		t.Fatalf("migrateDir = %q, want empty", migrateDir)
 	}
 	if cfg.CurrentWorkspace != "newfiles" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "newfiles")
@@ -283,7 +411,7 @@ func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
 	cfg.Mountpoint = ""
 
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(mountpointFile)))
-	_, err := promptLocalFilesystemSetup(reader, ioDiscard{}, &cfg, false)
+	err := promptLocalFilesystemSetup(reader, ioDiscard{}, &cfg, false)
 	if err == nil {
 		t.Fatal("promptLocalFilesystemSetup() returned nil error, want existing-file mountpoint rejection")
 	}

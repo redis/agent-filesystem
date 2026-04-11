@@ -296,7 +296,7 @@ func cmdSetup() error {
 	fmt.Println()
 
 	r := bufio.NewReader(os.Stdin)
-	cfg, migrateDir, err := runSetupWizard(r, os.Stdout, cfg, firstRun)
+	cfg, err := runSetupWizard(r, os.Stdout, cfg, firstRun)
 	if err != nil {
 		return err
 	}
@@ -308,64 +308,71 @@ func cmdSetup() error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("  %s Saved to %s\n\n", clr(ansiDim, "▸"), clr(ansiCyan, compactDisplayPath(configPath())))
-
-	if migrateDir != "" {
-		return performMigration(cfg, migrateDir, r)
-	}
-	return startServices(cfg)
+	fmt.Printf("  %s Saved to %s\n", clr(ansiDim, "▸"), clr(ansiCyan, compactDisplayPath(configPath())))
+	fmt.Printf("  %s Run %s to start AFS\n\n", clr(ansiDim, "▸"), clr(ansiCyan, filepath.Base(os.Args[0])+" up"))
+	return nil
 }
 
-func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (config, string, error) {
+// runSetupWizard runs the interactive setup flow. On first run it walks the
+// user through Redis + filesystem configuration in order; on subsequent runs
+// it shows a menu that loops until the user picks "Done", so they can edit
+// Redis connection, filesystem mount, and current workspace in any order
+// without being dropped back to the shell after a single choice.
+func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (config, error) {
 	if firstRun {
 		return runFullSetupWizard(r, out, cfg)
 	}
+	return runEditSetupWizard(r, out, cfg)
+}
 
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Setup"))
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  What would you like to change?")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change filesystem mount "+clr(ansiDim, "("+setupLocalModeLabel(cfg)+")"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
-	fmt.Fprintln(out)
+func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
+	for {
+		fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Setup"))
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "  What would you like to change?")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change filesystem mount "+clr(ansiDim, "("+setupLocalModeLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Save and exit")
+		fmt.Fprintln(out)
 
-	choice, err := promptString(r, out, "  Choose", "1")
-	if err != nil {
-		return cfg, "", err
-	}
-
-	switch strings.TrimSpace(choice) {
-	case "1":
-		if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
-			return cfg, "", err
-		}
-		return cfg, "", nil
-	case "2":
-		migrateDir, err := promptLocalFilesystemSetup(r, out, &cfg, false)
+		choice, err := promptString(r, out, "  Choose", "4")
 		if err != nil {
-			return cfg, "", err
+			return cfg, err
 		}
-		return cfg, migrateDir, nil
-	case "3":
-		if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
-			return cfg, "", err
+		fmt.Fprintln(out)
+
+		switch strings.TrimSpace(choice) {
+		case "1":
+			if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+				return cfg, err
+			}
+		case "2":
+			if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
+				return cfg, err
+			}
+		case "3":
+			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
+				return cfg, err
+			}
+		case "4", "":
+			return cfg, nil
+		default:
+			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, or 4."))
+			fmt.Fprintln(out)
 		}
-		return cfg, "", nil
-	default:
-		return cfg, "", fmt.Errorf("unsupported choice %q", choice)
 	}
 }
 
-func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, string, error) {
+func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
 	if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
-		return cfg, "", err
+		return cfg, err
 	}
-	migrateDir, err := promptLocalFilesystemSetup(r, out, &cfg, true)
-	if err != nil {
-		return cfg, "", err
+	if err := promptLocalFilesystemSetup(r, out, &cfg, true); err != nil {
+		return cfg, err
 	}
-	return cfg, migrateDir, nil
+	return cfg, nil
 }
 
 func setupRedisConnectionLabel(cfg config) string {
@@ -468,7 +475,7 @@ func promptRedisConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) err
 	return nil
 }
 
-func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, firstRun bool) (string, error) {
+func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, firstRun bool) error {
 	// ── Filesystem mount ────────────────────────────────
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Filesystem Mount"))
@@ -477,7 +484,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	if !firstRun {
 		backendName, err := normalizeMountBackend(cfg.MountBackend)
 		if err != nil {
-			return "", err
+			return err
 		}
 		if backendName != mountBackendNone && strings.TrimSpace(cfg.Mountpoint) != "" {
 			mountDefault = cfg.Mountpoint
@@ -492,20 +499,20 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	mp, err := promptString(r, out,
 		"  Choose local mount point\n"+promptHint, mountDefault)
 	if err != nil {
-		return "", err
+		return err
 	}
 	mp = strings.TrimSpace(mp)
 	if strings.EqualFold(mp, "none") || mp == "" {
 		cfg.MountBackend = mountBackendNone
 		cfg.Mountpoint = ""
-		return "", nil
+		return nil
 	}
 	resolvedMountpoint, err := expandPath(mp)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if err := validateMountpointPath(resolvedMountpoint); err != nil {
-		return "", err
+		return err
 	}
 	if strings.TrimSpace(cfg.CurrentWorkspace) == "" {
 		workspaceDefault := strings.TrimSpace(filepath.Base(mp))
@@ -516,14 +523,14 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 			"\n  Workspace name\n"+
 				"  "+clr(ansiDim, "AFS will create this workspace before mounting if it does not already exist"), workspaceDefault)
 		if err != nil {
-			return "", err
+			return err
 		}
 		workspace = strings.TrimSpace(workspace)
 		if workspace == "" {
-			return "", fmt.Errorf("workspace name cannot be empty when enabling a mounted filesystem")
+			return fmt.Errorf("workspace name cannot be empty when enabling a mounted filesystem")
 		}
 		if err := validateAFSName("workspace", workspace); err != nil {
-			return "", err
+			return err
 		}
 		cfg.CurrentWorkspace = workspace
 	}
@@ -539,7 +546,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		}
 		suggestedPort, occupied, err := suggestNFSPort(cfg.NFSHost, cfg.NFSPort)
 		if err != nil {
-			return "", err
+			return err
 		}
 		cfg.NFSPort = suggestedPort
 		if occupied {
@@ -550,7 +557,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	}
 
 	fmt.Fprintln(out)
-	return "", nil
+	return nil
 }
 
 func promptCurrentWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
