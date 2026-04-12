@@ -106,7 +106,12 @@ func startSyncServices(cfg config, foreground bool) error {
 		return err
 	}
 	progress := func(done, total int64) {
-		bootStep.update(fmt.Sprintf("Syncing workspace · %d/%d files", done, total))
+		if total < 0 {
+			// Scan phase: total is unknown, done = entries discovered so far.
+			bootStep.update(fmt.Sprintf("Scanning workspace · %d entries", done))
+		} else {
+			bootStep.update(fmt.Sprintf("Syncing workspace · %d/%d files", done, total))
+		}
 	}
 	if err := daemon.StartWithProgress(ctx, progress); err != nil {
 		bootStep.fail(err.Error())

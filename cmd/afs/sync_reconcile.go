@@ -70,7 +70,7 @@ func (f *fullReconciler) run(ctx context.Context, onProgress ProgressFunc) error
 	if err != nil {
 		return fmt.Errorf("scan local: %w", err)
 	}
-	remote, err := f.scanRemoteMeta(ctx)
+	remote, err := f.scanRemoteMeta(ctx, onProgress)
 	if err != nil {
 		return fmt.Errorf("scan remote: %w", err)
 	}
@@ -151,15 +151,21 @@ func (f *fullReconciler) scanLocalMeta() (map[string]observedMeta, error) {
 }
 
 // scanRemoteMeta walks the live workspace root using LsLong only — no Cat().
-// This is one LsLong RPC per directory, proportional to tree depth not file
-// count. For symlinks we also call Readlink (one extra RPC per symlink).
-func (f *fullReconciler) scanRemoteMeta(ctx context.Context) (map[string]observedMeta, error) {
+// This is one LsLong RPC per directory, proportional to directory count not
+// file count. For symlinks we also call Readlink (one extra RPC per symlink).
+// No timeout — large workspaces (45 GB+) can have thousands of directories
+// and the walk legitimately takes minutes on WAN. The parent context handles
+// cancellation (Ctrl-C).
+func (f *fullReconciler) scanRemoteMeta(ctx context.Context, onProgress ProgressFunc) (map[string]observedMeta, error) {
 	out := make(map[string]observedMeta)
-	// 60s total for the metadata walk — should be plenty for thousands of
-	// directories on WAN since each LsLong is one Redis call.
-	scanCtx, scanCancel := context.WithTimeout(ctx, 60*time.Second)
-	defer scanCancel()
-	if err := f.scanRemoteDirMeta(scanCtx, "/", out); err != nil {
+	var scanned int64
+	report := func() {
+		scanned++
+		if onProgress != nil {
+			onProgress(scanned, -1) // -1 = total unknown during scan
+		}
+	}
+	if err := f.scanRemoteDirMeta(ctx, "/", out, report); err != nil {
 		if isClientNotFound(err) {
 			return out, nil
 		}
@@ -168,7 +174,10 @@ func (f *fullReconciler) scanRemoteMeta(ctx context.Context) (map[string]observe
 	return out, nil
 }
 
-func (f *fullReconciler) scanRemoteDirMeta(ctx context.Context, dir string, out map[string]observedMeta) error {
+func (f *fullReconciler) scanRemoteDirMeta(ctx context.Context, dir string, out map[string]observedMeta, onEntry func()) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	entries, err := f.r.fs.LsLong(ctx, dir)
 	if err != nil {
 		return err
@@ -179,10 +188,13 @@ func (f *fullReconciler) scanRemoteDirMeta(ctx context.Context, dir string, out 
 		if f.r.ignore.shouldIgnore(rel, e.Type == "dir") {
 			continue
 		}
+		if onEntry != nil {
+			onEntry()
+		}
 		switch e.Type {
 		case "dir":
 			out[rel] = observedMeta{kind: "dir", mode: e.Mode, mtimeMs: e.Mtime}
-			if err := f.scanRemoteDirMeta(ctx, full, out); err != nil {
+			if err := f.scanRemoteDirMeta(ctx, full, out, onEntry); err != nil {
 				return err
 			}
 		case "symlink":
