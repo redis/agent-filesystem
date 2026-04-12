@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 )
 
 // Invalidate operation kinds published to other clients sharing an FS key.
@@ -55,6 +56,19 @@ func decodeInvalidate(payload []byte) (*InvalidateEvent, error) {
 	}
 	return &ev, nil
 }
+
+// ChangeStreamEntry is one entry from the per-workspace durable change
+// stream. Sync clients read these on reconnect to replay missed events.
+type ChangeStreamEntry struct {
+	ID    string          // Redis stream message ID (e.g. "1681234567890-0")
+	Event InvalidateEvent // Decoded event payload
+}
+
+// ErrStreamTrimmed is returned by ReadChangeStream when the client's saved
+// cursor position has been trimmed from the stream (the client was offline
+// longer than the stream's retention window). The caller should fall back
+// to a full reconciliation.
+var ErrStreamTrimmed = errors.New("change stream: saved position was trimmed, full reconcile required")
 
 // newOriginID returns a fresh opaque client identifier. 16 random bytes (hex
 // encoded) is plenty to make collisions astronomically unlikely for a Redis

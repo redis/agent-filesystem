@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -784,53 +785,126 @@ func atomicWriteFileStandalone(absPath string, data []byte, mode uint32, pid int
 
 // remoteSubscriptionPump runs in its own goroutine, translating client
 // invalidation events into remoteEvents the reconciler understands.
+// It also handles durable stream catch-up on startup and after each
+// pub/sub reconnection.
 type remoteSubscriptionPump struct {
-	fs  client.Client
-	log *syncLogger
-	out chan remoteEvent
+	fs          client.Client
+	log         *syncLogger
+	stateWriter *stateWriter
+	out         chan remoteEvent
 }
 
-func newRemoteSubscriptionPump(fs client.Client, log *syncLogger) *remoteSubscriptionPump {
-	return &remoteSubscriptionPump{fs: fs, log: log, out: make(chan remoteEvent, 256)}
+func newRemoteSubscriptionPump(fs client.Client, log *syncLogger, sw *stateWriter) *remoteSubscriptionPump {
+	return &remoteSubscriptionPump{fs: fs, log: log, stateWriter: sw, out: make(chan remoteEvent, 256)}
 }
 
 func (p *remoteSubscriptionPump) events() <-chan remoteEvent { return p.out }
 
 func (p *remoteSubscriptionPump) run(ctx context.Context, onReconnect func()) error {
 	p.log.Info("subscription pump started, listening for remote changes")
+
+	// Catch up from the durable change stream before subscribing to
+	// live pub/sub. This replays any events missed while we were offline.
+	// A missing cursor (first run or pre-journal state) is NOT an error —
+	// the initial reconcile already ran. Only trigger full reconcile when
+	// we had a cursor but it was trimmed (stream retention exceeded).
+	p.catchUpFromStream(ctx)
+
 	handler := func(ev client.InvalidateEvent) {
-		switch ev.Op {
-		case client.InvalidateOpContent:
-			for _, path := range ev.Paths {
-				p.log.RemoteChange(path, "content")
-				p.send(remoteEvent{Path: path, NeedsContent: true})
-			}
-		case client.InvalidateOpInode:
-			for _, path := range ev.Paths {
-				p.log.RemoteChange(path, "inode")
-				p.send(remoteEvent{Path: path})
-			}
-		case client.InvalidateOpDir:
-			for _, path := range ev.Paths {
-				p.log.RemoteChange(path, "dir")
-				p.send(remoteEvent{Path: path})
-			}
-		case client.InvalidateOpPrefix:
-			for _, path := range ev.Paths {
-				if path == "/" || path == "" {
-					p.log.Info("full sweep requested (prefix /)")
-					p.send(remoteEvent{FullSweep: true})
-					if onReconnect != nil {
-						onReconnect()
-					}
-					return
-				}
-				p.log.RemoteChange(path, "prefix")
-				p.send(remoteEvent{Path: path})
+		p.dispatchInvalidateEvent(ev)
+	}
+
+	// Use the reconnect-aware subscriber so we can replay the stream
+	// after each pub/sub connection drop.
+	return p.fs.SubscribeInvalidationsWithReconnect(ctx, handler, func() {
+		p.log.Info("pub/sub reconnected, replaying change stream")
+		if !p.catchUpFromStream(ctx) {
+			if onReconnect != nil {
+				onReconnect()
 			}
 		}
+	})
+}
+
+// catchUpFromStream reads the durable change stream from the last persisted
+// cursor and dispatches any missed events. Returns true if fully caught up,
+// false if the cursor was missing/trimmed (caller should fall back to full
+// reconcile).
+func (p *remoteSubscriptionPump) catchUpFromStream(ctx context.Context) bool {
+	lastID := p.stateWriter.lastStreamID()
+	if lastID == "" {
+		// No cursor yet — first run or pre-journal state file. This is not
+		// an error; the initial reconcile already ran. Skip silently.
+		return true
 	}
-	return p.fs.SubscribeInvalidations(ctx, handler)
+	const batchSize int64 = 500
+	total := 0
+	for {
+		entries, err := p.fs.ReadChangeStream(ctx, lastID, batchSize)
+		if err != nil {
+			if errors.Is(err, client.ErrStreamTrimmed) {
+				p.log.Info("change stream cursor trimmed, falling back to full reconcile")
+			} else {
+				p.log.Err("stream catch-up", err.Error())
+			}
+			return false
+		}
+		if len(entries) == 0 {
+			if total > 0 {
+				p.log.Info(fmt.Sprintf("stream catch-up complete: replayed %d entries", total))
+			}
+			return true
+		}
+		for _, e := range entries {
+			if e.Event.Origin == p.fs.OriginID() {
+				lastID = e.ID
+				continue
+			}
+			p.dispatchInvalidateEvent(client.InvalidateEvent(e.Event))
+			lastID = e.ID
+			total++
+		}
+		p.stateWriter.updateStreamID(lastID)
+		if int64(len(entries)) < batchSize {
+			if total > 0 {
+				p.log.Info(fmt.Sprintf("stream catch-up complete: replayed %d entries", total))
+			}
+			return true
+		}
+	}
+}
+
+// dispatchInvalidateEvent translates one InvalidateEvent into remoteEvent(s)
+// on the output channel. Shared by the live pub/sub handler and the stream
+// catch-up path.
+func (p *remoteSubscriptionPump) dispatchInvalidateEvent(ev client.InvalidateEvent) {
+	switch ev.Op {
+	case client.InvalidateOpContent:
+		for _, path := range ev.Paths {
+			p.log.RemoteChange(path, "content")
+			p.send(remoteEvent{Path: path, NeedsContent: true})
+		}
+	case client.InvalidateOpInode:
+		for _, path := range ev.Paths {
+			p.log.RemoteChange(path, "inode")
+			p.send(remoteEvent{Path: path})
+		}
+	case client.InvalidateOpDir:
+		for _, path := range ev.Paths {
+			p.log.RemoteChange(path, "dir")
+			p.send(remoteEvent{Path: path})
+		}
+	case client.InvalidateOpPrefix:
+		for _, path := range ev.Paths {
+			if path == "/" || path == "" {
+				p.log.Info("full sweep requested (prefix /)")
+				p.send(remoteEvent{FullSweep: true})
+				return
+			}
+			p.log.RemoteChange(path, "prefix")
+			p.send(remoteEvent{Path: path})
+		}
+	}
 }
 
 func (p *remoteSubscriptionPump) send(ev remoteEvent) {

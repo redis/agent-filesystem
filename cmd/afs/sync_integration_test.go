@@ -339,3 +339,36 @@ func TestSyncWarmRestartSkipsUnchanged(t *testing.T) {
 		t.Fatalf("stable.txt = %q, want %q", got, "original")
 	}
 }
+
+// Test that the change stream journal enables catch-up after an offline
+// period. The daemon writes to the stream on every mutation; after restart,
+// it reads from the saved cursor and replays missed changes.
+func TestSyncStreamCatchUpAfterOffline(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+
+	// Start daemon, create a file, wait for it to sync.
+	env.writeLocalFile(t, "before.txt", "v1")
+	env.startDaemon(t)
+	assertEventually(t, 3*time.Second, "before.txt remote", func() bool {
+		return env.remoteExists(t, "before.txt")
+	})
+
+	// Let the stream cursor get persisted.
+	time.Sleep(200 * time.Millisecond)
+	env.stopDaemon()
+
+	// While the daemon is stopped, write a file directly to Redis
+	// (simulating another client). The native client's Echo will XADD
+	// to the changes stream automatically.
+	env.writeRemoteFile(t, "missed.txt", "offline-change")
+
+	// Restart the daemon. It should catch up from the stream and download
+	// the missed file without needing a full remote scan.
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "missed.txt via stream catch-up", func() bool {
+		return env.localExists("missed.txt") && env.readLocalFile(t, "missed.txt") == "offline-change"
+	})
+}

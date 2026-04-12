@@ -14,6 +14,9 @@ type TreeEntry = internal.TreeEntry
 type GrepMatch = internal.GrepMatch
 type InvalidateEvent = internal.InvalidateEvent
 type AttrUpdate = internal.AttrUpdate
+type ChangeStreamEntry = internal.ChangeStreamEntry
+
+var ErrStreamTrimmed = internal.ErrStreamTrimmed
 
 const (
 	InvalidateOpInode   = internal.InvalidateOpInode

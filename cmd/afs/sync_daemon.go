@@ -110,7 +110,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
-	d.pump = newRemoteSubscriptionPump(cfg.FS, log)
+	d.pump = newRemoteSubscriptionPump(cfg.FS, log, stateWriter)
 	return d, nil
 }
 

@@ -36,11 +36,12 @@ type SyncEntry struct {
 // no "."). Directories are recorded so a missing entry on disk during the next
 // reconcile loop unambiguously means "deleted locally" rather than "never seen".
 type SyncState struct {
-	Version   int                  `json:"version"`
-	Workspace string               `json:"workspace"`
-	LocalPath string               `json:"local_path"`
-	Entries   map[string]SyncEntry `json:"entries"`
-	UpdatedAt time.Time            `json:"updated_at"`
+	Version      int                  `json:"version"`
+	Workspace    string               `json:"workspace"`
+	LocalPath    string               `json:"local_path"`
+	LastStreamID string               `json:"last_stream_id,omitempty"`
+	Entries      map[string]SyncEntry `json:"entries"`
+	UpdatedAt    time.Time            `json:"updated_at"`
 }
 
 // newSyncState returns an empty state ready to be populated by a reconciler
@@ -204,6 +205,23 @@ func (w *stateWriter) flushNow() {
 		// Log via stderr; the daemon will retry on next markDirty.
 		fmt.Fprintf(os.Stderr, "afs sync: failed to persist state for %s: %v\n", clone.Workspace, err)
 	}
+}
+
+// updateStreamID persists the latest Redis Stream cursor so the next
+// reconnect or restart can resume from this position.
+func (w *stateWriter) updateStreamID(id string) {
+	w.mu.Lock()
+	w.state.LastStreamID = id
+	w.dirty = true
+	w.mu.Unlock()
+	w.markDirty()
+}
+
+// lastStreamID returns the persisted stream cursor.
+func (w *stateWriter) lastStreamID() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.state.LastStreamID
 }
 
 // snapshot returns a defensive copy of the current state. Used by tests and

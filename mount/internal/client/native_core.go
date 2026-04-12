@@ -176,6 +176,117 @@ func (c *nativeClient) publishInvalidate(ctx context.Context, op string, paths .
 		// Best-effort broadcast. Log once per failure; callers never see it.
 		log.Printf("afs: invalidate publish failed op=%s paths=%v: %v", op, cleaned, err)
 	}
+	// Append to the durable change stream so offline clients can catch up
+	// on reconnect. Best-effort: a failure here does not block the mutation.
+	if err := c.rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: c.keys.changesStream(),
+		MaxLen: 10000,
+		Approx: true,
+		Values: map[string]interface{}{
+			"payload": string(payload),
+		},
+	}).Err(); err != nil {
+		log.Printf("afs: change stream append failed op=%s: %v", op, err)
+	}
+}
+
+// ReadChangeStream reads entries from the durable change journal, starting
+// strictly after lastID. Pass "0-0" to read from the beginning, "" is
+// treated as "0-0". Returns nil, nil when fully caught up.
+func (c *nativeClient) ReadChangeStream(ctx context.Context, lastID string, count int64) ([]ChangeStreamEntry, error) {
+	if lastID == "" {
+		lastID = "0-0"
+	}
+	if count <= 0 {
+		count = 500
+	}
+	streams, err := c.rdb.XRead(ctx, &redis.XReadArgs{
+		Streams: []string{c.keys.changesStream(), lastID},
+		Count:   count,
+	}).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	// Trim detection: if our cursor was trimmed, the stream's oldest entry
+	// will be newer than lastID. One cheap XRange("-","-") call checks this.
+	if lastID != "0-0" && len(streams) > 0 && len(streams[0].Messages) > 0 {
+		oldest, oerr := c.rdb.XRangeN(ctx, c.keys.changesStream(), "-", "+", 1).Result()
+		if oerr == nil && len(oldest) > 0 && oldest[0].ID > lastID {
+			return nil, ErrStreamTrimmed
+		}
+	}
+	var out []ChangeStreamEntry
+	for _, s := range streams {
+		for _, msg := range s.Messages {
+			payload, ok := msg.Values["payload"].(string)
+			if !ok {
+				continue
+			}
+			ev, err := decodeInvalidate([]byte(payload))
+			if err != nil {
+				continue
+			}
+			out = append(out, ChangeStreamEntry{ID: msg.ID, Event: *ev})
+		}
+	}
+	return out, nil
+}
+
+// SubscribeInvalidationsWithReconnect is like SubscribeInvalidations but
+// calls onReconnect each time the underlying pub/sub connection is
+// re-established after a drop.
+func (c *nativeClient) SubscribeInvalidationsWithReconnect(ctx context.Context, handler func(InvalidateEvent), onReconnect func()) error {
+	if handler == nil {
+		handler = func(InvalidateEvent) {}
+	}
+	channel := c.keys.invalidateChannel()
+	go c.runInvalidationSubscriberWithReconnect(ctx, channel, handler, onReconnect)
+	return nil
+}
+
+func (c *nativeClient) runInvalidationSubscriberWithReconnect(ctx context.Context, channel string, handler func(InvalidateEvent), onReconnect func()) {
+	firstConnect := true
+	backoff := 100 * time.Millisecond
+	const maxBackoff = 5 * time.Second
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		sub := c.rdb.Subscribe(ctx, channel)
+		if _, err := sub.Receive(ctx); err != nil {
+			_ = sub.Close()
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("afs: invalidate subscribe to %s failed: %v (retry in %s)", channel, err, backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+		backoff = 100 * time.Millisecond
+		if !firstConnect && onReconnect != nil {
+			onReconnect()
+		}
+		firstConnect = false
+		ch := sub.Channel()
+		c.consumeInvalidationChannel(ctx, ch, handler)
+		_ = sub.Close()
+		if ctx.Err() != nil {
+			return
+		}
+		log.Printf("afs: invalidate subscription to %s dropped, reconnecting", channel)
+	}
 }
 
 // SubscribeInvalidations implements the Client interface. It runs a goroutine

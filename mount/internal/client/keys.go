@@ -44,6 +44,13 @@ func (k keyBuilder) invalidateChannel() string {
 	return "afs:{" + k.fsKey + "}:invalidate"
 }
 
+// changesStream is the Redis Stream key for the durable change journal.
+// Sync clients read from this stream on reconnect to catch up on events
+// missed while their pub/sub subscription was down.
+func (k keyBuilder) changesStream() string {
+	return "afs:{" + k.fsKey + "}:changes"
+}
+
 func (k keyBuilder) inodePrefix() string {
 	return "afs:{" + k.fsKey + "}:inode:"
 }

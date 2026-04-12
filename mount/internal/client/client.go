@@ -92,6 +92,18 @@ type Client interface {
 	Find(ctx context.Context, path, pattern string, typeFilter string) ([]string, error)
 	Grep(ctx context.Context, path, pattern string, nocase bool) ([]GrepMatch, error)
 
+	// ReadChangeStream reads up to count entries from the per-workspace
+	// durable change stream starting strictly after lastID. Pass "0-0" to
+	// read from the beginning. Returns ErrStreamTrimmed if lastID has been
+	// trimmed (client should fall back to full reconcile).
+	ReadChangeStream(ctx context.Context, lastID string, count int64) ([]ChangeStreamEntry, error)
+
+	// SubscribeInvalidationsWithReconnect is like SubscribeInvalidations
+	// but calls onReconnect each time the pub/sub connection is
+	// re-established after a drop, allowing callers to replay the change
+	// stream for events missed during the outage.
+	SubscribeInvalidationsWithReconnect(ctx context.Context, handler func(InvalidateEvent), onReconnect func()) error
+
 	// SubscribeInvalidations runs a goroutine that listens on this FS key's
 	// pub/sub channel and dispatches every cross-client invalidation event
 	// to handler. Messages originating from this client are filtered out
