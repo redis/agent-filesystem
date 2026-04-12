@@ -38,23 +38,23 @@ func cmdWorkspace(args []string) error {
 	}
 
 	switch args[1] {
-	case "create":
+	case "create", "cr":
 		return cmdWorkspaceCreate(args)
-	case "list":
+	case "list", "l", "ls":
 		return cmdWorkspaceList(args)
-	case "current":
+	case "current", "cu":
 		return cmdWorkspaceCurrent(args)
-	case "use":
+	case "use", "u":
 		return cmdWorkspaceUse(args)
-	case "run":
+	case "run", "r":
 		return cmdWorkspaceRun(args)
-	case "clone":
+	case "clone", "cl":
 		return cmdWorkspaceClone(args)
-	case "fork":
+	case "fork", "f":
 		return cmdWorkspaceFork(args)
-	case "delete":
+	case "delete", "d", "rm":
 		return cmdWorkspaceDelete(args)
-	case "import":
+	case "import", "i":
 		return cmdWorkspaceImport(args)
 	default:
 		return fmt.Errorf("unknown workspace subcommand %q\n\n%s", args[1], workspaceUsageText(filepath.Base(os.Args[0])))
@@ -68,11 +68,11 @@ func cmdCheckpoint(args []string) error {
 	}
 
 	switch args[1] {
-	case "create":
+	case "create", "cr", "save":
 		return cmdCheckpointCreate(args)
-	case "list":
+	case "list", "l", "ls":
 		return cmdCheckpointList(args)
-	case "restore":
+	case "restore", "r":
 		return cmdCheckpointRestore(args)
 	default:
 		return fmt.Errorf("unknown checkpoint subcommand %q\n\n%s", args[1], checkpointUsageText(filepath.Base(os.Args[0])))
@@ -104,7 +104,7 @@ func cmdWorkspaceCreate(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace created"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace created"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: afsInitialCheckpointName},
 		{Label: "database", Value: configRemoteLabel(cfg)},
@@ -254,7 +254,7 @@ func cmdWorkspaceUse(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace selected"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace selected"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "config", Value: configPathLabel()},
@@ -386,7 +386,7 @@ func cmdWorkspaceDelete(args []string) error {
 	for _, name := range deleted {
 		rows = append(rows, boxRow{Value: name})
 	}
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspaces deleted"), rows)
+	printBox(markerSuccess+" "+clr(ansiBold, "workspaces deleted"), rows)
 	return nil
 }
 
@@ -430,7 +430,7 @@ func cmdWorkspaceClone(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace cloned"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace cloned"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "path", Value: clonedPath},
@@ -505,7 +505,7 @@ func cmdWorkspaceFork(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace forked"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace forked"), []boxRow{
 		{Label: "workspace", Value: newWorkspace},
 		{Label: "source", Value: sourceWorkspace},
 		{Label: "database", Value: configRemoteLabel(cfg)},
@@ -684,7 +684,7 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace mounted at source"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace mounted at source"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "path", Value: targetDir},
@@ -848,7 +848,7 @@ func cmdCheckpointCreate(args []string) error {
 	}
 	step.succeed(checkpointID)
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint created"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint created"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
 		{Label: "database", Value: configRemoteLabel(cfg)},
@@ -916,7 +916,7 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 		{Label: "checkpoint", Value: checkpointID},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 	}
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "checkpoint restored"), rows)
+	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint restored"), rows)
 	return nil
 }
 

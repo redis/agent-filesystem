@@ -51,12 +51,16 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	t.Helper()
 
+	// First-run flow: Redis → Mode → (mount surface). Pick existing Redis,
+	// then explicitly switch to live mount mode, then leave the mountpoint
+	// empty so the test exercises the "no mounted filesystem" path.
 	input := stringsJoinLines(
 		"2", // existing redis
 		"",  // redis addr default
 		"",  // redis username default
 		"",  // redis password
 		"",  // tls default
+		"2", // mode: live mount
 		"",  // no mounted filesystem
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -82,6 +86,7 @@ func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 		"",  // redis username default
 		"",  // redis password
 		"",  // tls default
+		"2", // mode: live mount
 		"",  // no mounted filesystem
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -110,15 +115,17 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	existing.UseExistingRedis = true
 	existing.RedisAddr = "redis.example:6379"
 	existing.CurrentWorkspace = "demo"
+	existing.Mode = modeMount // keep the menu label on "live mount" for the assertion below
 	existing.MountBackend = mountBackendNone
 	existing.Mountpoint = ""
 
-	// Menu (edit mode) → pick option 2 (filesystem mount) → keep as none →
-	// back to menu → pick 4 to save and exit.
+	// Menu (edit mode): 1=Mode, 2=Redis, 3=surface, 4=workspace, 5=save.
+	// Pick option 3 (filesystem mount) → keep as none → back to menu →
+	// pick 5 to save and exit.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"2",
+		"3",
 		"",
-		"4",
+		"5",
 	)))
 	var output bytes.Buffer
 
@@ -127,6 +134,9 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	}
 
 	got := output.String()
+	if !strings.Contains(got, "Change mode") || !strings.Contains(got, "live mount") {
+		t.Fatalf("setup output = %q, want mode current setting", got)
+	}
 	if !strings.Contains(got, "Change Redis connection") || !strings.Contains(got, "redis.example:6379") {
 		t.Fatalf("setup output = %q, want redis connection current setting", got)
 	}
@@ -145,10 +155,11 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
+	// Edit-menu items: 4 = current workspace, 5 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"3",
-		"repo-two",
 		"4",
+		"repo-two",
+		"5",
 	)))
 
 	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
@@ -167,10 +178,11 @@ func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
 	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
+	// Edit-menu items: 4 = current workspace, 5 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"3",
-		"none",
 		"4",
+		"none",
+		"5",
 	)))
 
 	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
@@ -198,14 +210,16 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	existing := defaultConfig()
 	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "repo"
+	existing.Mode = modeMount // stay on live mount in the edit menu
 	existing.MountBackend = mountBackendNone
 	existing.Mountpoint = ""
 	existing.NFSPort = busyAddr.Port
 
+	// Edit-menu items: 3 = filesystem mount, 5 = save and exit.
 	input := stringsJoinLines(
-		"2", // filesystem mount
+		"3", // filesystem mount
 		"/tmp/afs-mount",
-		"4", // save and exit
+		"5", // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -241,11 +255,12 @@ func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 	existing.CurrentWorkspace = "demo"
 	existing.MountBackend = mountBackendNone
 
-	// Pick option 3 (workspace) → set it → pick 3 again → clear → finally 4.
+	// Edit-menu items: 4 = current workspace, 5 = save. Exercise the loop
+	// by picking workspace twice (set, clear) then saving.
 	input := stringsJoinLines(
-		"3", "repo-two",
-		"3", "none",
-		"4",
+		"4", "repo-two",
+		"4", "none",
+		"5",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
@@ -269,8 +284,8 @@ func TestRunSetupWizardEditModeUnknownChoiceReprompts(t *testing.T) {
 	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
-	// Unknown choice "9" → menu re-displayed → pick 4 to exit.
-	input := stringsJoinLines("9", "4")
+	// Unknown choice "9" → menu re-displayed → pick 5 to save and exit.
+	input := stringsJoinLines("9", "5")
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
 
@@ -311,6 +326,7 @@ func TestCmdSetupDoesNotStartServices(t *testing.T) {
 		"",  // default user
 		"",  // no password
 		"",  // no tls
+		"2", // mode: live mount (keeps the "no mounted filesystem" path alive)
 		"",  // no mounted filesystem
 	)
 	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {
@@ -371,13 +387,15 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	existing := defaultConfig()
 	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = ""
+	existing.Mode = modeMount // edit-mode test, staying on live mount
 	existing.MountBackend = mountBackendNone
 
+	// Edit-menu items: 3 = filesystem mount, 5 = save.
 	input := stringsJoinLines(
-		"2",        // filesystem mount
+		"3",        // filesystem mount
 		"/tmp/afs", // requested mountpoint
 		"newfiles", // workspace name to create/use
-		"4",        // save and exit
+		"5",        // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -457,6 +475,7 @@ func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
 		"",             // redis username default
 		"",             // redis password
 		"",             // tls default
+		"2",            // mode: live mount (so we reach the mountpoint prompt)
 		mountpointFile, // invalid mountpoint
 	)
 	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {

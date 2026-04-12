@@ -50,6 +50,16 @@ type config struct {
 	RedisLog         string `json:"redisLog"`
 	MountLog         string `json:"mountLog"`
 
+	// Sync daemon (Dropbox-style local-first sync).
+	// Mode is one of "" (legacy: same as "mount"), "sync", "mount", or "none".
+	// When sync, `afs up` starts the background sync daemon instead of mounting
+	// the live workspace as FUSE/NFS. Existing configs without this field keep
+	// their previous mount-based behavior.
+	Mode             string `json:"mode,omitempty"`
+	SyncLocalPath    string `json:"syncLocalPath,omitempty"`
+	SyncFileSizeCapMB int   `json:"syncFileSizeCapMB,omitempty"`
+	SyncLog          string `json:"syncLog,omitempty"`
+
 	// Derived at runtime, not persisted.
 	redisHost string
 	redisPort int
@@ -75,6 +85,12 @@ type state struct {
 	RedisServerBin       string    `json:"redis_server_bin"`
 	MountBin             string    `json:"mount_bin"`
 	ArchivePath          string    `json:"archive_path,omitempty"`
+
+	// Sync daemon mode fields. Populated when `afs up` ran with mode=sync.
+	SyncMode      string `json:"sync_mode,omitempty"`
+	SyncPID       int    `json:"sync_pid,omitempty"`
+	SyncLocalPath string `json:"sync_local_path,omitempty"`
+	SyncLog       string `json:"sync_log,omitempty"`
 }
 
 type importClient interface {
@@ -94,14 +110,15 @@ type importStats = worktree.ImportStats
 
 var cfgPathOverride string
 var errMigrationCancelled = errors.New("migration cancelled")
+var mainSigCh chan os.Signal // disabled by interactive sync mode so it can handle SIGINT itself
 
 func main() {
 	defer showCursor()
 
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	mainSigCh = make(chan os.Signal, 1)
+	signal.Notify(mainSigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
-		<-sigCh
+		<-mainSigCh
 		showCursor()
 		fmt.Println()
 		os.Exit(130)
@@ -119,40 +136,46 @@ func main() {
 	}
 
 	switch args[0] {
-	case "setup":
+	case "setup", "se":
 		if err := cmdSetup(); err != nil {
 			fatal(err)
 		}
-	case "config":
+	case "config", "co":
 		if err := cmdConfig(args); err != nil {
 			fatal(err)
 		}
-	case "up":
+	case "up", "u":
 		if err := cmdUpArgs(args[1:]); err != nil {
 			fatal(err)
 		}
-	case "down":
+	case "down", "d":
 		if err := cmdDown(); err != nil {
 			fatal(err)
 		}
-	case "status":
+	case "status", "st", "s":
 		if err := cmdStatus(); err != nil {
 			fatal(err)
 		}
-	case "grep":
+	case "grep", "g":
 		if err := cmdGrep(args); err != nil {
 			fatal(err)
 		}
-	case "mcp":
+	case "mcp", "m":
 		if err := cmdMCP(args); err != nil {
 			fatal(err)
 		}
-	case "workspace":
+	case "workspace", "w":
 		if err := cmdWorkspace(args); err != nil {
 			fatal(err)
 		}
-	case "checkpoint":
+	case "checkpoint", "c", "ch":
 		if err := cmdCheckpoint(args); err != nil {
+			fatal(err)
+		}
+	case "_sync-daemon":
+		// Hidden: re-exec'd by `afs up` in sync mode. Runs the steady-state
+		// sync loop until SIGTERM.
+		if err := runSyncDaemon(); err != nil {
 			fatal(err)
 		}
 	case "help", "--help", "-h":
@@ -308,8 +331,8 @@ func cmdSetup() error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-	fmt.Printf("  %s Saved to %s\n", clr(ansiDim, "▸"), clr(ansiCyan, compactDisplayPath(configPath())))
-	fmt.Printf("  %s Run %s to start AFS\n\n", clr(ansiDim, "▸"), clr(ansiCyan, filepath.Base(os.Args[0])+" up"))
+	fmt.Printf("  %s Saved to %s\n", clr(ansiDim, "▸"), clr(ansiBold, compactDisplayPath(configPath())))
+	fmt.Printf("  %s Run %s to start AFS\n\n", clr(ansiDim, "▸"), clr(ansiOrange, filepath.Base(os.Args[0])+" up"))
 	return nil
 }
 
@@ -331,13 +354,14 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  What would you like to change?")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change filesystem mount "+clr(ansiDim, "("+setupLocalModeLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Save and exit")
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change mode "+clr(ansiDim, "("+setupModeLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Save and exit")
 		fmt.Fprintln(out)
 
-		choice, err := promptString(r, out, "  Choose", "4")
+		choice, err := promptString(r, out, "  Choose", "5")
 		if err != nil {
 			return cfg, err
 		}
@@ -345,32 +369,64 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 
 		switch strings.TrimSpace(choice) {
 		case "1":
-			if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+			if err := promptModeSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
 		case "2":
-			if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
+			if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
 		case "3":
+			mode, err := effectiveMode(cfg)
+			if err != nil {
+				return cfg, err
+			}
+			if mode == modeSync {
+				if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			} else {
+				if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
+					return cfg, err
+				}
+			}
+		case "4":
 			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
-		case "4", "":
+		case "5", "":
 			return cfg, nil
 		default:
-			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, or 4."))
+			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, or 5."))
 			fmt.Fprintln(out)
 		}
 	}
 }
 
 func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
+	// First-run default is sync, so a user who just blows through with Enter
+	// ends up on the recommended path.
+	if strings.TrimSpace(cfg.Mode) == "" {
+		cfg.Mode = modeSync
+	}
 	if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
-	if err := promptLocalFilesystemSetup(r, out, &cfg, true); err != nil {
+	if err := promptModeSetup(r, out, &cfg); err != nil {
 		return cfg, err
+	}
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return cfg, err
+	}
+	if mode == modeSync {
+		if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
+			return cfg, err
+		}
+	} else {
+		if err := promptLocalFilesystemSetup(r, out, &cfg, true); err != nil {
+			return cfg, err
+		}
 	}
 	return cfg, nil
 }
@@ -408,6 +464,57 @@ func setupLocalModeLabel(cfg config) string {
 		return label + " at " + cfg.Mountpoint
 	}
 	return label
+}
+
+// setupModeLabel is the right-aligned hint shown next to the "Change mode"
+// menu item. We render sync as the default and call it out as recommended
+// when the config is still on the legacy empty/mount setting.
+func setupModeLabel(cfg config) string {
+	resolved, err := effectiveMode(cfg)
+	if err != nil {
+		return "unknown"
+	}
+	switch resolved {
+	case modeSync:
+		return "sync (recommended)"
+	case modeMount:
+		return "live mount"
+	case modeNone:
+		return "none"
+	}
+	return resolved
+}
+
+// setupSurfaceMenuLabel names the menu item for the "local surface" choice
+// depending on mode. In sync mode it's the local sync path; in mount mode
+// it's the FUSE/NFS mountpoint. Avoids a schizophrenic "Change filesystem
+// mount" label when the user is in sync mode.
+func setupSurfaceMenuLabel(cfg config) string {
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return "local path"
+	}
+	if mode == modeSync {
+		return "sync local path"
+	}
+	return "filesystem mount"
+}
+
+// setupLocalSurfaceLabel is the right-side hint for the surface menu item.
+// Sync mode shows the sync path; mount mode delegates to setupLocalModeLabel.
+func setupLocalSurfaceLabel(cfg config) string {
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return setupLocalModeLabel(cfg)
+	}
+	if mode == modeSync {
+		path := strings.TrimSpace(cfg.SyncLocalPath)
+		if path == "" {
+			return "not configured"
+		}
+		return path
+	}
+	return setupLocalModeLabel(cfg)
 }
 
 func promptRedisConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
@@ -560,6 +667,90 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	return nil
 }
 
+// promptModeSetup lets the user pick between the Dropbox-style sync daemon
+// and the legacy live FUSE/NFS mount. Sync is the recommended default.
+// Mode selection only writes cfg.Mode; the companion surface (sync local
+// path vs mountpoint) is still edited from its own menu item so users don't
+// lose their existing path configuration when toggling modes.
+func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Mode"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  How should AFS expose the workspace locally?")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — Dropbox-style local-first sync to a real folder"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount backed directly by Redis")
+	fmt.Fprintln(out)
+
+	current, err := effectiveMode(*cfg)
+	if err != nil {
+		current = modeSync
+	}
+	def := "1"
+	if current == modeMount {
+		def = "2"
+	}
+
+	choice, err := promptString(r, out, "  Choose", def)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+
+	switch strings.TrimSpace(choice) {
+	case "1", "", "sync":
+		cfg.Mode = modeSync
+		if strings.TrimSpace(cfg.SyncLocalPath) == "" {
+			// Carry over the existing mountpoint as a sensible default; if
+			// there isn't one either, default to ~/afs to mirror first-run.
+			if mp := strings.TrimSpace(cfg.Mountpoint); mp != "" {
+				cfg.SyncLocalPath = mp
+			} else {
+				cfg.SyncLocalPath = "~/afs"
+			}
+			fmt.Fprintln(out, "  "+clr(ansiDim, "Sync local path defaulted to ")+clr(ansiBold, cfg.SyncLocalPath)+clr(ansiDim, " (edit it from the menu)"))
+			fmt.Fprintln(out)
+		}
+	case "2", "mount", "live", "live mount":
+		cfg.Mode = modeMount
+	default:
+		fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; keeping ")+clr(ansiBold, current))
+		fmt.Fprintln(out)
+	}
+	return nil
+}
+
+// promptSyncLocalPathSetup edits cfg.SyncLocalPath when the user is already
+// in sync mode. It is a deliberately narrower prompt than
+// promptLocalFilesystemSetup because sync mode doesn't need backend
+// selection or NFS port negotiation.
+func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Sync Local Path"))
+	fmt.Fprintln(out)
+
+	defaultValue := strings.TrimSpace(cfg.SyncLocalPath)
+	promptHint := "  " + clr(ansiDim, "Enter the local directory AFS should sync to. Example: ~/afs")
+	if defaultValue != "" {
+		promptHint = "  " + clr(ansiDim, "Press enter to keep "+defaultValue+", or type a new path")
+	}
+
+	entered, err := promptString(r, out, "  Local path\n"+promptHint, defaultValue)
+	if err != nil {
+		return err
+	}
+	entered = strings.TrimSpace(entered)
+	if entered == "" {
+		return nil
+	}
+	expanded, err := expandPath(entered)
+	if err != nil {
+		return err
+	}
+	cfg.SyncLocalPath = expanded
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Sync will write to ")+clr(ansiBold, expanded))
+	fmt.Fprintln(out)
+	return nil
+}
+
 func promptCurrentWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Current Workspace"))
@@ -651,8 +842,20 @@ func cmdUpArgs(args []string) error {
 		return nil
 	}
 
+	// Parse --interactive flag (runs sync daemon in foreground with live logs).
+	foreground := false
+	var filteredArgs []string
+	for _, a := range args {
+		if a == "--interactive" || a == "-i" {
+			foreground = true
+		} else {
+			filteredArgs = append(filteredArgs, a)
+		}
+	}
+	args = filteredArgs
+
 	if st, err := loadState(); err == nil {
-		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.ManageRedis && st.RedisPID > 0 && processAlive(st.RedisPID)) {
+		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.ManageRedis && st.RedisPID > 0 && processAlive(st.RedisPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
 			return cmdStatus()
 		}
 	}
@@ -660,6 +863,13 @@ func cmdUpArgs(args []string) error {
 	cfg, err := loadConfigForUp(args)
 	if err != nil {
 		return err
+	}
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return err
+	}
+	if mode == modeSync {
+		return startSyncServices(cfg, foreground)
 	}
 	if err := cleanupStaleMount(cfg); err != nil {
 		return err
@@ -711,6 +921,10 @@ func cmdDown() error {
 			fmt.Println()
 			return nil
 		}
+		return err
+	}
+
+	if handled, err := stopSyncServicesIfActive(st); handled || err != nil {
 		return err
 	}
 
@@ -838,11 +1052,15 @@ func cmdStatus() error {
 		if errors.Is(err, os.ErrNotExist) {
 			title := clr(ansiDim, "○") + " afs is not running"
 			printBox(title, []boxRow{
-				{Label: "start", Value: clr(ansiCyan, "afs up")},
+				{Label: "start", Value: clr(ansiOrange, "afs up")},
 			})
 			return nil
 		}
 		return err
+	}
+
+	if statusSyncIfActive(st) {
+		return nil
 	}
 
 	backend, backendName, err := backendForState(st)
@@ -876,7 +1094,7 @@ func cmdStatus() error {
 
 	var title string
 	if mounted && mountAlive {
-		title = statusTitle(clr(ansiBGreen, "●"), currentWorkspace, localPath, true)
+		title = statusTitle(markerSuccess, currentWorkspace, localPath, true)
 	} else {
 		title = statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
 	}
@@ -1043,7 +1261,7 @@ func startServices(cfg config) error {
 
 func printReadyBox(cfg config, backendName, _ string) {
 	localPath := localSurfacePath(cfg, backendName)
-	titlePrefix := clr(ansiBGreen, "●")
+	titlePrefix := markerSuccess
 	mounted := backendName != mountBackendNone
 	if !mounted {
 		titlePrefix = clr(ansiYellow, "○")
@@ -1056,14 +1274,14 @@ func printReadyBox(cfg config, backendName, _ string) {
 	}
 	if backendName == mountBackendNone {
 		rows = append(rows, boxRow{})
-		rows = append(rows, boxRow{Label: "create", Value: clr(ansiCyan, filepath.Base(os.Args[0])+" workspace create <workspace>")})
-		rows = append(rows, boxRow{Label: "import", Value: clr(ansiCyan, filepath.Base(os.Args[0])+" workspace import <workspace> <directory>")})
+		rows = append(rows, boxRow{Label: "create", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace create <workspace>")})
+		rows = append(rows, boxRow{Label: "import", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace import <workspace> <directory>")})
 		printBox(title, rows)
 		return
 	}
 	rows = append(rows, boxRow{})
-	rows = append(rows, boxRow{Label: "try", Value: clr(ansiCyan, "ls "+cfg.Mountpoint)})
-	rows = append(rows, boxRow{Label: "stop", Value: clr(ansiCyan, filepath.Base(os.Args[0])+" down")})
+	rows = append(rows, boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.Mountpoint)})
+	rows = append(rows, boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")})
 	printBox(title, rows)
 }
 
@@ -1344,7 +1562,7 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 	rollback = false
 
 	totalDuration := time.Since(migrationStartedAt)
-	title := clr(ansiBGreen, "●") + " " + clr(ansiBold, "migration complete")
+	title := markerSuccess + " " + clr(ansiBold, "migration complete")
 	readyRows := append(commandContextRows(cfg, currentWorkspaceLabel(cfg.CurrentWorkspace)),
 		boxRow{Label: "mountpoint", Value: localSurfacePath(cfg, backendName)},
 		boxRow{Label: "mount backend", Value: userModeLabel(backendName)},
@@ -1370,8 +1588,8 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		boxRow{Label: "total", Value: formatStepDuration(totalDuration)},
 		boxRow{Label: "rate", Value: formatMigrationThroughput(importedBytes, dirDuration+fileDuration)},
 		boxRow{},
-		boxRow{Label: "try", Value: clr(ansiCyan, "ls "+cfg.Mountpoint)},
-		boxRow{Label: "stop", Value: clr(ansiCyan, filepath.Base(os.Args[0])+" down")},
+		boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.Mountpoint)},
+		boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")},
 	)
 	printBox(title, readyRows)
 	return nil
@@ -1850,6 +2068,27 @@ func prepareConfigForSave(cfg *config) error {
 			return err
 		}
 		cfg.CurrentWorkspace = strings.TrimSpace(cfg.CurrentWorkspace)
+	}
+
+	// Sync mode validation. Mode is left empty for legacy configs; effectiveMode
+	// translates that to "mount" at runtime.
+	if strings.TrimSpace(cfg.Mode) != "" {
+		if _, err := effectiveMode(*cfg); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(cfg.SyncLocalPath) != "" {
+		expanded, err := expandPath(cfg.SyncLocalPath)
+		if err != nil {
+			return err
+		}
+		cfg.SyncLocalPath = expanded
+	}
+	if cfg.SyncFileSizeCapMB < 0 {
+		return fmt.Errorf("syncFileSizeCapMB must be >= 0")
+	}
+	if strings.TrimSpace(cfg.SyncLog) == "" {
+		cfg.SyncLog = "/tmp/afs-sync.log"
 	}
 
 	host, port, err := splitAddr(cfg.RedisAddr)

@@ -174,7 +174,7 @@ func cmdConfigSet(args []string) error {
 
 	rows := configSummaryRows(cfg, "saved")
 	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "config updated"), rows)
+	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
 	return nil
 }
 
@@ -543,12 +543,16 @@ Examples:
 
 func upUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s up
+  %s up [flags]
   %s up <workspace> <mountpoint>
 
 Start AFS using the saved config.
 If <workspace> and <mountpoint> are provided, AFS saves them into %s before
 starting so future runs use the updated workspace and mountpoint.
+
+Flags:
+  --interactive, -i   Run the sync daemon in the foreground with live logs.
+                      Ctrl-C stops the daemon. Useful for debugging.
 
 Notes:
   Redis connection, mount backend, and readonly mode come from config.
@@ -559,8 +563,9 @@ Notes:
 
 Examples:
   %s up
+  %s up --interactive
   %s up claude-code ~/.claude
-`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin)
+`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {

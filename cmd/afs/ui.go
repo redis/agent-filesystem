@@ -22,10 +22,20 @@ const (
 	ansiBRed    = "\033[91m"
 	ansiBGreen  = "\033[92m"
 	ansiGray    = "\033[90m"
+	// ansiOrange is the 256-color amber Claude Code uses for actionable
+	// text (version numbers, command references, "run this next" hints).
+	// We use it for any `afs …` command a box or setup flow is telling the
+	// user to run next.
+	ansiOrange  = "\033[38;5;208m"
 	ansiHideCur = "\033[?25l"
 	ansiShowCur = "\033[?25h"
 	ansiClearLn = "\033[2K"
 )
+
+// markerSuccess is the emoji marker we use at the start of success box
+// titles and top-level completion messages. Matches Claude Code's install
+// banner.
+const markerSuccess = "✅"
 
 var (
 	spinFrames = [...]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
@@ -89,7 +99,34 @@ func stripAnsi(s string) string {
 }
 
 func runeWidth(s string) int {
-	return utf8.RuneCountInString(stripAnsi(s))
+	stripped := stripAnsi(s)
+	n := 0
+	for _, r := range stripped {
+		n += cellWidth(r)
+	}
+	return n
+}
+
+// cellWidth returns the terminal cell width of a single rune. We only need
+// to distinguish single-width (1) from double-width (2) characters because
+// combining marks and zero-width glyphs don't appear in our UI strings.
+// Emoji fall into specific Unicode ranges — we check the handful we actually
+// use rather than pulling in a full runewidth table dependency.
+func cellWidth(r rune) int {
+	switch {
+	case r == '✅', r == '❌', r == '⏸':
+		return 2
+	// Miscellaneous Symbols and Pictographs + Supplemental Symbols — the
+	// blocks that hold most common emoji. Catches future emoji we add to
+	// status output without touching this function.
+	case r >= 0x1F300 && r <= 0x1FAFF:
+		return 2
+	case r >= 0x2600 && r <= 0x27BF && r != '✓' && r != '✗':
+		// Dingbats / misc symbols. ✓ (U+2713) and ✗ (U+2717) render single-
+		// width in most monospaced fonts and we rely on that in step output.
+		return 2
+	}
+	return 1
 }
 
 func fitDisplayText(text string, maxWidth int) string {
@@ -123,11 +160,12 @@ func fitDisplayText(text string, maxWidth int) string {
 		}
 
 		r, size := utf8.DecodeRuneInString(text[i:])
-		if visible >= maxWidth-1 {
+		w := cellWidth(r)
+		if visible+w > maxWidth-1 {
 			break
 		}
 		b.WriteRune(r)
-		visible++
+		visible += w
 		i += size
 	}
 

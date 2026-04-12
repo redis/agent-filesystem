@@ -247,7 +247,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 
-	printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "workspace imported"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace imported"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: initialSavepoint},
 		{Label: "database", Value: configRemoteLabel(cfg)},
@@ -701,7 +701,7 @@ func saveAFSWorkspace(ctx context.Context, cfg config, store *afsStore, workspac
 	}
 
 	if printResult {
-		printBox(clr(ansiBGreen, "●")+" "+clr(ansiBold, "save complete"), []boxRow{
+		printBox(markerSuccess+" "+clr(ansiBold, "save complete"), []boxRow{
 			{Label: "workspace", Value: workspace},
 			{Label: "savepoint", Value: savepointID},
 			{Label: "files", Value: strconv.Itoa(stats.FileCount)},

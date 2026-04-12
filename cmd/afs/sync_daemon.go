@@ -1,0 +1,251 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/redis/agent-filesystem/mount/client"
+)
+
+// syncDaemonConfig is everything the daemon needs to operate. The fields are
+// grouped by concern: the workspace and root path, the Redis client, and
+// optional knobs (size cap, debounce, readonly).
+type syncDaemonConfig struct {
+	Workspace      string
+	LocalRoot      string // absolute, will be created if missing
+	FS             client.Client
+	Store          *afsStore
+	MaxFileBytes   int64
+	WatcherDebounce time.Duration
+	Readonly       bool
+	Interactive    bool // when true, log every file event to stderr
+}
+
+// syncDaemon orchestrates the watcher, reconciler, uploader, downloader, and
+// remote subscription pump goroutines for one workspace+local-path pair.
+type syncDaemon struct {
+	cfg syncDaemonConfig
+	log *syncLogger
+
+	stateWriter   *stateWriter
+	reconciler    *reconciler
+	uploader      *uploader
+	downloader    *downloader
+	pump          *remoteSubscriptionPump
+	watcher       *syncWatcher
+	full          *fullReconciler
+	echo          *echoSuppressor
+	conflict      *conflictNamer
+	ignore        *syncIgnore
+
+	wg     sync.WaitGroup
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// newSyncDaemon initializes (but does not start) a daemon for the given
+// workspace + local path. Run() does the heavy lifting.
+func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
+	if cfg.FS == nil {
+		return nil, errors.New("syncDaemon: nil client")
+	}
+	if cfg.Workspace == "" {
+		return nil, errors.New("syncDaemon: empty workspace")
+	}
+	if cfg.LocalRoot == "" {
+		return nil, errors.New("syncDaemon: empty local root")
+	}
+	if cfg.MaxFileBytes <= 0 {
+		cfg.MaxFileBytes = 64 * 1024 * 1024
+	}
+	if cfg.WatcherDebounce <= 0 {
+		cfg.WatcherDebounce = 100 * time.Millisecond
+	}
+
+	if err := os.MkdirAll(cfg.LocalRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("create local root: %w", err)
+	}
+	abs, err := filepath.Abs(cfg.LocalRoot)
+	if err != nil {
+		return nil, err
+	}
+	cfg.LocalRoot = abs
+
+	st, err := loadSyncState(cfg.Workspace)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("load sync state: %w", err)
+		}
+		st = newSyncState(cfg.Workspace, cfg.LocalRoot)
+	} else if st.LocalPath != cfg.LocalRoot {
+		// Local path moved between runs; reset state to force a full
+		// reconciliation rather than using stale paths.
+		st = newSyncState(cfg.Workspace, cfg.LocalRoot)
+	}
+
+	ignore, err := loadSyncIgnore(cfg.LocalRoot)
+	if err != nil {
+		return nil, err
+	}
+	echo := newEchoSuppressor()
+	conflict := newConflictNamer()
+	stateWriter := newStateWriter(st, time.Second)
+	log := newSyncLogger(cfg.Interactive)
+
+	d := &syncDaemon{
+		cfg:         cfg,
+		log:         log,
+		stateWriter: stateWriter,
+		echo:        echo,
+		conflict:    conflict,
+		ignore:      ignore,
+		done:        make(chan struct{}),
+	}
+	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log)
+	d.full = newFullReconciler(d.reconciler)
+	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
+	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
+	d.pump = newRemoteSubscriptionPump(cfg.FS)
+	return d, nil
+}
+
+// Start kicks off all goroutines and returns. The initial reconciliation
+// (cold-start hydration) runs inline with a progress callback so the caller
+// can show a live spinner. Once Start returns, the folder is fully populated
+// and the steady-state goroutines are running.
+func (d *syncDaemon) Start(ctx context.Context) error {
+	return d.StartWithProgress(ctx, nil)
+}
+
+// StartWithProgress is like Start but accepts an optional progress callback
+// that receives (done, total) file counts during the initial reconciliation.
+func (d *syncDaemon) StartWithProgress(ctx context.Context, onProgress ProgressFunc) error {
+	if d.cancel != nil {
+		return errors.New("syncDaemon: already started")
+	}
+	dctx, cancel := context.WithCancel(ctx)
+	d.cancel = cancel
+
+	// Install the watcher FIRST so fsnotify queues events for any files
+	// that land while the reconcile is running. The reconciler's debouncer
+	// deduplicates them against the cold-start state.
+	w, err := newSyncWatcher(d.cfg.LocalRoot, d.ignore, d.cfg.WatcherDebounce)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("watcher: %w", err)
+	}
+	d.watcher = w
+
+	// Single full reconcile — walks both trees, diffs, and applies directly
+	// with parallel workers. No channel dispatch, so no deadlock risk.
+	if err := d.full.run(dctx, onProgress); err != nil {
+		_ = w.Close()
+		cancel()
+		return fmt.Errorf("initial reconcile: %w", err)
+	}
+
+	// Steady-state goroutines.
+	stateStop := make(chan struct{})
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.stateWriter.run(stateStop)
+	}()
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		<-dctx.Done()
+		close(stateStop)
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		w.run(dctx)
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.uploader.run(dctx, d.reconciler.uploadIn())
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.downloader.run(dctx, d.reconciler.downloadIn())
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		err := d.pump.run(dctx, func() {
+			d.reconciler.requestFullSweep()
+		})
+		if err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "afs sync: subscription pump exited: %v\n", err)
+		}
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		d.reconciler.run(dctx, w.Events(), d.pump.events())
+	}()
+
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		for {
+			select {
+			case <-dctx.Done():
+				return
+			case <-d.reconciler.fullSweepRequests():
+				if err := d.full.run(dctx, nil); err != nil && !errors.Is(err, context.Canceled) {
+					fmt.Fprintf(os.Stderr, "afs sync: full reconcile failed: %v\n", err)
+				}
+			}
+		}
+	}()
+
+	go func() {
+		d.wg.Wait()
+		if d.watcher != nil {
+			_ = d.watcher.Close()
+		}
+		d.stateWriter.flushNow()
+		close(d.done)
+	}()
+
+	return nil
+}
+
+// Stop cancels the daemon context and waits for all goroutines to drain.
+func (d *syncDaemon) Stop() {
+	if d.cancel != nil {
+		d.cancel()
+		d.cancel = nil
+	}
+	<-d.done
+}
+
+// Snapshot returns a copy of the current sync state for status reporting.
+func (d *syncDaemon) Snapshot() *SyncState {
+	return d.stateWriter.snapshot()
+}
+
+// Run is a blocking helper that starts the daemon and waits for ctx to be
+// cancelled. Used by `afs up` foreground mode and tests.
+func (d *syncDaemon) Run(ctx context.Context) error {
+	if err := d.Start(ctx); err != nil {
+		return err
+	}
+	<-ctx.Done()
+	d.Stop()
+	return ctx.Err()
+}

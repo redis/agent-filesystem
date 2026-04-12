@@ -315,6 +315,7 @@ func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
+	cfg.Mode = modeMount // this test specifically exercises the no-mount legacy path
 	cfg.MountBackend = mountBackendNone
 	cfg.CurrentWorkspace = "demo"
 	cfg.WorkRoot = t.TempDir()

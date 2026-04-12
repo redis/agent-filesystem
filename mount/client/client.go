@@ -12,6 +12,15 @@ type InfoResult = internal.InfoResult
 type WcResult = internal.WcResult
 type TreeEntry = internal.TreeEntry
 type GrepMatch = internal.GrepMatch
+type InvalidateEvent = internal.InvalidateEvent
+type AttrUpdate = internal.AttrUpdate
+
+const (
+	InvalidateOpInode   = internal.InvalidateOpInode
+	InvalidateOpDir     = internal.InvalidateOpDir
+	InvalidateOpPrefix  = internal.InvalidateOpPrefix
+	InvalidateOpContent = internal.InvalidateOpContent
+)
 
 func New(rdb *redis.Client, key string) Client {
 	return internal.New(rdb, key)
