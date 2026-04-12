@@ -148,12 +148,10 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	if r.ignore.shouldIgnore(ev.Path, false) {
 		return
 	}
-	r.log.LocalChange(ev.Path, ev.KindHint)
 	abs := filepath.Join(r.root, filepath.FromSlash(ev.Path))
 	info, err := os.Lstat(abs)
 	if errors.Is(err, fs.ErrNotExist) {
-		// Local delete: enqueue an upload-side delete unless we already
-		// know the entry is gone.
+		r.log.LocalChange(ev.Path, "deleted")
 		r.handleLocalDelete(ev.Path)
 		return
 	}
@@ -163,7 +161,7 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	}
 
 	// Echo suppression: if the downloader marked an expectation for this
-	// path and the disk content matches, drop the event.
+	// path and the disk content matches, drop the event silently.
 	if exp, ok := r.echo.consume(ev.Path); ok {
 		if r.echoMatches(abs, info, exp) {
 			return
@@ -171,6 +169,13 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 		// Echo expectation existed but disk does not match — fall through
 		// and treat as a normal local event. The expectation has already
 		// been consumed.
+	}
+
+	// Log only events that survived ignore + echo filtering, and skip
+	// chmod-only events (permission changes are synced but not interesting
+	// to the user in the interactive log).
+	if ev.KindHint != "chmod" {
+		r.log.LocalChange(ev.Path, ev.KindHint)
 	}
 
 	switch {

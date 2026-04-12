@@ -100,7 +100,7 @@ func isBaselineIgnored(rel string) bool {
 	if strings.HasPrefix(base, ".afs-sync.tmp.") {
 		return true
 	}
-	if strings.HasPrefix(base, ".afssync.tmp.") {
+	if strings.Contains(base, ".afssync.tmp.") {
 		return true
 	}
 	if base == afsIgnoreFilename || base == legacyOriginalIgnoreFilename {
