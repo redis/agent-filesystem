@@ -60,12 +60,136 @@ const defaultParallelWorkers = 8
 // (completed, total) counts. Used by the CLI to update the startup spinner.
 type ProgressFunc func(done, total int64)
 
-// run executes a single full reconciliation pass:
-//  1. Metadata-only scan of local tree + remote tree (fast, no content reads)
-//  2. Diff against persisted state → plan of actions
-//  3. Execute plan in parallel (download/upload with content reads)
-//  4. Update persisted state
+// run executes a single full reconciliation pass. On cold start (empty local
+// folder, no persisted state) it uses the bulk materialize path — the same
+// one `workspace run` uses — which reads the entire workspace in a handful of
+// pipelined Redis calls instead of one LsLong per directory. Warm restarts
+// use the metadata-diff approach to detect changes.
 func (f *fullReconciler) run(ctx context.Context, onProgress ProgressFunc) error {
+	if f.isColdStart() {
+		return f.coldStart(ctx, onProgress)
+	}
+	return f.warmStart(ctx, onProgress)
+}
+
+// isColdStart returns true when the local folder is empty (or missing) and
+// there is no persisted SyncState. This means we can skip the diff entirely
+// and just pull everything from Redis in bulk.
+func (f *fullReconciler) isColdStart() bool {
+	f.r.state.mu.Lock()
+	entryCount := len(f.r.state.state.Entries)
+	f.r.state.mu.Unlock()
+	if entryCount > 0 {
+		return false
+	}
+	entries, err := os.ReadDir(f.r.root)
+	if err != nil {
+		return true // missing dir = cold start
+	}
+	// Ignore hidden files (.DS_Store etc) when deciding if the dir is "empty".
+	for _, e := range entries {
+		if !strings.HasPrefix(e.Name(), ".") {
+			return false
+		}
+	}
+	return true
+}
+
+// coldStart pulls the entire workspace from Redis using the bulk manifest
+// path (buildManifestFromWorkspaceRoot + materializeManifestToDirectory).
+// This is the same path `workspace run` uses and reads the full tree in
+// a handful of pipelined HMGet/HGetAll calls — dramatically faster than
+// one LsLong per directory over WAN.
+func (f *fullReconciler) coldStart(ctx context.Context, onProgress ProgressFunc) error {
+	if f.r.store == nil || f.r.store.rdb == nil {
+		return fmt.Errorf("cold start requires a store with Redis connection")
+	}
+
+	fsKey := workspaceRedisKey(f.r.workspace)
+	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
+	if err != nil {
+		return fmt.Errorf("get workspace meta: %w", err)
+	}
+
+	m, blobs, stats, err := buildManifestFromWorkspaceRoot(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint)
+	if err != nil {
+		return fmt.Errorf("build manifest: %w", err)
+	}
+
+	if onProgress != nil {
+		onProgress(0, int64(stats.FileCount+stats.DirCount))
+	}
+
+	var done int64
+	matStats, err := materializeManifestToDirectory(f.r.root, m, func(blobID string) ([]byte, error) {
+		data, ok := blobs[blobID]
+		if !ok {
+			return nil, fmt.Errorf("blob %q missing during cold start materialize", blobID)
+		}
+		return data, nil
+	}, manifestMaterializeOptions{
+		preserveMetadata: true,
+		onProgress: func(p importStats) {
+			done = int64(p.Files + p.Dirs + p.Symlinks)
+			if onProgress != nil {
+				onProgress(done, int64(stats.FileCount+stats.DirCount))
+			}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("materialize: %w", err)
+	}
+
+	// Build SyncState from the materialized manifest so warm restarts can
+	// diff against it without re-reading content.
+	now := time.Now().UTC()
+	f.r.state.mu.Lock()
+	for path, entry := range m.Entries {
+		rel := strings.TrimPrefix(path, "/")
+		if rel == "" {
+			continue // skip root dir entry
+		}
+		se := SyncEntry{
+			Type:          entry.Type,
+			Mode:          entry.Mode,
+			Size:          entry.Size,
+			RemoteMtimeMs: entry.MtimeMs,
+			LastSyncedAt:  now,
+		}
+		switch entry.Type {
+		case "file":
+			// Compute hash from the inline/blob content so warm restart can compare.
+			data, _ := manifestEntryData(entry, func(blobID string) ([]byte, error) {
+				d, ok := blobs[blobID]
+				if !ok {
+					return nil, fmt.Errorf("blob %q missing", blobID)
+				}
+				return d, nil
+			})
+			if data != nil {
+				se.LocalHash = sha256Hex(data)
+				se.RemoteHash = se.LocalHash
+			}
+			// Get local mtime from the file we just wrote.
+			abs := filepath.Join(f.r.root, filepath.FromSlash(rel))
+			if fi, statErr := os.Stat(abs); statErr == nil {
+				se.LocalMtimeMs = fi.ModTime().UnixMilli()
+			}
+		case "symlink":
+			se.Target = entry.Target
+		}
+		f.r.state.state.Entries[rel] = se
+	}
+	f.r.state.dirty = true
+	f.r.state.mu.Unlock()
+	f.r.state.markDirty()
+
+	_ = matStats // used via the progress callback
+	return nil
+}
+
+// warmStart diffs local vs remote metadata and syncs only what changed.
+func (f *fullReconciler) warmStart(ctx context.Context, onProgress ProgressFunc) error {
 	local, err := f.scanLocalMeta()
 	if err != nil {
 		return fmt.Errorf("scan local: %w", err)
@@ -79,18 +203,6 @@ func (f *fullReconciler) run(ctx context.Context, onProgress ProgressFunc) error
 	if len(plan) == 0 {
 		return nil
 	}
-	dirs, downloads, uploads := 0, 0, 0
-	for _, a := range plan {
-		switch {
-		case a.kind == "mkdir-local" || a.kind == "mkdir-remote":
-			dirs++
-		case a.kind == "download" || a.kind == "symlink-download":
-			downloads++
-		case a.kind == "upload" || a.kind == "symlink-upload":
-			uploads++
-		}
-	}
-	fmt.Fprintf(os.Stderr, "afs sync: reconcile plan: %d dirs, %d downloads, %d uploads\n", dirs, downloads, uploads)
 	return f.executePlan(ctx, plan, onProgress)
 }
 
