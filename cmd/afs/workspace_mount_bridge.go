@@ -75,11 +75,140 @@ func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace
 }
 
 func buildManifestFromWorkspaceRoot(ctx context.Context, rdb *redis.Client, fsKey, workspace, savepoint string) (manifest, map[string][]byte, manifestStats, error) {
+	return buildManifestFromWorkspaceRootWithProgress(ctx, rdb, fsKey, workspace, savepoint, nil)
+}
+
+// buildManifestFromWorkspaceRootWithProgress reads the entire workspace tree
+// using pipelined BFS — one Redis pipeline per tree depth level. This replaces
+// the sequential recursive walk (one HMGet per inode) and is orders of magnitude
+// faster on WAN: a tree of depth 10 takes ~10 round trips regardless of file
+// count, vs. N round trips in the old code.
+//
+// onProgress is called with (entriesProcessed, -1) during the walk so callers
+// can show a live counter. Pass nil to skip.
+func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.Client, fsKey, workspace, savepoint string, onProgress func(int64, int64)) (manifest, map[string][]byte, manifestStats, error) {
 	entries := make(map[string]manifestEntry)
 	blobs := make(map[string][]byte)
 	stats := manifestStats{}
-	if err := appendWorkspaceRootManifest(ctx, rdb, fsKey, workspaceFSRootInodeID, "/", entries, blobs, &stats); err != nil {
-		return manifest{}, nil, manifestStats{}, err
+	var processed int64
+
+	report := func() {
+		processed++
+		if onProgress != nil {
+			onProgress(processed, -1)
+		}
+	}
+
+	// BFS queue: each item is (inodeID, path).
+	type bfsItem struct {
+		inodeID string
+		path    string
+	}
+	queue := []bfsItem{{workspaceFSRootInodeID, "/"}}
+
+	for len(queue) > 0 {
+		if ctx.Err() != nil {
+			return manifest{}, nil, manifestStats{}, ctx.Err()
+		}
+
+		// Pipeline: read all inodes in this BFS level.
+		pipe := rdb.Pipeline()
+		inodeCmds := make([]*redis.SliceCmd, len(queue))
+		for i, item := range queue {
+			inodeCmds[i] = pipe.HMGet(ctx, workspaceRootInodeKey(fsKey, item.inodeID),
+				"type", "mode", "size", "mtime_ms", "target", "content")
+		}
+		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+			return manifest{}, nil, manifestStats{}, err
+		}
+
+		// Collect directories that need their children enumerated.
+		var dirItems []bfsItem
+		for i, item := range queue {
+			values, err := inodeCmds[i].Result()
+			if err != nil || len(values) < 6 || values[0] == nil {
+				continue
+			}
+			inode := &workspaceRootInode{
+				Type:    workspaceRootString(values[0]),
+				Mode:    uint32(workspaceRootInt64(values[1])),
+				Size:    workspaceRootInt64(values[2]),
+				MtimeMs: workspaceRootInt64(values[3]),
+				Target:  workspaceRootString(values[4]),
+				Content: workspaceRootString(values[5]),
+			}
+			if shouldIgnoreMountedPath(item.path) {
+				continue
+			}
+			report()
+
+			entry := manifestEntry{
+				Type:    inode.Type,
+				Mode:    inode.Mode,
+				MtimeMs: inode.MtimeMs,
+				Size:    inode.Size,
+			}
+			switch inode.Type {
+			case "dir":
+				entry.Size = 0
+				entries[item.path] = entry
+				if item.path != "/" {
+					stats.DirCount++
+				}
+				dirItems = append(dirItems, item)
+			case "file":
+				data := []byte(inode.Content)
+				entry.Size = int64(len(data))
+				stats.FileCount++
+				stats.TotalBytes += int64(len(data))
+				if len(data) <= afsInlineThreshold {
+					entry.Inline = base64.StdEncoding.EncodeToString(data)
+				} else {
+					entry.BlobID = sha256Hex(data)
+					if _, ok := blobs[entry.BlobID]; !ok {
+						blobs[entry.BlobID] = data
+					}
+				}
+				entries[item.path] = entry
+			case "symlink":
+				entry.Target = inode.Target
+				entry.Size = int64(len(inode.Target))
+				entries[item.path] = entry
+			}
+		}
+
+		// Pipeline: read dirents for all directories in this level.
+		if len(dirItems) == 0 {
+			break
+		}
+		pipe = rdb.Pipeline()
+		direntCmds := make([]*redis.MapStringStringCmd, len(dirItems))
+		for i, item := range dirItems {
+			direntCmds[i] = pipe.HGetAll(ctx, workspaceRootDirentsKey(fsKey, item.inodeID))
+		}
+		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+			return manifest{}, nil, manifestStats{}, err
+		}
+
+		// Build next BFS level from children.
+		queue = queue[:0]
+		for i, item := range dirItems {
+			children, err := direntCmds[i].Result()
+			if err != nil {
+				continue
+			}
+			childNames := make([]string, 0, len(children))
+			for name := range children {
+				childNames = append(childNames, name)
+			}
+			sort.Strings(childNames)
+			for _, name := range childNames {
+				queue = append(queue, bfsItem{
+					inodeID: children[name],
+					path:    joinWorkspaceRootPath(item.path, name),
+				})
+			}
+		}
 	}
 
 	if _, ok := entries["/"]; !ok {

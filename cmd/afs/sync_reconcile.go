@@ -111,7 +111,7 @@ func (f *fullReconciler) coldStart(ctx context.Context, onProgress ProgressFunc)
 		return fmt.Errorf("get workspace meta: %w", err)
 	}
 
-	m, blobs, stats, err := buildManifestFromWorkspaceRoot(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint)
+	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint, onProgress)
 	if err != nil {
 		return fmt.Errorf("build manifest: %w", err)
 	}
