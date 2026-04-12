@@ -786,39 +786,46 @@ func atomicWriteFileStandalone(absPath string, data []byte, mode uint32, pid int
 // invalidation events into remoteEvents the reconciler understands.
 type remoteSubscriptionPump struct {
 	fs  client.Client
+	log *syncLogger
 	out chan remoteEvent
 }
 
-func newRemoteSubscriptionPump(fs client.Client) *remoteSubscriptionPump {
-	return &remoteSubscriptionPump{fs: fs, out: make(chan remoteEvent, 256)}
+func newRemoteSubscriptionPump(fs client.Client, log *syncLogger) *remoteSubscriptionPump {
+	return &remoteSubscriptionPump{fs: fs, log: log, out: make(chan remoteEvent, 256)}
 }
 
 func (p *remoteSubscriptionPump) events() <-chan remoteEvent { return p.out }
 
 func (p *remoteSubscriptionPump) run(ctx context.Context, onReconnect func()) error {
+	p.log.Info("subscription pump started, listening for remote changes")
 	handler := func(ev client.InvalidateEvent) {
 		switch ev.Op {
 		case client.InvalidateOpContent:
 			for _, path := range ev.Paths {
+				p.log.RemoteChange(path, "content")
 				p.send(remoteEvent{Path: path, NeedsContent: true})
 			}
 		case client.InvalidateOpInode:
 			for _, path := range ev.Paths {
+				p.log.RemoteChange(path, "inode")
 				p.send(remoteEvent{Path: path})
 			}
 		case client.InvalidateOpDir:
 			for _, path := range ev.Paths {
+				p.log.RemoteChange(path, "dir")
 				p.send(remoteEvent{Path: path})
 			}
 		case client.InvalidateOpPrefix:
 			for _, path := range ev.Paths {
 				if path == "/" || path == "" {
+					p.log.Info("full sweep requested (prefix /)")
 					p.send(remoteEvent{FullSweep: true})
 					if onReconnect != nil {
 						onReconnect()
 					}
 					return
 				}
+				p.log.RemoteChange(path, "prefix")
 				p.send(remoteEvent{Path: path})
 			}
 		}

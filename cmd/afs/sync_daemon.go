@@ -110,7 +110,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
-	d.pump = newRemoteSubscriptionPump(cfg.FS)
+	d.pump = newRemoteSubscriptionPump(cfg.FS, log)
 	return d, nil
 }
 
@@ -125,15 +125,23 @@ func (d *syncDaemon) Start(ctx context.Context) error {
 // StartWithProgress is like Start but accepts an optional progress callback
 // that receives (done, total) file counts during the initial reconciliation.
 func (d *syncDaemon) StartWithProgress(ctx context.Context, onProgress ProgressFunc) error {
+	return d.start(ctx, onProgress, false)
+}
+
+// StartSteadyStateOnly skips the initial reconcile and goes straight to the
+// steady-state goroutines. Used by the background _sync-daemon child process
+// when the parent already did the reconcile moments ago.
+func (d *syncDaemon) StartSteadyStateOnly(ctx context.Context) error {
+	return d.start(ctx, nil, true)
+}
+
+func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipReconcile bool) error {
 	if d.cancel != nil {
 		return errors.New("syncDaemon: already started")
 	}
 	dctx, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 
-	// Install the watcher FIRST so fsnotify queues events for any files
-	// that land while the reconcile is running. The reconciler's debouncer
-	// deduplicates them against the cold-start state.
 	w, err := newSyncWatcher(d.cfg.LocalRoot, d.ignore, d.cfg.WatcherDebounce)
 	if err != nil {
 		cancel()
@@ -141,12 +149,12 @@ func (d *syncDaemon) StartWithProgress(ctx context.Context, onProgress ProgressF
 	}
 	d.watcher = w
 
-	// Single full reconcile — walks both trees, diffs, and applies directly
-	// with parallel workers. No channel dispatch, so no deadlock risk.
-	if err := d.full.run(dctx, onProgress); err != nil {
-		_ = w.Close()
-		cancel()
-		return fmt.Errorf("initial reconcile: %w", err)
+	if !skipReconcile {
+		if err := d.full.run(dctx, onProgress); err != nil {
+			_ = w.Close()
+			cancel()
+			return fmt.Errorf("initial reconcile: %w", err)
+		}
 	}
 
 	// Steady-state goroutines.

@@ -323,8 +323,10 @@ func runSyncDaemon() error {
 	if err != nil {
 		return err
 	}
-	// No progress callback — the child is headless.
-	if err := daemon.Start(ctx); err != nil {
+	// Skip the initial reconcile — the parent process already did it moments
+	// ago. Go straight to the steady-state goroutines so the subscription
+	// pump starts receiving events immediately.
+	if err := daemon.StartSteadyStateOnly(ctx); err != nil {
 		return err
 	}
 

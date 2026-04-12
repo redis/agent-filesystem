@@ -148,6 +148,7 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	if r.ignore.shouldIgnore(ev.Path, false) {
 		return
 	}
+	r.log.LocalChange(ev.Path, ev.KindHint)
 	abs := filepath.Join(r.root, filepath.FromSlash(ev.Path))
 	info, err := os.Lstat(abs)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -226,7 +227,6 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 	if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
 		return
 	}
-	r.log.LocalChange(rel, "modified")
 	op := uploadOp{
 		Kind:        opUploadFile,
 		Path:        rel,
@@ -286,7 +286,6 @@ func (r *reconciler) handleLocalDelete(rel string) {
 	if !hasStored {
 		return
 	}
-	r.log.LocalChange(rel, "deleted")
 	r.uploadCh <- uploadOp{
 		Kind:        opUploadDelete,
 		Path:        rel,
