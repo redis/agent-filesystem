@@ -142,20 +142,24 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 	dctx, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 
+	if !skipReconcile {
+		if err := d.full.run(dctx, onProgress); err != nil {
+			cancel()
+			return fmt.Errorf("initial reconcile: %w", err)
+		}
+	}
+
+	// Install the watcher AFTER the reconcile. The cold-start path calls
+	// materializeManifestToDirectory which does RemoveAll + MkdirAll on
+	// the target directory — that would invalidate any fsnotify watches
+	// installed earlier. Installing after guarantees the watches land on
+	// the final directory tree.
 	w, err := newSyncWatcher(d.cfg.LocalRoot, d.ignore, d.cfg.WatcherDebounce)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("watcher: %w", err)
 	}
 	d.watcher = w
-
-	if !skipReconcile {
-		if err := d.full.run(dctx, onProgress); err != nil {
-			_ = w.Close()
-			cancel()
-			return fmt.Errorf("initial reconcile: %w", err)
-		}
-	}
 
 	// Steady-state goroutines.
 	stateStop := make(chan struct{})
