@@ -1061,23 +1061,22 @@ func cmdStatus() error {
 			localPath := localSurfacePath(cfg, backendName)
 			mode, _ := effectiveMode(cfg)
 			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
-			rows := []boxRow{
-				{Label: "database", Value: statusRemoteLabel(cfg.RedisAddr, cfg.RedisDB)},
+			var rows []boxRow
+			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
+				rows = append(rows, boxRow{Label: "workspace", Value: cfg.CurrentWorkspace})
 			}
+			if localPath != "" {
+				rows = append(rows, boxRow{Label: "local", Value: localPath})
+			}
+			rows = append(rows, boxRow{Label: "database", Value: statusRemoteLabel(cfg.RedisAddr, cfg.RedisDB)})
 			if mode == modeMount {
 				rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
 			}
 			rows = append(rows,
 				boxRow{Label: "mode", Value: mode},
 				boxRow{Label: "config", Value: configPathLabel()},
+				boxRow{Label: "start", Value: clr(ansiOrange, "afs up")},
 			)
-			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
-				rows = append([]boxRow{{Label: "workspace", Value: cfg.CurrentWorkspace}}, rows...)
-			}
-			if localPath != "" {
-				rows = append(rows, boxRow{Label: "local", Value: localPath})
-			}
-			rows = append(rows, boxRow{Label: "start", Value: clr(ansiOrange, "afs up")})
 			printBox(title, rows)
 			return nil
 		}
