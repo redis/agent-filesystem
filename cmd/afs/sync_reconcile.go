@@ -352,14 +352,20 @@ func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []sync
 			// Local-only → upload to remote.
 			plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 		case !lok && rok:
-			// Remote-only → download to local, unless a local delete is in
-			// flight (delete queued but not yet confirmed to Redis). Without
-			// this guard a full reconciliation would re-download the file and
-			// reverse the user's delete.
+			// Skip if a local delete is already in-flight in the reconciler.
 			f.r.pendingDeletesMu.Lock()
 			_, pending := f.r.pendingDeletes[path]
 			f.r.pendingDeletesMu.Unlock()
 			if pending {
+				continue
+			}
+			// If the file was previously synced (in state) but is now absent
+			// locally, the user (or another process) deleted it. Propagate
+			// the delete to remote instead of re-downloading. This handles
+			// both live deletes (where the watcher debounce hasn't delivered
+			// the event yet) and offline deletes (daemon restart after rm).
+			if hasStored {
+				plan = append(plan, syncAction{kind: "delete-remote", path: path, absPath: abs})
 				continue
 			}
 			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
@@ -532,6 +538,8 @@ func (f *fullReconciler) executeAction(ctx context.Context, a syncAction) error 
 		return f.execSymlinkDownload(ctx, a)
 	case "symlink-upload":
 		return f.execSymlinkUpload(ctx, a)
+	case "delete-remote":
+		return f.execDeleteRemote(ctx, a)
 	default:
 		return fmt.Errorf("unknown action kind: %s", a.kind)
 	}
@@ -627,6 +635,18 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 		RemoteMtimeMs: remoteMtimeMs,
 		LastSyncedAt:  time.Now().UTC(),
 	})
+	return nil
+}
+
+func (f *fullReconciler) execDeleteRemote(ctx context.Context, a syncAction) error {
+	remotePath := absoluteRemotePath(a.path)
+	if err := f.r.fs.Rm(ctx, remotePath); err != nil && !isClientNotFound(err) {
+		return fmt.Errorf("rm remote %s: %w", a.path, err)
+	}
+	f.r.state.mu.Lock()
+	delete(f.r.state.state.Entries, a.path)
+	f.r.state.dirty = true
+	f.r.state.mu.Unlock()
 	return nil
 }
 

@@ -372,3 +372,73 @@ func TestSyncStreamCatchUpAfterOffline(t *testing.T) {
 		return env.localExists("missed.txt") && env.readLocalFile(t, "missed.txt") == "offline-change"
 	})
 }
+
+// Regression: deleting a local file and then triggering a full reconciliation
+// (e.g. from a subscription reconnect) before the watcher debounce fires
+// would re-download the file. The fullReconciler should detect that a
+// previously-synced file is missing locally and propagate the delete to
+// remote rather than re-downloading.
+func TestSyncLocalDeleteSurvivesFullReconcile(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeLocalFile(t, "vanish.txt", "goodbye")
+
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	// Wait for the file to be fully synced.
+	assertEventually(t, 3*time.Second, "vanish.txt remote", func() bool {
+		return env.remoteExists(t, "vanish.txt")
+	})
+
+	// Delete the file locally.
+	abs := filepath.Join(env.localRoot, "vanish.txt")
+	if err := removeFile(abs); err != nil {
+		t.Fatalf("remove local: %v", err)
+	}
+
+	// Immediately force a full reconciliation — simulates a subscription
+	// reconnect or activity from a second system that races with the
+	// watcher debounce.
+	env.daemon.reconciler.requestFullSweep()
+
+	// The file must stay deleted locally and eventually disappear from remote.
+	assertEventually(t, 5*time.Second, "remote delete after full reconcile", func() bool {
+		return !env.remoteExists(t, "vanish.txt")
+	})
+	// Verify the file did not reappear locally.
+	if env.localExists("vanish.txt") {
+		t.Fatalf("vanish.txt reappeared locally after delete + full reconcile")
+	}
+}
+
+// Regression: stopping the daemon, deleting a file, then restarting should
+// propagate the delete to remote — not re-download the file.
+func TestSyncOfflineDeletePropagatesOnRestart(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeLocalFile(t, "offline.txt", "will-die")
+
+	env.startDaemon(t)
+	assertEventually(t, 3*time.Second, "offline.txt remote", func() bool {
+		return env.remoteExists(t, "offline.txt")
+	})
+	env.stopDaemon()
+
+	// Delete while daemon is stopped.
+	abs := filepath.Join(env.localRoot, "offline.txt")
+	if err := removeFile(abs); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	// Restart — warm start should detect the local delete and propagate it.
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	assertEventually(t, 5*time.Second, "remote delete after restart", func() bool {
+		return !env.remoteExists(t, "offline.txt")
+	})
+	if env.localExists("offline.txt") {
+		t.Fatalf("offline.txt reappeared locally after offline delete + restart")
+	}
+}
