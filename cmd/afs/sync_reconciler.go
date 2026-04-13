@@ -52,6 +52,11 @@ type reconciler struct {
 
 	pendingFullSweep bool
 	fullSweepRequest chan struct{}
+
+	// pendingDeletes tracks paths whose local deletion has been queued for
+	// upload but not yet confirmed. buildPlan skips re-downloading these files
+	// so a full reconciliation cannot reverse a pending local delete.
+	pendingDeletes map[string]struct{}
 }
 
 func newReconciler(
@@ -93,6 +98,7 @@ func newReconciler(
 		uploadResCh:      make(chan uploadResult, 256),
 		downloadResCh:    make(chan downloadResult, 256),
 		fullSweepRequest: make(chan struct{}, 1),
+		pendingDeletes:   make(map[string]struct{}),
 	}
 }
 
@@ -338,6 +344,7 @@ func (r *reconciler) handleLocalDelete(rel string) {
 	if !hasStored {
 		return
 	}
+	r.pendingDeletes[rel] = struct{}{}
 	r.uploadCh <- uploadOp{
 		Kind:        opUploadDelete,
 		Path:        rel,
@@ -480,6 +487,9 @@ func (r *reconciler) detectConflict(rel, abs string, stored SyncEntry, hasStored
 }
 
 func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
+	if res.Op.Kind == opUploadDelete {
+		delete(r.pendingDeletes, res.Op.Path)
+	}
 	if res.Err != nil {
 		r.log.Err("upload "+res.Op.Path, res.Err.Error())
 		return

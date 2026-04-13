@@ -352,7 +352,13 @@ func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []sync
 			// Local-only → upload to remote.
 			plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 		case !lok && rok:
-			// Remote-only → download to local.
+			// Remote-only → download to local, unless a local delete is in
+			// flight (delete queued but not yet confirmed to Redis). Without
+			// this guard a full reconciliation would re-download the file and
+			// reverse the user's delete.
+			if _, pending := f.r.pendingDeletes[path]; pending {
+				continue
+			}
 			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
 		case lok && rok:
 			// Both present. Check if they match using metadata (size+mtime
