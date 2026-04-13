@@ -715,6 +715,7 @@ We should add:
 - sign-in state
 - organization/workspace ownership
 - workspace connection instructions
+- workspace table with a `Connected Agents` count per workspace
 - connected clients table
 - managed database creation flow
 - external database attach flow
@@ -1065,6 +1066,7 @@ This is the highest-leverage next step because it turns today's bootstrap-only s
 
 1. Surface active sessions in the web UI and add a connected-clients page that shows:
    active clients, heartbeats, current workspace, last activity, and client metadata.
+   The workspace table should also show a `Connected Agents` count for each workspace.
 2. Add browser/CLI auth for AFS Cloud with browser-launched PKCE for the CLI.
 3. Add a secret-store layer before building managed Redis Cloud provisioning.
 
