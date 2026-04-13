@@ -108,6 +108,13 @@ func (c *nativeClient) DisableInvalidationPublishing() {
 	c.publishDisabled.Store(true)
 }
 
+// InvalidateCache flushes the entire local attribute/directory-listing cache.
+func (c *nativeClient) InvalidateCache() {
+	if c.cache != nil {
+		c.cache.InvalidateAll()
+	}
+}
+
 // invalidateInode drops the path's own cache entry AND (implicitly, via the
 // dirCacheKey entry) any cached directory listing of which it is a child, and
 // broadcasts the same invalidation to peer clients over pub/sub.

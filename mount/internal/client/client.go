@@ -140,6 +140,11 @@ type Client interface {
 	// by the --disable-cross-client-invalidation flag. Local cache state
 	// still tracks mutations; other clients just won't be notified.
 	DisableInvalidationPublishing()
+
+	// InvalidateCache flushes the entire local attribute/directory-listing
+	// cache. Use before full reconciliation scans so stale cached listings
+	// don't cause the scanner to miss recently created files.
+	InvalidateCache()
 }
 
 // PathCacheWarmer is implemented by clients that can prewarm exact-path cache

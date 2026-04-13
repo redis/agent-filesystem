@@ -195,6 +195,11 @@ func (f *fullReconciler) warmStart(ctx context.Context, onProgress ProgressFunc)
 	if err != nil {
 		return fmt.Errorf("scan local: %w", err)
 	}
+	// Flush the client's attribute/listing cache so the remote scan always
+	// hits Redis. Without this, recently-created files that haven't been
+	// reflected in the cached directory listing would be missed, causing
+	// buildPlan to falsely classify them as remote-deleted.
+	f.r.fs.InvalidateCache()
 	remote, err := f.scanRemoteMeta(ctx, onProgress)
 	if err != nil {
 		return fmt.Errorf("scan remote: %w", err)
