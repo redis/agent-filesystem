@@ -579,7 +579,6 @@ func (s *afsMCPServer) toolAFSStatus() (any, error) {
 	return map[string]any{
 		"redis_addr":        s.cfg.RedisAddr,
 		"redis_db":          s.cfg.RedisDB,
-		"work_root":         s.cfg.WorkRoot,
 		"current_workspace": strings.TrimSpace(s.cfg.CurrentWorkspace),
 		"mount_backend":     s.cfg.MountBackend,
 		"local_path":        s.cfg.LocalPath,
@@ -1131,11 +1130,15 @@ func (s *afsMCPServer) toolFileGrep(ctx context.Context, args map[string]any) (a
 }
 
 func (s *afsMCPServer) grepLocalWorkspace(ctx context.Context, workspace, searchPath string, opts grepOptions) (any, error) {
-	if _, _, err := ensureMaterializedWorkspace(ctx, s.store, s.cfg, workspace); err != nil {
+	workspaceMeta, err := s.store.getWorkspaceMeta(ctx, workspace)
+	if err != nil {
 		return nil, err
 	}
-	treePath := afsWorkspaceTreePath(s.cfg, workspace)
-	targets, err := collectLocalGrepTargets(treePath, searchPath)
+	manifestValue, err := s.store.getManifest(ctx, workspace, workspaceMeta.HeadSavepoint)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := collectManifestGrepTargets(ctx, s.store, workspace, manifestValue, searchPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1177,6 +1180,43 @@ func (s *afsMCPServer) grepLocalWorkspace(ctx context.Context, workspace, search
 		result["matches"] = matches
 	}
 	return result, nil
+}
+
+func collectManifestGrepTargets(ctx context.Context, store *afsStore, workspace string, manifestValue manifest, searchPath string) ([]grepFileTarget, error) {
+	entry, ok := manifestValue.Entries[searchPath]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+
+	targets := make([]grepFileTarget, 0)
+	for manifestPath, child := range manifestValue.Entries {
+		switch {
+		case manifestPath == searchPath && child.Type == "file":
+		case entry.Type == "dir" && strings.HasPrefix(manifestPath, manifestPathPrefix(searchPath)) && child.Type == "file":
+		default:
+			continue
+		}
+
+		data, err := manifestEntryData(child, func(blobID string) ([]byte, error) {
+			return store.getBlob(ctx, workspace, blobID)
+		})
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, grepFileTarget{
+			path:    manifestPath,
+			content: data,
+			loaded:  true,
+		})
+	}
+	return targets, nil
+}
+
+func manifestPathPrefix(path string) string {
+	if path == "/" {
+		return "/"
+	}
+	return path + "/"
 }
 
 func (s *afsMCPServer) resolveWorkspaceArg(ctx context.Context, args map[string]any, field string) (string, error) {

@@ -63,9 +63,6 @@ func TestDefaultConfigUsesAFSDefaults(t *testing.T) {
 	if cfg.LocalPath != "~/afs" {
 		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, "~/afs")
 	}
-	if cfg.RedisLog != "/tmp/afs-redis.log" {
-		t.Fatalf("RedisLog = %q, want %q", cfg.RedisLog, "/tmp/afs-redis.log")
-	}
 	if cfg.MountLog != "/tmp/afs-mount.log" {
 		t.Fatalf("MountLog = %q, want %q", cfg.MountLog, "/tmp/afs-mount.log")
 	}
@@ -265,12 +262,11 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 
 	st := state{
 		StartedAt:        time.Now().UTC(),
-		ManageRedis:      true,
-		RedisPID:         os.Getpid(),
 		RedisAddr:        "localhost:6379",
 		RedisDB:          0,
 		CurrentWorkspace: "demo",
 		MountBackend:     mountBackendNone,
+		SyncPID:          os.Getpid(),
 	}
 	if err := saveState(st); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
@@ -303,9 +299,8 @@ func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
-	cfg.Mode = modeMount // this test specifically exercises the no-mount legacy path
+	cfg.Mode = modeNone // start with no local surface; this test only cares about output shape
 	cfg.MountBackend = mountBackendNone
 	cfg.CurrentWorkspace = "demo"
 	cfg.WorkRoot = t.TempDir()
@@ -342,7 +337,6 @@ func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
-		ManageRedis:          false,
 		RedisAddr:            mr.Addr(),
 		RedisDB:              0,
 		CurrentWorkspace:     "demo",

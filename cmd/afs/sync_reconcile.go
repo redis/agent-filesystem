@@ -62,10 +62,10 @@ const defaultParallelWorkers = 8
 type ProgressFunc func(done, total int64)
 
 // run executes a single full reconciliation pass. On cold start (empty local
-// folder, no persisted state) it uses the bulk materialize path — the same
-// one `workspace run` uses — which reads the entire workspace in a handful of
-// pipelined Redis calls instead of one LsLong per directory. Warm restarts
-// use the metadata-diff approach to detect changes.
+// folder, no persisted state) it uses the bulk materialize path, which reads
+// the entire workspace in a handful of pipelined Redis calls instead of one
+// LsLong per directory. Warm restarts use the metadata-diff approach to
+// detect changes.
 func (f *fullReconciler) run(ctx context.Context, onProgress ProgressFunc) error {
 	if f.isColdStart() {
 		return f.coldStart(ctx, onProgress)
@@ -98,9 +98,8 @@ func (f *fullReconciler) isColdStart() bool {
 
 // coldStart pulls the entire workspace from Redis using the bulk manifest
 // path (buildManifestFromWorkspaceRoot + materializeManifestToDirectory).
-// This is the same path `workspace run` uses and reads the full tree in
-// a handful of pipelined HMGet/HGetAll calls — dramatically faster than
-// one LsLong per directory over WAN.
+// It reads the full tree in a handful of pipelined HMGet/HGetAll calls —
+// dramatically faster than one LsLong per directory over WAN.
 func (f *fullReconciler) coldStart(ctx context.Context, onProgress ProgressFunc) error {
 	if f.r.store == nil || f.r.store.rdb == nil {
 		return fmt.Errorf("cold start requires a store with Redis connection")

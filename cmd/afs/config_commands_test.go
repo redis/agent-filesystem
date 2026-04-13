@@ -48,9 +48,6 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadConfig() returned error: %v", err)
 	}
-	if !cfg.UseExistingRedis {
-		t.Fatal("UseExistingRedis = false, want true")
-	}
 	if cfg.RedisAddr != "127.0.0.1:6380" {
 		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, "127.0.0.1:6380")
 	}
@@ -79,7 +76,6 @@ func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = "redis.example:6380"
 	cfg.RedisDB = 7
 	cfg.CurrentWorkspace = "demo"
@@ -124,7 +120,6 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 	})
 
 	base := defaultConfig()
-	base.UseExistingRedis = true
 	base.RedisAddr = "127.0.0.1:6379"
 	base.RedisDB = 0
 	base.CurrentWorkspace = "alpha"
@@ -176,7 +171,6 @@ func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *test
 	})
 
 	base := defaultConfig()
-	base.UseExistingRedis = true
 	base.RedisAddr = "127.0.0.1:6379"
 	base.RedisDB = 0
 	base.CurrentWorkspace = "alpha"
@@ -241,7 +235,6 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	})
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.RedisDB = 7
 	if err := createEmptyWorkspace(context.Background(), cfg, newAFSStore(rdb), "demo"); err != nil {
@@ -249,11 +242,14 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	}
 
 	raw := `{
-  "useExistingRedis": true,
-  "redisAddr": "` + mr.Addr() + `",
+  "redis": {
+    "addr": "` + mr.Addr() + `"
+  },
   "currentWorkspace": "demo",
-  "mountBackend": "nfs",
-  "nfsBin": "/usr/bin/true"
+  "mount": {
+    "backend": "nfs",
+    "nfsBin": "/usr/bin/true"
+  }
 }`
 	if err := os.WriteFile(configFile, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) returned error: %v", err)
@@ -309,10 +305,13 @@ func TestLoadConfigForUpRejectsMissingWorkspaceEvenWhenPromptingAllowed(t *testi
 	})
 
 	raw := `{
-  "useExistingRedis": true,
-  "redisAddr": "127.0.0.1:6379",
-  "mountBackend": "nfs",
-  "nfsBin": "/usr/bin/true"
+  "redis": {
+    "addr": "127.0.0.1:6379"
+  },
+  "mount": {
+    "backend": "nfs",
+    "nfsBin": "/usr/bin/true"
+  }
 }`
 	if err := os.WriteFile(configFile, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) returned error: %v", err)
@@ -396,6 +395,7 @@ func TestLoadConfigForUpRejectsMountOverrideWhenMountsAreDisabledInConfig(t *tes
 	t.Helper()
 
 	base := defaultConfig()
+	base.Mode = modeMount
 	base.MountBackend = mountBackendNone
 	saveTempConfig(t, base)
 
@@ -405,6 +405,69 @@ func TestLoadConfigForUpRejectsMountOverrideWhenMountsAreDisabledInConfig(t *tes
 	}
 	if !strings.Contains(err.Error(), "filesystem mounts are disabled in config") {
 		t.Fatalf("loadConfigForUp() error = %q, want disabled mount backend message", err)
+	}
+}
+
+func TestLoadConfigForUpAllowsLocalPathOverrideInSyncModeWhenMountsDisabled(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	base := defaultConfig()
+	base.Mode = modeSync
+	base.MountBackend = mountBackendNone
+	base.CurrentWorkspace = "alpha"
+	saveTempConfig(t, base)
+
+	cfg, err := loadConfigForUp([]string{"beta", "~/claude"})
+	if err != nil {
+		t.Fatalf("loadConfigForUp() returned error: %v", err)
+	}
+	if cfg.CurrentWorkspace != "beta" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "beta")
+	}
+	wantLocalPath := filepath.Join(homeDir, "claude")
+	if cfg.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", cfg.LocalPath, wantLocalPath)
+	}
+	if cfg.Mode != modeSync {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeSync)
+	}
+}
+
+func TestLoadConfigForUpAppliesModeOverrideAndSavesConfig(t *testing.T) {
+	t.Helper()
+
+	base := defaultConfig()
+	base.Mode = modeSync
+	base.CurrentWorkspace = "alpha"
+	base.LocalPath = t.TempDir()
+	base.MountBackend = mountBackendNFS
+	base.NFSBin = "/usr/bin/true"
+	saveTempConfig(t, base)
+
+	mode := optionalString{value: modeMount, set: true}
+	cfg, err := loadConfigForUpWithMode([]string{}, mode)
+	if err != nil {
+		t.Fatalf("loadConfigForUpWithMode() returned error: %v", err)
+	}
+	if cfg.Mode != modeMount {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeMount)
+	}
+
+	saved, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig(saved) returned error: %v", err)
+	}
+	if saved.Mode != modeMount {
+		t.Fatalf("saved Mode = %q, want %q", saved.Mode, modeMount)
 	}
 }
 
@@ -420,15 +483,35 @@ func TestCmdUpHelpListsPositionalOverrides(t *testing.T) {
 
 	for _, want := range []string{
 		"up <workspace> <mountpoint>",
+		"--mode <sync|mount>",
 		"Redis connection, mount backend, and readonly mode come from config",
 		"Current workspace must already be selected",
 		"If Redis DB or mountpoint are missing",
 		"config set",
+		"up --mode sync",
 		"up claude-code ~/.claude",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("up help output = %q, want substring %q", out, want)
 		}
+	}
+}
+
+func TestLoadConfigForUpRejectsUnsupportedModeOverride(t *testing.T) {
+	t.Helper()
+
+	base := defaultConfig()
+	base.CurrentWorkspace = "alpha"
+	base.LocalPath = t.TempDir()
+	saveTempConfig(t, base)
+
+	mode := optionalString{value: modeNone, set: true}
+	_, err := loadConfigForUpWithMode([]string{}, mode)
+	if err == nil {
+		t.Fatal("loadConfigForUpWithMode() returned nil error, want unsupported mode error")
+	}
+	if !strings.Contains(err.Error(), `expected sync or mount`) {
+		t.Fatalf("loadConfigForUpWithMode() error = %q, want sync-or-mount guidance", err)
 	}
 }
 
@@ -448,7 +531,6 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 		"use <workspace>",
 		"clone [workspace] <directory>",
 		"fork [source-workspace] <new-workspace>",
-		"run [workspace] [--readonly] -- <command...>",
 		"import [--force] [--mount-at-source] <workspace> <directory>",
 		"workspace create demo",
 	} {
@@ -456,27 +538,24 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 			t.Fatalf("workspace help output = %q, want substring %q", out, want)
 		}
 	}
+	if strings.Contains(out, "run [workspace]") {
+		t.Fatalf("workspace help output = %q, did not expect removed run subcommand", out)
+	}
 }
 
-func TestCmdWorkspaceRunHelpExplainsBehavior(t *testing.T) {
+func TestCmdWorkspaceRunReportsRemovedCommand(t *testing.T) {
 	t.Helper()
 
-	out, err := captureStderr(t, func() error {
-		return cmdWorkspace([]string{"workspace", "run", "--help"})
-	})
-	if err != nil {
-		t.Fatalf("cmdWorkspace(run --help) returned error: %v", err)
+	err := cmdWorkspace([]string{"workspace", "run", "--help"})
+	if err == nil {
+		t.Fatal("cmdWorkspace(run --help) returned nil error, want removed-command error")
 	}
-
 	for _, want := range []string{
-		"refresh the local dirty state when the command exits",
-		"checkpoint create <workspace> [checkpoint]",
-		"If <workspace> is omitted",
-		"workspace use <workspace>",
-		"workspace run demo -- /bin/sh",
+		`unknown workspace subcommand "run"`,
+		"workspace <subcommand>",
 	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("workspace run help output = %q, want substring %q", out, want)
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("cmdWorkspace(run --help) error = %q, want substring %q", err, want)
 		}
 	}
 }
@@ -486,7 +565,6 @@ func TestCmdWorkspaceUseAndCurrentManageSelectionOutsideConfigCommand(t *testing
 
 	mr := miniredis.RunT(t)
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
 	saveTempConfig(t, cfg)
@@ -539,7 +617,6 @@ func TestCmdWorkspaceUseRejectsSwitchWhileDifferentWorkspaceMounted(t *testing.T
 
 	mr := miniredis.RunT(t)
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNFS
 	cfg.NFSBin = "/usr/bin/true"

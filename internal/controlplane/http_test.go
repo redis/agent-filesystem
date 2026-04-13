@@ -263,8 +263,10 @@ func newTestManager(t *testing.T) (*DatabaseManager, string) {
 	})
 
 	cfg := Config{
-		RedisAddr: mr.Addr(),
-		RedisDB:   0,
+		RedisConfig: RedisConfig{
+			RedisAddr: mr.Addr(),
+			RedisDB:   0,
+		},
 	}
 	store := NewStore(rdb)
 	ctx := context.Background()

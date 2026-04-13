@@ -66,6 +66,12 @@ type configOverrides struct {
 	readonly     optionalBool
 }
 
+type upOptions struct {
+	foreground  bool
+	mode        optionalString
+	positionals []string
+}
+
 func cmdConfig(args []string) error {
 	if len(args) < 2 {
 		printConfigUsage()
@@ -179,28 +185,44 @@ func cmdConfigSet(args []string) error {
 }
 
 func loadConfigForUp(args []string) (config, error) {
-	return loadConfigForUpWithIO(args, bufio.NewReader(os.Stdin), os.Stdout, isInteractiveTerminal())
+	return loadConfigForUpWithMode(args, optionalString{})
+}
+
+func loadConfigForUpWithMode(args []string, mode optionalString) (config, error) {
+	return loadConfigForUpWithIOAndMode(args, mode, bufio.NewReader(os.Stdin), os.Stdout, isInteractiveTerminal())
 }
 
 type upConfigPresence struct {
-	filePresent    bool
-	redisDBPresent bool
+	filePresent      bool
+	redisDBPresent   bool
 	localPathPresent bool
 }
 
 func loadConfigForUpWithIO(args []string, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
+	return loadConfigForUpWithIOAndMode(args, optionalString{}, r, out, allowPrompt)
+}
+
+func loadConfigForUpWithIOAndMode(args []string, mode optionalString, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
 	cfg, presence, err := loadConfigWithUpPresence()
 	if err != nil {
 		return cfg, err
 	}
 
-	changed := false
+	if err := validateUpModeOverride(mode); err != nil {
+		return cfg, err
+	}
+	changed := mode.set
+	if mode.set {
+		cfg.Mode = strings.TrimSpace(mode.value)
+	}
 	switch len(args) {
 	case 0:
-		changed, err = promptForMissingUpConfig(&cfg, presence, r, out, allowPrompt)
+		var promptedChanged bool
+		promptedChanged, err = promptForMissingUpConfig(&cfg, presence, r, out, allowPrompt)
 		if err != nil {
 			return cfg, err
 		}
+		changed = changed || promptedChanged
 	case 2:
 		if err := applyUpWorkspaceAndMountpoint(&cfg, args[0], args[1]); err != nil {
 			return cfg, err
@@ -210,6 +232,9 @@ func loadConfigForUpWithIO(args []string, r *bufio.Reader, out io.Writer, allowP
 		return cfg, fmt.Errorf("%s", upUsageText(filepath.Base(os.Args[0])))
 	}
 
+	if err := validateUpModeSelection(cfg); err != nil {
+		return cfg, err
+	}
 	if changed {
 		if err := persistConfigForUp(&cfg); err != nil {
 			return cfg, err
@@ -239,17 +264,57 @@ func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) er
 		return err
 	}
 
-	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	mode, err := effectiveMode(*cfg)
 	if err != nil {
 		return err
 	}
-	if backendName == mountBackendNone {
-		return fmt.Errorf("filesystem mounts are disabled in config\nRun '%s config set --mount-backend nfs --mountpoint %s' or similar first", filepath.Base(os.Args[0]), mountpoint)
+	if mode == modeNone {
+		return fmt.Errorf("mode is set to none\nRun '%s up --mode sync', '%s up --mode mount', or update config first", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+	}
+	if mode == modeMount {
+		backendName, err := normalizeMountBackend(cfg.MountBackend)
+		if err != nil {
+			return err
+		}
+		if backendName == mountBackendNone {
+			return fmt.Errorf("filesystem mounts are disabled in config\nRun '%s config set --mount-backend nfs --mountpoint %s' or similar first", filepath.Base(os.Args[0]), mountpoint)
+		}
 	}
 
 	cfg.CurrentWorkspace = workspace
 	cfg.LocalPath = mountpoint
 	return nil
+}
+
+func validateUpModeSelection(cfg config) error {
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return err
+	}
+	if mode != modeMount {
+		return nil
+	}
+	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	if err != nil {
+		return err
+	}
+	if backendName == mountBackendNone {
+		bin := filepath.Base(os.Args[0])
+		return fmt.Errorf("mode=mount requires a configured mount backend\nRun '%s config set --mount-backend nfs --mountpoint <path>' or rerun '%s setup'", bin, bin)
+	}
+	return nil
+}
+
+func validateUpModeOverride(mode optionalString) error {
+	if !mode.set {
+		return nil
+	}
+	switch strings.TrimSpace(mode.value) {
+	case modeSync, modeMount:
+		return nil
+	default:
+		return fmt.Errorf("unsupported value for --mode %q (expected sync or mount)", mode.value)
+	}
 }
 
 func loadConfigWithUpPresence() (config, upConfigPresence, error) {
@@ -273,10 +338,14 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 	}
 
 	presence.filePresent = true
-	_, presence.redisDBPresent = fields["redisDB"]
-	_, lpPresent := fields["localPath"]
-	_, mpPresent := fields["mountpoint"]
-	presence.localPathPresent = lpPresent || mpPresent
+	if rawRedis, ok := fields["redis"]; ok {
+		var redisFields map[string]json.RawMessage
+		if err := json.Unmarshal(rawRedis, &redisFields); err != nil {
+			return cfg, presence, err
+		}
+		_, presence.redisDBPresent = redisFields["db"]
+	}
+	_, presence.localPathPresent = fields["localPath"]
 	return cfg, presence, nil
 }
 
@@ -285,14 +354,14 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, fmt.Errorf("missing config")
 	}
 
-	backendName, err := normalizeMountBackend(cfg.MountBackend)
+	mode, err := effectiveMode(*cfg)
 	if err != nil {
 		return false, err
 	}
 
 	missingDatabase := !presence.filePresent || !presence.redisDBPresent
-	missingWorkspace := backendName != mountBackendNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
-	missingLocalPath := backendName != mountBackendNone && (!presence.filePresent || !presence.localPathPresent || strings.TrimSpace(cfg.LocalPath) == "")
+	missingWorkspace := mode != modeNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
+	missingLocalPath := mode != modeNone && (!presence.filePresent || !presence.localPathPresent || strings.TrimSpace(cfg.LocalPath) == "")
 	if !missingDatabase && !missingWorkspace && !missingLocalPath {
 		return false, nil
 	}
@@ -364,10 +433,6 @@ func suggestUpWorkspace(cfg config) (string, string) {
 }
 
 func existingWorkspaceNames(cfg config) ([]string, error) {
-	if !cfg.UseExistingRedis {
-		return nil, nil
-	}
-
 	redisCfg := cfg
 	if err := prepareConfigForSave(&redisCfg); err != nil {
 		return nil, err
@@ -463,6 +528,32 @@ func configUsageError(command string) error {
 	}
 }
 
+func parseUpOptions(args []string) (upOptions, error) {
+	var opts upOptions
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--interactive" || arg == "-i":
+			opts.foreground = true
+		case arg == "--mode":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.mode.value = strings.TrimSpace(args[i])
+			opts.mode.set = true
+		case strings.HasPrefix(arg, "--mode="):
+			opts.mode.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
+			opts.mode.set = true
+		case strings.HasPrefix(arg, "-"):
+			return opts, configUsageError("up")
+		default:
+			opts.positionals = append(opts.positionals, arg)
+		}
+	}
+	return opts, nil
+}
+
 func isHelpArg(v string) bool {
 	switch strings.TrimSpace(v) {
 	case "help", "-h", "--help":
@@ -553,6 +644,8 @@ If <workspace> and <mountpoint> are provided, AFS saves them into %s before
 starting so future runs use the updated workspace and mountpoint.
 
 Flags:
+  --mode <sync|mount>
+                      Persist a mode override before starting.
   --interactive, -i   Run the sync daemon in the foreground with live logs.
                       Ctrl-C stops the daemon. Useful for debugging.
 
@@ -565,9 +658,10 @@ Notes:
 
 Examples:
   %s up
+  %s up --mode sync
   %s up --interactive
   %s up claude-code ~/.claude
-`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin)
+`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {
@@ -605,7 +699,6 @@ func applyRedisURL(cfg *config, raw string) error {
 	if strings.TrimSpace(u.Host) == "" {
 		return fmt.Errorf("redis url must include host:port")
 	}
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = u.Host
 	if u.User != nil {
 		cfg.RedisUsername = u.User.Username()

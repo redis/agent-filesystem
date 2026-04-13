@@ -46,8 +46,6 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceCurrent(args)
 	case "use", "u":
 		return cmdWorkspaceUse(args)
-	case "run", "r":
-		return cmdWorkspaceRun(args)
 	case "clone", "cl":
 		return cmdWorkspaceClone(args)
 	case "fork", "f":
@@ -298,46 +296,6 @@ func activeMountedWorkspaceState() (mountedWorkspaceState, error) {
 	return mountedWorkspaceState{}, nil
 }
 
-func cmdWorkspaceRun(args []string) error {
-	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceRunUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-	parsed, childArgs, err := parseAFSCommandInvocation(args[2:])
-	if err != nil {
-		return err
-	}
-	if len(parsed.positionals) > 1 {
-		return fmt.Errorf("%s", workspaceRunUsageText(filepath.Base(os.Args[0])))
-	}
-
-	cfg, store, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspace := ""
-	if len(parsed.positionals) == 1 {
-		workspace = parsed.positionals[0]
-	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
-
-	if err := runAFSCommand(context.Background(), cfg, store, workspace, childArgs, parsed.readonly); err != nil {
-		if errors.Is(err, errAFSWorkspaceConflict) {
-			return fmt.Errorf("workspace %q moved since this working copy was materialized; inspect it before running again", workspace)
-		}
-		return err
-	}
-	return nil
-}
-
 func cmdWorkspaceDelete(args []string) error {
 	if len(args) > 2 && isHelpArg(args[2]) {
 		fmt.Fprint(os.Stderr, workspaceDeleteUsageText(filepath.Base(os.Args[0])))
@@ -509,7 +467,7 @@ func cmdWorkspaceFork(args []string) error {
 		{Label: "workspace", Value: newWorkspace},
 		{Label: "source", Value: sourceWorkspace},
 		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace run " + newWorkspace + " -- /bin/sh"},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace use " + newWorkspace},
 	})
 	return nil
 }
@@ -571,8 +529,7 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", targetDir, entry)
 	}
 
-	existingState, err := loadStateForMountAtSource()
-	if err != nil {
+	if _, err := loadStateForMountAtSource(); err != nil {
 		return err
 	}
 
@@ -662,8 +619,6 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
-		ManageRedis:          existingState.ManageRedis,
-		RedisPID:             existingState.RedisPID,
 		RedisAddr:            mountCfg.RedisAddr,
 		RedisDB:              mountCfg.RedisDB,
 		CurrentWorkspace:     workspace,
@@ -674,9 +629,7 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		MountEndpoint:        started.Endpoint,
 		LocalPath:            mountCfg.LocalPath,
 		RedisKey:             mountKey,
-		RedisLog:             mountCfg.RedisLog,
 		MountLog:             mountCfg.MountLog,
-		RedisServerBin:       mountCfg.RedisServerBin,
 		MountBin:             mountCfg.MountBin,
 		ArchivePath:          backupDir,
 	}
@@ -940,7 +893,6 @@ Subcommands:
   list                                         List workspaces in Redis
   current                                      Show the current workspace
   use <workspace>                              Set the current workspace
-  run [workspace] [--readonly] -- <command...> Materialize and run in a workspace cwd
   clone [workspace] <directory>                Clone a workspace into a local directory
   fork [source-workspace] <new-workspace>      Fork a workspace at its current head
   delete <workspace>...                       Delete workspaces and local materialized state
@@ -950,12 +902,11 @@ Subcommands:
 Examples:
   %s workspace create demo
   %s workspace use demo
-  %s workspace run demo -- /bin/sh
   %s workspace clone demo ~/src/demo
   %s workspace fork demo demo-copy
 
 Run '%s workspace <subcommand> --help' for details.
-`, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin)
 }
 
 func workspaceCreateUsageText(bin string) string {
@@ -972,25 +923,6 @@ func workspaceListUsageText(bin string) string {
 
 List workspaces stored in Redis, along with checkpoint counts and creation time.
 `, bin)
-}
-
-func workspaceRunUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s workspace run [workspace] [--readonly] -- <command...>
-
-Materialize the workspace locally, run a command with that workspace as the cwd,
-and refresh the local dirty state when the command exits.
-
-Notes:
-  If <workspace> is omitted, AFS uses the current workspace selected with
-  '%s workspace use <workspace>'.
-  Create a checkpoint explicitly with '%s checkpoint create <workspace> [checkpoint]'
-  when you want to persist the current workspace state.
-
-Examples:
-  %s workspace run demo -- /bin/sh
-  %s workspace run --readonly demo -- make test
-`, bin, bin, bin, bin, bin)
 }
 
 func workspaceCurrentUsageText(bin string) string {

@@ -7,13 +7,12 @@ import (
 
 func TestBuildRedisOptionsIncludesUsernameAndTLS(t *testing.T) {
 	t.Helper()
-	cfg := config{
-		RedisAddr:     "hosted.redis.example.com:16379",
-		RedisUsername: "default",
-		RedisPassword: "secret",
-		RedisDB:       0,
-		RedisTLS:      true,
-	}
+	cfg := config{}
+	cfg.RedisAddr = "hosted.redis.example.com:16379"
+	cfg.RedisUsername = "default"
+	cfg.RedisPassword = "secret"
+	cfg.RedisDB = 0
+	cfg.RedisTLS = true
 
 	opts := buildRedisOptions(cfg, 12)
 	if opts.Addr != cfg.RedisAddr {

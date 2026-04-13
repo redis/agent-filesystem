@@ -38,11 +38,10 @@ func TestPrepareRuntimeMountConfigFallsBackToFreeNFSPort(t *testing.T) {
 	defer listener.Close()
 
 	occupiedPort := listener.Addr().(*net.TCPAddr).Port
-	cfg := config{
-		MountBackend: mountBackendNFS,
-		NFSHost:      "127.0.0.1",
-		NFSPort:      occupiedPort,
-	}
+	cfg := config{}
+	cfg.MountBackend = mountBackendNFS
+	cfg.NFSHost = "127.0.0.1"
+	cfg.NFSPort = occupiedPort
 
 	prepared, err := prepareRuntimeMountConfig(cfg, mountBackendNFS)
 	if err != nil {

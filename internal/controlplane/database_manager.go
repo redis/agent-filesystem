@@ -500,12 +500,13 @@ func seedDatabaseProfile(cfg Config) databaseProfile {
 
 func profileToConfig(profile databaseProfile) Config {
 	return Config{
-		RedisAddr:     profile.RedisAddr,
-		RedisUsername: profile.RedisUsername,
-		RedisPassword: profile.RedisPassword,
-		RedisDB:       profile.RedisDB,
-		RedisTLS:      profile.RedisTLS,
-		RedisKey:      defaultConfig().RedisKey,
+		RedisConfig: RedisConfig{
+			RedisAddr:     profile.RedisAddr,
+			RedisUsername: profile.RedisUsername,
+			RedisPassword: profile.RedisPassword,
+			RedisDB:       profile.RedisDB,
+			RedisTLS:      profile.RedisTLS,
+		},
 	}
 }
 

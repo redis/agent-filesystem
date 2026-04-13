@@ -61,7 +61,7 @@ Supporting areas:
 
 ### `cmd/afs/`
 
-- `cmd/afs/afs_commands.go`: workspace-facing command handlers such as import, save, and run flows.
+- `cmd/afs/afs_commands.go`: workspace-facing command handlers such as import and manifest/save helpers.
 - `cmd/afs/afs_commands_test.go`: tests command-surface helpers in `afs_commands.go`.
 - `cmd/afs/afs_diff.go`: lightweight manifest diff formatting helpers.
 - `cmd/afs/afs_grep.go`: `afs grep` implementation, with fast Redis-side and richer client-side search modes.
@@ -70,7 +70,6 @@ Supporting areas:
 - `cmd/afs/afs_local.go`: local materialization and workspace-state helpers.
 - `cmd/afs/afs_materialize.go`: wrappers that materialize workspace manifests into local directories.
 - `cmd/afs/afs_materialize_test.go`: tests materialization helpers.
-- `cmd/afs/afs_run_save_test.go`: tests `workspace run`, live-root sync-back, and explicit-checkpoint behavior.
 - `cmd/afs/afs_session_reset.go`: resets a local session by archiving and rematerializing from a checkpoint head.
 - `cmd/afs/afs_setup_test.go`: tests setup/config-related flows.
 - `cmd/afs/afs_store.go`: thin wrapper around the control-plane Redis store.

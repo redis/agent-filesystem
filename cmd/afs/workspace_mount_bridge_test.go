@@ -19,7 +19,6 @@ func TestEnsureMountWorkspaceRejectsMissingCurrentWorkspace(t *testing.T) {
 
 	mr := miniredis.RunT(t)
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.WorkRoot = t.TempDir()
 	cfg.CurrentWorkspace = "newfiles"
@@ -310,7 +309,6 @@ func seedWorkspaceMountBridgeFixture(t *testing.T) (config, *afsStore, func()) {
 
 	mr := miniredis.RunT(t)
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
 	cfg.WorkRoot = t.TempDir()

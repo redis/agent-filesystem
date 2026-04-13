@@ -1,25 +1,28 @@
 {
-  "useExistingRedis": true,
-  "redisAddr": "localhost:6379",
-  "redisUsername": "",
-  "redisPassword": "",
-  "redisDB": 0,
-  "redisTLS": false,
-  "workRoot": "~/.afs/workspaces",
-  "currentWorkspace": "",
-  "redisKey": "afs-demo",
-  "localPath": "~/afs",
-  "mountBackend": "none",
-  "readOnly": false,
-  "allowOther": false,
-  "redisServerBin": "",
-  "modulePath": "",
-  "mountBin": "",
-  "nfsBin": "",
-  "nfsHost": "127.0.0.1",
-  "nfsPort": 20490,
-  "redisLog": "/tmp/afs-redis.log",
-  "mountLog": "/tmp/afs-mount.log",
+  "redis": {
+    "addr": "localhost:6379",
+    "username": "",
+    "password": "",
+    "db": 0,
+    "tls": false
+  },
   "mode": "sync",
-  "syncLog": "/tmp/afs-sync.log"
+  "currentWorkspace": "",
+  "localPath": "~/afs",
+  "mount": {
+    "backend": "none",
+    "readOnly": false,
+    "allowOther": false,
+    "mountBin": "",
+    "nfsBin": "",
+    "nfsHost": "127.0.0.1",
+    "nfsPort": 20490
+  },
+  "logs": {
+    "mount": "/tmp/afs-mount.log",
+    "sync": "/tmp/afs-sync.log"
+  },
+  "sync": {
+    "fileSizeCapMB": 100
+  }
 }

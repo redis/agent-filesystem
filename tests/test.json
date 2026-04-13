@@ -1,19 +1,26 @@
 {
-  "useExistingRedis": true,
-  "redisAddr": "localhost:6379",
-  "redisPassword": "",
-  "redisDB": 0,
-  "redisKey": "memories",
-  "mountpoint": "~/memories",
-  "mountBackend": "auto",
-  "readOnly": false,
-  "allowOther": false,
-  "redisServerBin": "",
-  "modulePath": "",
-  "mountBin": "",
-  "nfsBin": "~/git/agent-filesystem/mount/agent-filesystem-nfs",
-  "nfsHost": "127.0.0.1",
-  "nfsPort": 20490,
-  "redisLog": "/tmp/afs-redis.log",
-  "mountLog": "/tmp/afs-mount.log"
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "mode": "mount",
+  "currentWorkspace": "memories",
+  "localPath": "~/memories",
+  "mount": {
+    "backend": "nfs",
+    "readOnly": false,
+    "allowOther": false,
+    "mountBin": "",
+    "nfsBin": "~/git/agent-filesystem/mount/agent-filesystem-nfs",
+    "nfsHost": "127.0.0.1",
+    "nfsPort": 20490
+  },
+  "logs": {
+    "mount": "/tmp/afs-mount.log",
+    "sync": "/tmp/afs-sync.log"
+  },
+  "sync": {
+    "fileSizeCapMB": 100
+  }
 }

@@ -13,13 +13,12 @@ import (
 	"github.com/redis/agent-filesystem/mount/client"
 )
 
-func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
+func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -33,20 +32,12 @@ func TestWorkspaceCommandsImportRunCloneForkListAndDelete(t *testing.T) {
 	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
 		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
-	}
 
-	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	_, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
 	defer closeStore()
-
-	treePath := afsWorkspaceTreePath(loadedCfg, "repo")
-	if _, err := os.Stat(filepath.Join(treePath, "main.go")); err != nil {
-		t.Fatalf("expected opened workspace tree to exist: %v", err)
-	}
 
 	clonedDir := filepath.Join(t.TempDir(), "repo-clone")
 	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
@@ -120,7 +111,6 @@ func TestWorkspaceCreateSuggestsMountFirst(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -147,7 +137,6 @@ func TestWorkspaceCloneRejectsNonEmptyDestination(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -178,7 +167,6 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -191,27 +179,26 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
 		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
-	}
 
-	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	_, store, closeStore, err := openAFSStore(context.Background())
 	if err != nil {
 		t.Fatalf("openAFSStore() returned error: %v", err)
 	}
 	defer closeStore()
-	treePath := afsWorkspaceTreePath(loadedCfg, "repo")
-	targetFile := filepath.Join(treePath, "main.go")
 
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "printf 'package updated\\n' > main.go"}); err != nil {
-		t.Fatalf("cmdWorkspace(run updated) returned error: %v", err)
+	rootKey, _, _, err := seedWorkspaceMountKey(context.Background(), store, "repo")
+	if err != nil {
+		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
+	}
+	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/main.go", []byte("package updated\n")); err != nil {
+		t.Fatalf("Echo(/main.go) returned error: %v", err)
 	}
 	if err := cmdCheckpoint([]string{"checkpoint", "create", "repo", "after-edit"}); err != nil {
 		t.Fatalf("cmdCheckpoint(create) returned error: %v", err)
 	}
 
-	if err := os.WriteFile(targetFile, []byte("package broken\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile(main.go broken) returned error: %v", err)
+	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/main.go", []byte("package broken\n")); err != nil {
+		t.Fatalf("Echo(/main.go broken) returned error: %v", err)
 	}
 	if err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "after-edit"}); err != nil {
 		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
@@ -223,14 +210,6 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	}
 	if string(liveMain) != "package updated\n" {
 		t.Fatalf("live main.go after restore = %q, want %q", string(liveMain), "package updated\n")
-	}
-
-	restored, err := os.ReadFile(targetFile)
-	if err != nil {
-		t.Fatalf("ReadFile(main.go) returned error: %v", err)
-	}
-	if string(restored) != "package broken\n" {
-		t.Fatalf("local main.go after restore = %q, want %q", string(restored), "package broken\n")
 	}
 
 	listOutput, err := captureStdout(t, func() error {
@@ -262,7 +241,6 @@ func TestCheckpointCreateUsesLiveWorkspaceWhenNoLocalTreeExists(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -330,7 +308,6 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -342,9 +319,6 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 
 	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
 		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
-	}
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
 	}
 
 	_, store, closeStore, err := openAFSStore(context.Background())
@@ -363,7 +337,6 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
-		ManageRedis:          false,
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
@@ -422,7 +395,6 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -453,7 +425,6 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
-		ManageRedis:          false,
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
@@ -508,7 +479,6 @@ func TestCheckpointCreateUsesActiveMountedWorkspaceWhenConfigUnset(t *testing.T)
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -538,7 +508,6 @@ func TestCheckpointCreateUsesActiveMountedWorkspaceWhenConfigUnset(t *testing.T)
 
 	if err := saveState(state{
 		StartedAt:            time.Now().UTC(),
-		ManageRedis:          false,
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
@@ -569,7 +538,6 @@ func TestWorkspaceCloneAndForkUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -615,15 +583,15 @@ func TestWorkspaceCloneAndForkUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestWorkspaceRunRejectsLegacyFlag(t *testing.T) {
+func TestWorkspaceRunCommandIsRemoved(t *testing.T) {
 	t.Helper()
 
 	err := cmdWorkspace([]string{"workspace", "run", "repo", "--session", "main", "--", "/bin/sh", "-c", "true"})
 	if err == nil {
-		t.Fatal("cmdWorkspace(run) returned nil error, want legacy flag rejection")
+		t.Fatal("cmdWorkspace(run) returned nil error, want removed-command error")
 	}
-	if !strings.Contains(err.Error(), `unknown flag "--session"`) {
-		t.Fatalf("cmdWorkspace(run) error = %q, want legacy --session rejection", err)
+	if !strings.Contains(err.Error(), `unknown workspace subcommand "run"`) {
+		t.Fatalf("cmdWorkspace(run) error = %q, want removed run subcommand error", err)
 	}
 }
 

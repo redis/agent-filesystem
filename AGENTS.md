@@ -17,7 +17,7 @@ make clean          # remove compiled artifacts
 ./afs down
 ./afs status
 ./afs workspace import <workspace> <directory>
-./afs workspace run <workspace> -- /bin/sh
+./afs workspace clone <workspace> <directory>
 ./afs checkpoint list <workspace>
 ```
 

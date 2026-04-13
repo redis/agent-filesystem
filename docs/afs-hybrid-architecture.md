@@ -2,7 +2,10 @@
 
 Date: 2026-04-05
 
-Note: this document is historical context. The current code no longer uses the hybrid "local draft as working copy" model described below. Mounts and MCP edits target the live Redis workspace root directly, `workspace run` materializes from that live root and syncs back on exit, and checkpoints are explicit-only.
+Note: this document is historical context. The current code no longer has the
+`workspace run` flow described below. Sync mode and live mounts are the active
+local surfaces, mounts and MCP edits target the live Redis workspace root
+directly, and checkpoints are explicit-only.
 
 ## Thesis
 

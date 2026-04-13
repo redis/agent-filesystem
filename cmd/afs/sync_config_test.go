@@ -7,10 +7,10 @@ import (
 func TestEffectiveModeDefaults(t *testing.T) {
 	t.Helper()
 	cases := []struct {
-		name  string
-		cfg   config
-		want  string
-		err   bool
+		name string
+		cfg  config
+		want string
+		err  bool
 	}{
 		{"empty defaults to sync", config{}, modeSync, false},
 		{"explicit sync", config{Mode: "sync"}, modeSync, false},
@@ -18,13 +18,12 @@ func TestEffectiveModeDefaults(t *testing.T) {
 		{"explicit none", config{Mode: "none"}, modeNone, false},
 		{"garbage errors", config{Mode: "garbage"}, "", true},
 		{
-			name: "legacy mount config (empty mode + local path + backend)",
-			cfg:  config{MountBackend: "nfs", LocalPath: "/tmp/afs"},
-			want: modeMount,
-		},
-		{
 			name: "explicit sync mode with local path",
-			cfg:  config{MountBackend: "nfs", LocalPath: "/tmp/afs", Mode: modeSync},
+			cfg: func() config {
+				cfg := config{Mode: modeSync, LocalPath: "/tmp/afs"}
+				cfg.MountBackend = "nfs"
+				return cfg
+			}(),
 			want: modeSync,
 		},
 	}
@@ -50,7 +49,9 @@ func TestSyncSizeCapBytesDefault(t *testing.T) {
 	if got := syncSizeCapBytes(config{}); got != int64(defaultSyncFileSizeCapMB)*1024*1024 {
 		t.Fatalf("syncSizeCapBytes default = %d, want %d", got, int64(defaultSyncFileSizeCapMB)*1024*1024)
 	}
-	if got := syncSizeCapBytes(config{SyncFileSizeCapMB: 8}); got != 8*1024*1024 {
+	cfg := config{}
+	cfg.SyncFileSizeCapMB = 8
+	if got := syncSizeCapBytes(cfg); got != 8*1024*1024 {
 		t.Fatalf("syncSizeCapBytes(8) = %d, want %d", got, 8*1024*1024)
 	}
 }

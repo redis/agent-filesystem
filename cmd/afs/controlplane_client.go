@@ -7,11 +7,13 @@ import (
 
 func controlPlaneConfigFromCLI(cfg config) controlplane.Config {
 	return controlplane.Config{
-		RedisAddr:     cfg.RedisAddr,
-		RedisUsername: cfg.RedisUsername,
-		RedisPassword: cfg.RedisPassword,
-		RedisDB:       cfg.RedisDB,
-		RedisTLS:      cfg.RedisTLS,
+		RedisConfig: controlplane.RedisConfig{
+			RedisAddr:     cfg.RedisAddr,
+			RedisUsername: cfg.RedisUsername,
+			RedisPassword: cfg.RedisPassword,
+			RedisDB:       cfg.RedisDB,
+			RedisTLS:      cfg.RedisTLS,
+		},
 	}
 }
 

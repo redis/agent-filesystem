@@ -27,7 +27,7 @@ The `afs` binary is at the repo root after building.
 
 | Command | Description |
 |---------|-------------|
-| `afs setup` | Interactive first-time wizard — saves config, starts services |
+| `afs setup` | Interactive first-time wizard — saves config only |
 | `afs up` | Start services from saved config |
 | `afs down` | Stop all services and unmount |
 | `afs status` | Show current status |
@@ -53,24 +53,30 @@ cd /home/ubuntu/git/agent-filesystem && make
 ```bash
 cat > /home/ubuntu/git/agent-filesystem/afs.config.json << 'EOF'
 {
-  "useExistingRedis": false,
-  "redisAddr": "localhost:6379",
-  "redisPassword": "",
-  "redisDB": 0,
+  "redis": {
+    "addr": "localhost:6379",
+    "password": "",
+    "db": 0
+  },
+  "mode": "sync",
   "currentWorkspace": "my-workspace",
-  "mountpoint": "/home/ubuntu/agent-filesystem",
-  "readOnly": false,
-  "allowOther": false,
-  "redisServerBin": "",
-  "modulePath": "",
-  "mountBin": "",
-  "redisLog": "/tmp/afs-redis.log",
-  "mountLog": "/tmp/afs-mount.log"
+  "localPath": "/home/ubuntu/agent-filesystem",
+  "mount": {
+    "backend": "none",
+    "readOnly": false,
+    "allowOther": false,
+    "mountBin": ""
+  },
+  "logs": {
+    "mount": "/tmp/afs-mount.log",
+    "sync": "/tmp/afs-sync.log"
+  },
+  "sync": {
+    "fileSizeCapMB": 100
+  }
 }
 EOF
 ```
-
-Empty strings for `redisServerBin`, `modulePath`, and `mountBin` are auto-detected at runtime.
 
 ### 3. Start
 
@@ -91,39 +97,52 @@ File: `afs.config.json` (next to the `afs` binary in the repo root)
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `useExistingRedis` | bool | `false` | `true` = connect to running Redis; `false` = start a managed instance |
-| `redisAddr` | string | `"localhost:6379"` | Redis server address (host:port) |
-| `redisPassword` | string | `""` | Redis password (empty = no auth) |
-| `redisDB` | int | `0` | Redis database number (0–15) |
-| `currentWorkspace` | string | `""` | Workspace mounted locally when a mountpoint is configured |
-| `mountpoint` | string | | Local directory where the filesystem is mounted |
-| `readOnly` | bool | `false` | Mount as read-only |
-| `allowOther` | bool | `false` | Allow other system users to access the mount |
-| `redisServerBin` | string | auto | Path to `redis-server` (only used when `useExistingRedis` is `false`) |
-| `modulePath` | string | auto | Path to `fs.so` module |
-| `mountBin` | string | auto | Path to `agent-filesystem-mount` binary |
-| `redisLog` | string | `"/tmp/afs-redis.log"` | Log file for managed Redis |
-| `mountLog` | string | `"/tmp/afs-mount.log"` | Log file for mount daemon |
+| `redis.addr` | string | `"localhost:6379"` | Redis server address (host:port) |
+| `redis.username` | string | `""` | Optional Redis username |
+| `redis.password` | string | `""` | Redis password (empty = no auth) |
+| `redis.db` | int | `0` | Redis database number |
+| `redis.tls` | bool | `false` | Enable TLS for the Redis connection |
+| `mode` | string | `"sync"` | `sync`, `mount`, or `none` |
+| `currentWorkspace` | string | `""` | Workspace selected by default for `up`, `clone`, and checkpoints |
+| `localPath` | string | `"~/afs"` | Sync root in sync mode or mountpoint in mount mode |
+| `mount.backend` | string | `"none"` | `none`, `fuse`, or `nfs` |
+| `mount.readOnly` | bool | `false` | Start the local surface as read-only |
+| `mount.allowOther` | bool | `false` | Allow other system users to access the mount |
+| `mount.mountBin` | string | auto | Path to `agent-filesystem-mount` when using FUSE |
+| `mount.nfsBin` | string | auto | Path to `agent-filesystem-nfs` when using NFS |
+| `mount.nfsHost` | string | `"127.0.0.1"` | Host for the local NFS export |
+| `mount.nfsPort` | int | `20490` | Port for the local NFS export |
+| `logs.mount` | string | `"/tmp/afs-mount.log"` | Mount daemon log file |
+| `logs.sync` | string | `"/tmp/afs-sync.log"` | Sync daemon log file |
+| `sync.fileSizeCapMB` | int | `100` | Max file size synced through local sync mode |
 
 ### Common config patterns
 
-**Managed Redis (simplest):**
+**Sync mode (recommended):**
 ```json
 {
-  "useExistingRedis": false,
+  "redis": {
+    "addr": "redis.local:6379"
+  },
+  "mode": "sync",
   "currentWorkspace": "my-workspace",
-  "mountpoint": "/home/ubuntu/data"
+  "localPath": "/home/ubuntu/data"
 }
 ```
 
-**Connect to existing Redis:**
+**Live mount mode:**
 ```json
 {
-  "useExistingRedis": true,
-  "redisAddr": "redis.local:6379",
-  "redisPassword": "secret",
+  "redis": {
+    "addr": "redis.local:6379",
+    "password": "secret"
+  },
+  "mode": "mount",
   "currentWorkspace": "my-workspace",
-  "mountpoint": "/home/ubuntu/data"
+  "localPath": "/home/ubuntu/data",
+  "mount": {
+    "backend": "nfs"
+  }
 }
 ```
 
@@ -278,7 +297,7 @@ redis-cli RENAME staging production   # rename a volume
 |---------|----------|
 | `no configuration found` | Run `afs setup` or create `afs.config.json` next to the binary |
 | `module not loaded` | Load with: `redis-cli MODULE LOAD /path/to/module/fs.so` |
-| `cannot find redis-server` | Install Redis, or set `useExistingRedis: true` |
+| `cannot connect to Redis` | Start Redis yourself, then point `redis.addr` at that instance |
 | `cannot find agent-filesystem-mount` | Run `make mount` in the repo root |
 | `mount did not become ready` | Check `mountLog` path for errors |
 | `agent-filesystem is already running` | Run `afs down` first |

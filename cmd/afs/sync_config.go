@@ -5,9 +5,7 @@ import (
 	"strings"
 )
 
-// Mode constants determine what `afs up` actually starts. The legacy default
-// is "mount" — empty Mode is treated identically so that existing
-// `afs.config.json` files keep their pre-sync behavior.
+// Mode constants determine what `afs up` actually starts.
 const (
 	modeMount = "mount"
 	modeSync  = "sync"
@@ -23,50 +21,18 @@ const (
 const defaultSyncFileSizeCapMB = 2048
 
 // effectiveMode returns the resolved Mode for the daemon. Empty resolves to
-// sync (the recommended default). A pre-existing config that does not set
-// Mode but DOES configure a mountpoint and backend is still honored as
-// mount, so users who installed AFS before sync mode existed keep their
-// mount-based setup on their next `afs up`.
-//
-// Any unrecognized value is reported as an error so the user notices a typo
-// immediately rather than after a confusing fallback.
+// sync. Any unrecognized value is reported as an error so the user notices a
+// typo immediately rather than after a confusing fallback.
 func effectiveMode(cfg config) (string, error) {
 	m := strings.TrimSpace(cfg.Mode)
 	switch m {
 	case "":
-		// Legacy heuristic: a config that was clearly built for mount mode
-		// (explicit backend + mountpoint, no sync path) should keep mounting.
-		// Anything else — including brand-new configs — defaults to sync.
-		if isLegacyMountConfig(cfg) {
-			return modeMount, nil
-		}
 		return modeSync, nil
 	case modeMount, modeSync, modeNone:
 		return m, nil
 	default:
 		return "", fmt.Errorf("unknown mode %q in config (expected one of: sync, mount, none)", cfg.Mode)
 	}
-}
-
-// isLegacyMountConfig detects configs that were written before sync mode
-// existed and explicitly wanted a FUSE/NFS mount. We err on the side of NOT
-// migrating those users silently — flipping a live mount to sync mid-session
-// could cause surprising writes.
-func isLegacyMountConfig(cfg config) bool {
-	// A legacy mount config has a non-none mount backend but no explicit mode.
-	// With the unified LocalPath field there's no separate SyncLocalPath to
-	// distinguish legacy configs, so we rely solely on Mode being empty.
-	if strings.TrimSpace(cfg.Mode) != "" {
-		return false
-	}
-	backend := strings.TrimSpace(cfg.MountBackend)
-	if backend == "" || backend == mountBackendNone {
-		return false
-	}
-	if strings.TrimSpace(cfg.LocalPath) == "" {
-		return false
-	}
-	return true
 }
 
 // syncSizeCapBytes returns the configured per-file size cap in bytes, falling

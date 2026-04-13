@@ -279,7 +279,6 @@ func setupAFSMCPTestServer(t *testing.T) (*afsMCPServer, func()) {
 
 	mr := miniredis.RunT(t)
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
 	cfg.WorkRoot = t.TempDir()

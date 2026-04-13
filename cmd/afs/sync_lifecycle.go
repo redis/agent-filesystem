@@ -38,18 +38,6 @@ func startSyncServices(cfg config, foreground bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	redisPID := 0
-	if !cfg.UseExistingRedis {
-		s := startStep("Starting Redis server")
-		pid, err := startRedisDaemon(cfg)
-		if err != nil {
-			s.fail(err.Error())
-			return err
-		}
-		redisPID = pid
-		s.succeed(fmt.Sprintf("pid %d", pid))
-	}
-
 	s := startStep("Connecting to Redis")
 	rdb := redis.NewClient(buildRedisOptions(cfg, 4))
 	defer rdb.Close()
@@ -119,22 +107,16 @@ func startSyncServices(cfg config, foreground bool) error {
 		// Don't stop the daemon we just started — it's already running.
 		st := state{
 			StartedAt:        time.Now().UTC(),
-			ManageRedis:      !cfg.UseExistingRedis,
 			RedisAddr:        cfg.RedisAddr,
 			RedisDB:          cfg.RedisDB,
 			CurrentWorkspace: workspace,
 			MountBackend:     mountBackendNone,
 			ReadOnly:         cfg.ReadOnly,
 			RedisKey:         mountKey,
-			RedisLog:         cfg.RedisLog,
-			RedisServerBin:   cfg.RedisServerBin,
 			Mode:             modeSync,
 			SyncPID:          os.Getpid(),
 			LocalPath:        localRoot,
 			SyncLog:          cfg.SyncLog,
-		}
-		if !cfg.UseExistingRedis {
-			st.RedisPID = redisPID
 		}
 		if err := saveState(st); err != nil {
 			daemon.Stop()
@@ -160,12 +142,6 @@ func startSyncServices(cfg config, foreground bool) error {
 		cancel()
 		daemon.Stop()
 		stopStep.succeed("clean")
-
-		if !cfg.UseExistingRedis && redisPID > 0 && processAlive(redisPID) {
-			rs := startStep("Stopping Redis server")
-			_ = terminatePID(redisPID, 2*time.Second)
-			rs.succeed(fmt.Sprintf("pid %d", redisPID))
-		}
 
 		cleanStep := startStep("Removing local sync folder")
 		if err := os.RemoveAll(localRoot); err != nil {
@@ -195,22 +171,16 @@ func startSyncServices(cfg config, foreground bool) error {
 
 	st := state{
 		StartedAt:        time.Now().UTC(),
-		ManageRedis:      !cfg.UseExistingRedis,
 		RedisAddr:        cfg.RedisAddr,
 		RedisDB:          cfg.RedisDB,
 		CurrentWorkspace: workspace,
 		MountBackend:     mountBackendNone,
 		ReadOnly:         cfg.ReadOnly,
 		RedisKey:         mountKey,
-		RedisLog:         cfg.RedisLog,
-		RedisServerBin:   cfg.RedisServerBin,
 		Mode:             modeSync,
 		SyncPID:          daemonPID,
 		LocalPath:        localRoot,
 		SyncLog:          cfg.SyncLog,
-	}
-	if !cfg.UseExistingRedis {
-		st.RedisPID = redisPID
 	}
 	if err := saveState(st); err != nil {
 		return err
@@ -336,7 +306,7 @@ func runSyncDaemon() error {
 // validateSyncLocalPath blocks dual-writer collisions.
 func validateSyncLocalPath(cfg config, localRoot string) error {
 	cleanLocal := filepath.Clean(localRoot)
-	for _, forbidden := range []string{cfg.WorkRoot, stateDir()} {
+	for _, forbidden := range []string{defaultWorkRoot(), stateDir()} {
 		if strings.TrimSpace(forbidden) == "" {
 			continue
 		}
@@ -380,12 +350,6 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 			s.succeed(fmt.Sprintf("pid %d", st.SyncPID))
 		}
 	}
-	if st.ManageRedis && st.RedisPID > 0 && processAlive(st.RedisPID) {
-		s := startStep("Stopping Redis server")
-		_ = terminatePID(st.RedisPID, 2*time.Second)
-		s.succeed(fmt.Sprintf("pid %d", st.RedisPID))
-	}
-
 	// Remove the local sync folder — the source of truth is Redis, and
 	// `afs up` will re-populate it. Same semantics as mount mode removing
 	// the mountpoint.
@@ -410,4 +374,3 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 	fmt.Printf("\n  %s afs sync stopped\n\n", clr(ansiDim, "■"))
 	return true, nil
 }
-

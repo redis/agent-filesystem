@@ -253,7 +253,6 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -312,8 +311,12 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	if err := cmdWorkspace([]string{"workspace", "list"}); err != nil {
 		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
+	clonedDir := filepath.Join(t.TempDir(), "repo-clone")
+	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
+		t.Fatalf("cmdWorkspace(clone) returned error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(clonedDir, "main.go")); err != nil {
+		t.Fatalf("expected cloned directory to contain main.go: %v", err)
 	}
 	if err := cmdCheckpoint([]string{"checkpoint", "list", "repo"}); err != nil {
 		t.Fatalf("cmdCheckpoint(list) returned error: %v", err)
@@ -326,7 +329,6 @@ func TestCmdImportRespectsAFSIgnore(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -374,7 +376,6 @@ func TestCmdImportHandlesEmptyFiles(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -389,17 +390,12 @@ func TestCmdImportHandlesEmptyFiles(t *testing.T) {
 		t.Fatalf("cmdImport() returned error: %v", err)
 	}
 
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
+	clonedDir := filepath.Join(t.TempDir(), "repo-clone")
+	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
+		t.Fatalf("cmdWorkspace(clone) returned error: %v", err)
 	}
 
-	loadedCfg, _, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		t.Fatalf("openAFSStore() returned error: %v", err)
-	}
-	defer closeStore()
-
-	data, err := os.ReadFile(filepath.Join(afsWorkspaceTreePath(loadedCfg, "repo"), "empty.txt"))
+	data, err := os.ReadFile(filepath.Join(clonedDir, "empty.txt"))
 	if err != nil {
 		t.Fatalf("ReadFile(empty.txt) returned error: %v", err)
 	}
@@ -408,13 +404,12 @@ func TestCmdImportHandlesEmptyFiles(t *testing.T) {
 	}
 }
 
-func TestCmdWorkspaceRunCreatesWorkingCopy(t *testing.T) {
+func TestCmdWorkspaceCloneCreatesLocalCopy(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
@@ -427,26 +422,23 @@ func TestCmdWorkspaceRunCreatesWorkingCopy(t *testing.T) {
 	if err := cmdImport([]string{"import", "repo", sourceDir}); err != nil {
 		t.Fatalf("cmdImport() returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"workspace", "run", "repo", "--", "/bin/sh", "-c", "true"}); err != nil {
-		t.Fatalf("cmdWorkspace(run) returned error: %v", err)
+	clonedDir := filepath.Join(t.TempDir(), "repo-clone")
+	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
+		t.Fatalf("cmdWorkspace(clone) returned error: %v", err)
 	}
 
-	loadedCfg, _, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		t.Fatalf("openAFSStore() returned error: %v", err)
-	}
-	defer closeStore()
-
-	if _, err := loadAFSLocalState(loadedCfg, "repo"); err != nil {
-		t.Fatalf("expected working copy state after clone: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(afsWorkspaceTreePath(loadedCfg, "repo"), "docs", "notes.md")); err != nil {
-		t.Fatalf("expected working copy contents after clone: %v", err)
+	if _, err := os.Stat(filepath.Join(clonedDir, "docs", "notes.md")); err != nil {
+		t.Fatalf("expected cloned workspace contents: %v", err)
 	}
 }
 
 func saveTempConfig(t *testing.T, cfg config) {
 	t.Helper()
+
+	if cfg.WorkRoot != "" && cfg.WorkRoot != defaultWorkRoot() {
+		homeDir := withTempHome(t)
+		cfg.WorkRoot = filepath.Join(homeDir, ".afs", "workspaces")
+	}
 
 	configFile := filepath.Join(t.TempDir(), "afs.config.json")
 	orig := cfgPathOverride

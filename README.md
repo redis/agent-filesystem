@@ -14,8 +14,7 @@ Filesystems are a great interface for agents because they already know how to re
 AFS fixes that by:
 
 - storing workspace state in Redis
-- exposing the current workspace as a normal local filesystem
-- materializing a real local working copy when you run commands
+- exposing the current workspace through sync or an optional live mount
 - letting you checkpoint and restore workspaces
 - letting you fork a workspace for parallel work
 
@@ -42,7 +41,7 @@ AFS exists for a different shape of problem: agent workspaces that should feel l
 | one shared live tree | NFS, EFS, CephFS, NetApp, SMB | AFS can expose a shared mount, but the main point is not the mount. The main point is a workspace model with checkpoints and forks. |
 | source-code branching | Git branches and `git worktree` | AFS is for whole workspaces, not just committed source. Notes, generated files, prompts, logs, scratch state, and code can all live in one workspace timeline. |
 | point-in-time rollback on one machine | ZFS or Btrfs snapshots | AFS gives you similar checkpoint and fork ideas, but with a remote saved source of truth that is not tied to one machine. |
-| normal local execution plus remote saved state | a hand-rolled sync or cache layer | AFS makes that model explicit: save state in Redis, mount or materialize locally, run real tools, checkpoint when ready. |
+| normal local execution plus remote saved state | a hand-rolled sync or cache layer | AFS makes that model explicit: save state in Redis, sync or mount locally, run real tools, checkpoint when ready. |
 
 Choose something else when:
 
@@ -78,6 +77,15 @@ The important pattern is:
 
 So AFS is not trying to beat your local SSD, and it is not trying to out-POSIX mature shared filesystems. It is trying to give you a remote, checkpointable, forkable workspace with enough performance that normal tools still feel normal.
 
+## Requirements
+
+AFS requires a Redis instance you provide.
+
+AFS does not start Redis for you, manage a local Redis server, or hide the
+connection details behind a separate product flow. The CLI expects a reachable
+Redis address in `afs.config.json`, whether that Redis is local, containerized,
+hosted, or managed by something else.
+
 ## 60-Second Quick Start
 
 Build AFS:
@@ -92,23 +100,34 @@ Run setup:
 ./afs setup
 ```
 
-The default path is to mount a workspace and use it like a normal folder.
+The default path is sync mode: Redis stays the source of truth while AFS keeps
+a real local folder up to date.
 
 During setup:
 
 - choose your Redis connection
-- choose a workspace name
-- choose a local mountpoint like `~/afs`
+- keep sync mode (recommended) or choose live mount
+- choose a local path like `~/afs`
 
-When setup finishes, AFS mounts that workspace for you. Then you can just use the folder:
+Setup only writes `afs.config.json`. To start using AFS, create or import a
+workspace, select it, and then start the service:
 
 ```bash
+./afs workspace create my-repo
+./afs workspace use my-repo
+./afs up --mode sync
 cd ~/afs
 ls
 echo "# Notes" > notes.md
 ```
 
-If you want to remount it later:
+If you want to start the optional live mount instead:
+
+```bash
+./afs up --mode mount
+```
+
+If you want to start it again later:
 
 ```bash
 ./afs up
@@ -121,7 +140,7 @@ If you want to bring an existing folder into AFS:
 ```bash
 ./afs workspace import my-repo ./repo
 ./afs workspace use my-repo
-./afs up
+./afs up --mode sync
 ```
 
 If you want to exclude local junk before importing, create a `.afsignore` file in that folder first.
@@ -137,6 +156,50 @@ If you want a second line of work:
 ```bash
 ./afs workspace fork my-repo my-repo-experiment
 ```
+
+## Config File
+
+AFS stores CLI configuration in `afs.config.json` next to the `afs` binary.
+The current config shape is nested and workspace-oriented:
+
+```json
+{
+  "redis": {
+    "addr": "localhost:6379",
+    "username": "",
+    "password": "",
+    "db": 0,
+    "tls": false
+  },
+  "mode": "sync",
+  "currentWorkspace": "my-repo",
+  "localPath": "~/afs",
+  "mount": {
+    "backend": "none",
+    "readOnly": false,
+    "allowOther": false,
+    "mountBin": "",
+    "nfsBin": "",
+    "nfsHost": "127.0.0.1",
+    "nfsPort": 20490
+  },
+  "logs": {
+    "mount": "/tmp/afs-mount.log",
+    "sync": "/tmp/afs-sync.log"
+  },
+  "sync": {
+    "fileSizeCapMB": 100
+  }
+}
+```
+
+Notable current rules:
+
+- Redis connection is required; there is no `useExistingRedis` or managed-Redis mode
+- `redisKey` is not a config setting anymore; workspace keys are derived internally
+- `workspace run` is gone; use sync mode, live mount mode, or `workspace clone`
+- `workRoot` is internal state, not a user-facing config field
+- `afs up --mode sync|mount` lets you switch the local surface from the CLI and persists the mode change
 
 ## MCP Server
 
@@ -162,8 +225,8 @@ client on demand. A minimal config looks like:
 
 The MCP surface is workspace-oriented: list/select/create/fork workspaces,
 read and edit files, grep a workspace, and create or restore checkpoints.
-File-edit tools update the materialized working copy and leave the workspace
-dirty until `checkpoint_create` is called explicitly.
+File-edit tools update the live workspace state and leave the workspace dirty
+until `checkpoint_create` is called explicitly.
 
 ## The Basic Model
 
@@ -175,30 +238,42 @@ AFS has two main concepts:
 Typical flow:
 
 1. Put a workspace into AFS with `workspace create` or `workspace import`
-2. Mount it and use it like a normal directory
+2. Sync it to a normal local directory or expose it as a live mount
 3. Save stable moments with `checkpoint create`
 4. Fork it when you want a second line of work
 5. Restore a checkpoint if you want to go back
 
-## Mounted Filesystem
+## Local Surfaces
 
 The simplest way to think about AFS is:
 
 - Redis stores the workspace state
-- AFS mounts the current workspace into a local folder
-- your editor, shell, and tools use that folder like any other directory
+- AFS exposes that workspace locally either through sync mode or live mount mode
+- your editor, shell, and tools use the local folder like any other directory
 
-The main mount commands are:
+### Sync Mode
 
-```bash
-./afs up
-./afs status
-./afs down
-```
+Sync mode is the default and recommended local surface.
+
+- `localPath` is a real directory on disk
+- `afs up --mode sync` starts a background sync daemon
+- local edits are reconciled with the live Redis-backed workspace root
+- `afs down` stops the sync daemon but does not remove workspace state
+
+### Live Mount Mode
+
+Live mount mode exposes the workspace directly as a Redis-backed filesystem.
+
+- `localPath` is the mountpoint
+- `afs up --mode mount` starts the mount daemon
+- edits go straight into the live Redis-backed workspace root
+- `afs down` unmounts the filesystem and stops the mount daemon
 
 On macOS AFS uses NFS. On Linux AFS uses FUSE.
 
-If no workspace exists yet, setup will ask for one and create it before mounting.
+Before using live mount mode, create or import a workspace and select it with
+`afs workspace use <workspace>`, and make sure `mount.backend` is configured
+to something other than `none`.
 
 Current macOS/NFS caveats:
 
@@ -209,17 +284,19 @@ Current macOS/NFS caveats:
 
 ```bash
 ./afs setup
+./afs config show --json
 ./afs workspace create <workspace>
 ./afs workspace import <workspace> <directory>
 ./afs workspace list
 ./afs workspace use <workspace>
-./afs workspace run <workspace> -- <command...>
 ./afs workspace clone <workspace> <directory>
 ./afs workspace fork <workspace> <new-workspace>
 ./afs checkpoint create <workspace> <name>
 ./afs checkpoint list <workspace>
 ./afs checkpoint restore <workspace> <name>
 ./afs up
+./afs up --mode sync
+./afs up --mode mount
 ./afs status
 ./afs down
 ```
@@ -271,8 +348,8 @@ Notes:
 ## What Gets Stored Where
 
 - Redis stores both the live workspace working copy and the immutable checkpoint history
-- your chosen mountpoint is the live local folder in mounted filesystem mode
-- AFS creates local working copies under `~/.afs/workspaces` only for `workspace run`
+- `localPath` is the synced folder in sync mode or the mountpoint in live mount mode
+- `~/.afs` is reserved for AFS runtime state and internal local metadata
 - `afs.config.json` stores local CLI configuration next to the `afs` binary
 
 You can think of Redis as the source of truth for both:
@@ -280,20 +357,17 @@ You can think of Redis as the source of truth for both:
 - the live mutable workspace root
 - the explicit checkpoint history
 
+In sync mode:
+
+- you work in the directory configured by `localPath`
+- AFS keeps that directory reconciled with the live Redis-backed workspace root
+- `afs down` stops the sync daemon but does not discard workspace state
+
 In mounted filesystem mode:
 
 - you work in your chosen mountpoint
-- you can mostly ignore `~/.afs/workspaces`
 - edits go straight into the live Redis-backed workspace root
 - `afs down` just unmounts; it does not create or sync a separate draft
-
-In `workspace run` mode:
-
-- AFS materializes a local working copy under `~/.afs/workspaces` from the live workspace root
-- your command runs there
-- when the command exits, AFS syncs changes back into the live workspace root
-- `--readonly` discards the process changes instead of syncing them back
-- use `afs checkpoint create <workspace> [name]` to persist edits as a checkpoint
 
 ## Build
 
@@ -352,33 +426,13 @@ You can override the defaults at invocation time:
 make web-dev AFS_WEB_SERVER_ADDR=127.0.0.1:9001 AFS_WEB_API_BASE_URL=http://127.0.0.1:9001 AFS_WEB_UI_PORT=4173
 ```
 
-## Alternative: `workspace run`
+## Clone a Workspace
 
-If you do not want a mounted filesystem, AFS also has a command-oriented mode:
-
-```bash
-./afs workspace run my-repo -- bash
-```
-
-This is useful when:
-
-- you want to run one command and decide later whether to checkpoint the result
-- you are driving AFS from another agent or script
-- you do not want to keep a mounted directory around
-- you want a more explicit “open, run, checkpoint” workflow
-
-`workspace run`:
-
-- makes sure the workspace exists locally
-- runs your command with that workspace as the current working directory
-- leaves any edits in the local working copy
-- does not create a checkpoint; use `afs checkpoint create <workspace> [name]`
-  when you want to persist the current draft
-
-For example:
+If you want an explicit one-off local copy instead of a long-running sync or
+mount, clone the current saved head into a normal directory:
 
 ```bash
-./afs workspace run my-repo -- go test ./...
+./afs workspace clone my-repo ~/src/my-repo
 ```
 
 ## Repo Contents
@@ -396,5 +450,8 @@ But if you are brand new here, start with:
 ```bash
 make
 ./afs setup
-cd <your-mountpoint>
+./afs workspace create demo
+./afs workspace use demo
+./afs up --mode sync
+cd ~/afs
 ```

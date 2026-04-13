@@ -24,7 +24,7 @@ Open the bundled starter ignore file at [assets/.afsignore](assets/.afsignore) a
 4. Create or update `~/.codex/.afsignore` before migration.
 5. On the source machine, run `./afs workspace import --mount-at-source .codex ~/.codex`, then `./afs workspace use .codex`.
 6. Explain that the original directory becomes `~/.codex.pre-afs`, the imported workspace is mounted at `~/.codex`, and the workspace name is `.codex`.
-7. On each additional machine, move aside any existing `~/.codex`, configure the current workspace as `.codex`, set `mountpoint` to that machine's `~/.codex`, then run `./afs up`.
+7. On each additional machine, move aside any existing `~/.codex`, configure the current workspace as `.codex`, set `localPath` to that machine's `~/.codex`, choose mount mode if you want a live mount there, then run `./afs up`.
 8. Verify with `./afs status` and `ls -la ~/.codex`.
 
 ## Secondary machine config
@@ -33,27 +33,34 @@ Use a config like:
 
 ```json
 {
-  "useExistingRedis": true,
-  "redisAddr": "YOUR_SHARED_REDIS_HOST:6379",
-  "redisPassword": "",
-  "redisDB": 0,
-  "redisKey": ".codex",
-  "mountpoint": "/Users/YOUR_USER/.codex",
-  "mountBackend": "auto",
-  "readOnly": false,
-  "allowOther": false,
-  "redisServerBin": "",
-  "modulePath": "",
-  "mountBin": "",
-  "nfsBin": "",
-  "nfsHost": "127.0.0.1",
-  "nfsPort": 20490,
-  "redisLog": "/tmp/afs-redis.log",
-  "mountLog": "/tmp/afs-mount.log"
+  "redis": {
+    "addr": "YOUR_SHARED_REDIS_HOST:6379",
+    "password": "",
+    "db": 0
+  },
+  "mode": "mount",
+  "currentWorkspace": ".codex",
+  "localPath": "/Users/YOUR_USER/.codex",
+  "mount": {
+    "backend": "nfs",
+    "readOnly": false,
+    "allowOther": false,
+    "mountBin": "",
+    "nfsBin": "",
+    "nfsHost": "127.0.0.1",
+    "nfsPort": 20490
+  },
+  "logs": {
+    "mount": "/tmp/afs-mount.log",
+    "sync": "/tmp/afs-sync.log"
+  },
+  "sync": {
+    "fileSizeCapMB": 100
+  }
 }
 ```
 
-If `auto` is problematic on macOS, switch `mountBackend` to `"nfs"`.
+For sync mode instead, keep `"mode": "sync"` and set `"mount": { "backend": "none" }`.
 
 ## Notes to surface
 

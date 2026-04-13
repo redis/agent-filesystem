@@ -15,13 +15,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type RedisConfig struct {
+	RedisAddr     string `json:"addr"`
+	RedisUsername string `json:"username"`
+	RedisPassword string `json:"password"`
+	RedisDB       int    `json:"db"`
+	RedisTLS      bool   `json:"tls"`
+}
+
 type Config struct {
-	RedisAddr     string `json:"redisAddr"`
-	RedisUsername string `json:"redisUsername"`
-	RedisPassword string `json:"redisPassword"`
-	RedisDB       int    `json:"redisDB"`
-	RedisTLS      bool   `json:"redisTLS"`
-	RedisKey      string `json:"redisKey"`
+	RedisConfig `json:"redis"`
 }
 
 func LoadConfig(configPathOverride string) (Config, error) {
@@ -101,9 +104,10 @@ func configPath(configPathOverride string) string {
 
 func defaultConfig() Config {
 	return Config{
-		RedisAddr: "localhost:6379",
-		RedisDB:   0,
-		RedisKey:  "myfs",
+		RedisConfig: RedisConfig{
+			RedisAddr: "localhost:6379",
+			RedisDB:   0,
+		},
 	}
 }
 

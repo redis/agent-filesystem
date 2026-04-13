@@ -35,7 +35,6 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 	cfg.MountBackend = mountBackendNone
 	cfg.LocalPath = "~/mypath"
 	cfg.WorkRoot = t.TempDir()
-	cfg.UseExistingRedis = true
 
 	if err := resolveConfigPaths(&cfg); err != nil {
 		t.Fatalf("resolveConfigPaths() returned error: %v", err)
@@ -52,11 +51,10 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	t.Helper()
 
-	// First-run flow: Redis → Mode → (mount surface). Pick existing Redis,
-	// then explicitly switch to live mount mode, then leave the mountpoint
-	// empty so the test exercises the "no mounted filesystem" path.
+	// First-run flow: Redis → Mode → (mount surface). Leave the Redis prompts
+	// at defaults, switch to live mount mode, then leave the mountpoint empty
+	// so the test exercises the "no mounted filesystem" path.
 	input := stringsJoinLines(
-		"2", // existing redis
 		"",  // redis addr default
 		"",  // redis username default
 		"",  // redis password
@@ -82,7 +80,6 @@ func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 	t.Helper()
 
 	input := stringsJoinLines(
-		"2", // existing redis
 		"",  // redis addr default
 		"",  // redis username default
 		"",  // redis password
@@ -113,7 +110,6 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.RedisAddr = "redis.example:6379"
 	existing.CurrentWorkspace = "demo"
 	existing.Mode = modeMount // keep the menu label on "live mount" for the assertion below
@@ -153,7 +149,6 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
 	// Edit-menu items: 4 = current workspace, 5 = save.
@@ -176,7 +171,6 @@ func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
 	// Edit-menu items: 4 = current workspace, 5 = save.
@@ -209,7 +203,6 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	}
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "repo"
 	existing.Mode = modeMount // stay on live mount in the edit menu
 	existing.MountBackend = mountBackendNone
@@ -251,7 +244,6 @@ func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.RedisAddr = "redis.example:6379"
 	existing.CurrentWorkspace = "demo"
 	existing.MountBackend = mountBackendNone
@@ -282,7 +274,6 @@ func TestRunSetupWizardEditModeUnknownChoiceReprompts(t *testing.T) {
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = "demo"
 
 	// Unknown choice "9" → menu re-displayed → pick 5 to save and exit.
@@ -322,7 +313,6 @@ func TestCmdSetupDoesNotStartServices(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
-		"2", // existing Redis
 		"",  // default addr
 		"",  // default user
 		"",  // no password
@@ -386,7 +376,6 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	t.Helper()
 
 	existing := defaultConfig()
-	existing.UseExistingRedis = true
 	existing.CurrentWorkspace = ""
 	existing.Mode = modeMount // edit-mode test, staying on live mount
 	existing.MountBackend = mountBackendNone
@@ -424,7 +413,6 @@ func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
 	}
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.CurrentWorkspace = "demo"
 	cfg.MountBackend = mountBackendNone
 	cfg.LocalPath = ""
@@ -471,7 +459,6 @@ func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
-		"2",            // existing redis
 		"",             // redis addr default
 		"",             // redis username default
 		"",             // redis password
@@ -530,7 +517,6 @@ func TestStartServicesFilesystemOnlyUsesRedisWithoutMountpoint(t *testing.T) {
 	})
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
 	cfg.WorkRoot = filepath.Join(homeDir, ".afs", "workspaces")
@@ -563,7 +549,6 @@ func TestStartServicesRejectsMissingConfiguredWorkspaceForMountedFilesystem(t *t
 	mr := miniredis.RunT(t)
 
 	cfg := defaultConfig()
-	cfg.UseExistingRedis = true
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNFS
 	cfg.NFSBin = "/usr/bin/true"
