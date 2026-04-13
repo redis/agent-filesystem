@@ -579,6 +579,15 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 		r.log.Err("download "+res.Op.Path, res.Err.Error())
 		return
 	}
+	// If a local delete is in-flight for this path, discard the download
+	// result — the file was written to disk by the downloader but the user
+	// already deleted it. Remove the re-created file immediately so it does
+	// not reappear, and let the pending upload carry the delete to Redis.
+	if _, pending := r.pendingDeletes[res.Op.Path]; pending {
+		abs := filepath.Join(r.root, filepath.FromSlash(res.Op.Path))
+		_ = os.Remove(abs)
+		return
+	}
 	if res.ConflictPath != "" {
 		r.log.Conflict(res.Op.Path, res.ConflictPath)
 		go triggerConflictCheckpoint(ctx, r.store, r.workspace)
