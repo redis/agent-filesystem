@@ -1059,8 +1059,10 @@ func cmdStatus() error {
 				backendName = mountBackendNone
 			}
 			localPath := localSurfacePath(cfg, backendName)
+			mode, _ := effectiveMode(cfg)
 			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
 			rows := statusRows(backendName, cfg.RedisAddr, cfg.RedisDB)
+			rows = append(rows, boxRow{Label: "mode", Value: mode})
 			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
 				rows = append([]boxRow{{Label: "workspace", Value: cfg.CurrentWorkspace}}, rows...)
 			}
