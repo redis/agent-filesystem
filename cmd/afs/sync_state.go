@@ -11,8 +11,9 @@ import (
 )
 
 // syncStateVersion is bumped whenever the on-disk SyncState format changes in
-// an incompatible way. v1 is the initial schema.
-const syncStateVersion = 1
+// an incompatible way. v2 adds ChunkSize/ChunkHashes to SyncEntry for
+// chunk-level delta sync. v1 entries have zero-value ChunkSize (= inline).
+const syncStateVersion = 2
 
 // SyncEntry is the per-path record the reconciler maintains. It records what
 // the daemon last knew about both sides — local hash/mtime and the corresponding
@@ -29,6 +30,9 @@ type SyncEntry struct {
 	RemoteMtimeMs int64     `json:"remote_mtime_ms"`
 	Target        string    `json:"target,omitempty"`
 	LastSyncedAt  time.Time `json:"last_synced_at"`
+	// Chunked sync fields (v2). ChunkSize==0 means inline (not chunked).
+	ChunkSize   int      `json:"chunk_size,omitempty"`
+	ChunkHashes []string `json:"chunk_hashes,omitempty"`
 }
 
 // SyncState is the persisted view of every path the daemon has ever observed

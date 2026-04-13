@@ -39,7 +39,7 @@ func (c *nativeClient) Cp(ctx context.Context, src, dst string, recursive bool) 
 }
 
 func (c *nativeClient) copyFile(ctx context.Context, srcPath, dstPath string, src *inodeData) error {
-	content, err := c.loadContentByID(ctx, src.ID)
+	content, err := c.loadContentExternal(ctx, src.ID, src.ContentRef)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,7 @@ func (c *nativeClient) Grep(ctx context.Context, p, pattern string, nocase bool)
 	var matches []GrepMatch
 	switch inode.Type {
 	case "file":
-		content, err := c.loadContentByID(ctx, inode.ID)
+		content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +232,7 @@ func (c *nativeClient) grepWalk(ctx context.Context, dirPath string, dir *inodeD
 	for _, child := range children {
 		switch child.Inode.Type {
 		case "file":
-			content, err := c.loadContentByID(ctx, child.Inode.ID)
+			content, err := c.loadContentExternal(ctx, child.Inode.ID, child.Inode.ContentRef)
 			if err != nil {
 				return err
 			}

@@ -28,12 +28,18 @@ type uploadOp struct {
 	Kind        uploadOpKind
 	Path        string // workspace-relative POSIX, no leading slash
 	AbsPath     string // absolute local path (for diagnostic logging)
-	Content     []byte // file body, only for opUploadFile
+	Content     []byte // file body, only for non-chunked opUploadFile
 	Mode        uint32
 	Symlink     string // target, only for opUploadSymlink
-	LocalHash   string // sha256 of Content; used to update SyncEntry post-upload
+	LocalHash   string // sha256 of Content or compositeHash for chunked
 	StoredEntry SyncEntry
 	HasStored   bool
+	// Chunked upload fields (set when file > chunkThreshold).
+	Chunked     bool
+	FileSize    int64
+	ChunkSize   int
+	ChunkHashes []string // complete new manifest
+	DirtyChunks []int    // indices of changed chunks
 }
 
 // uploadResult tells the reconciler how the upload landed so it can mark the
@@ -100,6 +106,10 @@ func (u *uploader) process(ctx context.Context, op uploadOp) {
 }
 
 func (u *uploader) processFile(ctx context.Context, op uploadOp) {
+	if op.Chunked {
+		u.processChunkedFile(ctx, op)
+		return
+	}
 	if int64(len(op.Content)) > u.maxFileBytes {
 		u.send(uploadResult{Op: op, Err: fmt.Errorf("file %s is %d bytes, exceeds sync size cap of %d bytes", op.Path, len(op.Content), u.maxFileBytes)})
 		return
@@ -143,6 +153,60 @@ func (u *uploader) processFile(ctx context.Context, op uploadOp) {
 	// Best-effort mode sync; ignore mode-only errors so transient
 	// permission errors don't block content propagation.
 	_ = u.fs.Chmod(ctx, remotePath, mode)
+	newStat, err := u.fs.Stat(ctx, remotePath)
+	if err != nil {
+		u.send(uploadResult{Op: op, Err: fmt.Errorf("post-write stat %s: %w", op.Path, err)})
+		return
+	}
+	u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: newStat})
+}
+
+func (u *uploader) processChunkedFile(ctx context.Context, op uploadOp) {
+	remotePath := absoluteRemotePath(op.Path)
+
+	// Drift check: compare remote chunk manifest against what we stored.
+	_, remoteHashes, err := u.fs.ChunkMeta(ctx, remotePath)
+	if err != nil && !isClientNotFound(err) {
+		u.send(uploadResult{Op: op, Err: fmt.Errorf("chunk meta %s: %w", op.Path, err)})
+		return
+	}
+	// If remote has chunks and they differ from our stored baseline, someone
+	// else changed the file → conflict.
+	if op.HasStored && op.StoredEntry.RemoteHash != "" && len(remoteHashes) > 0 {
+		remoteComposite := compositeHash(remoteHashes)
+		if remoteComposite != op.StoredEntry.RemoteHash {
+			stat, _ := u.fs.Stat(ctx, remotePath)
+			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: remoteComposite, RemoteStat: stat})
+			return
+		}
+	}
+
+	// Upload dirty chunks in batches.
+	chunks := make(map[int][]byte, len(op.DirtyChunks))
+	for _, idx := range op.DirtyChunks {
+		data, err := readChunkFromDisk(op.AbsPath, idx, op.ChunkSize)
+		if err != nil {
+			u.send(uploadResult{Op: op, Err: fmt.Errorf("read chunk %d of %s: %w", idx, op.Path, err)})
+			return
+		}
+		chunks[idx] = data
+	}
+
+	// If file doesn't exist remotely yet, create it first.
+	stat, _ := u.fs.Stat(ctx, remotePath)
+	if stat == nil {
+		if _, _, err := u.fs.CreateFile(ctx, remotePath, op.Mode, false); err != nil && !isClientAlreadyExists(err) {
+			u.send(uploadResult{Op: op, Err: fmt.Errorf("create %s: %w", op.Path, err)})
+			return
+		}
+	}
+
+	if err := u.fs.WriteChunks(ctx, remotePath, chunks, op.ChunkSize, op.FileSize, op.ChunkHashes); err != nil {
+		u.send(uploadResult{Op: op, Err: fmt.Errorf("write chunks %s: %w", op.Path, err)})
+		return
+	}
+
+	_ = u.fs.Chmod(ctx, remotePath, op.Mode)
 	newStat, err := u.fs.Stat(ctx, remotePath)
 	if err != nil {
 		u.send(uploadResult{Op: op, Err: fmt.Errorf("post-write stat %s: %w", op.Path, err)})

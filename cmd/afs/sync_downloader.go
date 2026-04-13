@@ -36,6 +36,12 @@ type downloadOp struct {
 	StoredEntry SyncEntry
 	HasStored   bool
 	Conflict    bool // when true, downloader writes the conflict-copy first then writes remote
+	// Chunked download fields (set when remote file is chunked).
+	Chunked     bool
+	FileSize    int64
+	ChunkSize   int
+	ChunkHashes []string // remote's complete manifest
+	DirtyChunks []int    // indices to fetch
 }
 
 // downloadResult informs the reconciler of the outcome so it can update state.
@@ -109,6 +115,10 @@ func (d *downloader) process(ctx context.Context, op downloadOp) {
 }
 
 func (d *downloader) processFile(ctx context.Context, op downloadOp) {
+	if op.Chunked {
+		d.processChunkedFile(ctx, op)
+		return
+	}
 	remotePath := absoluteRemotePath(op.Path)
 	stat, err := d.fs.Stat(ctx, remotePath)
 	if err != nil && !isClientNotFound(err) {
@@ -172,6 +182,90 @@ func (d *downloader) processFile(ctx context.Context, op downloadOp) {
 		ConflictPath: conflictPath,
 		Mode:         stat.Mode,
 		Size:         stat.Size,
+		MtimeMs:      stat.Mtime,
+	})
+}
+
+func (d *downloader) processChunkedFile(ctx context.Context, op downloadOp) {
+	remotePath := absoluteRemotePath(op.Path)
+	stat, err := d.fs.Stat(ctx, remotePath)
+	if err != nil && !isClientNotFound(err) {
+		d.send(downloadResult{Op: op, Err: fmt.Errorf("stat remote %s: %w", op.Path, err)})
+		return
+	}
+	if stat == nil {
+		d.removeLocalFile(op)
+		d.send(downloadResult{Op: downloadOp{Kind: opDownloadDelete, Path: op.Path, AbsPath: op.AbsPath, StoredEntry: op.StoredEntry, HasStored: op.HasStored}})
+		return
+	}
+
+	// Fetch dirty chunks from remote.
+	chunkData, err := d.fs.ReadChunks(ctx, remotePath, op.DirtyChunks, op.ChunkSize)
+	if err != nil {
+		d.send(downloadResult{Op: op, Err: fmt.Errorf("read chunks %s: %w", op.Path, err)})
+		return
+	}
+
+	var conflictPath string
+	if op.Conflict {
+		moved, err := moveLocalToConflict(d.conflict, op.AbsPath)
+		if err != nil {
+			d.send(downloadResult{Op: op, Err: fmt.Errorf("preserve conflict copy %s: %w", op.Path, err)})
+			return
+		}
+		conflictPath = moved
+	}
+
+	mode := stat.Mode
+	if d.readonly {
+		mode = 0o444
+	}
+
+	// Ensure parent directory exists.
+	if err := os.MkdirAll(filepath.Dir(op.AbsPath), 0o755); err != nil {
+		d.send(downloadResult{Op: op, Err: err})
+		return
+	}
+
+	// Patch the local file at chunk offsets.
+	f, err := os.OpenFile(op.AbsPath, os.O_RDWR|os.O_CREATE, fs.FileMode(mode&0o7777))
+	if err != nil {
+		d.send(downloadResult{Op: op, Err: fmt.Errorf("open %s: %w", op.Path, err)})
+		return
+	}
+	for idx, data := range chunkData {
+		offset := int64(idx) * int64(op.ChunkSize)
+		if _, err := f.WriteAt(data, offset); err != nil {
+			_ = f.Close()
+			d.send(downloadResult{Op: op, Err: fmt.Errorf("write chunk %d of %s: %w", idx, op.Path, err)})
+			return
+		}
+	}
+	if op.FileSize > 0 {
+		if err := f.Truncate(op.FileSize); err != nil {
+			_ = f.Close()
+			d.send(downloadResult{Op: op, Err: fmt.Errorf("truncate %s: %w", op.Path, err)})
+			return
+		}
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		d.send(downloadResult{Op: op, Err: err})
+		return
+	}
+	_ = f.Close()
+	_ = os.Chmod(op.AbsPath, fs.FileMode(mode&0o7777))
+
+	hash := compositeHash(op.ChunkHashes)
+	d.echo.markFile(op.Path, hash)
+
+	d.send(downloadResult{
+		Op:           op,
+		RemoteHash:   hash,
+		RemoteStat:   stat,
+		ConflictPath: conflictPath,
+		Mode:         mode,
+		Size:         op.FileSize,
 		MtimeMs:      stat.Mtime,
 	})
 }

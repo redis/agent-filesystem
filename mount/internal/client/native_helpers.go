@@ -21,14 +21,14 @@ const (
 var inodeMetaFields = []string{
 	"type", "mode", "uid", "gid", "size",
 	"ctime_ms", "mtime_ms", "atime_ms", "target",
-	"parent", "name",
+	"parent", "name", "content_ref",
 }
 
 var inodeWarmFields = []string{
 	"path",
 	"type", "mode", "uid", "gid", "size",
 	"ctime_ms", "mtime_ms", "atime_ms", "target",
-	"parent", "name",
+	"parent", "name", "content_ref",
 }
 
 type namedInode struct {
@@ -425,10 +425,44 @@ func (c *nativeClient) loadWarmBatch(ctx context.Context, keys []string) ([]warm
 	return entries, nil
 }
 
+// loadContentByID reads file content for the given inode ID, handling both
+// legacy inline storage (content field in the inode HASH) and the new external
+// storage (dedicated STRING key). When the inode's content_ref is already
+// known, pass it via loadContentExternal to skip the extra round trip.
 func (c *nativeClient) loadContentByID(ctx context.Context, id string) (string, error) {
+	// Check content_ref to decide storage mode.
+	ref, err := c.rdb.HGet(ctx, c.keys.inode(id), "content_ref").Result()
+	if err != nil && err != redis.Nil {
+		return "", err
+	}
+	return c.loadContentExternal(ctx, id, ref)
+}
+
+// loadContentExternal reads content using the already-known content_ref value.
+// When contentRef is "ext", reads from the separate STRING key. Otherwise
+// falls back to the legacy inline HASH field and lazily migrates the content
+// to the external key on first access (zero-downtime online migration).
+func (c *nativeClient) loadContentExternal(ctx context.Context, id, contentRef string) (string, error) {
+	if contentRef == "ext" {
+		v, err := c.rdb.Get(ctx, c.keys.content(id)).Result()
+		if err != nil && err != redis.Nil {
+			return "", err
+		}
+		return v, nil
+	}
+	// Legacy inline mode: content stored in the inode HASH field.
 	v, err := c.rdb.HGet(ctx, c.keys.inode(id), "content").Result()
 	if err != nil && err != redis.Nil {
 		return "", err
+	}
+	// Lazy migration: move inline content to the external STRING key.
+	// This is best-effort — if it fails, the next read will retry.
+	if v != "" {
+		pipe := c.rdb.Pipeline()
+		pipe.Set(ctx, c.keys.content(id), v, 0)
+		pipe.HSet(ctx, c.keys.inode(id), "content_ref", "ext")
+		pipe.HDel(ctx, c.keys.inode(id), "content")
+		_, _ = pipe.Exec(ctx)
 	}
 	return v, nil
 }
@@ -437,8 +471,19 @@ func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData
 	if inode == nil || inode.ID == "" {
 		return errors.New("missing inode id")
 	}
-	if err := c.saveInodeAtPath(ctx, p, inode, true); err != nil {
-		return err
+	if inode.ContentRef == "ext" && inode.Type == "file" {
+		// Write content to the external STRING key and metadata to HASH
+		// in the same pipeline.
+		pipe := c.rdb.Pipeline()
+		pipe.Set(ctx, c.keys.content(inode.ID), inode.Content, 0)
+		pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, false))
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+	} else {
+		if err := c.saveInodeAtPath(ctx, p, inode, true); err != nil {
+			return err
+		}
 	}
 	c.cachePath(p, inode)
 	return nil
@@ -508,8 +553,19 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	inode.Name = name
 	now := nowMs()
 
+	// New files use external content storage.
+	if inode.Type == "file" {
+		inode.ContentRef = "ext"
+	}
+
 	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, inode.Type == "file"))
+	if inode.Type == "file" {
+		// Content goes to the external STRING key; metadata-only to the HASH.
+		pipe.Set(ctx, c.keys.content(id), inode.Content, 0)
+		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, false))
+	} else {
+		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, false))
+	}
 	pipe.HSet(ctx, c.keys.dirents(parent.ID), name, id)
 	c.queueTouchTimes(pipe, parent.ID, now)
 	c.queueCreateInfo(pipe, inode)
@@ -583,18 +639,19 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 
 	now := nowMs()
 	inode := &inodeData{
-		ID:      id,
-		Parent:  parentInode.ID,
-		Name:    name,
-		Type:    "file",
-		Mode:    mode,
-		UID:     0,
-		GID:     0,
-		Size:    int64(len(content)),
-		CtimeMs: now,
-		MtimeMs: now,
-		AtimeMs: now,
-		Content: content,
+		ID:         id,
+		Parent:     parentInode.ID,
+		Name:       name,
+		Type:       "file",
+		Mode:       mode,
+		UID:        0,
+		GID:        0,
+		Size:       int64(len(content)),
+		CtimeMs:    now,
+		MtimeMs:    now,
+		AtimeMs:    now,
+		Content:    content,
+		ContentRef: "ext",
 	}
 
 	// Optimistic write: claim the name with HSETNX and unconditionally
@@ -603,7 +660,10 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	// orphan inode and counter bumps are compensated below.
 	pipe := c.rdb.Pipeline()
 	claim := pipe.HSetNX(ctx, direntsKey, name, inode.ID)
-	pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, true))
+	// Content goes to the external STRING key; metadata (with content_ref="ext")
+	// goes to the inode HASH. includeContent=false because content_ref="ext".
+	pipe.Set(ctx, c.keys.content(inode.ID), content, 0)
+	pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, false))
 	c.queueTouchTimes(pipe, parentInode.ID, now)
 	c.queueCreateInfo(pipe, inode)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -624,11 +684,12 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return inode, true, nil
 	}
 
-	// Lost race: someone else won the HSETNX. Clean up the orphan inode
-	// and compensating counter bumps in a single pipeline (one extra RTT
-	// on this rare path), then fall through to the existing-file handling.
+	// Lost race: someone else won the HSETNX. Clean up the orphan inode,
+	// its content key, and compensating counter bumps in a single pipeline
+	// (one extra RTT on this rare path), then fall through to existing-file.
 	cleanup := c.rdb.Pipeline()
 	cleanup.Del(ctx, c.keys.inode(inode.ID))
+	cleanup.Del(ctx, c.keys.content(inode.ID))
 	cleanup.HIncrBy(ctx, c.keys.info(), "files", -1)
 	if inode.Size > 0 {
 		cleanup.HIncrBy(ctx, c.keys.info(), "total_data_bytes", -inode.Size)
@@ -899,9 +960,15 @@ func (c *nativeClient) inodeFields(inode *inodeData, includeContent bool) map[st
 	if inode.Type == "symlink" {
 		fields["target"] = inode.Target
 	}
-	if includeContent && inode.Type == "file" {
+	if inode.ContentRef != "" {
+		fields["content_ref"] = inode.ContentRef
+	}
+	if includeContent && inode.Type == "file" && inode.ContentRef != "ext" {
+		// Legacy inline mode: content stored in the inode HASH.
 		fields["content"] = inode.Content
 	}
+	// When content_ref == "ext", the caller is responsible for writing
+	// content to the separate STRING key via c.keys.content(id).
 	return fields
 }
 
@@ -1053,7 +1120,7 @@ func inodeFromValues(id string, vals []interface{}) *inodeData {
 	if len(vals) < 11 || vals[0] == nil {
 		return nil
 	}
-	return &inodeData{
+	inode := &inodeData{
 		ID:      id,
 		Type:    toStr(vals[0]),
 		Mode:    uint32(toInt(vals[1])),
@@ -1067,6 +1134,11 @@ func inodeFromValues(id string, vals []interface{}) *inodeData {
 		Parent:  toStr(vals[9]),
 		Name:    toStr(vals[10]),
 	}
+	// content_ref was added after the initial schema; tolerate its absence.
+	if len(vals) > 11 {
+		inode.ContentRef = toStr(vals[11])
+	}
+	return inode
 }
 
 func inodeUint64(id string) uint64 {

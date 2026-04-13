@@ -46,6 +46,10 @@ type reconciler struct {
 	readonly     bool
 	log          *syncLogger
 
+	// Chunk-level delta sync.
+	chunkSize      int
+	chunkThreshold int
+
 	pendingFullSweep bool
 	fullSweepRequest chan struct{}
 }
@@ -61,7 +65,15 @@ func newReconciler(
 	maxFileBytes int64,
 	readonly bool,
 	log *syncLogger,
+	chunkSize int,
+	chunkThreshold int,
 ) *reconciler {
+	if chunkSize <= 0 {
+		chunkSize = defaultChunkSize
+	}
+	if chunkThreshold <= 0 {
+		chunkThreshold = defaultChunkThreshold
+	}
 	return &reconciler{
 		state:            state,
 		root:             root,
@@ -74,6 +86,8 @@ func newReconciler(
 		maxFileBytes:     maxFileBytes,
 		readonly:         readonly,
 		log:              log,
+		chunkSize:        chunkSize,
+		chunkThreshold:   chunkThreshold,
 		uploadCh:         make(chan uploadOp, 256),
 		downloadCh:       make(chan downloadOp, 256),
 		uploadResCh:      make(chan uploadResult, 256),
@@ -216,23 +230,57 @@ func (r *reconciler) echoMatches(abs string, info fs.FileInfo, exp echoExpectati
 }
 
 func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
+	fileSize := info.Size()
+	if fileSize > r.maxFileBytes {
+		fmt.Fprintf(os.Stderr, "afs sync: skipping %s — %d bytes exceeds %d byte cap\n", rel, fileSize, r.maxFileBytes)
+		return
+	}
+
+	r.state.mu.Lock()
+	stored, hasStored := r.state.state.Entries[rel]
+	r.state.mu.Unlock()
+
+	// Chunked path: files above the threshold use streaming chunk hashes
+	// so we never load the full file into memory.
+	if fileSize > int64(r.chunkThreshold) {
+		hashes, actualSize, err := streamChunkHashes(abs, r.chunkSize)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "afs sync: chunk hash %s: %v\n", abs, err)
+			return
+		}
+		hash := compositeHash(hashes)
+		if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
+			return
+		}
+		dirty, _ := diffChunkManifests(stored.ChunkHashes, hashes)
+		r.uploadCh <- uploadOp{
+			Kind:        opUploadFile,
+			Path:        rel,
+			AbsPath:     abs,
+			Mode:        uint32(info.Mode() & fs.ModePerm),
+			LocalHash:   hash,
+			StoredEntry: stored,
+			HasStored:   hasStored,
+			Chunked:     true,
+			FileSize:    actualSize,
+			ChunkSize:   r.chunkSize,
+			ChunkHashes: hashes,
+			DirtyChunks: dirty,
+		}
+		return
+	}
+
+	// Inline path: small files use full-file read (existing behavior).
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "afs sync: read %s: %v\n", abs, err)
 		return
 	}
-	if int64(len(data)) > r.maxFileBytes {
-		fmt.Fprintf(os.Stderr, "afs sync: skipping %s — %d bytes exceeds %d byte cap\n", rel, len(data), r.maxFileBytes)
-		return
-	}
 	hash := sha256Hex(data)
-	r.state.mu.Lock()
-	stored, hasStored := r.state.state.Entries[rel]
-	r.state.mu.Unlock()
 	if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
 		return
 	}
-	op := uploadOp{
+	r.uploadCh <- uploadOp{
 		Kind:        opUploadFile,
 		Path:        rel,
 		AbsPath:     abs,
@@ -242,7 +290,6 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 		StoredEntry: stored,
 		HasStored:   hasStored,
 	}
-	r.uploadCh <- op
 }
 
 func (r *reconciler) handleLocalSymlink(rel, abs string) {
@@ -371,14 +418,34 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 			Conflict:    conflict,
 		}
 	case "file":
-		r.downloadCh <- downloadOp{
-			Kind:        opDownloadFile,
-			Path:        rel,
-			AbsPath:     abs,
-			Mode:        stat.Mode,
-			StoredEntry: stored,
-			HasStored:   hasStored,
-			Conflict:    conflict,
+		// Check if the remote file has chunk metadata for delta download.
+		chunkSize, remoteHashes, chunkErr := r.fs.ChunkMeta(ctx, absoluteRemotePath(rel))
+		if chunkErr == nil && chunkSize > 0 && len(remoteHashes) > 0 {
+			dirty, _ := diffChunkManifests(stored.ChunkHashes, remoteHashes)
+			r.downloadCh <- downloadOp{
+				Kind:        opDownloadFile,
+				Path:        rel,
+				AbsPath:     abs,
+				Mode:        stat.Mode,
+				StoredEntry: stored,
+				HasStored:   hasStored,
+				Conflict:    conflict,
+				Chunked:     true,
+				FileSize:    stat.Size,
+				ChunkSize:   chunkSize,
+				ChunkHashes: remoteHashes,
+				DirtyChunks: dirty,
+			}
+		} else {
+			r.downloadCh <- downloadOp{
+				Kind:        opDownloadFile,
+				Path:        rel,
+				AbsPath:     abs,
+				Mode:        stat.Mode,
+				StoredEntry: stored,
+				HasStored:   hasStored,
+				Conflict:    conflict,
+			}
 		}
 	}
 }
@@ -436,13 +503,19 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 	r.state.mu.Lock()
 	switch res.Op.Kind {
 	case opUploadFile:
+		size := int64(len(res.Op.Content))
+		if res.Op.Chunked {
+			size = res.Op.FileSize
+		}
 		entry := SyncEntry{
 			Type:          "file",
 			Mode:          res.Op.Mode,
-			Size:          int64(len(res.Op.Content)),
+			Size:          size,
 			LocalHash:     res.Op.LocalHash,
 			RemoteHash:    res.Op.LocalHash,
 			LastSyncedAt:  now,
+			ChunkSize:     res.Op.ChunkSize,
+			ChunkHashes:   res.Op.ChunkHashes,
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
@@ -513,6 +586,8 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 			LocalMtimeMs:  res.MtimeMs,
 			RemoteMtimeMs: res.MtimeMs,
 			LastSyncedAt:  now,
+			ChunkSize:     res.Op.ChunkSize,
+			ChunkHashes:   res.Op.ChunkHashes,
 		}
 		r.state.state.Entries[res.Op.Path] = entry
 	case opDownloadSymlink:

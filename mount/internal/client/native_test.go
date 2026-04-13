@@ -250,8 +250,17 @@ func TestCanonicalInodeStorageFormat(t *testing.T) {
 	if vals["type"] != "file" {
 		t.Fatalf("expected type=file, got %q", vals["type"])
 	}
-	if vals["content"] != "world" {
-		t.Fatalf("expected content=world, got %q", vals["content"])
+	// Content is stored in a separate STRING key, not the inode HASH.
+	if vals["content_ref"] != "ext" {
+		t.Fatalf("expected content_ref=ext, got %q", vals["content_ref"])
+	}
+	contentKey := "afs:{keytest}:content:" + inodeID
+	contentVal, err := rdb.Get(ctx, contentKey).Result()
+	if err != nil {
+		t.Fatalf("get content key: %v", err)
+	}
+	if contentVal != "world" {
+		t.Fatalf("expected content=world in content key, got %q", contentVal)
 	}
 	if vals["parent"] != rootInodeID {
 		t.Fatalf("expected parent=%s, got %q", rootInodeID, vals["parent"])
@@ -2199,18 +2208,16 @@ func TestCreateFileCommandCountIsBounded(t *testing.T) {
 	// Post Fix 1, an uncontended CreateFile against a warm root cache
 	// issues roughly:
 	//   INCR nextInode                                         (1)
-	//   pipeline: HSETNX dirents + HSet inode + HSet touchtimes
-	//             + HIncrBy files                              (4)
+	//   pipeline: HSETNX dirents + SET content:{id} + HSet inode
+	//             + HSet touchtimes + HIncrBy files            (5)
 	//   PUBLISH invalidate (InvalidateOpDir for parent listing) (1)
 	//   PUBLISH invalidate (InvalidateOpInode for new file)     (1)
 	//   SET rootDirty "1"                                       (1)
-	// = 8 commands.
+	// = 9 commands.
 	//
-	// Pre-fix the WATCH/MULTI sequence added at least one WATCH, one HGET
-	// inside the tx, and the MULTI/EXEC pair — 3+ extra commands before
-	// the same post-work. The bound below is well under the pre-fix cost
-	// while giving slack for markRootDirty variations.
-	const maxCommands = 10
+	// The extra SET is for the external content key (content_ref="ext"
+	// storage model). Pre-fix the WATCH/MULTI sequence was 3+ more.
+	const maxCommands = 12
 	if got := h.total.Load(); got > maxCommands {
 		t.Fatalf("CreateFile issued %d Redis commands, want <= %d (regression)", got, maxCommands)
 	}

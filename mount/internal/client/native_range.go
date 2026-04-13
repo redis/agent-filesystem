@@ -33,7 +33,7 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 	if data.Type != "file" {
 		return nil, errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, data.ID)
+	content, err := c.loadContentExternal(ctx, data.ID, data.ContentRef)
 	if err != nil {
 		return nil, err
 	}
@@ -47,15 +47,27 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 	return []byte(content[off:end]), nil
 }
 
-// inodeWithContentFields is inodeMetaFields + "content". Kept as a package
-// variable so WriteInodeAtPath can fetch metadata and content in one HMGET
-// round trip instead of the previous two-call pattern.
+// inodeWithContentFields is inodeMetaFields + "content". Used for legacy
+// inline inodes where content is still in the HASH.
 var inodeWithContentFields = append(append([]string{}, inodeMetaFields...), "content")
 
-// loadInodeWithContentByID fetches the full inode metadata and file content
-// in a single Redis round trip.
+// loadInodeWithContentByID fetches the full inode metadata and file content.
+// For external content (content_ref="ext") it pipelines the metadata HMGET
+// with a GET on the content key. For legacy inline inodes it reads both from
+// the HASH in one HMGET.
 func (c *nativeClient) loadInodeWithContentByID(ctx context.Context, id string) (*inodeData, error) {
-	vals, err := c.rdb.HMGet(ctx, c.keys.inode(id), inodeWithContentFields...).Result()
+	// First fetch metadata (including content_ref) to determine storage mode.
+	// For the common external case, pipeline metadata + content GET together.
+	pipe := c.rdb.Pipeline()
+	metaCmd := pipe.HMGet(ctx, c.keys.inode(id), inodeMetaFields...)
+	contentCmd := pipe.Get(ctx, c.keys.content(id))
+	// Also try legacy inline content in case this is an old inode.
+	inlineCmd := pipe.HGet(ctx, c.keys.inode(id), "content")
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	vals, err := metaCmd.Result()
 	if err != nil {
 		return nil, err
 	}
@@ -63,9 +75,14 @@ func (c *nativeClient) loadInodeWithContentByID(ctx context.Context, id string) 
 	if inode == nil {
 		return nil, nil
 	}
-	if last := vals[len(vals)-1]; last != nil {
-		if s, ok := last.(string); ok {
-			inode.Content = s
+
+	if inode.ContentRef == "ext" {
+		if v, err := contentCmd.Result(); err == nil {
+			inode.Content = v
+		}
+	} else {
+		if v, err := inlineCmd.Result(); err == nil {
+			inode.Content = v
 		}
 	}
 	return inode, nil
@@ -122,15 +139,22 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	now := nowMs()
 	data.MtimeMs = now
 	data.AtimeMs = now
+	if data.ContentRef == "" {
+		data.ContentRef = "ext"
+	}
 
+	// For external content, write content to STRING key and metadata to
+	// HASH. includeContent=false because content_ref="ext" skips the
+	// content field in inodeFields.
 	var fields map[string]interface{}
 	if path != "" {
-		fields = c.inodeFieldsAtPath(data, path, true)
+		fields = c.inodeFieldsAtPath(data, path, false)
 	} else {
-		fields = c.inodeFields(data, true)
+		fields = c.inodeFields(data, false)
 	}
 
 	pipe := c.rdb.Pipeline()
+	pipe.Set(ctx, c.keys.content(data.ID), data.Content, 0)
 	pipe.HSet(ctx, c.keys.inode(data.ID), fields)
 	if delta != 0 {
 		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
@@ -196,15 +220,19 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	now := nowMs()
 	data.MtimeMs = now
 	data.AtimeMs = now
+	if data.ContentRef == "" {
+		data.ContentRef = "ext"
+	}
 
 	var fields map[string]interface{}
 	if path != "" {
-		fields = c.inodeFieldsAtPath(data, path, true)
+		fields = c.inodeFieldsAtPath(data, path, false)
 	} else {
-		fields = c.inodeFields(data, true)
+		fields = c.inodeFields(data, false)
 	}
 
 	pipe := c.rdb.Pipeline()
+	pipe.Set(ctx, c.keys.content(data.ID), data.Content, 0)
 	pipe.HSet(ctx, c.keys.inode(data.ID), fields)
 	if delta != 0 {
 		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)

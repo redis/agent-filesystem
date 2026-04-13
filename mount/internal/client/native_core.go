@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -60,19 +61,20 @@ type nativeClient struct {
 const markRootDirtyThrottle = 100 * time.Millisecond
 
 type inodeData struct {
-	ID      string
-	Parent  string
-	Name    string
-	Type    string
-	Mode    uint32
-	UID     uint32
-	GID     uint32
-	Size    int64
-	CtimeMs int64
-	MtimeMs int64
-	AtimeMs int64
-	Target  string
-	Content string
+	ID         string
+	Parent     string
+	Name       string
+	Type       string
+	Mode       uint32
+	UID        uint32
+	GID        uint32
+	Size       int64
+	CtimeMs    int64
+	MtimeMs    int64
+	AtimeMs    int64
+	Target     string
+	Content    string
+	ContentRef string // "ext" means content lives in afs:{fs}:content:{id}
 }
 
 func newNativeClient(rdb *redis.Client, key string) Client {
@@ -432,7 +434,7 @@ func (c *nativeClient) Cat(ctx context.Context, p string) ([]byte, error) {
 	if inode.Type != "file" {
 		return nil, errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, inode.ID)
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return nil, err
 	}
@@ -551,6 +553,9 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	c.invalidateInode(ctx, resolved)
 	pipe := c.rdb.Pipeline()
 	pipe.Del(ctx, c.keys.inode(inode.ID))
+	if inode.Type == "file" {
+		pipe.Del(ctx, c.keys.content(inode.ID))
+	}
 	if inode.Type == "dir" {
 		pipe.Del(ctx, c.keys.dirents(inode.ID))
 	}
@@ -737,7 +742,7 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 
 	var content []byte
 	if size > 0 {
-		raw, err := c.loadContentByID(ctx, inode.ID)
+		raw, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 		if err != nil {
 			return err
 		}
@@ -757,6 +762,9 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
+	if inode.ContentRef == "" {
+		inode.ContentRef = "ext"
+	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -881,6 +889,9 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
+	if inode.ContentRef == "" {
+		inode.ContentRef = "ext"
+	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -909,7 +920,7 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 
 	before := inode.Size
 	if appendMode {
-		existing, err := c.loadContentByID(ctx, inode.ID)
+		existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 		if err != nil {
 			return err
 		}
@@ -921,6 +932,10 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
+	// Ensure new writes use external content storage.
+	if inode.ContentRef == "" {
+		inode.ContentRef = "ext"
+	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -981,4 +996,155 @@ func sortNames(values map[string]string) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// WriteChunks writes specific chunks to a file's external content key via
+// pipelined SETRANGE, then atomically updates inode metadata (size, mtime,
+// chunk_size, chunk_hashes). chunks maps chunk-index → data.
+func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int][]byte, chunkSize int, newSize int64, hashes []string) error {
+	resolved, inode, err := c.resolvePath(ctx, p, true)
+	if err != nil {
+		return err
+	}
+	if inode.Type != "file" {
+		return errors.New("not a file")
+	}
+	if inode.ContentRef != "ext" {
+		// Migrate to external content first.
+		content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
+		if err != nil {
+			return err
+		}
+		if err := c.rdb.Set(ctx, c.keys.content(inode.ID), content, 0).Err(); err != nil {
+			return err
+		}
+	}
+
+	// Write dirty chunks via pipelined SETRANGE.
+	pipe := c.rdb.Pipeline()
+	for idx, data := range chunks {
+		offset := int64(idx) * int64(chunkSize)
+		pipe.SetRange(ctx, c.keys.content(inode.ID), offset, string(data))
+	}
+
+	// Handle truncation if file shrunk.
+	if newSize < inode.Size {
+		// Redis SETRANGE can't truncate. Read the kept portion and SET.
+		// This is only needed when the file actually shrunk.
+		getCmd := pipe.GetRange(ctx, c.keys.content(inode.ID), 0, newSize-1)
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		truncated := getCmd.Val()
+		if err := c.rdb.Set(ctx, c.keys.content(inode.ID), truncated, 0).Err(); err != nil {
+			return err
+		}
+	} else {
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+	}
+
+	// Update inode metadata atomically.
+	now := nowMs()
+	hashJSON, _ := encodeChunkHashes(hashes)
+	delta := newSize - inode.Size
+	metaPipe := c.rdb.Pipeline()
+	metaPipe.HSet(ctx, c.keys.inode(inode.ID),
+		"size", newSize,
+		"mtime_ms", now,
+		"atime_ms", now,
+		"content_ref", "ext",
+		"chunk_size", chunkSize,
+		"chunk_hashes", hashJSON,
+	)
+	if delta != 0 {
+		metaPipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
+	}
+	metaPipe.Set(ctx, c.keys.rootDirty(), "1", 0)
+	if _, err := metaPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+
+	c.invalidateInode(ctx, resolved)
+	return nil
+}
+
+// ReadChunks reads specific chunks from a file's content key via pipelined
+// GETRANGE. Returns chunk data by index.
+func (c *nativeClient) ReadChunks(ctx context.Context, p string, indices []int, chunkSize int) (map[int][]byte, error) {
+	_, inode, err := c.resolvePath(ctx, p, true)
+	if err != nil {
+		return nil, err
+	}
+	if inode.Type != "file" {
+		return nil, errors.New("not a file")
+	}
+
+	contentKey := c.keys.content(inode.ID)
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(indices))
+	for i, idx := range indices {
+		offset := int64(idx) * int64(chunkSize)
+		end := offset + int64(chunkSize) - 1
+		cmds[i] = pipe.GetRange(ctx, contentKey, offset, end)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return nil, err
+	}
+
+	result := make(map[int][]byte, len(indices))
+	for i, idx := range indices {
+		if v, err := cmds[i].Result(); err == nil {
+			result[idx] = []byte(v)
+		}
+	}
+	return result, nil
+}
+
+// ChunkMeta returns the stored chunk_size and chunk_hashes for a file
+// without fetching content.
+func (c *nativeClient) ChunkMeta(ctx context.Context, p string) (int, []string, error) {
+	_, inode, err := c.resolvePath(ctx, p, true)
+	if err != nil {
+		return 0, nil, err
+	}
+	if inode.Type != "file" {
+		return 0, nil, errors.New("not a file")
+	}
+
+	vals, err := c.rdb.HMGet(ctx, c.keys.inode(inode.ID), "chunk_size", "chunk_hashes").Result()
+	if err != nil {
+		return 0, nil, err
+	}
+	cs := 0
+	if vals[0] != nil {
+		if s, ok := vals[0].(string); ok {
+			n, _ := strconv.ParseInt(s, 10, 64)
+			cs = int(n)
+		}
+	}
+	var hashes []string
+	if vals[1] != nil {
+		if s, ok := vals[1].(string); ok && s != "" {
+			hashes, _ = decodeChunkHashes(s)
+		}
+	}
+	return cs, hashes, nil
+}
+
+// encodeChunkHashes serializes chunk hashes for storage in a Redis HASH field.
+func encodeChunkHashes(hashes []string) (string, error) {
+	if len(hashes) == 0 {
+		return "", nil
+	}
+	return strings.Join(hashes, ","), nil
+}
+
+// decodeChunkHashes deserializes chunk hashes from a Redis HASH field.
+func decodeChunkHashes(s string) ([]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	return strings.Split(s, ","), nil
 }

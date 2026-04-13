@@ -24,6 +24,9 @@ type syncDaemonConfig struct {
 	WatcherDebounce time.Duration
 	Readonly       bool
 	Interactive    bool // when true, log every file event to stderr
+	// Chunk-level delta sync knobs. Zero values use defaults.
+	ChunkSize      int // bytes per chunk (default 256 KB)
+	ChunkThreshold int // minimum file size to enable chunked sync (default 1 MB)
 }
 
 // syncDaemon orchestrates the watcher, reconciler, uploader, downloader, and
@@ -106,7 +109,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 		ignore:      ignore,
 		done:        make(chan struct{}),
 	}
-	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log)
+	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)

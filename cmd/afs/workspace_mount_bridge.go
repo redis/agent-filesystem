@@ -111,22 +111,37 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 			return manifest{}, nil, manifestStats{}, ctx.Err()
 		}
 
-		// Pipeline: read all inodes in this BFS level.
+		// Pipeline: read all inodes in this BFS level. We read content_ref
+		// to determine whether content is inline or in a separate STRING key.
 		pipe := rdb.Pipeline()
 		inodeCmds := make([]*redis.SliceCmd, len(queue))
 		for i, item := range queue {
 			inodeCmds[i] = pipe.HMGet(ctx, workspaceRootInodeKey(fsKey, item.inodeID),
-				"type", "mode", "size", "mtime_ms", "target", "content")
+				"type", "mode", "size", "mtime_ms", "target", "content", "content_ref")
 		}
 		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 			return manifest{}, nil, manifestStats{}, err
 		}
 
+		// For inodes with content_ref="ext", we need a second pipeline to
+		// read content from the separate STRING key.
+		type extContent struct {
+			idx     int
+			cmd     *redis.StringCmd
+		}
+		var extFetches []extContent
+
 		// Collect directories that need their children enumerated.
 		var dirItems []bfsItem
+		type parsedInode struct {
+			inode *workspaceRootInode
+			item  bfsItem
+		}
+		parsedInodes := make([]parsedInode, 0, len(queue))
 		for i, item := range queue {
 			values, err := inodeCmds[i].Result()
 			if err != nil || len(values) < 6 || values[0] == nil {
+				parsedInodes = append(parsedInodes, parsedInode{})
 				continue
 			}
 			inode := &workspaceRootInode{
@@ -137,6 +152,42 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 				Target:  workspaceRootString(values[4]),
 				Content: workspaceRootString(values[5]),
 			}
+			// Check content_ref (index 6) for external content.
+			contentRef := ""
+			if len(values) > 6 {
+				contentRef = workspaceRootString(values[6])
+			}
+			inode.ContentRef = contentRef
+			parsedInodes = append(parsedInodes, parsedInode{inode: inode, item: item})
+		}
+
+		// Second pipeline: fetch external content for ext inodes.
+		if len(parsedInodes) > 0 {
+			pipe2 := rdb.Pipeline()
+			for i, p := range parsedInodes {
+				if p.inode != nil && p.inode.Type == "file" && p.inode.ContentRef == "ext" {
+					cmd := pipe2.Get(ctx, workspaceRootContentKey(fsKey, queue[i].inodeID))
+					extFetches = append(extFetches, extContent{idx: i, cmd: cmd})
+				}
+			}
+			if len(extFetches) > 0 {
+				if _, err := pipe2.Exec(ctx); err != nil && err != redis.Nil {
+					return manifest{}, nil, manifestStats{}, err
+				}
+				for _, ef := range extFetches {
+					if v, err := ef.cmd.Result(); err == nil {
+						parsedInodes[ef.idx].inode.Content = v
+					}
+				}
+			}
+		}
+
+		for i, p := range parsedInodes {
+			if p.inode == nil {
+				continue
+			}
+			item := queue[i]
+			inode := p.inode
 			if shouldIgnoreMountedPath(item.path) {
 				continue
 			}
@@ -226,12 +277,13 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 const workspaceFSRootInodeID = "1"
 
 type workspaceRootInode struct {
-	Type    string
-	Mode    uint32
-	Size    int64
-	MtimeMs int64
-	Target  string
-	Content string
+	Type       string
+	Mode       uint32
+	Size       int64
+	MtimeMs    int64
+	Target     string
+	Content    string
+	ContentRef string
 }
 
 func appendWorkspaceRootManifest(ctx context.Context, rdb *redis.Client, fsKey, inodeID, currentPath string, entries map[string]manifestEntry, blobs map[string][]byte, stats *manifestStats) error {
@@ -303,7 +355,7 @@ func appendWorkspaceRootManifest(ctx context.Context, rdb *redis.Client, fsKey, 
 
 func loadWorkspaceRootInode(ctx context.Context, rdb *redis.Client, fsKey, inodeID string) (*workspaceRootInode, error) {
 	values, err := rdb.HMGet(ctx, workspaceRootInodeKey(fsKey, inodeID),
-		"type", "mode", "size", "mtime_ms", "target", "content",
+		"type", "mode", "size", "mtime_ms", "target", "content", "content_ref",
 	).Result()
 	if err != nil {
 		return nil, err
@@ -311,14 +363,25 @@ func loadWorkspaceRootInode(ctx context.Context, rdb *redis.Client, fsKey, inode
 	if len(values) < 6 || values[0] == nil {
 		return nil, nil
 	}
-	return &workspaceRootInode{
+	inode := &workspaceRootInode{
 		Type:    workspaceRootString(values[0]),
 		Mode:    uint32(workspaceRootInt64(values[1])),
 		Size:    workspaceRootInt64(values[2]),
 		MtimeMs: workspaceRootInt64(values[3]),
 		Target:  workspaceRootString(values[4]),
 		Content: workspaceRootString(values[5]),
-	}, nil
+	}
+	if len(values) > 6 {
+		inode.ContentRef = workspaceRootString(values[6])
+	}
+	// If content is external, fetch from the separate STRING key.
+	if inode.ContentRef == "ext" && inode.Type == "file" {
+		v, err := rdb.Get(ctx, workspaceRootContentKey(fsKey, inodeID)).Result()
+		if err == nil {
+			inode.Content = v
+		}
+	}
+	return inode, nil
 }
 
 func loadWorkspaceRootDirents(ctx context.Context, rdb *redis.Client, fsKey, inodeID string) (map[string]string, error) {
@@ -334,6 +397,10 @@ func loadWorkspaceRootDirents(ctx context.Context, rdb *redis.Client, fsKey, ino
 
 func workspaceRootInodeKey(fsKey, inodeID string) string {
 	return "afs:{" + fsKey + "}:inode:" + inodeID
+}
+
+func workspaceRootContentKey(fsKey, inodeID string) string {
+	return "afs:{" + fsKey + "}:content:" + inodeID
 }
 
 func workspaceRootDirentsKey(fsKey, inodeID string) string {

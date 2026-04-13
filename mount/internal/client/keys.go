@@ -33,6 +33,10 @@ func (k keyBuilder) rootDirty() string {
 	return "afs:{" + k.fsKey + "}:root_dirty"
 }
 
+func (k keyBuilder) content(id string) string {
+	return "afs:{" + k.fsKey + "}:content:" + id
+}
+
 func (k keyBuilder) locks(id string) string {
 	return "afs:{" + k.fsKey + "}:locks:" + id
 }

@@ -18,7 +18,9 @@ const (
 // uploader. The Redis backend stores file content as a single hash field with
 // an implicit 512 MB cap; we set the default low enough that users get a
 // clean error before they hit the wall.
-const defaultSyncFileSizeCapMB = 64
+// defaultSyncFileSizeCapMB is raised from 64 to 2048 (2 GB) now that
+// chunked delta sync avoids loading entire files into memory.
+const defaultSyncFileSizeCapMB = 2048
 
 // effectiveMode returns the resolved Mode for the daemon. Empty resolves to
 // sync (the recommended default). A pre-existing config that does not set

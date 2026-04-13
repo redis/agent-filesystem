@@ -14,7 +14,7 @@ func (c *nativeClient) Head(ctx context.Context, p string, n int) (string, error
 	if inode.Type != "file" {
 		return "", errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, inode.ID)
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return "", err
 	}
@@ -39,7 +39,7 @@ func (c *nativeClient) Tail(ctx context.Context, p string, n int) (string, error
 	if inode.Type != "file" {
 		return "", errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, inode.ID)
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +64,7 @@ func (c *nativeClient) Lines(ctx context.Context, p string, start, end int) (str
 	if inode.Type != "file" {
 		return "", errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, inode.ID)
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return "", err
 	}
@@ -92,7 +92,7 @@ func (c *nativeClient) Wc(ctx context.Context, p string) (*WcResult, error) {
 	if inode.Type != "file" {
 		return nil, errors.New("not a file")
 	}
-	content, err := c.loadContentByID(ctx, inode.ID)
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +120,7 @@ func (c *nativeClient) Insert(ctx context.Context, p string, afterLine int, cont
 	if inode.Type != "file" {
 		return errors.New("not a file")
 	}
-	existing, err := c.loadContentByID(ctx, inode.ID)
+	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return err
 	}
@@ -160,7 +160,7 @@ func (c *nativeClient) Replace(ctx context.Context, p string, old, new string, a
 	if inode.Type != "file" {
 		return 0, errors.New("not a file")
 	}
-	existing, err := c.loadContentByID(ctx, inode.ID)
+	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return 0, err
 	}
@@ -205,7 +205,7 @@ func (c *nativeClient) DeleteLines(ctx context.Context, p string, start, end int
 	if inode.Type != "file" {
 		return 0, errors.New("not a file")
 	}
-	existing, err := c.loadContentByID(ctx, inode.ID)
+	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return 0, err
 	}

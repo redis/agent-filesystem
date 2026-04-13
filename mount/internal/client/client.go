@@ -92,6 +92,21 @@ type Client interface {
 	Find(ctx context.Context, path, pattern string, typeFilter string) ([]string, error)
 	Grep(ctx context.Context, path, pattern string, nocase bool) ([]GrepMatch, error)
 
+	// WriteChunks writes specific chunks to a file's content key via pipelined
+	// SETRANGE. Updates size, mtime, chunk_size and chunk_hashes atomically.
+	// chunks maps chunk-index → data.
+	WriteChunks(ctx context.Context, path string, chunks map[int][]byte,
+		chunkSize int, newSize int64, hashes []string) error
+
+	// ReadChunks reads specific chunks from a file's content key via pipelined
+	// GETRANGE. Returns chunk data by index.
+	ReadChunks(ctx context.Context, path string, indices []int,
+		chunkSize int) (map[int][]byte, error)
+
+	// ChunkMeta returns the stored chunk_size and chunk_hashes for a file
+	// without fetching content. Returns 0/nil for non-chunked files.
+	ChunkMeta(ctx context.Context, path string) (int, []string, error)
+
 	// ReadChangeStream reads up to count entries from the per-workspace
 	// durable change stream starting strictly after lastID. Pass "0-0" to
 	// read from the beginning. Returns ErrStreamTrimmed if lastID has been
