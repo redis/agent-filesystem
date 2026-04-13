@@ -1063,7 +1063,8 @@ This is the highest-leverage next step because it turns today's bootstrap-only s
 
 ### After that
 
-1. Surface active sessions in the web UI and add a basic connected-clients page.
+1. Surface active sessions in the web UI and add a connected-clients page that shows:
+   active clients, heartbeats, current workspace, last activity, and client metadata.
 2. Add browser/CLI auth for AFS Cloud with browser-launched PKCE for the CLI.
 3. Add a secret-store layer before building managed Redis Cloud provisioning.
 
