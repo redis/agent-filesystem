@@ -1061,8 +1061,16 @@ func cmdStatus() error {
 			localPath := localSurfacePath(cfg, backendName)
 			mode, _ := effectiveMode(cfg)
 			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
-			rows := statusRows(backendName, cfg.RedisAddr, cfg.RedisDB)
-			rows = append(rows, boxRow{Label: "mode", Value: mode})
+			rows := []boxRow{
+				{Label: "database", Value: statusRemoteLabel(cfg.RedisAddr, cfg.RedisDB)},
+			}
+			if mode == modeMount {
+				rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
+			}
+			rows = append(rows,
+				boxRow{Label: "mode", Value: mode},
+				boxRow{Label: "config", Value: configPathLabel()},
+			)
 			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
 				rows = append([]boxRow{{Label: "workspace", Value: cfg.CurrentWorkspace}}, rows...)
 			}
