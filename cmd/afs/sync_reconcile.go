@@ -548,7 +548,7 @@ func (f *fullReconciler) executeAction(ctx context.Context, a syncAction) error 
 	case "delete-remote":
 		return f.execDeleteRemote(ctx, a)
 	case "delete-local":
-		return f.execDeleteLocal(a)
+		return f.execDeleteLocal(ctx, a)
 	default:
 		return fmt.Errorf("unknown action kind: %s", a.kind)
 	}
@@ -647,10 +647,18 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 	return nil
 }
 
-func (f *fullReconciler) execDeleteLocal(a syncAction) error {
+func (f *fullReconciler) execDeleteLocal(ctx context.Context, a syncAction) error {
+	// Verify the remote truly deleted this path — don't delete locally if
+	// the scan just missed it (upload in flight, cache race, etc.).
+	stat, statErr := f.r.fs.Stat(ctx, absoluteRemotePath(a.path))
+	if statErr == nil && stat != nil {
+		// Remote still has it. The scan missed it — skip the delete.
+		return nil
+	}
+
 	info, err := os.Lstat(a.absPath)
 	if err != nil {
-		// Already gone — just clean up state.
+		// Already gone locally — just clean up state.
 		f.r.state.mu.Lock()
 		delete(f.r.state.state.Entries, a.path)
 		f.r.state.dirty = true
