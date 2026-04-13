@@ -393,29 +393,45 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 		return
 	}
 	if stat == nil {
-		if hasStored {
-			// Mark tombstone immediately so buildPlan racing concurrently sees it.
-			r.state.mu.Lock()
-			if entry, ok := r.state.state.Entries[rel]; ok && !entry.Deleted {
-				entry.Deleted = true
-				entry.Version = r.state.nextVersion()
-				entry.LastSyncedAt = time.Now().UTC()
-				r.state.state.Entries[rel] = entry
-				r.state.dirty = true
-			}
-			r.state.mu.Unlock()
+		if hasStored && !stored.Deleted {
+			// The invalidation event might have arrived while the file was
+			// being created (pre-write invalidation race) or the cache was
+			// transiently stale. Flush the cache and retry once before
+			// concluding the file was deleted.
+			r.fs.InvalidateCache()
+			stat2, err2 := r.fs.Stat(ctx, absoluteRemotePath(rel))
+			if err2 == nil && stat2 != nil {
+				// File exists after cache flush — not actually deleted.
+				// Treat as an update instead.
+				fmt.Fprintf(os.Stderr, "afs sync: handleRemoteEvent %s: stat nil → retry found it (cache was stale)\n", rel)
+				stat = stat2
+				// Fall through to the download/update logic below.
+			} else {
+				// Confirmed: file truly gone from remote.
+				r.state.mu.Lock()
+				if entry, ok := r.state.state.Entries[rel]; ok && !entry.Deleted {
+					entry.Deleted = true
+					entry.Version = r.state.nextVersion()
+					entry.LastSyncedAt = time.Now().UTC()
+					r.state.state.Entries[rel] = entry
+					r.state.dirty = true
+				}
+				r.state.mu.Unlock()
 
-			fmt.Fprintf(os.Stderr, "afs sync: handleRemoteEvent %s: stat nil, hasStored → tombstone + downloadDelete\n", rel)
-			r.log.RemoteChange(rel, "deleted")
-			r.downloadCh <- downloadOp{
-				Kind:        opDownloadDelete,
-				Path:        rel,
-				AbsPath:     abs,
-				StoredEntry: stored,
-				HasStored:   true,
+				fmt.Fprintf(os.Stderr, "afs sync: handleRemoteEvent %s: stat nil confirmed after retry → tombstone + downloadDelete\n", rel)
+				r.log.RemoteChange(rel, "deleted")
+				r.downloadCh <- downloadOp{
+					Kind:        opDownloadDelete,
+					Path:        rel,
+					AbsPath:     abs,
+					StoredEntry: stored,
+					HasStored:   true,
+				}
+				return
 			}
+		} else {
+			return
 		}
-		return
 	}
 
 	// Detect potential conflict: local file diverged from stored hash AND
