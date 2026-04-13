@@ -7,9 +7,8 @@
   "redisTLS": false,
   "workRoot": "~/.afs/workspaces",
   "currentWorkspace": "",
-  "runtimeMode": "host",
   "redisKey": "afs-demo",
-  "mountpoint": "",
+  "localPath": "~/afs",
   "mountBackend": "none",
   "readOnly": false,
   "allowOther": false,
@@ -20,5 +19,7 @@
   "nfsHost": "127.0.0.1",
   "nfsPort": 20490,
   "redisLog": "/tmp/afs-redis.log",
-  "mountLog": "/tmp/afs-mount.log"
+  "mountLog": "/tmp/afs-mount.log",
+  "mode": "sync",
+  "syncLog": "/tmp/afs-sync.log"
 }
