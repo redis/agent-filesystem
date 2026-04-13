@@ -452,6 +452,8 @@ func printBox(title string, rows []boxRow) {
 
 	if !colorTerm {
 		fmt.Println()
+		fmt.Println("  Redis Agent Filesystem")
+		fmt.Println()
 		for _, l := range lines {
 			if l.empty {
 				fmt.Println()
@@ -466,7 +468,17 @@ func printBox(title string, rows []boxRow) {
 	d := ansiDim
 	r := ansiReset
 
-	fmt.Printf("  %s╭%s╮%s\n", d, strings.Repeat("─", innerWidth), r)
+	// Branded top border: ╭─ ░▒▓█ Redis Agent Filesystem █▓▒░ ─...╮
+	brandText := "Redis Agent Filesystem"
+	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiWhite + "█" + ansiReset
+	gradientR := ansiBold + ansiWhite + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
+	brandLabel := gradient + " " + ansiBold + ansiWhite + brandText + ansiReset + " " + gradientR
+	brandVisible := 4 + 1 + len(brandText) + 1 + 4 // ░▒▓█ + space + text + space + █▓▒░
+	fillLen := innerWidth - 2 - brandVisible - 1
+	if fillLen < 1 {
+		fillLen = 1
+	}
+	fmt.Printf("  %s╭─ %s%s %s%s╮%s\n", d, ansiReset, brandLabel, ansiDim, strings.Repeat("─", fillLen), r)
 	fmt.Printf("  %s│%s%s%s│%s\n", d, r, strings.Repeat(" ", innerWidth), d, r)
 
 	for _, l := range lines {

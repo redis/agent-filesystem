@@ -317,9 +317,6 @@ func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdUpArgs() returned error: %v", err)
 	}
-	if strings.Contains(out, "Agent Filesystem") || strings.Contains(out, "AFS\n") {
-		t.Fatalf("cmdUpArgs() output = %q, did not expect banner", out)
-	}
 	if !strings.Contains(out, "AFS Running") {
 		t.Fatalf("cmdUpArgs() output = %q, want ready output", out)
 	}
