@@ -356,7 +356,10 @@ func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []sync
 			// flight (delete queued but not yet confirmed to Redis). Without
 			// this guard a full reconciliation would re-download the file and
 			// reverse the user's delete.
-			if _, pending := f.r.pendingDeletes[path]; pending {
+			f.r.pendingDeletesMu.Lock()
+			_, pending := f.r.pendingDeletes[path]
+			f.r.pendingDeletesMu.Unlock()
+			if pending {
 				continue
 			}
 			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
@@ -561,6 +564,16 @@ func (f *fullReconciler) execMkdirRemote(ctx context.Context, a syncAction) erro
 }
 
 func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
+	// Check pending deletes right before downloading — if the user deleted
+	// this file locally and the upload hasn't completed yet, skip the
+	// download so we don't reverse their delete.
+	f.r.pendingDeletesMu.Lock()
+	_, pending := f.r.pendingDeletes[a.path]
+	f.r.pendingDeletesMu.Unlock()
+	if pending {
+		return nil
+	}
+
 	remotePath := absoluteRemotePath(a.path)
 	// Use a per-file timeout to prevent a single slow Redis call from
 	// blocking the entire cold start. 30s is generous for any individual

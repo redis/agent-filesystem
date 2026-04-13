@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/client"
@@ -54,9 +55,12 @@ type reconciler struct {
 	fullSweepRequest chan struct{}
 
 	// pendingDeletes tracks paths whose local deletion has been queued for
-	// upload but not yet confirmed. buildPlan skips re-downloading these files
-	// so a full reconciliation cannot reverse a pending local delete.
-	pendingDeletes map[string]struct{}
+	// upload but not yet confirmed. buildPlan and execDownload skip
+	// re-downloading these files so a full reconciliation cannot reverse a
+	// pending local delete. Guarded by pendingDeletesMu because the
+	// fullReconciler runs in a separate goroutine.
+	pendingDeletesMu sync.Mutex
+	pendingDeletes   map[string]struct{}
 }
 
 func newReconciler(
@@ -344,7 +348,9 @@ func (r *reconciler) handleLocalDelete(rel string) {
 	if !hasStored {
 		return
 	}
+	r.pendingDeletesMu.Lock()
 	r.pendingDeletes[rel] = struct{}{}
+	r.pendingDeletesMu.Unlock()
 	r.uploadCh <- uploadOp{
 		Kind:        opUploadDelete,
 		Path:        rel,
@@ -370,6 +376,15 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 	if r.ignore.shouldIgnore(rel, false) {
 		return
 	}
+	// Skip remote events for paths with a pending local delete — the delete
+	// upload will propagate the removal to Redis shortly.
+	r.pendingDeletesMu.Lock()
+	_, pending := r.pendingDeletes[rel]
+	r.pendingDeletesMu.Unlock()
+	if pending {
+		return
+	}
+
 	abs := filepath.Join(r.root, filepath.FromSlash(rel))
 	r.state.mu.Lock()
 	stored, hasStored := r.state.state.Entries[rel]
@@ -488,7 +503,9 @@ func (r *reconciler) detectConflict(rel, abs string, stored SyncEntry, hasStored
 
 func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 	if res.Op.Kind == opUploadDelete {
+		r.pendingDeletesMu.Lock()
 		delete(r.pendingDeletes, res.Op.Path)
+		r.pendingDeletesMu.Unlock()
 	}
 	if res.Err != nil {
 		r.log.Err("upload "+res.Op.Path, res.Err.Error())
@@ -583,7 +600,10 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 	// result — the file was written to disk by the downloader but the user
 	// already deleted it. Remove the re-created file immediately so it does
 	// not reappear, and let the pending upload carry the delete to Redis.
-	if _, pending := r.pendingDeletes[res.Op.Path]; pending {
+	r.pendingDeletesMu.Lock()
+	_, pending := r.pendingDeletes[res.Op.Path]
+	r.pendingDeletesMu.Unlock()
+	if pending {
 		abs := filepath.Join(r.root, filepath.FromSlash(res.Op.Path))
 		_ = os.Remove(abs)
 		return
