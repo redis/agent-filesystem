@@ -165,6 +165,7 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	abs := filepath.Join(r.root, filepath.FromSlash(ev.Path))
 	info, err := os.Lstat(abs)
 	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "afs sync: handleLocalEvent %s: ErrNotExist → handleLocalDelete (kindHint=%s)\n", ev.Path, ev.KindHint)
 		r.log.LocalChange(ev.Path, "deleted")
 		r.handleLocalDelete(ev.Path)
 		return
@@ -336,8 +337,10 @@ func (r *reconciler) handleLocalDelete(rel string) {
 	stored, hasStored := r.state.state.Entries[rel]
 	if !hasStored {
 		r.state.mu.Unlock()
+		fmt.Fprintf(os.Stderr, "afs sync: handleLocalDelete %s: not in state, skipping\n", rel)
 		return
 	}
+	fmt.Fprintf(os.Stderr, "afs sync: handleLocalDelete %s: setting tombstone, queuing upload delete\n", rel)
 	// Tombstone immediately — buildPlan sees this before upload completes.
 	stored.Deleted = true
 	stored.Version = r.state.nextVersion()
@@ -402,6 +405,7 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 			}
 			r.state.mu.Unlock()
 
+			fmt.Fprintf(os.Stderr, "afs sync: handleRemoteEvent %s: stat nil, hasStored → tombstone + downloadDelete\n", rel)
 			r.log.RemoteChange(rel, "deleted")
 			r.downloadCh <- downloadOp{
 				Kind:        opDownloadDelete,
