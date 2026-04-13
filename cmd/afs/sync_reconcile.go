@@ -349,7 +349,14 @@ func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []sync
 
 		switch {
 		case lok && !rok:
-			// Local-only → upload to remote.
+			// If the file was previously synced but is now absent from
+			// remote, another system deleted it. Propagate the delete
+			// locally instead of re-uploading.
+			if hasStored {
+				plan = append(plan, syncAction{kind: "delete-local", path: path, absPath: abs})
+				continue
+			}
+			// Genuinely new local file → upload to remote.
 			plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 		case !lok && rok:
 			// Skip if a local delete is already in-flight in the reconciler.
@@ -540,6 +547,8 @@ func (f *fullReconciler) executeAction(ctx context.Context, a syncAction) error 
 		return f.execSymlinkUpload(ctx, a)
 	case "delete-remote":
 		return f.execDeleteRemote(ctx, a)
+	case "delete-local":
+		return f.execDeleteLocal(a)
 	default:
 		return fmt.Errorf("unknown action kind: %s", a.kind)
 	}
@@ -635,6 +644,29 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 		RemoteMtimeMs: remoteMtimeMs,
 		LastSyncedAt:  time.Now().UTC(),
 	})
+	return nil
+}
+
+func (f *fullReconciler) execDeleteLocal(a syncAction) error {
+	info, err := os.Lstat(a.absPath)
+	if err != nil {
+		// Already gone — just clean up state.
+		f.r.state.mu.Lock()
+		delete(f.r.state.state.Entries, a.path)
+		f.r.state.dirty = true
+		f.r.state.mu.Unlock()
+		return nil
+	}
+	f.r.echo.markDelete(a.path)
+	if info.IsDir() {
+		_ = os.RemoveAll(a.absPath)
+	} else {
+		_ = os.Remove(a.absPath)
+	}
+	f.r.state.mu.Lock()
+	delete(f.r.state.state.Entries, a.path)
+	f.r.state.dirty = true
+	f.r.state.mu.Unlock()
 	return nil
 }
 

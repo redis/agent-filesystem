@@ -442,3 +442,39 @@ func TestSyncOfflineDeletePropagatesOnRestart(t *testing.T) {
 		t.Fatalf("offline.txt reappeared locally after offline delete + restart")
 	}
 }
+
+// Regression: when another system deletes a file from Redis, a full
+// reconciliation on this system would see the file locally but not remotely
+// and re-upload it — undoing the remote delete. The fullReconciler must
+// detect that a previously-synced file vanished from remote and delete
+// it locally instead.
+func TestSyncRemoteDeleteNotReuploadedByFullReconcile(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeLocalFile(t, "shared.txt", "hello")
+
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	// Wait for the file to be fully synced to remote.
+	assertEventually(t, 3*time.Second, "shared.txt remote", func() bool {
+		return env.remoteExists(t, "shared.txt")
+	})
+
+	// Simulate another system deleting from Redis directly.
+	if err := env.fsClient.Rm(testCtx(), absoluteRemotePath("shared.txt")); err != nil {
+		t.Fatalf("remote rm: %v", err)
+	}
+
+	// Force a full reconciliation — simulates a subscription reconnect.
+	env.daemon.reconciler.requestFullSweep()
+
+	// The file must be deleted locally, NOT re-uploaded to remote.
+	assertEventually(t, 5*time.Second, "local delete propagated from remote", func() bool {
+		return !env.localExists("shared.txt")
+	})
+	// Verify it didn't get re-uploaded.
+	if env.remoteExists(t, "shared.txt") {
+		t.Fatalf("shared.txt was re-uploaded after remote delete + full reconcile")
+	}
+}
