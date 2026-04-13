@@ -567,6 +567,10 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	c.queueDeleteInfo(pipe, inode)
 	_, err = pipe.Exec(ctx)
 	c.invalidateInode(ctx, parentPath)
+	// Re-invalidate the removed path AFTER the pipeline so peer sync daemons
+	// that raced on the pre-deletion invalidation (line 553) see a second
+	// event and discover the file is now gone.
+	c.invalidateInode(ctx, resolved)
 	if err != nil {
 		return err
 	}
