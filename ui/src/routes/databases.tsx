@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@redislabsdev/redis-ui-components";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import styled from "styled-components";
 import {
@@ -59,6 +59,15 @@ function DatabasesPage() {
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<DatabaseFormState>(createInitialFormState());
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  const isDialogOpen = dialogMode != null;
+
+  useEffect(() => {
+    if (isDialogOpen) {
+      requestAnimationFrame(() => nameInputRef.current?.focus());
+    }
+  }, [isDialogOpen]);
 
   const editingDatabase = useMemo(
     () => databases.find((database) => database.id === editingDatabaseId) ?? null,
@@ -150,8 +159,6 @@ function DatabasesPage() {
     }
   }
 
-  const isDialogOpen = dialogMode != null;
-
   return (
     <PageStack>
       <PageSection>
@@ -202,7 +209,7 @@ function DatabasesPage() {
               <Field>
                 Name
                 <TextInput
-                  autoFocus
+                  ref={nameInputRef}
                   value={form.displayName}
                   onChange={(event) => updateForm("displayName", event.target.value)}
                   placeholder="localhost:6388"
