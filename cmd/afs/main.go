@@ -257,31 +257,64 @@ func commandContextRows(cfg config, workspace string) []boxRow {
 	return rows
 }
 
-func statusTitle(prefix, workspace, localPath string, mounted bool) string {
-	workspace = strings.TrimSpace(workspace)
-	if workspace == "" {
-		return prefix + " " + clr(ansiBold, "AFS no workspace selected")
+func statusTitle(prefix string, pid int) string {
+	if pid > 0 {
+		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (daemon %d)", pid))
 	}
-	if mounted {
-		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS workspace %s mounted at %s", workspace, localPath))
-	}
-	return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS workspace %s not mounted", workspace))
+	return prefix + " " + clr(ansiBold, "AFS Running")
 }
 
 func localSurfacePath(cfg config) string {
 	return cfg.LocalPath
 }
 
-func statusRows(backendName, redisAddr string, redisDB int) []boxRow {
-	mountValue := "none"
-	if backendName != mountBackendNone {
-		mountValue = userModeLabel(backendName)
+// statusRows returns the consistent core rows: workspace, local, database, mode.
+// Mount backend is included only for FUSE/NFS.
+func statusRows(workspace, localPath, mode, backendName, redisAddr string, redisDB int) []boxRow {
+	var rows []boxRow
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		rows = append(rows, boxRow{Label: "workspace", Value: ws})
 	}
-	return []boxRow{
-		{Label: "database", Value: statusRemoteLabel(redisAddr, redisDB)},
-		{Label: "mount backend", Value: mountValue},
-		{Label: "config", Value: configPathLabel()},
+	if localPath != "" {
+		rows = append(rows, boxRow{Label: "local", Value: localPath})
 	}
+	rows = append(rows, boxRow{Label: "database", Value: statusRemoteLabel(redisAddr, redisDB)})
+	rows = append(rows, boxRow{Label: "mode", Value: mode})
+	if backendName != "" && backendName != mountBackendNone {
+		rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
+	}
+	return rows
+}
+
+// statusTitleForAlive returns a green-check or yellow-circle title with
+// optional daemon PID.
+func statusTitleForAlive(alive bool, pid int) string {
+	if alive {
+		return statusTitle(markerSuccess, pid)
+	}
+	return statusTitle(clr(ansiYellow, "○"), 0)
+}
+
+// appendUptimeRows appends the uptime row and, if set, the readonly row.
+func appendUptimeRows(rows []boxRow, st state) []boxRow {
+	rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
+	if st.ReadOnly {
+		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
+	}
+	return rows
+}
+
+// loadSyncStateForStatus loads the sync snapshot for a workspace, returning
+// nil if the workspace is empty or the state cannot be loaded.
+func loadSyncStateForStatus(workspace string) *SyncState {
+	if workspace == "" {
+		return nil
+	}
+	st, err := loadSyncState(workspace)
+	if err != nil {
+		return nil
+	}
+	return st
 }
 
 func currentWorkspaceLabel(workspace string) string {
@@ -1044,47 +1077,68 @@ func cmdDown() error {
 // status — show current state
 // ---------------------------------------------------------------------------
 
+// cmdStatus dispatches to one of three status renderers:
+//   - cmdStatusNotRunning: no state file exists (afs is stopped)
+//   - cmdStatusSync:       running in sync mode
+//   - cmdStatusMount:      running in mount mode
 func cmdStatus() error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			cfg := loadConfigOrDefault()
-			if err2 := resolveConfigPaths(&cfg); err2 != nil {
-				cfg.WorkRoot = defaultWorkRoot()
-			}
-			backendName := cfg.MountBackend
-			if backendName == "" {
-				backendName = mountBackendNone
-			}
-			localPath := localSurfacePath(cfg)
-			mode, _ := effectiveMode(cfg)
-			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
-			var rows []boxRow
-			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
-				rows = append(rows, boxRow{Label: "workspace", Value: cfg.CurrentWorkspace})
-			}
-			if localPath != "" {
-				rows = append(rows, boxRow{Label: "local", Value: localPath})
-			}
-			rows = append(rows, boxRow{Label: "database", Value: statusRemoteLabel(cfg.RedisAddr, cfg.RedisDB)})
-			if mode == modeMount {
-				rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
-			}
-			rows = append(rows,
-				boxRow{Label: "mode", Value: mode},
-				boxRow{Label: "config", Value: configPathLabel()},
-				boxRow{Label: "start", Value: clr(ansiOrange, "afs up")},
-			)
-			printBox(title, rows)
-			return nil
+			return cmdStatusNotRunning()
 		}
 		return err
 	}
-
-	if statusSyncIfActive(st) {
+	if strings.TrimSpace(st.Mode) == modeSync {
+		cmdStatusSync(st)
 		return nil
 	}
+	return cmdStatusMount(st)
+}
 
+// cmdStatusNotRunning renders the status box when no state file exists.
+func cmdStatusNotRunning() error {
+	cfg := loadConfigOrDefault()
+	if err := resolveConfigPaths(&cfg); err != nil {
+		cfg.WorkRoot = defaultWorkRoot()
+	}
+	backendName := cfg.MountBackend
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	mode, _ := effectiveMode(cfg)
+
+	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
+	rows := statusRows(cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
+	rows = append(rows,
+		boxRow{Label: "config", Value: configPathLabel()},
+		boxRow{Label: "start", Value: clr(ansiOrange, "afs up")},
+	)
+	printBox(title, rows)
+	return nil
+}
+
+// cmdStatusSync renders the status box for a running sync daemon.
+func cmdStatusSync(st state) {
+	workspace := strings.TrimSpace(st.CurrentWorkspace)
+	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
+
+	title := statusTitleForAlive(alive, st.SyncPID)
+	rows := statusRows(workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
+	// Post-core rows: config, uptime, entries, last sync.
+	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	rows = appendUptimeRows(rows, st)
+	if snap := loadSyncStateForStatus(workspace); snap != nil {
+		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
+		if !snap.UpdatedAt.IsZero() {
+			rows = append(rows, boxRow{Label: "last sync", Value: snap.UpdatedAt.UTC().Format(time.RFC3339)})
+		}
+	}
+	printBox(title, rows)
+}
+
+// cmdStatusMount renders the status box for mount mode (running).
+func cmdStatusMount(st state) error {
 	backend, backendName, err := backendForState(st)
 	if err != nil {
 		return err
@@ -1093,44 +1147,29 @@ func cmdStatus() error {
 	if err := resolveConfigPaths(&cfg); err != nil {
 		cfg.WorkRoot = defaultWorkRoot()
 	}
-	currentWorkspace := cfg.CurrentWorkspace
-	if strings.TrimSpace(st.CurrentWorkspace) != "" {
-		currentWorkspace = st.CurrentWorkspace
+
+	workspace := cfg.CurrentWorkspace
+	if ws := strings.TrimSpace(st.CurrentWorkspace); ws != "" {
+		workspace = ws
 	}
 	localPath := localSurfacePath(cfg)
 	if backendName != mountBackendNone && strings.TrimSpace(st.LocalPath) != "" {
 		localPath = st.LocalPath
 	}
-	if backendName == mountBackendNone {
-		title := statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
-		rows := statusRows(backendName, st.RedisAddr, st.RedisDB)
-		rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
-		if st.ReadOnly {
-			rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
-		}
-		printBox(title, rows)
-		return nil
-	}
-	mounted := backend.IsMounted(st.LocalPath)
-	mountAlive := st.MountPID > 0 && processAlive(st.MountPID)
 
-	var title string
-	if mounted && mountAlive {
-		title = statusTitle(markerSuccess, currentWorkspace, localPath, true)
-	} else {
-		title = statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
+	alive := false
+	if backendName != mountBackendNone {
+		alive = backend.IsMounted(st.LocalPath) && st.MountPID > 0 && processAlive(st.MountPID)
 	}
+	title := statusTitleForAlive(alive, st.MountPID)
 
-	rows := statusRows(backendName, st.RedisAddr, st.RedisDB)
-	rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
-	if st.ReadOnly {
-		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
-	}
-
+	rows := statusRows(workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
+	// Post-core rows: config, uptime, archive.
+	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
 		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})
 	}
-
 	printBox(title, rows)
 	return nil
 }
@@ -1284,13 +1323,13 @@ func startServices(cfg config) error {
 
 func printReadyBox(cfg config, backendName, _ string) {
 	localPath := localSurfacePath(cfg)
-	titlePrefix := markerSuccess
+	mode, _ := effectiveMode(cfg)
 	mounted := backendName != mountBackendNone
+	title := statusTitle(markerSuccess, 0)
 	if !mounted {
-		titlePrefix = clr(ansiYellow, "○")
+		title = statusTitle(clr(ansiYellow, "○"), 0)
 	}
-	title := statusTitle(titlePrefix, cfg.CurrentWorkspace, localPath, mounted)
-	rows := statusRows(backendName, cfg.RedisAddr, cfg.RedisDB)
+	rows := statusRows(cfg.CurrentWorkspace, localPath, mode, backendName, cfg.RedisAddr, cfg.RedisDB)
 
 	if cfg.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})

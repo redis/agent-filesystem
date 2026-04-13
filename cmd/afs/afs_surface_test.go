@@ -100,70 +100,63 @@ func TestExecutablePathResolvesSymlinks(t *testing.T) {
 	}
 }
 
-func TestStatusRowsUseNoMountLabelsWhenFilesystemMountIsNone(t *testing.T) {
+func TestStatusRowsNoMountBackendWhenNone(t *testing.T) {
 	t.Helper()
 
-	orig := cfgPathOverride
-	cfgPathOverride = filepath.Join("/Users/example/Library/Application Support/AFS", ".afs", "afs.config.json")
-	defer func() {
-		cfgPathOverride = orig
-	}()
-
-	rows := statusRows(mountBackendNone, "localhost:6379", 0)
-	if len(rows) != 3 {
-		t.Fatalf("len(statusRows()) = %d, want 3", len(rows))
+	rows := statusRows("myws", "/tmp/local", "sync", mountBackendNone, "localhost:6379", 0)
+	// Expect: workspace, local, database, mode — no mount backend row.
+	labels := make([]string, len(rows))
+	for i, r := range rows {
+		labels[i] = r.Label
 	}
-	if rows[0].Label != "database" {
-		t.Fatalf("rows[0].Label = %q, want %q", rows[0].Label, "database")
+	for _, l := range labels {
+		if l == "mount backend" {
+			t.Fatalf("statusRows() should not include mount backend for backendNone, got labels %v", labels)
+		}
 	}
-	if rows[0].Value != "redis://localhost:6379/0" {
-		t.Fatalf("rows[0].Value = %q, want %q", rows[0].Value, "redis://localhost:6379/0")
+	if rows[0].Label != "workspace" || rows[0].Value != "myws" {
+		t.Fatalf("rows[0] = %+v, want workspace=myws", rows[0])
 	}
-	if rows[1].Label != "mount backend" || rows[1].Value != "none" {
-		t.Fatalf("rows[1] = %+v, want mount backend row", rows[1])
-	}
-	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, filepath.Join(".afs", "afs.config.json")) {
-		t.Fatalf("rows[2] = %+v, want config row", rows[2])
-	}
-	if strings.Contains(stripAnsi(rows[2].Value), "/Users/example/") {
-		t.Fatalf("rows[2] = %+v, did not expect full absolute path", rows[2])
+	if rows[2].Label != "database" || rows[2].Value != "redis://localhost:6379/0" {
+		t.Fatalf("rows[2] = %+v, want database row", rows[2])
 	}
 }
 
-func TestStatusRowsKeepFilesystemLabelsForMountMode(t *testing.T) {
+func TestStatusRowsIncludesMountBackendForFuse(t *testing.T) {
 	t.Helper()
 
-	orig := cfgPathOverride
-	cfgPathOverride = filepath.Join("/Users/example/Library/Application Support/AFS", ".afs", "afs.config.json")
-	defer func() {
-		cfgPathOverride = orig
-	}()
-
-	rows := statusRows(mountBackendFuse, "localhost:6379", 0)
-	if len(rows) != 3 {
-		t.Fatalf("len(statusRows()) = %d, want 3", len(rows))
+	rows := statusRows("myws", "/tmp/local", "mount", mountBackendFuse, "localhost:6379", 0)
+	found := false
+	for _, r := range rows {
+		if r.Label == "mount backend" && r.Value == "FUSE" {
+			found = true
+		}
 	}
-	if rows[0].Label != "database" || rows[0].Value != "redis://localhost:6379/0" {
-		t.Fatalf("rows[0] = %+v, want database row", rows[0])
-	}
-	if rows[1].Label != "mount backend" || rows[1].Value != "FUSE" {
-		t.Fatalf("rows[1] = %+v, want mount backend row", rows[1])
-	}
-	if rows[2].Label != "config" || !strings.Contains(rows[2].Value, filepath.Join(".afs", "afs.config.json")) {
-		t.Fatalf("rows[2] = %+v, want config row", rows[2])
-	}
-	if strings.Contains(stripAnsi(rows[2].Value), "/Users/example/") {
-		t.Fatalf("rows[2] = %+v, did not expect full absolute path", rows[2])
+	if !found {
+		t.Fatalf("statusRows() missing mount backend=FUSE row")
 	}
 }
 
-func TestStatusTitleUsesMountedWorkspaceWording(t *testing.T) {
+func TestStatusTitleShowsRunningWithPID(t *testing.T) {
 	t.Helper()
 
-	title := statusTitle("●", "newfiles", "/Users/rowantrollope/abc", true)
-	want := "AFS workspace newfiles mounted at /Users/rowantrollope/abc"
+	title := statusTitle("●", 12345)
+	want := "AFS Running (daemon 12345)"
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
+	}
+}
+
+func TestStatusTitleShowsRunningWithoutPID(t *testing.T) {
+	t.Helper()
+
+	title := statusTitle("●", 0)
+	want := "AFS Running"
+	if !strings.Contains(title, want) {
+		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
+	}
+	if strings.Contains(title, "daemon") {
+		t.Fatalf("statusTitle() = %q, should not contain daemon when pid=0", title)
 	}
 }
 
@@ -184,12 +177,12 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 		t.Fatalf("printReadyBox() returned error: %v", err)
 	}
 
-	want := "AFS workspace newfiles mounted at /Users/rowantrollope/abc"
+	want := "AFS Running"
 	if !strings.Contains(out, want) {
 		t.Fatalf("printReadyBox() output = %q, want substring %q", out, want)
 	}
-	if strings.Contains(out, "Successfully mounted workspace") {
-		t.Fatalf("printReadyBox() output = %q, should not use old success wording", out)
+	if !strings.Contains(out, "newfiles") {
+		t.Fatalf("printReadyBox() output = %q, want workspace name in rows", out)
 	}
 }
 
@@ -287,7 +280,7 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdUp() returned error: %v", err)
 	}
-	if !strings.Contains(out, "AFS workspace demo not mounted") {
+	if !strings.Contains(out, "AFS Running") {
 		t.Fatalf("cmdUp() output = %q, want status output", out)
 	}
 	if strings.Contains(out, "Run 'afs down' first") {
@@ -327,7 +320,7 @@ func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
 	if strings.Contains(out, "Agent Filesystem") || strings.Contains(out, "AFS\n") {
 		t.Fatalf("cmdUpArgs() output = %q, did not expect banner", out)
 	}
-	if !strings.Contains(out, "AFS workspace demo not mounted") {
+	if !strings.Contains(out, "AFS Running") {
 		t.Fatalf("cmdUpArgs() output = %q, want ready output", out)
 	}
 }

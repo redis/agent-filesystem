@@ -353,10 +353,8 @@ func validateSyncLocalPath(cfg config, localRoot string) error {
 }
 
 func printSyncReadyBox(cfg config, workspace, localRoot string) {
-	title := statusTitle(markerSuccess, workspace, localRoot, true)
-	rows := statusRows(mountBackendNone, cfg.RedisAddr, cfg.RedisDB)
-	rows = append(rows, boxRow{Label: "mode", Value: "sync"})
-	rows = append(rows, boxRow{Label: "local", Value: localRoot})
+	title := statusTitle(markerSuccess, 0)
+	rows := statusRows(workspace, localRoot, modeSync, "", cfg.RedisAddr, cfg.RedisDB)
 	if cfg.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
 	}
@@ -413,47 +411,3 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 	return true, nil
 }
 
-// statusSyncIfActive renders the status box for a running sync daemon.
-func statusSyncIfActive(st state) bool {
-	if strings.TrimSpace(st.Mode) != modeSync {
-		return false
-	}
-	workspace := strings.TrimSpace(st.CurrentWorkspace)
-	localPath := st.LocalPath
-	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
-	var title string
-	if alive {
-		title = statusTitle(markerSuccess, workspace, localPath, true)
-	} else {
-		title = statusTitle(clr(ansiYellow, "○"), workspace, localPath, false)
-	}
-	rows := statusRows(mountBackendNone, st.RedisAddr, st.RedisDB)
-	rows = append(rows, boxRow{Label: "mode", Value: "sync"})
-	rows = append(rows, boxRow{Label: "local", Value: localPath})
-	if alive {
-		rows = append(rows, boxRow{Label: "daemon", Value: pidStatusColored(st.SyncPID)})
-	}
-	rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
-	if st.ReadOnly {
-		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
-	}
-	if snap := loadSyncStateForStatus(workspace); snap != nil {
-		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
-		if !snap.UpdatedAt.IsZero() {
-			rows = append(rows, boxRow{Label: "last sync", Value: snap.UpdatedAt.UTC().Format(time.RFC3339)})
-		}
-	}
-	printBox(title, rows)
-	return true
-}
-
-func loadSyncStateForStatus(workspace string) *SyncState {
-	if workspace == "" {
-		return nil
-	}
-	st, err := loadSyncState(workspace)
-	if err != nil {
-		return nil
-	}
-	return st
-}
