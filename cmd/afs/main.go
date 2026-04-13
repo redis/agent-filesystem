@@ -1050,10 +1050,25 @@ func cmdStatus() error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			title := clr(ansiDim, "○") + " afs is not running"
-			printBox(title, []boxRow{
-				{Label: "start", Value: clr(ansiOrange, "afs up")},
-			})
+			cfg := loadConfigOrDefault()
+			if err2 := resolveConfigPaths(&cfg); err2 != nil {
+				cfg.WorkRoot = defaultWorkRoot()
+			}
+			backendName := cfg.MountBackend
+			if backendName == "" {
+				backendName = mountBackendNone
+			}
+			localPath := localSurfacePath(cfg, backendName)
+			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
+			rows := statusRows(backendName, cfg.RedisAddr, cfg.RedisDB)
+			if strings.TrimSpace(cfg.CurrentWorkspace) != "" {
+				rows = append([]boxRow{{Label: "workspace", Value: cfg.CurrentWorkspace}}, rows...)
+			}
+			if localPath != "" {
+				rows = append(rows, boxRow{Label: "local", Value: localPath})
+			}
+			rows = append(rows, boxRow{Label: "start", Value: clr(ansiOrange, "afs up")})
+			printBox(title, rows)
 			return nil
 		}
 		return err
