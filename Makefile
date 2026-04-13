@@ -30,7 +30,7 @@ afs-control-plane:
 
 install: afs
 	@mkdir -p "$(BINDIR)"
-	@ln -sf "$(PWD)/afs" "$(BINDIR)/afs"
+	@ln -sf "$(CURDIR)/afs" "$(BINDIR)/afs"
 	@echo "Installed afs -> $(BINDIR)/afs"
 
 uninstall:
