@@ -22,19 +22,14 @@ import (
 // background daemon process and returns — exactly like mount mode. The parent
 // `afs up` process exits and returns control to the shell.
 func startSyncServices(cfg config, foreground bool) error {
-	if strings.TrimSpace(cfg.SyncLocalPath) == "" {
-		if mp := strings.TrimSpace(cfg.Mountpoint); mp != "" {
-			cfg.SyncLocalPath = mp
-		}
+	if strings.TrimSpace(cfg.LocalPath) == "" {
+		return errors.New("localPath is required when mode=sync; run `afs setup` or set localPath in afs.config.json")
 	}
-	if strings.TrimSpace(cfg.SyncLocalPath) == "" {
-		return errors.New("syncLocalPath is required when mode=sync; run `afs setup` or set syncLocalPath in afs.config.json")
-	}
-	localRoot, err := expandPath(cfg.SyncLocalPath)
+	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {
 		return err
 	}
-	cfg.SyncLocalPath = localRoot
+	cfg.LocalPath = localRoot
 
 	if err := validateSyncLocalPath(cfg, localRoot); err != nil {
 		return err
@@ -133,9 +128,9 @@ func startSyncServices(cfg config, foreground bool) error {
 			RedisKey:         mountKey,
 			RedisLog:         cfg.RedisLog,
 			RedisServerBin:   cfg.RedisServerBin,
-			SyncMode:         modeSync,
+			Mode:             modeSync,
 			SyncPID:          os.Getpid(),
-			SyncLocalPath:    localRoot,
+			LocalPath:        localRoot,
 			SyncLog:          cfg.SyncLog,
 		}
 		if !cfg.UseExistingRedis {
@@ -209,9 +204,9 @@ func startSyncServices(cfg config, foreground bool) error {
 		RedisKey:         mountKey,
 		RedisLog:         cfg.RedisLog,
 		RedisServerBin:   cfg.RedisServerBin,
-		SyncMode:         modeSync,
+		Mode:             modeSync,
 		SyncPID:          daemonPID,
-		SyncLocalPath:    localRoot,
+		LocalPath:        localRoot,
 		SyncLog:          cfg.SyncLog,
 	}
 	if !cfg.UseExistingRedis {
@@ -280,14 +275,9 @@ func runSyncDaemon() error {
 		return fmt.Errorf("resolve config: %w", err)
 	}
 
-	localRoot, err := expandPath(cfg.SyncLocalPath)
+	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {
 		return err
-	}
-	if strings.TrimSpace(localRoot) == "" {
-		if mp := strings.TrimSpace(cfg.Mountpoint); mp != "" {
-			localRoot = mp
-		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -378,7 +368,7 @@ func printSyncReadyBox(cfg config, workspace, localRoot string) {
 // stopSyncServicesIfActive performs the cleanup that cmdDown needs when the
 // running daemon was started in sync mode.
 func stopSyncServicesIfActive(st state) (bool, error) {
-	if strings.TrimSpace(st.SyncMode) != modeSync {
+	if strings.TrimSpace(st.Mode) != modeSync {
 		return false, nil
 	}
 
@@ -401,7 +391,7 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 	// Remove the local sync folder — the source of truth is Redis, and
 	// `afs up` will re-populate it. Same semantics as mount mode removing
 	// the mountpoint.
-	if localPath := strings.TrimSpace(st.SyncLocalPath); localPath != "" {
+	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" {
 		s := startStep("Removing local sync folder")
 		if err := os.RemoveAll(localPath); err != nil {
 			s.fail(err.Error())
@@ -425,11 +415,11 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 
 // statusSyncIfActive renders the status box for a running sync daemon.
 func statusSyncIfActive(st state) bool {
-	if strings.TrimSpace(st.SyncMode) != modeSync {
+	if strings.TrimSpace(st.Mode) != modeSync {
 		return false
 	}
 	workspace := strings.TrimSpace(st.CurrentWorkspace)
-	localPath := st.SyncLocalPath
+	localPath := st.LocalPath
 	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
 	var title string
 	if alive {

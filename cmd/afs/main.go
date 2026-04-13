@@ -35,9 +35,8 @@ type config struct {
 	RedisTLS         bool   `json:"redisTLS"`
 	WorkRoot         string `json:"workRoot"`
 	CurrentWorkspace string `json:"currentWorkspace"`
-	RuntimeMode      string `json:"runtimeMode"`
 	RedisKey         string `json:"redisKey"`
-	Mountpoint       string `json:"mountpoint"`
+	LocalPath        string `json:"localPath,omitempty"`
 	MountBackend     string `json:"mountBackend"`
 	ReadOnly         bool   `json:"readOnly"`
 	AllowOther       bool   `json:"allowOther"`
@@ -55,14 +54,17 @@ type config struct {
 	// When sync, `afs up` starts the background sync daemon instead of mounting
 	// the live workspace as FUSE/NFS. Existing configs without this field keep
 	// their previous mount-based behavior.
-	Mode             string `json:"mode,omitempty"`
-	SyncLocalPath    string `json:"syncLocalPath,omitempty"`
-	SyncFileSizeCapMB int   `json:"syncFileSizeCapMB,omitempty"`
-	SyncLog          string `json:"syncLog,omitempty"`
+	Mode              string `json:"mode,omitempty"`
+	SyncFileSizeCapMB int    `json:"syncFileSizeCapMB,omitempty"`
+	SyncLog           string `json:"syncLog,omitempty"`
 
 	// Derived at runtime, not persisted.
 	redisHost string
 	redisPort int
+
+	// Legacy field migration — decoded from old JSON keys but never written.
+	legacyMountpoint    string `json:"mountpoint,omitempty"`
+	legacySyncLocalPath string `json:"syncLocalPath,omitempty"`
 }
 
 type state struct {
@@ -77,8 +79,8 @@ type state struct {
 	MountBackend         string    `json:"mount_backend"`
 	ReadOnly             bool      `json:"read_only"`
 	MountEndpoint        string    `json:"mount_endpoint,omitempty"`
-	Mountpoint           string    `json:"mountpoint"`
-	CreatedMountpoint    bool      `json:"created_mountpoint,omitempty"`
+	LocalPath            string    `json:"local_path,omitempty"`
+	CreatedLocalPath     bool      `json:"created_local_path,omitempty"`
 	RedisKey             string    `json:"redis_key"`
 	RedisLog             string    `json:"redis_log"`
 	MountLog             string    `json:"mount_log"`
@@ -87,10 +89,15 @@ type state struct {
 	ArchivePath          string    `json:"archive_path,omitempty"`
 
 	// Sync daemon mode fields. Populated when `afs up` ran with mode=sync.
-	SyncMode      string `json:"sync_mode,omitempty"`
-	SyncPID       int    `json:"sync_pid,omitempty"`
-	SyncLocalPath string `json:"sync_local_path,omitempty"`
-	SyncLog       string `json:"sync_log,omitempty"`
+	Mode    string `json:"mode,omitempty"`
+	SyncPID int    `json:"sync_pid,omitempty"`
+	SyncLog string `json:"sync_log,omitempty"`
+
+	// Legacy field migration — decoded from old JSON keys but never written.
+	legacyMountpoint        string `json:"mountpoint,omitempty"`
+	legacySyncLocalPath     string `json:"sync_local_path,omitempty"`
+	legacySyncMode          string `json:"sync_mode,omitempty"`
+	legacyCreatedMountpoint bool   `json:"created_mountpoint,omitempty"`
 }
 
 type importClient interface {
@@ -265,7 +272,7 @@ func localSurfacePath(cfg config, backendName string) string {
 	if backendName == mountBackendNone {
 		return cfg.WorkRoot
 	}
-	return cfg.Mountpoint
+	return cfg.LocalPath
 }
 
 func statusRows(backendName, redisAddr string, redisDB int) []boxRow {
@@ -460,8 +467,8 @@ func setupLocalModeLabel(cfg config) string {
 	if backend == mountBackendNFS {
 		label = "NFS"
 	}
-	if strings.TrimSpace(cfg.Mountpoint) != "" {
-		return label + " at " + cfg.Mountpoint
+	if strings.TrimSpace(cfg.LocalPath) != "" {
+		return label + " at " + cfg.LocalPath
 	}
 	return label
 }
@@ -508,7 +515,7 @@ func setupLocalSurfaceLabel(cfg config) string {
 		return setupLocalModeLabel(cfg)
 	}
 	if mode == modeSync {
-		path := strings.TrimSpace(cfg.SyncLocalPath)
+		path := strings.TrimSpace(cfg.LocalPath)
 		if path == "" {
 			return "not configured"
 		}
@@ -593,8 +600,8 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		if err != nil {
 			return err
 		}
-		if backendName != mountBackendNone && strings.TrimSpace(cfg.Mountpoint) != "" {
-			mountDefault = cfg.Mountpoint
+		if backendName != mountBackendNone && strings.TrimSpace(cfg.LocalPath) != "" {
+			mountDefault = cfg.LocalPath
 		}
 	}
 	promptHint := "  " + clr(ansiDim, "Leave empty for no mounted filesystem. Example: ~/afs")
@@ -611,7 +618,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	mp = strings.TrimSpace(mp)
 	if strings.EqualFold(mp, "none") || mp == "" {
 		cfg.MountBackend = mountBackendNone
-		cfg.Mountpoint = ""
+		cfg.LocalPath = ""
 		return nil
 	}
 	resolvedMountpoint, err := expandPath(mp)
@@ -641,7 +648,7 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 		}
 		cfg.CurrentWorkspace = workspace
 	}
-	cfg.Mountpoint = resolvedMountpoint
+	cfg.LocalPath = resolvedMountpoint
 	cfg.MountBackend = defaultMountBackend()
 	fmt.Fprintln(out, "  "+clr(ansiDim, "Using "+userModeLabel(cfg.MountBackend)+" for "+cfg.CurrentWorkspace))
 	if cfg.MountBackend == mountBackendNFS {
@@ -699,15 +706,9 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	switch strings.TrimSpace(choice) {
 	case "1", "", "sync":
 		cfg.Mode = modeSync
-		if strings.TrimSpace(cfg.SyncLocalPath) == "" {
-			// Carry over the existing mountpoint as a sensible default; if
-			// there isn't one either, default to ~/afs to mirror first-run.
-			if mp := strings.TrimSpace(cfg.Mountpoint); mp != "" {
-				cfg.SyncLocalPath = mp
-			} else {
-				cfg.SyncLocalPath = "~/afs"
-			}
-			fmt.Fprintln(out, "  "+clr(ansiDim, "Sync local path defaulted to ")+clr(ansiBold, cfg.SyncLocalPath)+clr(ansiDim, " (edit it from the menu)"))
+		if strings.TrimSpace(cfg.LocalPath) == "" {
+			cfg.LocalPath = "~/afs"
+			fmt.Fprintln(out, "  "+clr(ansiDim, "Sync local path defaulted to ")+clr(ansiBold, cfg.LocalPath)+clr(ansiDim, " (edit it from the menu)"))
 			fmt.Fprintln(out)
 		}
 	case "2", "mount", "live", "live mount":
@@ -719,7 +720,7 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	return nil
 }
 
-// promptSyncLocalPathSetup edits cfg.SyncLocalPath when the user is already
+// promptSyncLocalPathSetup edits cfg.LocalPath when the user is already
 // in sync mode. It is a deliberately narrower prompt than
 // promptLocalFilesystemSetup because sync mode doesn't need backend
 // selection or NFS port negotiation.
@@ -727,7 +728,7 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Sync Local Path"))
 	fmt.Fprintln(out)
 
-	defaultValue := strings.TrimSpace(cfg.SyncLocalPath)
+	defaultValue := strings.TrimSpace(cfg.LocalPath)
 	promptHint := "  " + clr(ansiDim, "Enter the local directory AFS should sync to. Example: ~/afs")
 	if defaultValue != "" {
 		promptHint = "  " + clr(ansiDim, "Press enter to keep "+defaultValue+", or type a new path")
@@ -745,7 +746,7 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 	if err != nil {
 		return err
 	}
-	cfg.SyncLocalPath = expanded
+	cfg.LocalPath = expanded
 	fmt.Fprintln(out, "  "+clr(ansiDim, "Sync will write to ")+clr(ansiBold, expanded))
 	fmt.Fprintln(out)
 	return nil
@@ -878,15 +879,15 @@ func cmdUpArgs(args []string) error {
 }
 
 func cleanupStaleMount(cfg config) error {
-	if cfg.MountBackend == mountBackendNone || strings.TrimSpace(cfg.Mountpoint) == "" {
+	if cfg.MountBackend == mountBackendNone || strings.TrimSpace(cfg.LocalPath) == "" {
 		return nil
 	}
-	entry, mounted := mountTableEntry(cfg.Mountpoint)
+	entry, mounted := mountTableEntry(cfg.LocalPath)
 	if !mounted {
 		return nil
 	}
 	if !isAFSMountEntry(entry) {
-		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", cfg.Mountpoint, entry)
+		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", cfg.LocalPath, entry)
 	}
 
 	backend, _, err := backendForConfig(cfg)
@@ -895,11 +896,11 @@ func cleanupStaleMount(cfg config) error {
 	}
 
 	s := startStep("Cleaning stale mount")
-	if err := backend.Unmount(cfg.Mountpoint); err != nil {
+	if err := backend.Unmount(cfg.LocalPath); err != nil {
 		s.fail(err.Error())
-		return fmt.Errorf("stale AFS mount at %s could not be unmounted: %w", cfg.Mountpoint, err)
+		return fmt.Errorf("stale AFS mount at %s could not be unmounted: %w", cfg.LocalPath, err)
 	}
-	s.succeed(cfg.Mountpoint)
+	s.succeed(cfg.LocalPath)
 	return nil
 }
 
@@ -949,14 +950,14 @@ func cmdDown() error {
 
 	// Always attempt unmount — even if the daemon crashed, the stale mount
 	// may still be in the mount table and block access to the mountpoint.
-	if backend.IsMounted(st.Mountpoint) {
+	if backend.IsMounted(st.LocalPath) {
 		s := startStep("Unmounting filesystem")
-		if err := backend.Unmount(st.Mountpoint); err != nil {
+		if err := backend.Unmount(st.LocalPath); err != nil {
 			s.fail(err.Error())
 			// Don't return — continue cleanup so the user isn't stuck
-			fmt.Printf("  %s manual cleanup: umount -f %s\n", clr(ansiYellow, "!"), st.Mountpoint)
+			fmt.Printf("  %s manual cleanup: umount -f %s\n", clr(ansiYellow, "!"), st.LocalPath)
 		} else {
-			s.succeed(st.Mountpoint)
+			s.succeed(st.LocalPath)
 		}
 	}
 
@@ -983,7 +984,7 @@ func cmdDown() error {
 		}
 	}
 
-	if shouldCleanLegacyMountCache(st) && !backend.IsMounted(st.Mountpoint) {
+	if shouldCleanLegacyMountCache(st) && !backend.IsMounted(st.LocalPath) {
 		redisCfg := cfg
 		redisCfg.RedisAddr = st.RedisAddr
 		redisCfg.RedisDB = st.RedisDB
@@ -1010,14 +1011,14 @@ func cmdDown() error {
 	if st.ArchivePath != "" {
 		if _, err := os.Stat(st.ArchivePath); err == nil {
 			// Only restore if the mountpoint is now empty/unmounted
-			if !backend.IsMounted(st.Mountpoint) {
+			if !backend.IsMounted(st.LocalPath) {
 				s := startStep("Restoring original directory")
-				_ = os.Remove(st.Mountpoint) // remove empty mountpoint dir
-				if err := os.Rename(st.ArchivePath, st.Mountpoint); err != nil {
+				_ = os.Remove(st.LocalPath) // remove empty mountpoint dir
+				if err := os.Rename(st.ArchivePath, st.LocalPath); err != nil {
 					s.fail(err.Error())
 					fmt.Printf("  %s archive preserved at %s\n", clr(ansiYellow, "!"), st.ArchivePath)
 				} else {
-					s.succeed(st.Mountpoint)
+					s.succeed(st.LocalPath)
 				}
 			} else {
 				fmt.Printf("  %s mount still active, archive preserved at %s\n",
@@ -1026,11 +1027,11 @@ func cmdDown() error {
 		}
 	}
 
-	if st.CreatedMountpoint && st.ArchivePath == "" && !backend.IsMounted(st.Mountpoint) {
-		removeErr := removeEmptyMountpoint(st.Mountpoint)
+	if st.CreatedLocalPath && st.ArchivePath == "" && !backend.IsMounted(st.LocalPath) {
+		removeErr := removeEmptyMountpoint(st.LocalPath)
 		if removeErr != nil {
 			fmt.Printf("  %s empty mountpoint at %s could not be removed automatically (%v)\n",
-				clr(ansiYellow, "!"), st.Mountpoint, removeErr)
+				clr(ansiYellow, "!"), st.LocalPath, removeErr)
 		}
 	}
 
@@ -1100,8 +1101,8 @@ func cmdStatus() error {
 		currentWorkspace = st.CurrentWorkspace
 	}
 	localPath := localSurfacePath(cfg, backendName)
-	if backendName != mountBackendNone && strings.TrimSpace(st.Mountpoint) != "" {
-		localPath = st.Mountpoint
+	if backendName != mountBackendNone && strings.TrimSpace(st.LocalPath) != "" {
+		localPath = st.LocalPath
 	}
 	if backendName == mountBackendNone {
 		title := statusTitle(clr(ansiYellow, "○"), currentWorkspace, localPath, false)
@@ -1113,7 +1114,7 @@ func cmdStatus() error {
 		printBox(title, rows)
 		return nil
 	}
-	mounted := backend.IsMounted(st.Mountpoint)
+	mounted := backend.IsMounted(st.LocalPath)
 	mountAlive := st.MountPID > 0 && processAlive(st.MountPID)
 
 	var title string
@@ -1229,14 +1230,14 @@ func startServices(cfg config) error {
 	}
 
 	s = startStep("Mounting filesystem")
-	createdMountpoint := false
-	if _, statErr := os.Stat(mountCfg.Mountpoint); errors.Is(statErr, os.ErrNotExist) {
-		createdMountpoint = true
+	createdLocalPath := false
+	if _, statErr := os.Stat(mountCfg.LocalPath); errors.Is(statErr, os.ErrNotExist) {
+		createdLocalPath = true
 	} else if statErr != nil {
 		s.fail(statErr.Error())
 		return fmt.Errorf("check mountpoint: %w", statErr)
 	}
-	if err := os.MkdirAll(mountCfg.Mountpoint, 0o755); err != nil {
+	if err := os.MkdirAll(mountCfg.LocalPath, 0o755); err != nil {
 		s.fail(err.Error())
 		return fmt.Errorf("create mountpoint: %w", err)
 	}
@@ -1250,7 +1251,7 @@ func startServices(cfg config) error {
 		s.fail("timeout")
 		return fmt.Errorf("mount did not become ready: %w", err)
 	}
-	s.succeed(mountCfg.Mountpoint)
+	s.succeed(mountCfg.LocalPath)
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
@@ -1263,8 +1264,9 @@ func startServices(cfg config) error {
 		MountBackend:         backendName,
 		ReadOnly:             cfg.ReadOnly,
 		MountEndpoint:        started.Endpoint,
-		Mountpoint:           mountCfg.Mountpoint,
-		CreatedMountpoint:    createdMountpoint,
+		LocalPath:            mountCfg.LocalPath,
+		CreatedLocalPath:     createdLocalPath,
+		Mode:                 modeMount,
 		RedisKey:             mountCfg.RedisKey,
 		RedisLog:             cfg.RedisLog,
 		MountLog:             cfg.MountLog,
@@ -1304,7 +1306,7 @@ func printReadyBox(cfg config, backendName, _ string) {
 		return
 	}
 	rows = append(rows, boxRow{})
-	rows = append(rows, boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.Mountpoint)})
+	rows = append(rows, boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.LocalPath)})
 	rows = append(rows, boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")})
 	printBox(title, rows)
 }
@@ -1560,7 +1562,7 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		return err
 	}
 	mountDuration := step.elapsed()
-	step.succeed(cfg.Mountpoint)
+	step.succeed(cfg.LocalPath)
 
 	st := state{
 		StartedAt:      time.Now().UTC(),
@@ -1572,7 +1574,8 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		MountBackend:   backendName,
 		ReadOnly:       cfg.ReadOnly,
 		MountEndpoint:  started.Endpoint,
-		Mountpoint:     cfg.Mountpoint,
+		LocalPath:      cfg.LocalPath,
+		Mode:           modeMount,
 		RedisKey:       cfg.RedisKey,
 		RedisLog:       cfg.RedisLog,
 		MountLog:       cfg.MountLog,
@@ -1612,7 +1615,7 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 		boxRow{Label: "total", Value: formatStepDuration(totalDuration)},
 		boxRow{Label: "rate", Value: formatMigrationThroughput(importedBytes, dirDuration+fileDuration)},
 		boxRow{},
-		boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.Mountpoint)},
+		boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.LocalPath)},
 		boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")},
 	)
 	printBox(title, readyRows)
@@ -1943,7 +1946,7 @@ func mountDaemonMatchesState(backendName string, st state, command string) bool 
 		if !strings.Contains(command, "agent-filesystem-mount") {
 			return false
 		}
-		return strings.Contains(command, " "+st.RedisKey+" "+st.Mountpoint)
+		return strings.Contains(command, " "+st.RedisKey+" "+st.LocalPath)
 	default:
 		return false
 	}
@@ -1997,6 +2000,14 @@ func loadConfig() (config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return cfg, err
 	}
+	// Migrate legacy field names.
+	if cfg.LocalPath == "" {
+		if cfg.legacySyncLocalPath != "" {
+			cfg.LocalPath = cfg.legacySyncLocalPath
+		} else if cfg.legacyMountpoint != "" {
+			cfg.LocalPath = cfg.legacyMountpoint
+		}
+	}
 	return cfg, nil
 }
 
@@ -2005,9 +2016,8 @@ func defaultConfig() config {
 		RedisAddr:    "localhost:6379",
 		RedisDB:      0,
 		WorkRoot:     defaultWorkRoot(),
-		RuntimeMode:  "host",
 		RedisKey:     "myfs",
-		Mountpoint:   "~/afs",
+		LocalPath:    "~/afs",
 		MountBackend: mountBackendAuto,
 		NFSHost:      "127.0.0.1",
 		NFSPort:      20490,
@@ -2033,12 +2043,12 @@ func prepareConfigForSave(cfg *config) error {
 		return fmt.Errorf("redis db must be >= 0")
 	}
 
-	if cfg.Mountpoint != "" {
-		mp, err := expandPath(cfg.Mountpoint)
+	if cfg.LocalPath != "" {
+		mp, err := expandPath(cfg.LocalPath)
 		if err != nil {
 			return err
 		}
-		cfg.Mountpoint = mp
+		cfg.LocalPath = mp
 	}
 	if strings.TrimSpace(cfg.WorkRoot) == "" {
 		cfg.WorkRoot = defaultWorkRoot()
@@ -2048,9 +2058,6 @@ func prepareConfigForSave(cfg *config) error {
 		return err
 	}
 	cfg.WorkRoot = workRoot
-	if strings.TrimSpace(cfg.RuntimeMode) == "" {
-		cfg.RuntimeMode = "host"
-	}
 	if strings.TrimSpace(cfg.RedisLog) == "" {
 		cfg.RedisLog = def.RedisLog
 	}
@@ -2068,14 +2075,14 @@ func prepareConfigForSave(cfg *config) error {
 	cfg.MountBackend = backendName
 
 	if backendName == mountBackendNone {
-		cfg.Mountpoint = ""
+		// No mount backend — LocalPath is used for sync mode only; don't clear it.
 	} else {
-		if strings.TrimSpace(cfg.Mountpoint) == "" {
-			mp, err := expandPath(def.Mountpoint)
+		if strings.TrimSpace(cfg.LocalPath) == "" {
+			mp, err := expandPath(def.LocalPath)
 			if err != nil {
 				return err
 			}
-			cfg.Mountpoint = mp
+			cfg.LocalPath = mp
 		}
 		if backendName == mountBackendNFS {
 			if cfg.NFSHost == "" {
@@ -2101,13 +2108,6 @@ func prepareConfigForSave(cfg *config) error {
 			return err
 		}
 	}
-	if strings.TrimSpace(cfg.SyncLocalPath) != "" {
-		expanded, err := expandPath(cfg.SyncLocalPath)
-		if err != nil {
-			return err
-		}
-		cfg.SyncLocalPath = expanded
-	}
 	if cfg.SyncFileSizeCapMB < 0 {
 		return fmt.Errorf("syncFileSizeCapMB must be >= 0")
 	}
@@ -2129,10 +2129,10 @@ func validateConfiguredMountpoint(cfg config) error {
 	if err != nil {
 		return err
 	}
-	if backendName == mountBackendNone || strings.TrimSpace(cfg.Mountpoint) == "" {
+	if backendName == mountBackendNone || strings.TrimSpace(cfg.LocalPath) == "" {
 		return nil
 	}
-	return validateMountpointPath(cfg.Mountpoint)
+	return validateMountpointPath(cfg.LocalPath)
 }
 
 func validateMountpointPath(mountpoint string) error {
@@ -2288,6 +2288,20 @@ func loadState() (state, error) {
 	}
 	if err := json.Unmarshal(b, &st); err != nil {
 		return st, err
+	}
+	// Migrate legacy field names.
+	if st.LocalPath == "" {
+		if st.legacySyncLocalPath != "" {
+			st.LocalPath = st.legacySyncLocalPath
+		} else if st.legacyMountpoint != "" {
+			st.LocalPath = st.legacyMountpoint
+		}
+	}
+	if st.Mode == "" && st.legacySyncMode != "" {
+		st.Mode = st.legacySyncMode
+	}
+	if !st.CreatedLocalPath && st.legacyCreatedMountpoint {
+		st.CreatedLocalPath = st.legacyCreatedMountpoint
 	}
 	return st, nil
 }

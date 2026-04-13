@@ -70,8 +70,8 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNFS)
 	}
 	wantMountpoint := filepath.Join(homeDir, "mounted-demo")
-	if cfg.Mountpoint != wantMountpoint {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, wantMountpoint)
+	if cfg.LocalPath != wantMountpoint {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, wantMountpoint)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNFS)
 	}
 	wantMountpoint := filepath.Join(homeDir, "override")
-	if cfg.Mountpoint != wantMountpoint {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, wantMountpoint)
+	if cfg.LocalPath != wantMountpoint {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, wantMountpoint)
 	}
 
 	saved, err := loadConfig()
@@ -157,8 +157,8 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 	if saved.CurrentWorkspace != "beta" {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q", saved.CurrentWorkspace, "beta")
 	}
-	if saved.Mountpoint != wantMountpoint {
-		t.Fatalf("saved Mountpoint = %q, want %q", saved.Mountpoint, wantMountpoint)
+	if saved.LocalPath != wantMountpoint {
+		t.Fatalf("saved Mountpoint = %q, want %q", saved.LocalPath, wantMountpoint)
 	}
 	if saved.MountBackend != mountBackendNFS {
 		t.Fatalf("saved MountBackend = %q, want %q", saved.MountBackend, mountBackendNFS)
@@ -181,7 +181,7 @@ func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *test
 	base.RedisDB = 0
 	base.CurrentWorkspace = "alpha"
 	base.MountBackend = mountBackendNFS
-	base.Mountpoint = filepath.Join(t.TempDir(), "valid-mountpoint")
+	base.LocalPath = filepath.Join(t.TempDir(), "valid-mountpoint")
 	base.NFSBin = "/usr/bin/true"
 	if err := saveConfig(base); err != nil {
 		t.Fatalf("saveConfig(base) returned error: %v", err)
@@ -207,8 +207,8 @@ func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *test
 	if saved.CurrentWorkspace != base.CurrentWorkspace {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q after rejected mountpoint", saved.CurrentWorkspace, base.CurrentWorkspace)
 	}
-	if saved.Mountpoint != base.Mountpoint {
-		t.Fatalf("saved Mountpoint = %q, want %q after rejected mountpoint", saved.Mountpoint, base.Mountpoint)
+	if saved.LocalPath != base.LocalPath {
+		t.Fatalf("saved Mountpoint = %q, want %q after rejected mountpoint", saved.LocalPath, base.LocalPath)
 	}
 	if saved.MountBackend != base.MountBackend {
 		t.Fatalf("saved MountBackend = %q, want %q after rejected mountpoint", saved.MountBackend, base.MountBackend)
@@ -276,8 +276,8 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	if got.CurrentWorkspace != "demo" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "demo")
 	}
-	if got.Mountpoint != "/tmp/afs-demo" {
-		t.Fatalf("Mountpoint = %q, want %q", got.Mountpoint, "/tmp/afs-demo")
+	if got.LocalPath != "/tmp/afs-demo" {
+		t.Fatalf("Mountpoint = %q, want %q", got.LocalPath, "/tmp/afs-demo")
 	}
 	if strings.Contains(output.String(), "Available workspace: demo") {
 		t.Fatalf("prompt output = %q, want no workspace prompt", output.String())
@@ -293,8 +293,8 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	if saved.CurrentWorkspace != "demo" {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q", saved.CurrentWorkspace, "demo")
 	}
-	if saved.Mountpoint != "/tmp/afs-demo" {
-		t.Fatalf("saved Mountpoint = %q, want %q", saved.Mountpoint, "/tmp/afs-demo")
+	if saved.LocalPath != "/tmp/afs-demo" {
+		t.Fatalf("saved Mountpoint = %q, want %q", saved.LocalPath, "/tmp/afs-demo")
 	}
 }
 
@@ -562,7 +562,7 @@ func TestCmdWorkspaceUseRejectsSwitchWhileDifferentWorkspaceMounted(t *testing.T
 		CurrentWorkspace: "alpha",
 		MountBackend:     mountBackendNFS,
 		MountPID:         os.Getpid(),
-		Mountpoint:       "/tmp/afs-alpha",
+		LocalPath:        "/tmp/afs-alpha",
 	}); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
 	}

@@ -285,15 +285,15 @@ func activeMountedWorkspaceState() (mountedWorkspaceState, error) {
 		return mountedWorkspaceState{}, nil
 	}
 	if st.MountPID > 0 && processAlive(st.MountPID) {
-		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.Mountpoint)}, nil
+		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.LocalPath)}, nil
 	}
 
 	backend, _, err := backendForState(st)
 	if err != nil {
 		return mountedWorkspaceState{}, err
 	}
-	if strings.TrimSpace(st.Mountpoint) != "" && backend.IsMounted(st.Mountpoint) {
-		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.Mountpoint)}, nil
+	if strings.TrimSpace(st.LocalPath) != "" && backend.IsMounted(st.LocalPath) {
+		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.LocalPath)}, nil
 	}
 	return mountedWorkspaceState{}, nil
 }
@@ -672,7 +672,7 @@ func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
 		MountBackend:         backendName,
 		ReadOnly:             mountCfg.ReadOnly,
 		MountEndpoint:        started.Endpoint,
-		Mountpoint:           mountCfg.Mountpoint,
+		LocalPath:            mountCfg.LocalPath,
 		RedisKey:             mountKey,
 		RedisLog:             mountCfg.RedisLog,
 		MountLog:             mountCfg.MountLog,

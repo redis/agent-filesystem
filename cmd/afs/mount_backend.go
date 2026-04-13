@@ -130,7 +130,7 @@ func (f fuseBackend) Start(cfg config) (mountStartResult, error) {
 		"--db", strconv.Itoa(cfg.RedisDB),
 		"--foreground",
 		cfg.RedisKey,
-		cfg.Mountpoint,
+		cfg.LocalPath,
 	}
 	if cfg.RedisUsername != "" {
 		args = append([]string{"--user", cfg.RedisUsername}, args...)
@@ -166,7 +166,7 @@ func (f fuseBackend) Start(cfg config) (mountStartResult, error) {
 }
 
 func (f fuseBackend) WaitForMount(cfg config, _ mountStartResult, timeout time.Duration) error {
-	return waitForMountpoint(cfg.Mountpoint, timeout, f.IsMounted)
+	return waitForMountpoint(cfg.LocalPath, timeout, f.IsMounted)
 }
 
 func (f fuseBackend) IsMounted(mountpoint string) bool {
@@ -290,7 +290,7 @@ func (n nfsBackend) WaitForMount(cfg config, started mountStartResult, timeout t
 		if started.PID > 0 && !processAlive(started.PID) {
 			return fmt.Errorf("nfs gateway exited before mount completed; see %s", cfg.MountLog)
 		}
-		if n.IsMounted(cfg.Mountpoint) {
+		if n.IsMounted(cfg.LocalPath) {
 			return nil
 		}
 		if err := n.mountLocal(cfg, started.Endpoint); err != nil {
@@ -298,7 +298,7 @@ func (n nfsBackend) WaitForMount(cfg config, started mountStartResult, timeout t
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		if err := waitForMountpoint(cfg.Mountpoint, 1200*time.Millisecond, n.IsMounted); err == nil {
+		if err := waitForMountpoint(cfg.LocalPath, 1200*time.Millisecond, n.IsMounted); err == nil {
 			return nil
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -306,7 +306,7 @@ func (n nfsBackend) WaitForMount(cfg config, started mountStartResult, timeout t
 	if lastMountErr != nil {
 		return lastMountErr
 	}
-	return waitForMountpoint(cfg.Mountpoint, timeout, n.IsMounted)
+	return waitForMountpoint(cfg.LocalPath, timeout, n.IsMounted)
 }
 
 func (n nfsBackend) mountLocal(cfg config, endpoint string) error {
@@ -322,13 +322,13 @@ func (n nfsBackend) mountLocal(cfg config, endpoint string) error {
 	if port <= 0 {
 		port = 20490
 	}
-	if err := os.MkdirAll(cfg.Mountpoint, 0o755); err != nil {
+	if err := os.MkdirAll(cfg.LocalPath, 0o755); err != nil {
 		return fmt.Errorf("create mountpoint: %w", err)
 	}
 
 	if runtime.GOOS == "darwin" {
 		opts := darwinNFSMountOptions(port)
-		cmd := exec.Command("/sbin/mount_nfs", "-o", opts, serverPath, cfg.Mountpoint)
+		cmd := exec.Command("/sbin/mount_nfs", "-o", opts, serverPath, cfg.LocalPath)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("mount_nfs failed: %w (%s)", err, strings.TrimSpace(string(out)))
 		}
@@ -336,7 +336,7 @@ func (n nfsBackend) mountLocal(cfg config, endpoint string) error {
 	}
 
 	opts := fmt.Sprintf("vers=3,tcp,port=%d,mountport=%d,nolock", port, port)
-	cmd := exec.Command("mount", "-t", "nfs", "-o", opts, serverPath, cfg.Mountpoint)
+	cmd := exec.Command("mount", "-t", "nfs", "-o", opts, serverPath, cfg.LocalPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("mount -t nfs failed: %w (%s)", err, strings.TrimSpace(string(out)))
 	}

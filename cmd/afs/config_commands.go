@@ -183,9 +183,9 @@ func loadConfigForUp(args []string) (config, error) {
 }
 
 type upConfigPresence struct {
-	filePresent       bool
-	redisDBPresent    bool
-	mountpointPresent bool
+	filePresent    bool
+	redisDBPresent bool
+	localPathPresent bool
 }
 
 func loadConfigForUpWithIO(args []string, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
@@ -248,7 +248,7 @@ func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) er
 	}
 
 	cfg.CurrentWorkspace = workspace
-	cfg.Mountpoint = mountpoint
+	cfg.LocalPath = mountpoint
 	return nil
 }
 
@@ -274,7 +274,9 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 
 	presence.filePresent = true
 	_, presence.redisDBPresent = fields["redisDB"]
-	_, presence.mountpointPresent = fields["mountpoint"]
+	_, lpPresent := fields["localPath"]
+	_, mpPresent := fields["mountpoint"]
+	presence.localPathPresent = lpPresent || mpPresent
 	return cfg, presence, nil
 }
 
@@ -290,8 +292,8 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 
 	missingDatabase := !presence.filePresent || !presence.redisDBPresent
 	missingWorkspace := backendName != mountBackendNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
-	missingMountpoint := backendName != mountBackendNone && (!presence.filePresent || !presence.mountpointPresent || strings.TrimSpace(cfg.Mountpoint) == "")
-	if !missingDatabase && !missingWorkspace && !missingMountpoint {
+	missingLocalPath := backendName != mountBackendNone && (!presence.filePresent || !presence.localPathPresent || strings.TrimSpace(cfg.LocalPath) == "")
+	if !missingDatabase && !missingWorkspace && !missingLocalPath {
 		return false, nil
 	}
 	if missingWorkspace {
@@ -299,7 +301,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, fmt.Errorf("no current workspace is selected for 'up'\nRun '%s workspace use <workspace>' or '%s up <workspace> <mountpoint>'", bin, bin)
 	}
 	if !allowPrompt {
-		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and mountpoint", filepath.Base(os.Args[0]))
+		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and local path", filepath.Base(os.Args[0]))
 	}
 
 	changed := false
@@ -321,20 +323,20 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		changed = true
 	}
 
-	if missingMountpoint {
-		defaultMountpoint := strings.TrimSpace(cfg.Mountpoint)
-		if defaultMountpoint == "" {
-			defaultMountpoint = defaultConfig().Mountpoint
+	if missingLocalPath {
+		defaultLocalPath := strings.TrimSpace(cfg.LocalPath)
+		if defaultLocalPath == "" {
+			defaultLocalPath = defaultConfig().LocalPath
 		}
 		mountpoint, err := promptString(r, out,
 			"  Local mountpoint\n  "+clr(ansiDim, "Directory where the workspace should be mounted"),
-			defaultMountpoint)
+			defaultLocalPath)
 		if err != nil {
 			return false, err
 		}
 		mountpoint = strings.TrimSpace(mountpoint)
 		if mountpoint == "" {
-			return false, fmt.Errorf("mountpoint cannot be empty when starting a mounted filesystem")
+			return false, fmt.Errorf("local path cannot be empty when starting a mounted filesystem")
 		}
 		resolvedMountpoint, err := expandPath(mountpoint)
 		if err != nil {
@@ -343,7 +345,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		if err := validateMountpointPath(resolvedMountpoint); err != nil {
 			return false, err
 		}
-		cfg.Mountpoint = resolvedMountpoint
+		cfg.LocalPath = resolvedMountpoint
 		changed = true
 	}
 
@@ -579,7 +581,7 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		cfg.MountBackend = strings.TrimSpace(overrides.mountBackend.value)
 	}
 	if overrides.mountpoint.set {
-		cfg.Mountpoint = overrides.mountpoint.value
+		cfg.LocalPath = overrides.mountpoint.value
 	}
 	if overrides.readonly.set {
 		cfg.ReadOnly = overrides.readonly.value
@@ -631,7 +633,7 @@ func applyRedisURL(cfg *config, raw string) error {
 func configSummaryRows(cfg config, source string) []boxRow {
 	mountValue := "none"
 	if cfg.MountBackend != mountBackendNone {
-		mountValue = fmt.Sprintf("%s at %s", userModeLabel(cfg.MountBackend), cfg.Mountpoint)
+		mountValue = fmt.Sprintf("%s at %s", userModeLabel(cfg.MountBackend), cfg.LocalPath)
 	}
 
 	rows := []boxRow{

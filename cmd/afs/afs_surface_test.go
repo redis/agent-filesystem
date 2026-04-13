@@ -60,11 +60,8 @@ func TestDefaultConfigUsesAFSDefaults(t *testing.T) {
 	if cfg.WorkRoot != defaultWorkRoot() {
 		t.Fatalf("WorkRoot = %q, want %q", cfg.WorkRoot, defaultWorkRoot())
 	}
-	if cfg.RuntimeMode != "host" {
-		t.Fatalf("RuntimeMode = %q, want %q", cfg.RuntimeMode, "host")
-	}
-	if cfg.Mountpoint != "~/afs" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "~/afs")
+	if cfg.LocalPath != "~/afs" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, "~/afs")
 	}
 	if cfg.RedisLog != "/tmp/afs-redis.log" {
 		t.Fatalf("RedisLog = %q, want %q", cfg.RedisLog, "/tmp/afs-redis.log")
@@ -177,7 +174,7 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 	cfg.RedisAddr = "localhost:6379"
 	cfg.RedisDB = 0
 	cfg.CurrentWorkspace = "newfiles"
-	cfg.Mountpoint = "/Users/rowantrollope/abc"
+	cfg.LocalPath = "/Users/rowantrollope/abc"
 
 	out, err := captureStdout(t, func() error {
 		printReadyBox(cfg, mountBackendNFS, "")
@@ -209,7 +206,7 @@ func TestPrintReadyBoxKeepsVisibleLinesWithinEightyColumns(t *testing.T) {
 	cfg.RedisAddr = "localhost:6379"
 	cfg.RedisDB = 0
 	cfg.CurrentWorkspace = "workspace-with-a-very-long-name-for-status-output"
-	cfg.Mountpoint = "/Users/example/Library/Application Support/Agent Filesystem/projects/customer-success/super-long-nested-workspace-path"
+	cfg.LocalPath = "/Users/example/Library/Application Support/Agent Filesystem/projects/customer-success/super-long-nested-workspace-path"
 
 	out, err := captureStdout(t, func() error {
 		printReadyBox(cfg, mountBackendNFS, "")
@@ -361,8 +358,8 @@ func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
 		CurrentWorkspace:     "demo",
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendFuse,
-		Mountpoint:           mountpoint,
-		CreatedMountpoint:    true,
+		LocalPath:            mountpoint,
+		CreatedLocalPath:     true,
 		RedisKey:             workspaceRedisKey("demo"),
 	}
 	if err := saveState(st); err != nil {
@@ -419,7 +416,7 @@ func TestParseOrphanMountDaemonPIDsMatchesFuseDaemonsForSameMountpoint(t *testin
 		MountPID:     200,
 		MountBackend: mountBackendFuse,
 		RedisKey:     "demo",
-		Mountpoint:   "/tmp/demo",
+		LocalPath:    "/tmp/demo",
 	}
 
 	psOutput := strings.Join([]string{

@@ -33,7 +33,7 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 
 	cfg := defaultConfig()
 	cfg.MountBackend = mountBackendNone
-	cfg.Mountpoint = "~/should-be-cleared"
+	cfg.LocalPath = "~/mypath"
 	cfg.WorkRoot = t.TempDir()
 	cfg.UseExistingRedis = true
 
@@ -43,8 +43,9 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 	if cfg.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNone)
 	}
-	if cfg.Mountpoint != "" {
-		t.Fatalf("Mountpoint = %q, want empty string", cfg.Mountpoint)
+	// LocalPath is kept even when backend=none (used for sync mode).
+	if cfg.LocalPath == "" {
+		t.Fatalf("LocalPath should be preserved when mountBackend=none; got empty")
 	}
 }
 
@@ -72,8 +73,8 @@ func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	if cfg.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNone)
 	}
-	if cfg.Mountpoint != "" {
-		t.Fatalf("Mountpoint = %q, want empty", cfg.Mountpoint)
+	if cfg.LocalPath != "" {
+		t.Fatalf("Mountpoint = %q, want empty", cfg.LocalPath)
 	}
 }
 
@@ -117,7 +118,7 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	existing.CurrentWorkspace = "demo"
 	existing.Mode = modeMount // keep the menu label on "live mount" for the assertion below
 	existing.MountBackend = mountBackendNone
-	existing.Mountpoint = ""
+	existing.LocalPath = ""
 
 	// Menu (edit mode): 1=Mode, 2=Redis, 3=surface, 4=workspace, 5=save.
 	// Pick option 3 (filesystem mount) → keep as none → back to menu →
@@ -212,7 +213,7 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	existing.CurrentWorkspace = "repo"
 	existing.Mode = modeMount // stay on live mount in the edit menu
 	existing.MountBackend = mountBackendNone
-	existing.Mountpoint = ""
+	existing.LocalPath = ""
 	existing.NFSPort = busyAddr.Port
 
 	// Edit-menu items: 3 = filesystem mount, 5 = save and exit.
@@ -230,8 +231,8 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
 	}
-	if cfg.Mountpoint != "/tmp/afs-mount" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/afs-mount")
+	if cfg.LocalPath != "/tmp/afs-mount" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, "/tmp/afs-mount")
 	}
 	if runtime.GOOS == "darwin" {
 		if cfg.NFSHost != "127.0.0.1" {
@@ -406,8 +407,8 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	if cfg.CurrentWorkspace != "newfiles" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "newfiles")
 	}
-	if cfg.Mountpoint != "/tmp/afs" {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.Mountpoint, "/tmp/afs")
+	if cfg.LocalPath != "/tmp/afs" {
+		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, "/tmp/afs")
 	}
 	if cfg.MountBackend != defaultMountBackend() {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, defaultMountBackend())
@@ -426,7 +427,7 @@ func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
 	cfg.UseExistingRedis = true
 	cfg.CurrentWorkspace = "demo"
 	cfg.MountBackend = mountBackendNone
-	cfg.Mountpoint = ""
+	cfg.LocalPath = ""
 
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(mountpointFile)))
 	err := promptLocalFilesystemSetup(reader, ioDiscard{}, &cfg, false)
@@ -439,8 +440,8 @@ func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
 	if cfg.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q after rejected mountpoint", cfg.MountBackend, mountBackendNone)
 	}
-	if cfg.Mountpoint != "" {
-		t.Fatalf("Mountpoint = %q, want empty after rejected mountpoint", cfg.Mountpoint)
+	if cfg.LocalPath != "" {
+		t.Fatalf("Mountpoint = %q, want empty after rejected mountpoint", cfg.LocalPath)
 	}
 }
 
@@ -548,8 +549,8 @@ func TestStartServicesFilesystemOnlyUsesRedisWithoutMountpoint(t *testing.T) {
 	if st.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q", st.MountBackend, mountBackendNone)
 	}
-	if st.Mountpoint != "" {
-		t.Fatalf("Mountpoint = %q, want empty", st.Mountpoint)
+	if st.LocalPath != "" {
+		t.Fatalf("Mountpoint = %q, want empty", st.LocalPath)
 	}
 	if st.RedisAddr != mr.Addr() {
 		t.Fatalf("RedisAddr = %q, want %q", st.RedisAddr, mr.Addr())
@@ -567,7 +568,7 @@ func TestStartServicesRejectsMissingConfiguredWorkspaceForMountedFilesystem(t *t
 	cfg.MountBackend = mountBackendNFS
 	cfg.NFSBin = "/usr/bin/true"
 	cfg.CurrentWorkspace = "missing-workspace"
-	cfg.Mountpoint = filepath.Join(t.TempDir(), "mnt")
+	cfg.LocalPath = filepath.Join(t.TempDir(), "mnt")
 
 	if err := resolveConfigPaths(&cfg); err != nil {
 		t.Fatalf("resolveConfigPaths() returned error: %v", err)

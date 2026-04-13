@@ -369,7 +369,7 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 		CurrentWorkspace:     "repo",
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
-		Mountpoint:           filepath.Join(t.TempDir(), "mount"),
+		LocalPath:            filepath.Join(t.TempDir(), "mount"),
 		RedisKey:             workspaceRedisKey("repo"),
 	}
 	if err := saveState(st); err != nil {
@@ -459,7 +459,7 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 		CurrentWorkspace:     "repo",
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
-		Mountpoint:           filepath.Join(t.TempDir(), "mount"),
+		LocalPath:            filepath.Join(t.TempDir(), "mount"),
 		RedisKey:             workspaceRedisKey("repo"),
 	}
 	if err := saveState(st); err != nil {
@@ -544,7 +544,7 @@ func TestCheckpointCreateUsesActiveMountedWorkspaceWhenConfigUnset(t *testing.T)
 		CurrentWorkspace:     "repo",
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
-		Mountpoint:           filepath.Join(t.TempDir(), "mount"),
+		LocalPath:            filepath.Join(t.TempDir(), "mount"),
 		RedisKey:             workspaceRedisKey("repo"),
 	}); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
@@ -655,7 +655,7 @@ func TestLoadStateForMountAtSourceRejectsExistingMountedState(t *testing.T) {
 		StartedAt:        time.Now().UTC(),
 		CurrentWorkspace: "repo",
 		MountBackend:     mountBackendNFS,
-		Mountpoint:       filepath.Join(t.TempDir(), "mount"),
+		LocalPath:        filepath.Join(t.TempDir(), "mount"),
 		ArchivePath:      filepath.Join(t.TempDir(), "mount.pre-afs"),
 	}
 	if err := saveState(st); err != nil {

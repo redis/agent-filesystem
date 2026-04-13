@@ -582,7 +582,7 @@ func (s *afsMCPServer) toolAFSStatus() (any, error) {
 		"work_root":         s.cfg.WorkRoot,
 		"current_workspace": strings.TrimSpace(s.cfg.CurrentWorkspace),
 		"mount_backend":     s.cfg.MountBackend,
-		"mountpoint":        s.cfg.Mountpoint,
+		"local_path":        s.cfg.LocalPath,
 	}, nil
 }
 

@@ -53,14 +53,17 @@ func effectiveMode(cfg config) (string, error) {
 // migrating those users silently — flipping a live mount to sync mid-session
 // could cause surprising writes.
 func isLegacyMountConfig(cfg config) bool {
-	if strings.TrimSpace(cfg.SyncLocalPath) != "" {
+	// A legacy mount config has a non-none mount backend but no explicit mode.
+	// With the unified LocalPath field there's no separate SyncLocalPath to
+	// distinguish legacy configs, so we rely solely on Mode being empty.
+	if strings.TrimSpace(cfg.Mode) != "" {
 		return false
 	}
 	backend := strings.TrimSpace(cfg.MountBackend)
 	if backend == "" || backend == mountBackendNone {
 		return false
 	}
-	if strings.TrimSpace(cfg.Mountpoint) == "" {
+	if strings.TrimSpace(cfg.LocalPath) == "" {
 		return false
 	}
 	return true

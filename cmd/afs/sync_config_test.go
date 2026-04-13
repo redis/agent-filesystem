@@ -18,13 +18,13 @@ func TestEffectiveModeDefaults(t *testing.T) {
 		{"explicit none", config{Mode: "none"}, modeNone, false},
 		{"garbage errors", config{Mode: "garbage"}, "", true},
 		{
-			name: "legacy mount config (empty mode + mountpoint + backend)",
-			cfg:  config{MountBackend: "nfs", Mountpoint: "/tmp/afs"},
+			name: "legacy mount config (empty mode + local path + backend)",
+			cfg:  config{MountBackend: "nfs", LocalPath: "/tmp/afs"},
 			want: modeMount,
 		},
 		{
-			name: "legacy config with explicit sync path prefers sync",
-			cfg:  config{MountBackend: "nfs", Mountpoint: "/tmp/afs", SyncLocalPath: "/tmp/afs"},
+			name: "explicit sync mode with local path",
+			cfg:  config{MountBackend: "nfs", LocalPath: "/tmp/afs", Mode: modeSync},
 			want: modeSync,
 		},
 	}
