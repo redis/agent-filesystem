@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,6 +16,57 @@ import (
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
+
+const syncDaemonBootstrapEnv = "AFS_SYNC_BOOTSTRAP"
+
+type syncBootstrap struct {
+	cfg             config
+	workspace       string
+	redisKey        string
+	headCheckpoint  string
+	initializedRoot bool
+}
+
+type syncDaemonBootstrap struct {
+	Config    config `json:"config"`
+	Workspace string `json:"workspace"`
+	RedisKey  string `json:"redis_key"`
+}
+
+func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(), error) {
+	resolvedCfg, service, closeFn, err := openAFSControlPlane(ctx)
+	if err != nil {
+		return syncBootstrap{}, func() {}, err
+	}
+
+	workspace, err := currentWorkspaceNameFromControlPlane(ctx, resolvedCfg, service)
+	if err != nil {
+		closeFn()
+		return syncBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can sync: %w", err)
+	}
+
+	session, err := service.CreateWorkspaceSession(ctx, workspace)
+	if err != nil {
+		closeFn()
+		return syncBootstrap{}, func() {}, err
+	}
+
+	runtimeCfg := resolvedCfg
+	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.RedisAddr = session.Redis.RedisAddr
+	runtimeCfg.RedisUsername = session.Redis.RedisUsername
+	runtimeCfg.RedisPassword = session.Redis.RedisPassword
+	runtimeCfg.RedisDB = session.Redis.RedisDB
+	runtimeCfg.RedisTLS = session.Redis.RedisTLS
+
+	return syncBootstrap{
+		cfg:             runtimeCfg,
+		workspace:       session.Workspace,
+		redisKey:        session.RedisKey,
+		headCheckpoint:  session.HeadCheckpointID,
+		initializedRoot: session.Initialized,
+	}, closeFn, nil
+}
 
 // startSyncServices is the sync-mode counterpart to startServices. It boots
 // Redis (if managed), opens the live workspace root, does the initial
@@ -38,50 +90,44 @@ func startSyncServices(cfg config, foreground bool) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	s := startStep("Connecting to Redis")
-	rdb := redis.NewClient(buildRedisOptions(cfg, 4))
-	defer rdb.Close()
-	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer pingCancel()
-	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		s.fail(fmt.Sprintf("cannot reach %s", cfg.RedisAddr))
-		return fmt.Errorf("cannot connect to Redis at %s: %w", cfg.RedisAddr, err)
-	}
-	s.succeed(cfg.RedisAddr)
-
-	store := newAFSStore(rdb)
-
-	workspaceStep := startStep("Ensuring current workspace")
-	workspace, err := ensureMountWorkspace(ctx, cfg, store)
-	if err != nil {
-		workspaceStep.fail(err.Error())
-		return fmt.Errorf("a current workspace is required before AFS can sync: %w", err)
-	}
-	workspaceStep.succeed(workspace)
-
-	prepareStep := startStep("Opening live workspace")
-	mountKey, _, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
+	prepareStep := startStep("Opening workspace session")
+	bootstrap, closeSession, err := prepareSyncBootstrap(ctx, cfg)
 	if err != nil {
 		prepareStep.fail(err.Error())
 		return err
 	}
-	if initialized {
-		prepareStep.succeed(workspace + " (initialized)")
+	defer closeSession()
+	runtimeCfg := bootstrap.cfg
+	if bootstrap.initializedRoot {
+		prepareStep.succeed(bootstrap.workspace + " (initialized)")
 	} else {
-		prepareStep.succeed(workspace)
+		prepareStep.succeed(bootstrap.workspace)
 	}
+
+	s := startStep("Connecting to Redis")
+	rdb := redis.NewClient(buildRedisOptions(runtimeCfg, 4))
+	defer rdb.Close()
+	pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer pingCancel()
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
+		s.fail(fmt.Sprintf("cannot reach %s", runtimeCfg.RedisAddr))
+		return fmt.Errorf("cannot connect to Redis at %s: %w", runtimeCfg.RedisAddr, err)
+	}
+	s.succeed(runtimeCfg.RedisAddr)
+
+	store := newAFSStore(rdb)
 
 	// Do the initial reconciliation in the foreground so the user sees
 	// progress and the local folder is fully populated before we return.
 	bootStep := startStep("Syncing workspace")
-	fsClient := client.New(rdb, mountKey)
+	fsClient := client.New(rdb, bootstrap.redisKey)
 	daemon, err := newSyncDaemon(syncDaemonConfig{
-		Workspace:    workspace,
+		Workspace:    bootstrap.workspace,
 		LocalRoot:    localRoot,
 		FS:           fsClient,
 		Store:        store,
-		MaxFileBytes: syncSizeCapBytes(cfg),
-		Readonly:     cfg.ReadOnly,
+		MaxFileBytes: syncSizeCapBytes(runtimeCfg),
+		Readonly:     runtimeCfg.ReadOnly,
 		Interactive:  foreground,
 	})
 	if err != nil {
@@ -100,30 +146,30 @@ func startSyncServices(cfg config, foreground bool) error {
 		bootStep.fail(err.Error())
 		return err
 	}
-	bootStep.succeed(fmt.Sprintf("%s synced", workspace))
+	bootStep.succeed(fmt.Sprintf("%s synced", bootstrap.workspace))
 
 	if foreground {
 		// --interactive: keep the daemon in this process with logs on stderr.
 		// Don't stop the daemon we just started — it's already running.
 		st := state{
 			StartedAt:        time.Now().UTC(),
-			RedisAddr:        cfg.RedisAddr,
-			RedisDB:          cfg.RedisDB,
-			CurrentWorkspace: workspace,
+			RedisAddr:        runtimeCfg.RedisAddr,
+			RedisDB:          runtimeCfg.RedisDB,
+			CurrentWorkspace: bootstrap.workspace,
 			MountBackend:     mountBackendNone,
-			ReadOnly:         cfg.ReadOnly,
-			RedisKey:         mountKey,
+			ReadOnly:         runtimeCfg.ReadOnly,
+			RedisKey:         bootstrap.redisKey,
 			Mode:             modeSync,
 			SyncPID:          os.Getpid(),
 			LocalPath:        localRoot,
-			SyncLog:          cfg.SyncLog,
+			SyncLog:          runtimeCfg.SyncLog,
 		}
 		if err := saveState(st); err != nil {
 			daemon.Stop()
 			return err
 		}
 
-		printSyncReadyBox(cfg, workspace, localRoot)
+		printSyncReadyBox(runtimeCfg, bootstrap.workspace, localRoot)
 		fmt.Fprintf(os.Stderr, "\n  Running in interactive mode. Ctrl-C to stop.\n\n")
 
 		// Disable main()'s SIGINT handler so we get the signal here.
@@ -149,7 +195,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		} else {
 			cleanStep.succeed(localRoot)
 		}
-		_ = removeSyncState(workspace)
+		_ = removeSyncState(bootstrap.workspace)
 		if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "afs sync: cleanup state file: %v\n", err)
 		}
@@ -162,7 +208,15 @@ func startSyncServices(cfg config, foreground bool) error {
 	daemon.Stop()
 
 	daemonStep := startStep("Starting background daemon")
-	daemonPID, err := startSyncDaemonProcess(cfg)
+	var daemonBootstrap *syncDaemonBootstrap
+	if productMode, _ := effectiveProductMode(cfg); productMode != productModeDirect {
+		daemonBootstrap = &syncDaemonBootstrap{
+			Config:    runtimeCfg,
+			Workspace: bootstrap.workspace,
+			RedisKey:  bootstrap.redisKey,
+		}
+	}
+	daemonPID, err := startSyncDaemonProcess(runtimeCfg, daemonBootstrap)
 	if err != nil {
 		daemonStep.fail(err.Error())
 		return err
@@ -171,29 +225,29 @@ func startSyncServices(cfg config, foreground bool) error {
 
 	st := state{
 		StartedAt:        time.Now().UTC(),
-		RedisAddr:        cfg.RedisAddr,
-		RedisDB:          cfg.RedisDB,
-		CurrentWorkspace: workspace,
+		RedisAddr:        runtimeCfg.RedisAddr,
+		RedisDB:          runtimeCfg.RedisDB,
+		CurrentWorkspace: bootstrap.workspace,
 		MountBackend:     mountBackendNone,
-		ReadOnly:         cfg.ReadOnly,
-		RedisKey:         mountKey,
+		ReadOnly:         runtimeCfg.ReadOnly,
+		RedisKey:         bootstrap.redisKey,
 		Mode:             modeSync,
 		SyncPID:          daemonPID,
 		LocalPath:        localRoot,
-		SyncLog:          cfg.SyncLog,
+		SyncLog:          runtimeCfg.SyncLog,
 	}
 	if err := saveState(st); err != nil {
 		return err
 	}
 
-	printSyncReadyBox(cfg, workspace, localRoot)
+	printSyncReadyBox(runtimeCfg, bootstrap.workspace, localRoot)
 	return nil
 }
 
 // startSyncDaemonProcess re-execs the current binary with the hidden
 // `_sync-daemon` subcommand. The child process inherits the config path
 // and runs in a new session (Setsid) so it survives the parent exiting.
-func startSyncDaemonProcess(cfg config) (int, error) {
+func startSyncDaemonProcess(cfg config, bootstrap *syncDaemonBootstrap) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, fmt.Errorf("cannot find own executable: %w", err)
@@ -218,6 +272,15 @@ func startSyncDaemonProcess(cfg config) (int, error) {
 	}
 
 	cmd := exec.Command(exe, args...)
+	cmd.Env = os.Environ()
+	bootstrapPath := ""
+	if bootstrap != nil {
+		bootstrapPath, err = writeSyncDaemonBootstrap(*bootstrap)
+		if err != nil {
+			return 0, err
+		}
+		cmd.Env = append(cmd.Env, syncDaemonBootstrapEnv+"="+bootstrapPath)
+	}
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if devNull, err := os.Open(os.DevNull); err == nil {
@@ -227,6 +290,9 @@ func startSyncDaemonProcess(cfg config) (int, error) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
+		if bootstrapPath != "" {
+			_ = os.Remove(bootstrapPath)
+		}
 		return 0, fmt.Errorf("start sync daemon: %w", err)
 	}
 	pid := cmd.Process.Pid
@@ -237,12 +303,9 @@ func startSyncDaemonProcess(cfg config) (int, error) {
 // runSyncDaemon is the entry point for the `_sync-daemon` child process.
 // It connects to Redis, starts the sync daemon, and blocks until SIGTERM.
 func runSyncDaemon() error {
-	cfg, err := loadConfig()
+	cfg, workspace, mountKey, err := loadSyncDaemonRuntime()
 	if err != nil {
-		return fmt.Errorf("load config: %w", err)
-	}
-	if err := resolveConfigPaths(&cfg); err != nil {
-		return fmt.Errorf("resolve config: %w", err)
+		return err
 	}
 
 	localRoot, err := expandPath(cfg.LocalPath)
@@ -262,14 +325,6 @@ func runSyncDaemon() error {
 	}
 
 	store := newAFSStore(rdb)
-	workspace := strings.TrimSpace(cfg.CurrentWorkspace)
-	if workspace == "" {
-		return errors.New("no current workspace")
-	}
-	mountKey, _, _, err := seedWorkspaceMountKey(ctx, store, workspace)
-	if err != nil {
-		return fmt.Errorf("seed workspace: %w", err)
-	}
 
 	fsClient := client.New(rdb, mountKey)
 	daemon, err := newSyncDaemon(syncDaemonConfig{
@@ -301,6 +356,90 @@ func runSyncDaemon() error {
 	cancel()
 	daemon.Stop()
 	return nil
+}
+
+func loadSyncDaemonRuntime() (config, string, string, error) {
+	bootstrap, ok, err := loadSyncDaemonBootstrap()
+	if err != nil {
+		return config{}, "", "", err
+	}
+	if ok {
+		cfg := bootstrap.Config
+		if err := resolveConfigPaths(&cfg); err != nil {
+			return config{}, "", "", fmt.Errorf("resolve bootstrap config: %w", err)
+		}
+		if strings.TrimSpace(bootstrap.Workspace) == "" {
+			return config{}, "", "", errors.New("sync bootstrap is missing workspace")
+		}
+		if strings.TrimSpace(bootstrap.RedisKey) == "" {
+			return config{}, "", "", errors.New("sync bootstrap is missing redis key")
+		}
+		return cfg, strings.TrimSpace(bootstrap.Workspace), strings.TrimSpace(bootstrap.RedisKey), nil
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		return config{}, "", "", fmt.Errorf("load config: %w", err)
+	}
+	if err := resolveConfigPaths(&cfg); err != nil {
+		return config{}, "", "", fmt.Errorf("resolve config: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	bootstrapState, closeFn, err := prepareSyncBootstrap(ctx, cfg)
+	if err != nil {
+		return config{}, "", "", err
+	}
+	defer closeFn()
+	return bootstrapState.cfg, bootstrapState.workspace, bootstrapState.redisKey, nil
+}
+
+func writeSyncDaemonBootstrap(bootstrap syncDaemonBootstrap) (string, error) {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+		return "", err
+	}
+	raw, err := json.Marshal(bootstrap)
+	if err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(stateDir(), ".sync-bootstrap-*.json")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if _, err := file.Write(raw); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	return name, nil
+}
+
+func loadSyncDaemonBootstrap() (syncDaemonBootstrap, bool, error) {
+	path := strings.TrimSpace(os.Getenv(syncDaemonBootstrapEnv))
+	if path == "" {
+		return syncDaemonBootstrap{}, false, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return syncDaemonBootstrap{}, false, fmt.Errorf("read sync bootstrap: %w", err)
+	}
+	_ = os.Remove(path)
+	var bootstrap syncDaemonBootstrap
+	if err := json.Unmarshal(raw, &bootstrap); err != nil {
+		return syncDaemonBootstrap{}, false, fmt.Errorf("parse sync bootstrap: %w", err)
+	}
+	return bootstrap, true, nil
 }
 
 // validateSyncLocalPath blocks dual-writer collisions.

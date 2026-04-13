@@ -1,0 +1,239 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/redis/agent-filesystem/internal/controlplane"
+)
+
+type httpControlPlaneClient struct {
+	baseURL    string
+	databaseID string
+	client     *http.Client
+}
+
+type httpErrorResponse struct {
+	Error string `json:"error"`
+}
+
+type httpRestoreCheckpointRequest struct {
+	CheckpointID string `json:"checkpoint_id"`
+}
+
+type httpForkWorkspaceRequest struct {
+	NewWorkspace string `json:"new_workspace"`
+}
+
+type httpSaveCheckpointRequest struct {
+	ExpectedHead          string                `json:"expected_head"`
+	CheckpointID          string                `json:"checkpoint_id"`
+	Manifest              controlplane.Manifest `json:"manifest"`
+	Blobs                 map[string][]byte     `json:"blobs"`
+	FileCount             int                   `json:"file_count"`
+	DirCount              int                   `json:"dir_count"`
+	TotalBytes            int64                 `json:"total_bytes"`
+	SkipWorkspaceRootSync bool                  `json:"skip_workspace_root_sync"`
+}
+
+type httpSaveCheckpointResponse struct {
+	Saved bool `json:"saved"`
+}
+
+func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPlaneClient, string, error) {
+	baseURL, err := normalizeControlPlaneURL(cfg.URL)
+	if err != nil {
+		return nil, "", err
+	}
+
+	client := &httpControlPlaneClient{
+		baseURL: baseURL,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+
+	databaseID := strings.TrimSpace(cfg.DatabaseID)
+	if databaseID == "" {
+		list, err := client.listDatabases(ctx)
+		if err != nil {
+			return nil, "", err
+		}
+		switch len(list.Items) {
+		case 0:
+			return nil, "", fmt.Errorf("control plane at %s returned no databases", baseURL)
+		case 1:
+			databaseID = list.Items[0].ID
+		default:
+			return nil, "", fmt.Errorf("control plane at %s has %d databases; set controlPlane.databaseID or run '%s config set --control-plane-database <id>'", baseURL, len(list.Items), filepath.Base(os.Args[0]))
+		}
+	}
+
+	client.databaseID = databaseID
+	return client, databaseID, nil
+}
+
+func (c *httpControlPlaneClient) ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error) {
+	var out controlplane.WorkspaceListResponse
+	err := c.doJSON(ctx, http.MethodGet, c.scopedPath("workspaces"), nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetWorkspace(ctx context.Context, workspace string) (controlplane.WorkspaceDetail, error) {
+	var out controlplane.WorkspaceDetail
+	err := c.doJSON(ctx, http.MethodGet, c.scopedPath("workspaces", workspace), nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
+	var out controlplane.WorkspaceDetail
+	err := c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces"), input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) DeleteWorkspace(ctx context.Context, workspace string) error {
+	return c.doJSON(ctx, http.MethodDelete, c.scopedPath("workspaces", workspace), nil, nil, http.StatusNoContent)
+}
+
+func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, workspace string) (controlplane.WorkspaceSession, error) {
+	var out controlplane.WorkspaceSession
+	err := c.doJSON(ctx, http.MethodPost, c.clientScopedPath("workspaces", workspace, "sessions"), nil, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error) {
+	rel := c.scopedPath("workspaces", workspace, "checkpoints")
+	if limit > 0 {
+		rel += "?limit=" + strconv.Itoa(limit)
+	}
+	var out []controlplane.CheckpointSummary
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
+	return c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", workspace)+":restore", httpRestoreCheckpointRequest{
+		CheckpointID: checkpointID,
+	}, nil, http.StatusNoContent)
+}
+
+func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error) {
+	var out httpSaveCheckpointResponse
+	err := c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", input.Workspace, "checkpoints"), httpSaveCheckpointRequest{
+		ExpectedHead:          input.ExpectedHead,
+		CheckpointID:          input.CheckpointID,
+		Manifest:              input.Manifest,
+		Blobs:                 input.Blobs,
+		FileCount:             input.FileCount,
+		DirCount:              input.DirCount,
+		TotalBytes:            input.TotalBytes,
+		SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+	}, &out, http.StatusCreated)
+	return out.Saved, err
+}
+
+func (c *httpControlPlaneClient) ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error {
+	return c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", sourceWorkspace)+":fork", httpForkWorkspaceRequest{
+		NewWorkspace: newWorkspace,
+	}, nil, http.StatusNoContent)
+}
+
+func (c *httpControlPlaneClient) listDatabases(ctx context.Context) (controlplane.DatabaseListResponse, error) {
+	var out controlplane.DatabaseListResponse
+	err := c.doJSON(ctx, http.MethodGet, "/v1/databases", nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) scopedPath(parts ...string) string {
+	escaped := make([]string, 0, len(parts)+2)
+	escaped = append(escaped, "/v1/databases", url.PathEscape(c.databaseID))
+	for _, part := range parts {
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	return strings.Join(escaped, "/")
+}
+
+func (c *httpControlPlaneClient) clientScopedPath(parts ...string) string {
+	escaped := make([]string, 0, len(parts)+3)
+	escaped = append(escaped, "/v1/client/databases", url.PathEscape(c.databaseID))
+	for _, part := range parts {
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	return strings.Join(escaped, "/")
+}
+
+func (c *httpControlPlaneClient) doJSON(ctx context.Context, method, rel string, requestBody any, out any, okStatuses ...int) error {
+	var body io.Reader
+	if requestBody != nil {
+		encoded, err := json.Marshal(requestBody)
+		if err != nil {
+			return err
+		}
+		body = bytes.NewReader(encoded)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+rel, body)
+	if err != nil {
+		return err
+	}
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if !containsStatus(okStatuses, resp.StatusCode) {
+		return decodeControlPlaneHTTPError(resp)
+	}
+	if out == nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+func containsStatus(allowed []int, got int) bool {
+	for _, status := range allowed {
+		if status == got {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeControlPlaneHTTPError(resp *http.Response) error {
+	body, _ := io.ReadAll(resp.Body)
+	message := strings.TrimSpace(resp.Status)
+	var payload httpErrorResponse
+	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error) != "" {
+		message = strings.TrimSpace(payload.Error)
+	} else if strings.TrimSpace(string(body)) != "" {
+		message = strings.TrimSpace(string(body))
+	}
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return fmt.Errorf("%w: %s", os.ErrNotExist, message)
+	case http.StatusConflict:
+		return fmt.Errorf("%w: %s", controlplane.ErrWorkspaceConflict, message)
+	case http.StatusNotImplemented:
+		return fmt.Errorf("%w: %s", controlplane.ErrUnsupportedView, message)
+	default:
+		return errors.New(message)
+	}
+}

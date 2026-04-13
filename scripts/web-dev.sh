@@ -39,6 +39,12 @@ if ! command -v curl >/dev/null 2>&1; then
 	exit 1
 fi
 
+if curl -fsS "$api_base_url/healthz" >/dev/null 2>&1; then
+	echo "error: a server is already responding at $api_base_url" >&2
+	echo "Stop the existing service, choose another AFS_WEB_SERVER_ADDR, or run 'make web-ui' against the existing control plane instead." >&2
+	exit 1
+fi
+
 echo "Starting AFS control plane on $server_addr"
 "$server_bin" --listen "$server_addr" --allow-origin "$allow_origin" &
 server_pid=$!
@@ -57,6 +63,16 @@ until curl -fsS "$api_base_url/healthz" >/dev/null 2>&1; do
 	fi
 	sleep 0.2
 done
+
+# If another process answered the health check while our control plane exited,
+# fail loudly instead of wiring the UI to a stale or incompatible backend.
+sleep 0.1
+if ! kill -0 "$server_pid" 2>/dev/null; then
+	wait "$server_pid" 2>/dev/null || true
+	echo "error: afs-control-plane exited after startup while $api_base_url became reachable" >&2
+	echo "Another service may already be using $server_addr. Stop it or choose another AFS_WEB_SERVER_ADDR." >&2
+	exit 1
+fi
 
 echo "AFS control plane ready at $api_base_url"
 echo "Starting AFS Web UI at http://$ui_host:$ui_port"

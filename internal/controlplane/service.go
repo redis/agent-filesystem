@@ -171,6 +171,17 @@ type restoreCheckpointRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 }
 
+type workspaceSession struct {
+	SessionID        string      `json:"session_id,omitempty"`
+	Workspace        string      `json:"workspace"`
+	DatabaseID       string      `json:"database_id,omitempty"`
+	DatabaseName     string      `json:"database_name,omitempty"`
+	RedisKey         string      `json:"redis_key"`
+	HeadCheckpointID string      `json:"head_checkpoint_id"`
+	Initialized      bool        `json:"initialized"`
+	Redis            RedisConfig `json:"redis"`
+}
+
 type viewRef struct {
 	Kind         string
 	CheckpointID string
@@ -194,6 +205,7 @@ type FileContentResponse = fileContentResponse
 type SourceRef = sourceRef
 type CreateWorkspaceRequest = createWorkspaceRequest
 type UpdateWorkspaceRequest = updateWorkspaceRequest
+type WorkspaceSession = workspaceSession
 
 type SaveCheckpointRequest struct {
 	Workspace             string
@@ -245,6 +257,20 @@ func (s *Service) SaveCheckpoint(ctx context.Context, input SaveCheckpointReques
 
 func (s *Service) ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error {
 	return s.forkWorkspace(ctx, sourceWorkspace, newWorkspace)
+}
+
+func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string) (WorkspaceSession, error) {
+	redisKey, headSavepoint, initialized, err := EnsureWorkspaceRoot(ctx, s.store, workspace)
+	if err != nil {
+		return WorkspaceSession{}, err
+	}
+	return WorkspaceSession{
+		Workspace:        workspace,
+		RedisKey:         redisKey,
+		HeadCheckpointID: headSavepoint,
+		Initialized:      initialized,
+		Redis:            s.cfg.RedisConfig,
+	}, nil
 }
 
 func (s *Service) GetTree(ctx context.Context, workspace, rawView, rawPath string, depth int) (TreeResponse, error) {

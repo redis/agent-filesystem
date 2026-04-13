@@ -34,16 +34,23 @@ type syncSettings struct {
 	SyncFileSizeCapMB int `json:"fileSizeCapMB"`
 }
 
+type controlPlaneSettings struct {
+	URL        string `json:"url,omitempty"`
+	DatabaseID string `json:"databaseID,omitempty"`
+}
+
 // config captures the persisted CLI/runtime settings for the AFS surface.
 // The JSON tags define the on-disk format.
 type config struct {
-	redisConfig      `json:"redis"`
-	Mode             string `json:"mode,omitempty"`
-	CurrentWorkspace string `json:"currentWorkspace"`
-	LocalPath        string `json:"localPath,omitempty"`
-	mountSettings    `json:"mount"`
-	logSettings      `json:"logs"`
-	syncSettings     `json:"sync"`
+	redisConfig          `json:"redis"`
+	controlPlaneSettings `json:"controlPlane,omitempty"`
+	ProductMode          string `json:"productMode,omitempty"`
+	Mode                 string `json:"mode,omitempty"`
+	CurrentWorkspace     string `json:"currentWorkspace"`
+	LocalPath            string `json:"localPath,omitempty"`
+	mountSettings        `json:"mount"`
+	logSettings          `json:"logs"`
+	syncSettings         `json:"sync"`
 
 	// Internal-only state; not persisted to afs.config.json.
 	WorkRoot string `json:"-"`

@@ -35,11 +35,39 @@ func statusRemoteLabel(addr string, db int) string {
 }
 
 func configRemoteLabel(cfg config) string {
+	productMode, err := effectiveProductMode(cfg)
+	if err == nil && productMode != productModeDirect {
+		label := strings.TrimSpace(cfg.URL)
+		if label == "" {
+			label = "<control plane url not configured>"
+		}
+		if db := strings.TrimSpace(cfg.DatabaseID); db != "" {
+			return fmt.Sprintf("%s (%s)", label, db)
+		}
+		return label + " (auto database)"
+	}
 	return redisDatabaseLabel(cfg.RedisAddr, cfg.RedisDB, cfg.RedisTLS)
 }
 
 func configPathLabel() string {
 	return clr(ansiDim, compactDisplayPath(configPath()))
+}
+
+func configStatusRow(cfg config) boxRow {
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return boxRow{Label: "config", Value: configPathLabel()}
+	}
+
+	if productMode == productModeLocal {
+		return boxRow{Label: "config", Value: "local: " + configPathLabel()}
+	}
+
+	value := strings.TrimSpace(cfg.URL)
+	if value == "" {
+		value = "<control plane url not configured>"
+	}
+	return boxRow{Label: "config", Value: "managed: " + value}
 }
 
 func commandContextRows(cfg config, workspace string) []boxRow {
@@ -152,7 +180,7 @@ func cmdStatusNotRunning() error {
 	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
 	rows := statusRows(cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
 	rows = append(rows,
-		boxRow{Label: "config", Value: configPathLabel()},
+		configStatusRow(cfg),
 		boxRow{Label: "start", Value: clr(ansiOrange, "afs up")},
 	)
 	printBox(title, rows)
@@ -163,10 +191,14 @@ func cmdStatusNotRunning() error {
 func cmdStatusSync(st state) {
 	workspace := strings.TrimSpace(st.CurrentWorkspace)
 	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
+	cfg := loadConfigOrDefault()
+	if err := resolveConfigPaths(&cfg); err != nil {
+		cfg.WorkRoot = defaultWorkRoot()
+	}
 
 	title := statusTitleForAlive(alive, st.SyncPID)
 	rows := statusRows(workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
-	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	rows = append(rows, configStatusRow(cfg))
 	rows = appendUptimeRows(rows, st)
 	if snap := loadSyncStateForStatus(workspace); snap != nil {
 		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
@@ -204,7 +236,7 @@ func cmdStatusMount(st state) error {
 	title := statusTitleForAlive(alive, st.MountPID)
 
 	rows := statusRows(workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
-	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	rows = append(rows, configStatusRow(cfg))
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
 		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})

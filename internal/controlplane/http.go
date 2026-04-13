@@ -10,7 +10,41 @@ import (
 	"strings"
 )
 
+type saveCheckpointHTTPResponse struct {
+	Saved bool `json:"saved"`
+}
+
+type forkWorkspaceRequest struct {
+	NewWorkspace string `json:"new_workspace"`
+}
+
+type saveCheckpointRequest struct {
+	ExpectedHead          string            `json:"expected_head"`
+	CheckpointID          string            `json:"checkpoint_id"`
+	Manifest              Manifest          `json:"manifest"`
+	Blobs                 map[string][]byte `json:"blobs"`
+	DirCount              int               `json:"dir_count"`
+	FileCount             int               `json:"file_count"`
+	TotalBytes            int64             `json:"total_bytes"`
+	SkipWorkspaceRootSync bool              `json:"skip_workspace_root_sync"`
+}
+
 func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
+	root := http.NewServeMux()
+	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
+	root.Handle("/", newAdminMux(manager))
+	return cors(root, allowOrigin)
+}
+
+func NewAdminHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
+	return cors(newAdminMux(manager), allowOrigin)
+}
+
+func NewClientHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
+	return cors(newClientMux(manager), allowOrigin)
+}
+
+func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +173,56 @@ func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
 		}
 	})
 
-	return cors(mux, allowOrigin)
+	return mux
+}
+
+func newClientMux(manager *DatabaseManager) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+	mux.HandleFunc("/databases/", func(w http.ResponseWriter, r *http.Request) {
+		trimmed := strings.TrimPrefix(r.URL.Path, "/databases/")
+		trimmed = strings.Trim(trimmed, "/")
+		if trimmed == "" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		parts := strings.Split(trimmed, "/")
+		databaseID := parts[0]
+		rest := strings.Join(parts[1:], "/")
+		switch {
+		case strings.HasSuffix(rest, "/sessions"):
+			if manager == nil {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			workspacePath := strings.TrimSuffix(rest, "/sessions")
+			workspacePath = strings.TrimPrefix(workspacePath, "workspaces/")
+			workspacePath = strings.Trim(workspacePath, "/")
+			if workspacePath == "" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			response, err := manager.CreateWorkspaceSession(r.Context(), databaseID, workspacePath)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, os.ErrNotExist)
+		}
+	})
+	return mux
 }
 
 func handleWorkspaceRoute(
@@ -150,6 +233,22 @@ func handleWorkspaceRoute(
 	workspacePath string,
 ) {
 	switch {
+	case strings.HasSuffix(workspacePath, ":fork"):
+		workspace := strings.TrimSuffix(workspacePath, ":fork")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input forkWorkspaceRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		if err := manager.ForkWorkspace(r.Context(), databaseID, workspace, input.NewWorkspace); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(workspacePath, ":restore"):
 		workspace := strings.TrimSuffix(workspacePath, ":restore")
 		if r.Method != http.MethodPost {
@@ -166,6 +265,46 @@ func handleWorkspaceRoute(
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case strings.HasSuffix(workspacePath, "/checkpoints"):
+		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
+		switch r.Method {
+		case http.MethodGet:
+			limit, err := queryInt(r, "limit", 100)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			response, err := manager.ListCheckpoints(r.Context(), databaseID, workspace, limit)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input saveCheckpointRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			saved, err := manager.SaveCheckpoint(r.Context(), databaseID, workspace, SaveCheckpointRequest{
+				Workspace:             workspace,
+				ExpectedHead:          input.ExpectedHead,
+				CheckpointID:          input.CheckpointID,
+				Manifest:              input.Manifest,
+				Blobs:                 input.Blobs,
+				FileCount:             input.FileCount,
+				DirCount:              input.DirCount,
+				TotalBytes:            input.TotalBytes,
+				SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+			})
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
 	case strings.HasSuffix(workspacePath, "/tree"):
 		workspace := strings.TrimSuffix(workspacePath, "/tree")
 		if r.Method != http.MethodGet {

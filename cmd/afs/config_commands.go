@@ -60,10 +60,13 @@ func (o *optionalBool) Set(v string) error {
 func (o *optionalBool) IsBoolFlag() bool { return true }
 
 type configOverrides struct {
-	redisURL     optionalString
-	mountBackend optionalString
-	mountpoint   optionalString
-	readonly     optionalBool
+	redisURL             optionalString
+	connection           optionalString
+	controlPlaneURL      optionalString
+	controlPlaneDatabase optionalString
+	mountBackend         optionalString
+	mountpoint           optionalString
+	readonly             optionalBool
 }
 
 type upOptions struct {
@@ -514,6 +517,12 @@ func parseConfigOverrideFlags(command string, args []string, includeJSON bool) (
 
 func registerConfigOverrideFlags(fs *flag.FlagSet, overrides *configOverrides) {
 	fs.Var(&overrides.redisURL, "redis-url", "redis:// or rediss:// URL")
+	fs.Var(&overrides.connection, "config-source", "local|self-hosted|cloud")
+	fs.Var(&overrides.connection, "control", "alias for --config-source")
+	fs.Var(&overrides.connection, "connection", "alias for --config-source")
+	fs.Var(&overrides.connection, "product-mode", "alias for --config-source")
+	fs.Var(&overrides.controlPlaneURL, "control-plane-url", "http:// or https:// control plane URL")
+	fs.Var(&overrides.controlPlaneDatabase, "control-plane-database", "database id for self-hosted control plane mode")
 	fs.Var(&overrides.mountBackend, "mount-backend", "auto|none|fuse|nfs")
 	fs.Var(&overrides.mountpoint, "mountpoint", "local mountpoint")
 	fs.Var(&overrides.readonly, "readonly", "start readonly")
@@ -581,6 +590,7 @@ Subcommands:
 
 Configurable settings:
   Redis connection    --redis-url
+  Configuration source --config-source, --control-plane-url, --control-plane-database
   Filesystem mount    --mount-backend, --mountpoint, --readonly
 
 Workspace selection:
@@ -619,6 +629,9 @@ func configSetUsageText(bin string) string {
 
 Basics:
   --redis-url <redis://...|rediss://...>
+  --config-source local|self-hosted|cloud
+  --control-plane-url <http://...|https://...>
+  --control-plane-database <database-id>
   --mount-backend auto|none|fuse|nfs
   --mountpoint <path>
   --readonly[=true|false]
@@ -672,6 +685,15 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		if err := applyRedisURL(cfg, overrides.redisURL.value); err != nil {
 			return err
 		}
+	}
+	if overrides.connection.set {
+		cfg.ProductMode = strings.TrimSpace(overrides.connection.value)
+	}
+	if overrides.controlPlaneURL.set {
+		cfg.URL = strings.TrimSpace(overrides.controlPlaneURL.value)
+	}
+	if overrides.controlPlaneDatabase.set {
+		cfg.DatabaseID = strings.TrimSpace(overrides.controlPlaneDatabase.value)
 	}
 
 	if overrides.mountBackend.set {
@@ -732,12 +754,17 @@ func configSummaryRows(cfg config, source string) []boxRow {
 		mountValue = fmt.Sprintf("%s at %s", userModeLabel(cfg.MountBackend), cfg.LocalPath)
 	}
 
+	productMode, _ := effectiveProductMode(cfg)
 	rows := []boxRow{
 		{Label: "source", Value: source},
+		{Label: "config source", Value: productMode},
 		{Label: "database", Value: publicRedisURL(cfg)},
 		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
 		{Label: "mount", Value: mountValue},
 		{Label: "readonly", Value: strconv.FormatBool(cfg.ReadOnly)},
+	}
+	if productMode != productModeLocal {
+		rows[2] = boxRow{Label: "control plane", Value: configRemoteLabel(cfg)}
 	}
 	return rows
 }

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -45,6 +46,10 @@ func cmdSetup() error {
 	}
 	fmt.Println()
 
+	if strings.TrimSpace(cfg.ProductMode) == "" {
+		cfg.ProductMode = productModeLocal
+	}
+
 	r := bufio.NewReader(os.Stdin)
 	cfg, err := runSetupWizard(r, os.Stdout, cfg, firstRun)
 	if err != nil {
@@ -63,10 +68,11 @@ func cmdSetup() error {
 }
 
 // runSetupWizard runs the interactive setup flow. On first run it walks the
-// user through Redis + filesystem configuration in order; on subsequent runs
-// it shows a menu that loops until the user picks "Done", so they can edit
-// Redis connection, filesystem mount, and current workspace in any order
-// without being dropped back to the shell after a single choice.
+// user through configuration source, workspace, and local-surface setup in
+// order; on subsequent runs it shows a menu that loops until the user picks
+// "Done", so they can edit mode, local path, workspace, and configuration
+// source in any order without being dropped back to the shell after a single
+// choice.
 func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (config, error) {
 	if firstRun {
 		return runFullSetupWizard(r, out, cfg)
@@ -76,18 +82,34 @@ func runSetupWizard(r *bufio.Reader, out io.Writer, cfg config, firstRun bool) (
 
 func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
 	for {
+		connection, err := effectiveProductMode(cfg)
+		if err != nil {
+			connection = productModeLocal
+		}
+		showRedisConnection := connection == productModeLocal
+
 		fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Setup"))
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  What would you like to change?")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change mode "+clr(ansiDim, "("+setupModeLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Save and exit")
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		if showRedisConnection {
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "6")+"  Save and exit")
+		} else {
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Save and exit")
+		}
 		fmt.Fprintln(out)
 
-		choice, err := promptString(r, out, "  Choose", "5")
+		defaultChoice := "5"
+		if showRedisConnection {
+			defaultChoice = "6"
+		}
+		choice, err := promptString(r, out, "  Choose", defaultChoice)
 		if err != nil {
 			return cfg, err
 		}
@@ -99,10 +121,6 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 				return cfg, err
 			}
 		case "2":
-			if err := promptRedisSetup(r, out, &cfg); err != nil {
-				return cfg, err
-			}
-		case "3":
 			mode, err := effectiveMode(cfg)
 			if err != nil {
 				return cfg, err
@@ -116,14 +134,39 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 					return cfg, err
 				}
 			}
-		case "4":
+		case "3":
 			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
-		case "5", "":
+		case "4":
+			if showRedisConnection {
+				if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			} else {
+				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			}
+		case "5":
+			if showRedisConnection {
+				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			} else {
+				return cfg, nil
+			}
+		case "6", "":
+			if showRedisConnection {
+				return cfg, nil
+			}
 			return cfg, nil
 		default:
-			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, or 5."))
+			if showRedisConnection {
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, 5, or 6."))
+			} else {
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, or 5."))
+			}
 			fmt.Fprintln(out)
 		}
 	}
@@ -135,7 +178,7 @@ func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	if strings.TrimSpace(cfg.Mode) == "" {
 		cfg.Mode = modeSync
 	}
-	if err := promptRedisSetup(r, out, &cfg); err != nil {
+	if err := promptConfigurationSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
 	if err := promptModeSetup(r, out, &cfg); err != nil {
@@ -157,6 +200,27 @@ func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	return cfg, nil
 }
 
+func promptConfigurationSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	if err := promptConnectionSetup(r, out, cfg); err != nil {
+		return err
+	}
+	return promptBackendSetup(r, out, cfg)
+}
+
+func promptConfigurationSetupForEdit(r *bufio.Reader, out io.Writer, cfg *config) error {
+	if err := promptConnectionSetup(r, out, cfg); err != nil {
+		return err
+	}
+	connection, err := effectiveProductMode(*cfg)
+	if err != nil {
+		return err
+	}
+	if connection == productModeLocal {
+		return nil
+	}
+	return promptBackendSetup(r, out, cfg)
+}
+
 func setupRedisConnectionLabel(cfg config) string {
 	label := cfg.RedisAddr
 	if cfg.RedisTLS {
@@ -166,6 +230,58 @@ func setupRedisConnectionLabel(cfg config) string {
 		return "Redis not configured"
 	}
 	return label
+}
+
+func setupConnectionLabel(cfg config) string {
+	connection, err := effectiveProductMode(cfg)
+	if err != nil {
+		return "unknown"
+	}
+	if connection == productModeLocal {
+		return "local"
+	}
+	return "managed (" + connection + ")"
+}
+
+func promptConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "How AFS Is Configured"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  AFS can run in a local-only mode with afs.config.json on this machine,")
+	fmt.Fprintln(out, "  or in a managed mode where a remote system provides its configuration.")
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Local")+" "+clr(ansiDim, "   — local-only mode using afs.config.json on this machine"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Managed")+" "+clr(ansiDim, " — configuration comes from a remote system (currently self-hosted control plane)"))
+	fmt.Fprintln(out)
+
+	current, err := effectiveProductMode(*cfg)
+	if err != nil {
+		current = productModeLocal
+	}
+	def := "1"
+	if current == productModeSelfHosted {
+		def = "2"
+	}
+
+	choice, err := promptString(r, out, "  Choose", def)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+
+	switch strings.TrimSpace(strings.ToLower(choice)) {
+	case "1", "", productModeLocal, legacyProductModeDirect:
+		cfg.ProductMode = productModeLocal
+	case "2", "managed", productModeSelfHosted, "selfhosted", "self hosted":
+		cfg.ProductMode = productModeSelfHosted
+		cfg.Mode = modeSync
+	case productModeCloud:
+		cfg.ProductMode = productModeCloud
+		cfg.Mode = modeSync
+	default:
+		fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; keeping ")+clr(ansiBold, current))
+		fmt.Fprintln(out)
+	}
+	return nil
 }
 
 func setupLocalModeLabel(cfg config) string {
@@ -214,12 +330,12 @@ func setupModeLabel(cfg config) string {
 func setupSurfaceMenuLabel(cfg config) string {
 	mode, err := effectiveMode(cfg)
 	if err != nil {
-		return "local path"
+		return "Local Path"
 	}
 	if mode == modeSync {
-		return "sync local path"
+		return "Local Path"
 	}
-	return "filesystem mount"
+	return "Filesystem Mount"
 }
 
 // setupLocalSurfaceLabel is the right-side hint for the surface menu item.
@@ -281,17 +397,69 @@ func promptRedisSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	if err := promptRedisConnectionSetup(r, out, cfg); err != nil {
 		return err
 	}
-	return promptWorkspaceSetupWithConfiguredRedis(r, out, cfg)
+	return promptWorkspaceSetupWithConfiguredLocalRedis(r, out, cfg)
 }
 
-func promptWorkspaceSetupWithConfiguredRedis(r *bufio.Reader, out io.Writer, cfg *config) error {
+func promptBackendSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	connection, err := effectiveProductMode(*cfg)
+	if err != nil {
+		return err
+	}
+	switch connection {
+	case productModeLocal:
+		return promptRedisSetup(r, out, cfg)
+	case productModeSelfHosted:
+		return promptControlPlaneSetup(r, out, cfg)
+	case productModeCloud:
+		return fmt.Errorf("cloud connection is not implemented yet")
+	default:
+		return fmt.Errorf("unknown connection %q", connection)
+	}
+}
+
+func promptWorkspaceSetupWithConfiguredLocalRedis(r *bufio.Reader, out io.Writer, cfg *config) error {
 	store, closeStore, err := connectSetupStore(out, *cfg)
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	if err := promptWorkspaceSelectionSetup(r, out, cfg, store); err != nil {
+	service := controlPlaneServiceFromStore(*cfg, store)
+	if err := promptWorkspaceSelectionSetup(r, out, cfg, service); err != nil {
+		return err
+	}
+	applySuggestedWorkspaceLocalPath(cfg)
+	return nil
+}
+
+func promptControlPlaneSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Control Plane"))
+	fmt.Fprintln(out)
+
+	defaultURL := strings.TrimSpace(cfg.URL)
+	if defaultURL == "" {
+		defaultURL = "http://127.0.0.1:8091"
+	}
+	entered, err := promptString(r, out,
+		"  Control plane URL\n"+
+			"  "+clr(ansiDim, "Example: http://127.0.0.1:8091"), defaultURL)
+	if err != nil {
+		return err
+	}
+	normalized, err := normalizeControlPlaneURL(entered)
+	if err != nil {
+		return err
+	}
+	cfg.URL = normalized
+
+	client, resolvedDatabaseID, closeClient, err := connectSetupControlPlane(out, *cfg)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	cfg.DatabaseID = resolvedDatabaseID
+
+	if err := promptWorkspaceSelectionSetup(r, out, cfg, client); err != nil {
 		return err
 	}
 	applySuggestedWorkspaceLocalPath(cfg)
@@ -319,34 +487,52 @@ func connectSetupStore(out io.Writer, cfg config) (*afsStore, func(), error) {
 	return newAFSStore(rdb), closeFn, nil
 }
 
-func promptWorkspaceSelectionSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore) error {
+func connectSetupControlPlane(out io.Writer, cfg config) (*httpControlPlaneClient, string, func(), error) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Connecting to ")+clr(ansiBold, configRemoteLabel(cfg)))
+
+	client, resolvedDatabaseID, err := newHTTPControlPlaneClient(context.Background(), cfg)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Connected"))
+	fmt.Fprintln(out)
+	return client, resolvedDatabaseID, func() {}, nil
+}
+
+type setupWorkspaceService interface {
+	ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error)
+	CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error)
+}
+
+func promptWorkspaceSelectionSetup(r *bufio.Reader, out io.Writer, cfg *config, service setupWorkspaceService) error {
 	if cfg == nil {
 		return fmt.Errorf("missing config")
 	}
-	if store == nil {
-		return fmt.Errorf("missing Redis store")
+	if service == nil {
+		return fmt.Errorf("missing workspace service")
 	}
 
 	ctx := context.Background()
-	service := controlPlaneServiceFromStore(*cfg, store)
 	workspaces, err := service.ListWorkspaceSummaries(ctx)
 	if err != nil {
 		return err
 	}
 	if len(workspaces.Items) == 0 {
-		return promptCreateFirstWorkspaceSetup(r, out, cfg, store)
+		return promptCreateFirstWorkspaceSetup(r, out, cfg, service)
 	}
-	return promptChooseExistingWorkspaceSetup(r, out, cfg, store, workspaces.Items)
+	return promptChooseExistingWorkspaceSetup(r, out, cfg, service, workspaces.Items)
 }
 
-func promptCreateFirstWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore) error {
-	return promptCreateWorkspaceSetup(r, out, cfg, store, true)
+func promptCreateFirstWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, service setupWorkspaceService) error {
+	return promptCreateWorkspaceSetup(r, out, cfg, service, true)
 }
 
-func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore, workspaces []workspaceSummary) error {
+func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, service setupWorkspaceService, workspaces []workspaceSummary) error {
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Workspace"))
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  Choose a workspace from Redis:")
+	fmt.Fprintln(out, "  Choose a workspace:")
 	fmt.Fprintln(out)
 	printSetupWorkspaceTable(out, workspaces)
 	fmt.Fprintln(out)
@@ -361,7 +547,7 @@ func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *con
 		}
 		workspace, createNew, ok := resolveSetupWorkspaceChoice(choice, workspaces)
 		if ok && createNew {
-			if err := promptCreateWorkspaceSetup(r, out, cfg, store, false); err != nil {
+			if err := promptCreateWorkspaceSetup(r, out, cfg, service, false); err != nil {
 				return err
 			}
 			return nil
@@ -477,18 +663,18 @@ func resolveSetupWorkspaceChoice(choice string, workspaces []workspaceSummary) (
 	return "", false, false
 }
 
-func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore, first bool) error {
+func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, service setupWorkspaceService, first bool) error {
 	if cfg == nil {
 		return fmt.Errorf("missing config")
 	}
-	if store == nil {
-		return fmt.Errorf("missing Redis store")
+	if service == nil {
+		return fmt.Errorf("missing workspace service")
 	}
 
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Workspace"))
 	fmt.Fprintln(out)
 	if first {
-		fmt.Fprintln(out, "  "+clr(ansiDim, "No workspaces found in this Redis database."))
+		fmt.Fprintln(out, "  "+clr(ansiDim, "No workspaces found yet."))
 		fmt.Fprintln(out)
 	}
 
@@ -508,7 +694,12 @@ func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, sto
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
-	if err := createEmptyWorkspace(context.Background(), *cfg, store, workspace); err != nil {
+	if _, err := service.CreateWorkspace(context.Background(), controlplane.CreateWorkspaceRequest{
+		Name: workspace,
+		Source: controlplane.SourceRef{
+			Kind: controlplane.SourceBlank,
+		},
+	}); err != nil {
 		return err
 	}
 
@@ -640,14 +831,32 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  How should AFS expose the workspace locally?")
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — Dropbox-style local-first sync to a real folder"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount backed directly by Redis")
-	fmt.Fprintln(out)
 
 	current, err := effectiveMode(*cfg)
 	if err != nil {
 		current = modeSync
 	}
+	connection, err := effectiveProductMode(*cfg)
+	if err != nil {
+		connection = productModeLocal
+	}
+
+	if connection == productModeSelfHosted {
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(currently required) — local sync from a self-hosted control plane"))
+		fmt.Fprintln(out)
+		cfg.Mode = modeSync
+		if strings.TrimSpace(cfg.LocalPath) == "" {
+			cfg.LocalPath = suggestedWorkspaceLocalPath(cfg.CurrentWorkspace)
+			fmt.Fprintln(out, "  "+clr(ansiDim, "Self-hosted currently uses sync mode; local path defaulted to ")+clr(ansiBold, cfg.LocalPath))
+			fmt.Fprintln(out)
+		}
+		return nil
+	}
+
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — Dropbox-style local-first sync to a real folder"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount backed directly by Redis")
+	fmt.Fprintln(out)
+
 	def := "1"
 	if current == modeMount {
 		def = "2"
@@ -680,7 +889,7 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 // sync mode. It is deliberately narrower than promptLocalFilesystemSetup
 // because sync mode doesn't need backend selection or NFS port negotiation.
 func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Sync Local Path"))
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Local Path"))
 	fmt.Fprintln(out)
 
 	defaultValue := strings.TrimSpace(cfg.LocalPath)
@@ -711,7 +920,37 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 }
 
 func promptCurrentWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	return promptWorkspaceSetupWithConfiguredRedis(r, out, cfg)
+	connection, err := effectiveProductMode(*cfg)
+	if err != nil {
+		return err
+	}
+	switch connection {
+	case productModeLocal:
+		return promptWorkspaceSetupWithConfiguredLocalRedis(r, out, cfg)
+	case productModeSelfHosted:
+		return promptWorkspaceSetupWithConfiguredControlPlane(r, out, cfg)
+	default:
+		return fmt.Errorf("%s connection is not implemented yet", connection)
+	}
+}
+
+func promptWorkspaceSetupWithConfiguredControlPlane(r *bufio.Reader, out io.Writer, cfg *config) error {
+	if strings.TrimSpace(cfg.URL) == "" {
+		return fmt.Errorf("control plane URL is not configured\nChoose 'Change configuration source' first")
+	}
+
+	client, resolvedDatabaseID, closeClient, err := connectSetupControlPlane(out, *cfg)
+	if err != nil {
+		return err
+	}
+	defer closeClient()
+	cfg.DatabaseID = resolvedDatabaseID
+
+	if err := promptWorkspaceSelectionSetup(r, out, cfg, client); err != nil {
+		return err
+	}
+	applySuggestedWorkspaceLocalPath(cfg)
+	return nil
 }
 
 func suggestNFSPort(host string, preferred int) (int, bool, error) {

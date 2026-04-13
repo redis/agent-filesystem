@@ -509,11 +509,32 @@ func currentWorkspaceName(ctx context.Context, cfg config, store *afsStore) (str
 	return "", fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 }
 
+func currentWorkspaceNameFromControlPlane(ctx context.Context, cfg config, service afsControlPlane) (string, error) {
+	workspace := selectedWorkspaceName(cfg)
+	if workspace != "" {
+		if _, err := service.GetWorkspace(ctx, workspace); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return "", fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", workspace, filepath.Base(os.Args[0]))
+			}
+			return "", err
+		}
+		return workspace, nil
+	}
+	return "", fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
+}
+
 func resolveWorkspaceName(ctx context.Context, cfg config, store *afsStore, requested string) (string, error) {
 	if requested != "" {
 		return requested, nil
 	}
 	return currentWorkspaceName(ctx, cfg, store)
+}
+
+func resolveWorkspaceNameFromControlPlane(ctx context.Context, cfg config, service afsControlPlane, requested string) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	return currentWorkspaceNameFromControlPlane(ctx, cfg, service)
 }
 
 func selectedWorkspaceName(cfg config) string {
@@ -601,19 +622,14 @@ func loadAFSConfig() (config, error) {
 }
 
 func openAFSStore(ctx context.Context) (config, *afsStore, func(), error) {
-	cfg, err := loadAFSConfig()
+	session, err := openAFSBackendSession(ctx)
 	if err != nil {
-		return cfg, nil, func() {}, err
+		return config{}, nil, func() {}, err
 	}
-
-	rdb := redis.NewClient(buildRedisOptions(cfg, 8))
-	closeFn := func() {
-		_ = rdb.Close()
+	if session.store == nil {
+		productMode, _ := effectiveProductMode(session.cfg)
+		session.close()
+		return config{}, nil, func() {}, fmt.Errorf("%s mode does not expose a local Redis store yet\nThis command still requires local mode for now", productMode)
 	}
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		closeFn()
-		return cfg, nil, func() {}, fmt.Errorf("cannot connect to Redis at %s: %w\nRun '%s up' first or point AFS at an existing Redis server",
-			cfg.RedisAddr, err, filepath.Base(os.Args[0]))
-	}
-	return cfg, newAFSStore(rdb), closeFn, nil
+	return session.cfg, session.store, session.close, nil
 }

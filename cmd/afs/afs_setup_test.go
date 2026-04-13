@@ -57,6 +57,7 @@ func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	// Switch to live mount mode, then type "none" so the test exercises the
 	// explicit "no mounted filesystem" path.
 	input := stringsJoinLines(
+		"",        // connection: local
 		mr.Addr(), // redis addr
 		"",        // redis username default
 		"",        // redis password
@@ -88,6 +89,7 @@ func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	input := stringsJoinLines(
+		"",        // connection: local
 		mr.Addr(), // redis addr
 		"",        // redis username default
 		"",        // redis password
@@ -141,6 +143,7 @@ func TestRunSetupWizardSelectsExistingWorkspaceAndDefaultsLocalPath(t *testing.T
 	}
 
 	input := stringsJoinLines(
+		"", // connection: local
 		mr.Addr(),
 		"",
 		"",
@@ -168,7 +171,7 @@ func TestRunSetupWizardSelectsExistingWorkspaceAndDefaultsLocalPath(t *testing.T
 	}
 	rendered := output.String()
 	for _, want := range []string{
-		"Choose a workspace from Redis",
+		"Choose a workspace",
 		"Workspace name",
 		"Files/Folders",
 		"Last updated",
@@ -208,6 +211,7 @@ func TestRunSetupWizardCanCreateNewWorkspaceFromExistingList(t *testing.T) {
 	}
 
 	input := stringsJoinLines(
+		"", // connection: local
 		mr.Addr(),
 		"",
 		"",
@@ -255,6 +259,7 @@ func TestRunSetupWizardCreatesFirstWorkspaceAndDefaultsLocalPath(t *testing.T) {
 	mr := miniredis.RunT(t)
 
 	input := stringsJoinLines(
+		"", // connection: local
 		mr.Addr(),
 		"",
 		"",
@@ -290,6 +295,50 @@ func TestRunSetupWizardCreatesFirstWorkspaceAndDefaultsLocalPath(t *testing.T) {
 	}
 }
 
+func TestRunSetupWizardSupportsSelfHostedConnection(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	input := stringsJoinLines(
+		"2",        // connection: self-hosted
+		server.URL, // control plane URL
+		"repo",     // existing workspace
+		"",         // keep default sync local path
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+
+	got, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.ProductMode != productModeSelfHosted {
+		t.Fatalf("ProductMode = %q, want %q", got.ProductMode, productModeSelfHosted)
+	}
+	if got.URL != server.URL {
+		t.Fatalf("controlPlane.url = %q, want %q", got.URL, server.URL)
+	}
+	if got.CurrentWorkspace != "repo" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "repo")
+	}
+	wantLocalPath := filepath.Join(homeDir, "repo")
+	if got.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", got.LocalPath, wantLocalPath)
+	}
+	if got.Mode != modeSync {
+		t.Fatalf("Mode = %q, want %q", got.Mode, modeSync)
+	}
+}
+
 func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	t.Helper()
 
@@ -300,13 +349,13 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	existing.MountBackend = mountBackendNone
 	existing.LocalPath = ""
 
-	// Menu (edit mode): 1=Mode, 2=Redis, 3=surface, 4=workspace, 5=save.
-	// Pick option 3 (filesystem mount) → keep as none → back to menu →
-	// pick 5 to save and exit.
+	// Menu (edit mode, local): 1=mode, 2=local path/filesystem mount,
+	// 3=workspace, 4=redis connection, 5=configuration source, 6=save.
+	// Pick option 2 (filesystem mount) → keep as none → back to menu → pick 6 to save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"3",
+		"2",
 		"",
-		"5",
+		"6",
 	)))
 	var output bytes.Buffer
 
@@ -318,14 +367,20 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	if !strings.Contains(got, "Change mode") || !strings.Contains(got, "live mount") {
 		t.Fatalf("setup output = %q, want mode current setting", got)
 	}
+	if !strings.Contains(got, "Change configuration source") || !strings.Contains(got, "local") {
+		t.Fatalf("setup output = %q, want configuration source current setting", got)
+	}
 	if !strings.Contains(got, "Change Redis connection") || !strings.Contains(got, "redis.example:6379") {
 		t.Fatalf("setup output = %q, want redis connection current setting", got)
 	}
-	if !strings.Contains(got, "Change filesystem mount") || !strings.Contains(got, "none") {
+	if !strings.Contains(got, "Change Filesystem Mount") || !strings.Contains(got, "none") {
 		t.Fatalf("setup output = %q, want filesystem mount current setting", got)
 	}
 	if !strings.Contains(got, "Change current workspace") || !strings.Contains(got, "demo") {
 		t.Fatalf("setup output = %q, want current workspace current setting", got)
+	}
+	if strings.Index(got, "Change current workspace") > strings.Index(got, "Change configuration source") {
+		t.Fatalf("setup output = %q, want configuration source after current workspace", got)
 	}
 }
 
@@ -346,11 +401,11 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
 	}
 
-	// Edit-menu items: 4 = current workspace, 5 = save.
+	// Edit-menu items (local): 3 = current workspace, 6 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"4",
+		"3",
 		"repo-two",
-		"5",
+		"6",
 	)))
 
 	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
@@ -359,6 +414,63 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	}
 	if cfg.CurrentWorkspace != "repo-two" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "repo-two")
+	}
+}
+
+func TestRunSetupWizardSwitchingToLocalKeepsExistingRedisConfig(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	existing := defaultConfig()
+	existing.ProductMode = productModeSelfHosted
+	existing.URL = server.URL
+	existing.DatabaseID = "db-local"
+	existing.RedisAddr = "redis.example:6379"
+	existing.RedisUsername = "alice"
+	existing.RedisPassword = "secret"
+	existing.RedisDB = 4
+	existing.RedisTLS = true
+	existing.CurrentWorkspace = "repo"
+
+	// Menu (edit mode, managed): 4 = configuration source, 5 = save.
+	// Choose local, then save from the re-rendered local menu.
+	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
+		"4",
+		"1",
+		"6",
+	)))
+	var output bytes.Buffer
+
+	cfg, err := runSetupWizard(reader, &output, existing, false)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if cfg.ProductMode != productModeLocal {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeLocal)
+	}
+	if cfg.RedisAddr != "redis.example:6379" {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, "redis.example:6379")
+	}
+	if cfg.RedisUsername != "alice" {
+		t.Fatalf("RedisUsername = %q, want %q", cfg.RedisUsername, "alice")
+	}
+	if cfg.RedisPassword != "secret" {
+		t.Fatalf("RedisPassword = %q, want %q", cfg.RedisPassword, "secret")
+	}
+	if cfg.RedisDB != 4 {
+		t.Fatalf("RedisDB = %d, want %d", cfg.RedisDB, 4)
+	}
+	if !cfg.RedisTLS {
+		t.Fatal("RedisTLS = false, want true")
+	}
+
+	got := output.String()
+	if strings.Contains(got, "▸ Redis Connection") {
+		t.Fatalf("setup output = %q, want no redis connection prompt when switching back to local", got)
+	}
+	if !strings.Contains(got, "Change Redis connection") || !strings.Contains(got, "redis.example:6379") {
+		t.Fatalf("setup output = %q, want redis connection available from the local main menu", got)
 	}
 }
 
@@ -385,12 +497,12 @@ func TestRunSetupWizardAllowsCreatingWorkspaceFromCurrentWorkspaceMenu(t *testin
 		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
 	}
 
-	// Edit-menu items: 4 = current workspace, 5 = save.
+	// Edit-menu items (local): 3 = current workspace, 6 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"4",
+		"3",
 		"2",
 		"repo-three",
-		"5",
+		"6",
 	)))
 
 	cfg, err := runSetupWizard(reader, ioDiscard{}, existing, false)
@@ -433,11 +545,11 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	existing.LocalPath = ""
 	existing.NFSPort = busyAddr.Port
 
-	// Edit-menu items: 3 = filesystem mount, 5 = save and exit.
+	// Edit-menu items (local): 2 = filesystem mount, 6 = save and exit.
 	input := stringsJoinLines(
-		"3", // filesystem mount
+		"2", // filesystem mount
 		"/tmp/afs-mount",
-		"5", // save and exit
+		"6", // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -482,12 +594,12 @@ func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
 	}
 
-	// Edit-menu items: 4 = current workspace, 5 = save. Exercise the loop
+	// Edit-menu items (local): 3 = current workspace, 6 = save. Exercise the loop
 	// by picking workspace twice, then saving.
 	input := stringsJoinLines(
-		"4", "repo-two",
-		"4", "demo",
-		"5",
+		"3", "repo-two",
+		"3", "demo",
+		"6",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
@@ -510,8 +622,8 @@ func TestRunSetupWizardEditModeUnknownChoiceReprompts(t *testing.T) {
 	existing := defaultConfig()
 	existing.CurrentWorkspace = "demo"
 
-	// Unknown choice "9" → menu re-displayed → pick 5 to save and exit.
-	input := stringsJoinLines("9", "5")
+	// Unknown choice "9" → menu re-displayed → pick 6 to save and exit.
+	input := stringsJoinLines("9", "6")
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
 
@@ -548,6 +660,7 @@ func TestCmdSetupDoesNotStartServices(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
+		"", // connection: local
 		mr.Addr(),
 		"", // default user
 		"", // no password
@@ -616,12 +729,12 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	existing.Mode = modeMount // edit-mode test, staying on live mount
 	existing.MountBackend = mountBackendNone
 
-	// Edit-menu items: 3 = filesystem mount, 5 = save.
+	// Edit-menu items (local): 2 = filesystem mount, 6 = save.
 	input := stringsJoinLines(
-		"3",        // filesystem mount
+		"2",        // filesystem mount
 		"/tmp/afs", // requested mountpoint
 		"newfiles", // workspace name to create/use
-		"5",        // save and exit
+		"6",        // save and exit
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -696,6 +809,7 @@ func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
+		"", // connection: local
 		mr.Addr(),
 		"", // redis username default
 		"", // redis password

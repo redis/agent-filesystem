@@ -360,6 +360,52 @@ func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, wor
 	return service.RestoreCheckpoint(ctx, workspace, checkpointID)
 }
 
+func (m *DatabaseManager) ListCheckpoints(ctx context.Context, databaseID, workspace string, limit int) ([]checkpointSummary, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return service.ListCheckpoints(ctx, workspace, limit)
+}
+
+func (m *DatabaseManager) SaveCheckpoint(ctx context.Context, databaseID, workspace string, input SaveCheckpointRequest) (bool, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return false, err
+	}
+	input.Workspace = workspace
+	return service.SaveCheckpoint(ctx, input)
+}
+
+func (m *DatabaseManager) ForkWorkspace(ctx context.Context, databaseID, sourceWorkspace, newWorkspace string) error {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return err
+	}
+	return service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace)
+}
+
+func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID, workspace string) (workspaceSession, error) {
+	service, profile, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return workspaceSession{}, err
+	}
+	session, err := service.CreateWorkspaceSession(ctx, workspace)
+	if err != nil {
+		return workspaceSession{}, err
+	}
+	session.DatabaseID = profile.ID
+	session.DatabaseName = profile.Name
+	session.Redis = RedisConfig{
+		RedisAddr:     profile.RedisAddr,
+		RedisUsername: profile.RedisUsername,
+		RedisPassword: profile.RedisPassword,
+		RedisDB:       profile.RedisDB,
+		RedisTLS:      profile.RedisTLS,
+	}
+	return session, nil
+}
+
 func (m *DatabaseManager) GetTree(ctx context.Context, databaseID, workspace, rawView, rawPath string, depth int) (treeResponse, error) {
 	service, _, err := m.serviceFor(ctx, databaseID)
 	if err != nil {

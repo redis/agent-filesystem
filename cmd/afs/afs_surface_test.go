@@ -39,6 +39,39 @@ func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 	}
 }
 
+func TestConfigStatusRowLocalUsesConfigPath(t *testing.T) {
+	t.Helper()
+
+	row := configStatusRow(config{ProductMode: productModeLocal})
+	if row.Label != "config" {
+		t.Fatalf("configStatusRow(local).Label = %q, want %q", row.Label, "config")
+	}
+	value := stripAnsi(row.Value)
+	if !strings.HasPrefix(value, "local: ") {
+		t.Fatalf("configStatusRow(local).Value = %q, want prefix %q", value, "local: ")
+	}
+	if !strings.Contains(value, "afs.config.json") {
+		t.Fatalf("configStatusRow(local).Value = %q, want config path", value)
+	}
+}
+
+func TestConfigStatusRowSelfHostedUsesControlPlaneURL(t *testing.T) {
+	t.Helper()
+
+	row := configStatusRow(config{
+		ProductMode: productModeSelfHosted,
+		controlPlaneSettings: controlPlaneSettings{
+			URL: "http://127.0.0.1:8091",
+		},
+	})
+	if row.Label != "config" {
+		t.Fatalf("configStatusRow(self-hosted).Label = %q, want %q", row.Label, "config")
+	}
+	if row.Value != "managed: http://127.0.0.1:8091" {
+		t.Fatalf("configStatusRow(self-hosted).Value = %q, want %q", row.Value, "managed: http://127.0.0.1:8091")
+	}
+}
+
 func TestStateDirAndWorkRootUseAFSHome(t *testing.T) {
 	t.Helper()
 
@@ -180,6 +213,26 @@ func TestPrintReadyBoxUsesMountedWorkspaceTitle(t *testing.T) {
 	}
 	if !strings.Contains(out, "newfiles") {
 		t.Fatalf("printReadyBox() output = %q, want workspace name in rows", out)
+	}
+}
+
+func TestCmdStatusNotRunningShowsSelfHostedConfigURL(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://127.0.0.1:8091"
+	saveTempConfig(t, cfg)
+
+	out, err := captureStdout(t, cmdStatusNotRunning)
+	if err != nil {
+		t.Fatalf("cmdStatusNotRunning() returned error: %v", err)
+	}
+	if !strings.Contains(out, "config") || !strings.Contains(out, "managed: http://127.0.0.1:8091") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want managed config row", out)
+	}
+	if !strings.Contains(out, "http://127.0.0.1:8091") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane url", out)
 	}
 }
 

@@ -107,6 +107,41 @@ func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 	}
 }
 
+func TestCmdConfigSetPersistsSelfHostedControlPlaneSettings(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	err := cmdConfig([]string{
+		"config", "set",
+		"--connection", "self-hosted",
+		"--control-plane-url", "http://127.0.0.1:8091/",
+		"--control-plane-database", "db-local",
+	})
+	if err != nil {
+		t.Fatalf("cmdConfig(set self-hosted) returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.ProductMode != productModeSelfHosted {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeSelfHosted)
+	}
+	if cfg.URL != "http://127.0.0.1:8091" {
+		t.Fatalf("controlPlane.url = %q, want %q", cfg.URL, "http://127.0.0.1:8091")
+	}
+	if cfg.DatabaseID != "db-local" {
+		t.Fatalf("controlPlane.databaseID = %q, want %q", cfg.DatabaseID, "db-local")
+	}
+}
+
 func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T) {
 	t.Helper()
 
@@ -371,6 +406,8 @@ func TestCmdConfigHelpListsConfigurableSettings(t *testing.T) {
 
 	for _, want := range []string{
 		"Redis connection",
+		"Configuration source",
+		"--config-source",
 		"--redis-url",
 		"--mount-backend",
 		"--mountpoint",
@@ -394,6 +431,7 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 
 	for _, want := range []string{
 		"--redis-url <redis://...|rediss://...>",
+		"--config-source local|self-hosted|cloud",
 		"--mount-backend auto|none|fuse|nfs",
 		"Current workspace is not configured here",
 		"runtime paths stay available in afs.config.json",

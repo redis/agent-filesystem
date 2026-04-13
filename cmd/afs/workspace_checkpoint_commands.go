@@ -91,22 +91,33 @@ func cmdWorkspaceCreate(args []string) error {
 		return err
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
 	ctx := context.Background()
-	if err := createEmptyWorkspace(ctx, cfg, store, workspace); err != nil {
+	_, err = service.CreateWorkspace(ctx, controlplane.CreateWorkspaceRequest{
+		Name: workspace,
+		Source: controlplane.SourceRef{
+			Kind: controlplane.SourceBlank,
+		},
+	})
+	if err != nil {
 		return err
+	}
+
+	next := filepath.Base(os.Args[0]) + " up " + workspace + " <folder>"
+	if productMode, _ := effectiveProductMode(cfg); productMode != productModeDirect {
+		next = filepath.Base(os.Args[0]) + " workspace use " + workspace
 	}
 
 	printBox(markerSuccess+" "+clr(ansiBold, "workspace created"), []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: afsInitialCheckpointName},
 		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " <folder>"},
+		{Label: "next", Value: next},
 	})
 	return nil
 }
@@ -131,13 +142,12 @@ func cmdWorkspaceList(args []string) error {
 		return fmt.Errorf("%s", workspaceListUsageText(filepath.Base(os.Args[0])))
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	service := controlPlaneServiceFromStore(cfg, store)
 	ctx := context.Background()
 	workspaces, err := service.ListWorkspaceSummaries(ctx)
 	if err != nil {
@@ -222,18 +232,17 @@ func cmdWorkspaceUse(args []string) error {
 		return err
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	exists, err := store.workspaceExists(context.Background(), workspace)
-	if err != nil {
+	if _, err := service.GetWorkspace(context.Background(), workspace); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("workspace %q does not exist", workspace)
+		}
 		return err
-	}
-	if !exists {
-		return fmt.Errorf("workspace %q does not exist", workspace)
 	}
 	if active, err := activeMountedWorkspaceState(); err != nil {
 		return err
@@ -306,14 +315,13 @@ func cmdWorkspaceDelete(args []string) error {
 	}
 	names := args[2:]
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
 	ctx := context.Background()
-	service := controlPlaneServiceFromStore(cfg, store)
 	deleted := make([]string, 0, len(names))
 	for _, name := range names {
 		if err := validateAFSName("workspace", name); err != nil {
@@ -432,7 +440,7 @@ func cmdWorkspaceFork(args []string) error {
 		return fmt.Errorf("%s", workspaceForkUsageText(filepath.Base(os.Args[0])))
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
@@ -446,7 +454,7 @@ func cmdWorkspaceFork(args []string) error {
 	} else {
 		newWorkspace = args[2]
 	}
-	sourceWorkspace, err = resolveWorkspaceName(context.Background(), cfg, store, sourceWorkspace)
+	sourceWorkspace, err = resolveWorkspaceNameFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
 	if err != nil {
 		return err
 	}
@@ -458,7 +466,6 @@ func cmdWorkspaceFork(args []string) error {
 	}
 
 	ctx := context.Background()
-	service := controlPlaneServiceFromStore(cfg, store)
 	if err := service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace); err != nil {
 		return err
 	}
@@ -704,7 +711,7 @@ func cmdCheckpointList(args []string) error {
 		return fmt.Errorf("%s", checkpointListUsageText(filepath.Base(os.Args[0])))
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
@@ -714,7 +721,7 @@ func cmdCheckpointList(args []string) error {
 	if len(args) == 3 {
 		workspace = args[2]
 	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	workspace, err = resolveWorkspaceNameFromControlPlane(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
@@ -722,7 +729,6 @@ func cmdCheckpointList(args []string) error {
 		return err
 	}
 
-	service := controlPlaneServiceFromStore(cfg, store)
 	checkpoints, err := service.ListCheckpoints(context.Background(), workspace, 100)
 	if err != nil {
 		return err
@@ -846,13 +852,12 @@ func cmdCheckpointRestore(args []string) error {
 }
 
 func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
-	cfg, store, closeStore, err := openAFSStore(ctx)
+	cfg, service, closeStore, err := openAFSControlPlane(ctx)
 	if err != nil {
 		return err
 	}
 	defer closeStore()
 
-	service := controlPlaneServiceFromStore(cfg, store)
 	_, err = resetAFSWorkspaceHead(ctx, service, workspace, checkpointID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

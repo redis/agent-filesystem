@@ -43,9 +43,24 @@ func cmdUpArgs(args []string) error {
 	if err != nil {
 		return err
 	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return err
+	}
 	mode, err := effectiveMode(cfg)
 	if err != nil {
 		return err
+	}
+	switch productMode {
+	case productModeDirect:
+		// Direct mode supports the existing sync/mount behavior below.
+	case productModeSelfHosted:
+		if mode != modeSync {
+			return fmt.Errorf("'afs up' in %s mode currently supports sync mode only\nRun '%s up --mode sync' or update config first", productMode, filepath.Base(os.Args[0]))
+		}
+		return startSyncServices(cfg, opts.foreground)
+	default:
+		return fmt.Errorf("'afs up' is not supported yet in %s mode\nUse workspace/checkpoint commands through the control plane for now", productMode)
 	}
 	if mode == modeSync {
 		return startSyncServices(cfg, opts.foreground)

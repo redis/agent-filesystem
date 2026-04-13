@@ -148,6 +148,195 @@ func TestHTTPRejectsUnsupportedWorkingCopyView(t *testing.T) {
 	}
 }
 
+func TestHTTPCheckpointListSaveAndFork(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/checkpoints?limit=10")
+	if err != nil {
+		t.Fatalf("GET checkpoints returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var checkpoints []checkpointSummary
+	if err := json.NewDecoder(resp.Body).Decode(&checkpoints); err != nil {
+		t.Fatalf("Decode(checkpoints) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET checkpoints status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	if len(checkpoints) != 2 {
+		t.Fatalf("len(checkpoints) = %d, want 2", len(checkpoints))
+	}
+
+	saveRequest := fmtJSON(t, saveCheckpointRequest{
+		ExpectedHead: "snapshot",
+		CheckpointID: "snapshot-2",
+		Manifest: Manifest{
+			Version:   formatVersion,
+			Workspace: "repo",
+			Savepoint: "snapshot-2",
+			Entries: map[string]ManifestEntry{
+				"/":            {Type: "dir", Mode: 0o755},
+				"/README.md":   {Type: "file", Mode: 0o644, Size: int64(len("# demo\n")), Inline: base64.StdEncoding.EncodeToString([]byte("# demo\n"))},
+				"/notes.txt":   {Type: "file", Mode: 0o644, Size: int64(len("phase-2\n")), Inline: base64.StdEncoding.EncodeToString([]byte("phase-2\n"))},
+				"/src":         {Type: "dir", Mode: 0o755},
+				"/src/main.go": {Type: "file", Mode: 0o644, Size: int64(len("package main\n")), Inline: base64.StdEncoding.EncodeToString([]byte("package main\n"))},
+			},
+		},
+		FileCount:  3,
+		DirCount:   1,
+		TotalBytes: int64(len("# demo\n") + len("phase-2\n") + len("package main\n")),
+	})
+
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+databaseID+"/workspaces/repo/checkpoints",
+		"application/json",
+		strings.NewReader(saveRequest),
+	)
+	if err != nil {
+		t.Fatalf("POST checkpoint save returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST checkpoint save status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var saveResponse saveCheckpointHTTPResponse
+	if err := json.NewDecoder(resp.Body).Decode(&saveResponse); err != nil {
+		t.Fatalf("Decode(save response) returned error: %v", err)
+	}
+	if !saveResponse.Saved {
+		t.Fatal("expected checkpoint save response to report saved=true")
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+databaseID+"/workspaces/repo:fork",
+		"application/json",
+		strings.NewReader(`{"new_workspace":"repo-copy"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST workspace fork returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST workspace fork status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo-copy")
+	if err != nil {
+		t.Fatalf("GET forked workspace returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var detail workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(forked workspace detail) returned error: %v", err)
+	}
+	if detail.HeadCheckpointID != "initial" {
+		t.Fatalf("forked workspace head_checkpoint_id = %q, want %q", detail.HeadCheckpointID, "initial")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo-copy/files/content?view=head&path=/notes.txt")
+	if err != nil {
+		t.Fatalf("GET forked workspace file content returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var forkedFile fileContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&forkedFile); err != nil {
+		t.Fatalf("Decode(forked file content) returned error: %v", err)
+	}
+	if forkedFile.Content != "phase-2\n" {
+		t.Fatalf("forked file content = %q, want %q", forkedFile.Content, "phase-2\n")
+	}
+}
+
+func TestHTTPClientWorkspaceSession(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST client workspace session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST client workspace session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(session) returned error: %v", err)
+	}
+	if session.Workspace != "repo" {
+		t.Fatalf("session workspace = %q, want %q", session.Workspace, "repo")
+	}
+	if session.RedisKey != WorkspaceFSKey("repo") {
+		t.Fatalf("session redis_key = %q, want %q", session.RedisKey, WorkspaceFSKey("repo"))
+	}
+	if session.Redis.RedisAddr == "" {
+		t.Fatal("expected workspace session to include redis bootstrap info")
+	}
+}
+
+func TestHTTPRouteSurfacesStaySeparated(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	admin := httptest.NewServer(NewAdminHandler(manager, "*"))
+	defer admin.Close()
+	client := httptest.NewServer(NewClientHandler(manager, "*"))
+	defer client.Close()
+
+	resp, err := http.Get(admin.URL + "/v1/databases")
+	if err != nil {
+		t.Fatalf("GET admin databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("admin /v1/databases status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	resp, err = http.Get(client.URL + "/v1/databases")
+	if err != nil {
+		t.Fatalf("GET client databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("client /v1/databases status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+
+	resp, err = http.Get(client.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("GET client healthz returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("client /healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	resp, err = http.Post(client.URL+"/databases/"+databaseID+"/workspaces/repo/sessions", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+}
+
 func TestHTTPDatabaseCRUDAndScopedWorkspaces(t *testing.T) {
 	t.Helper()
 
