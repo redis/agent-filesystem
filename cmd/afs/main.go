@@ -268,10 +268,7 @@ func statusTitle(prefix, workspace, localPath string, mounted bool) string {
 	return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS workspace %s not mounted", workspace))
 }
 
-func localSurfacePath(cfg config, backendName string) string {
-	if backendName == mountBackendNone {
-		return cfg.WorkRoot
-	}
+func localSurfacePath(cfg config) string {
 	return cfg.LocalPath
 }
 
@@ -1059,7 +1056,7 @@ func cmdStatus() error {
 			if backendName == "" {
 				backendName = mountBackendNone
 			}
-			localPath := localSurfacePath(cfg, backendName)
+			localPath := localSurfacePath(cfg)
 			mode, _ := effectiveMode(cfg)
 			title := clr(ansiDim, "○") + " " + clr(ansiBold, "afs is not running")
 			var rows []boxRow
@@ -1100,7 +1097,7 @@ func cmdStatus() error {
 	if strings.TrimSpace(st.CurrentWorkspace) != "" {
 		currentWorkspace = st.CurrentWorkspace
 	}
-	localPath := localSurfacePath(cfg, backendName)
+	localPath := localSurfacePath(cfg)
 	if backendName != mountBackendNone && strings.TrimSpace(st.LocalPath) != "" {
 		localPath = st.LocalPath
 	}
@@ -1286,7 +1283,7 @@ func startServices(cfg config) error {
 }
 
 func printReadyBox(cfg config, backendName, _ string) {
-	localPath := localSurfacePath(cfg, backendName)
+	localPath := localSurfacePath(cfg)
 	titlePrefix := markerSuccess
 	mounted := backendName != mountBackendNone
 	if !mounted {
@@ -1591,7 +1588,7 @@ func performMigration(cfg config, sourceDir string, r *bufio.Reader) (err error)
 	totalDuration := time.Since(migrationStartedAt)
 	title := markerSuccess + " " + clr(ansiBold, "migration complete")
 	readyRows := append(commandContextRows(cfg, currentWorkspaceLabel(cfg.CurrentWorkspace)),
-		boxRow{Label: "mountpoint", Value: localSurfacePath(cfg, backendName)},
+		boxRow{Label: "mountpoint", Value: localSurfacePath(cfg)},
 		boxRow{Label: "mount backend", Value: userModeLabel(backendName)},
 		boxRow{Label: "config", Value: configPathLabel()},
 	)
