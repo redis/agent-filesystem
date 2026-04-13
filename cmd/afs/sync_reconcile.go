@@ -200,11 +200,14 @@ func (f *fullReconciler) warmStart(ctx context.Context, onProgress ProgressFunc)
 		return fmt.Errorf("scan remote: %w", err)
 	}
 
-	plan := f.buildPlan(local, remote)
+	plan := f.buildPlan(ctx, local, remote)
 	if len(plan) == 0 {
+		f.cleanupTombstones()
 		return nil
 	}
-	return f.executePlan(ctx, plan, onProgress)
+	err = f.executePlan(ctx, plan, onProgress)
+	f.cleanupTombstones()
+	return err
 }
 
 // scanLocalMeta walks the local tree collecting only stat information —
@@ -324,8 +327,8 @@ func (f *fullReconciler) scanRemoteDirMeta(ctx context.Context, dir string, out 
 }
 
 // buildPlan diffs local vs remote vs persisted state and produces a list of
-// actions. No I/O happens here — just decisions based on metadata.
-func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []syncAction {
+// actions. The ctx is used for remote Stat calls in the lok && !rok case.
+func (f *fullReconciler) buildPlan(ctx context.Context, local, remote map[string]observedMeta) []syncAction {
 	all := make(map[string]struct{}, len(local)+len(remote))
 	for k := range local {
 		all[k] = struct{}{}
@@ -349,33 +352,34 @@ func (f *fullReconciler) buildPlan(local, remote map[string]observedMeta) []sync
 
 		switch {
 		case lok && !rok:
-			// If the file was previously synced but is now absent from
-			// remote, another system deleted it. Propagate the delete
-			// locally instead of re-uploading.
-			if hasStored {
+			if hasStored && stored.Deleted {
+				// Tombstone exists but file reappeared locally (re-created).
+				// Clear tombstone and upload.
+				plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
+			} else if hasStored && !stored.Deleted {
+				// File was synced, now missing from remote. Verify with fresh Stat.
+				stat, statErr := f.r.fs.Stat(ctx, absoluteRemotePath(path))
+				if statErr == nil && stat != nil {
+					continue // Remote still has it — scan race, skip
+				}
 				plan = append(plan, syncAction{kind: "delete-local", path: path, absPath: abs})
-				continue
+			} else {
+				// New local file → upload
+				plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 			}
-			// Genuinely new local file → upload to remote.
-			plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 		case !lok && rok:
-			// Skip if a local delete is already in-flight in the reconciler.
-			f.r.pendingDeletesMu.Lock()
-			_, pending := f.r.pendingDeletes[path]
-			f.r.pendingDeletesMu.Unlock()
-			if pending {
-				continue
-			}
-			// If the file was previously synced (in state) but is now absent
-			// locally, the user (or another process) deleted it. Propagate
-			// the delete to remote instead of re-downloading. This handles
-			// both live deletes (where the watcher debounce hasn't delivered
-			// the event yet) and offline deletes (daemon restart after rm).
-			if hasStored {
+			if hasStored && stored.Deleted {
+				// Local tombstone — propagate delete to remote
 				plan = append(plan, syncAction{kind: "delete-remote", path: path, absPath: abs})
-				continue
+			} else if hasStored && !stored.Deleted {
+				// File was previously synced and is now absent locally.
+				// This means a local delete (offline or watcher hasn't
+				// delivered the event yet). Propagate the delete to remote.
+				plan = append(plan, syncAction{kind: "delete-remote", path: path, absPath: abs})
+			} else {
+				// New remote file → download
+				plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
 			}
-			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
 		case lok && rok:
 			// Both present. Check if they match using metadata (size+mtime
 			// for files, target for symlinks). Only go deeper if they differ.
@@ -581,15 +585,15 @@ func (f *fullReconciler) execMkdirRemote(ctx context.Context, a syncAction) erro
 }
 
 func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
-	// Check pending deletes right before downloading — if the user deleted
+	// Check for tombstone right before downloading — if the user deleted
 	// this file locally and the upload hasn't completed yet, skip the
 	// download so we don't reverse their delete.
-	f.r.pendingDeletesMu.Lock()
-	_, pending := f.r.pendingDeletes[a.path]
-	f.r.pendingDeletesMu.Unlock()
-	if pending {
+	f.r.state.mu.Lock()
+	if entry, ok := f.r.state.state.Entries[a.path]; ok && entry.Deleted {
+		f.r.state.mu.Unlock()
 		return nil
 	}
+	f.r.state.mu.Unlock()
 
 	remotePath := absoluteRemotePath(a.path)
 	// Use a per-file timeout to prevent a single slow Redis call from
@@ -648,20 +652,16 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 }
 
 func (f *fullReconciler) execDeleteLocal(ctx context.Context, a syncAction) error {
-	// Verify the remote truly deleted this path — don't delete locally if
-	// the scan just missed it (upload in flight, cache race, etc.).
-	stat, statErr := f.r.fs.Stat(ctx, absoluteRemotePath(a.path))
-	if statErr == nil && stat != nil {
-		// Remote still has it. The scan missed it — skip the delete.
-		return nil
-	}
-
 	info, err := os.Lstat(a.absPath)
 	if err != nil {
-		// Already gone locally — just clean up state.
+		// Already gone locally — mark tombstone in state.
 		f.r.state.mu.Lock()
-		delete(f.r.state.state.Entries, a.path)
-		f.r.state.dirty = true
+		if entry, ok := f.r.state.state.Entries[a.path]; ok {
+			entry.Deleted = true
+			entry.Version = f.r.state.nextVersion()
+			f.r.state.state.Entries[a.path] = entry
+			f.r.state.dirty = true
+		}
 		f.r.state.mu.Unlock()
 		return nil
 	}
@@ -672,8 +672,12 @@ func (f *fullReconciler) execDeleteLocal(ctx context.Context, a syncAction) erro
 		_ = os.Remove(a.absPath)
 	}
 	f.r.state.mu.Lock()
-	delete(f.r.state.state.Entries, a.path)
-	f.r.state.dirty = true
+	if entry, ok := f.r.state.state.Entries[a.path]; ok {
+		entry.Deleted = true
+		entry.Version = f.r.state.nextVersion()
+		f.r.state.state.Entries[a.path] = entry
+		f.r.state.dirty = true
+	}
 	f.r.state.mu.Unlock()
 	return nil
 }
@@ -684,8 +688,13 @@ func (f *fullReconciler) execDeleteRemote(ctx context.Context, a syncAction) err
 		return fmt.Errorf("rm remote %s: %w", a.path, err)
 	}
 	f.r.state.mu.Lock()
-	delete(f.r.state.state.Entries, a.path)
-	f.r.state.dirty = true
+	if entry, ok := f.r.state.state.Entries[a.path]; ok {
+		entry.Deleted = true
+		entry.Version = f.r.state.nextVersion()
+		entry.LastSyncedAt = time.Now().UTC()
+		f.r.state.state.Entries[a.path] = entry
+		f.r.state.dirty = true
+	}
 	f.r.state.mu.Unlock()
 	return nil
 }
@@ -774,8 +783,24 @@ func (f *fullReconciler) execSymlinkUpload(ctx context.Context, a syncAction) er
 	return nil
 }
 
+// cleanupTombstones removes tombstone entries older than 5 minutes to
+// prevent unbounded state growth.
+func (f *fullReconciler) cleanupTombstones() {
+	const maxAge = 5 * time.Minute
+	now := time.Now()
+	f.r.state.mu.Lock()
+	for path, entry := range f.r.state.state.Entries {
+		if entry.Deleted && now.Sub(entry.LastSyncedAt) > maxAge {
+			delete(f.r.state.state.Entries, path)
+			f.r.state.dirty = true
+		}
+	}
+	f.r.state.mu.Unlock()
+}
+
 func (f *fullReconciler) updateState(path string, entry SyncEntry) {
 	f.r.state.mu.Lock()
+	entry.Version = f.r.state.nextVersion()
 	f.r.state.state.Entries[path] = entry
 	f.r.state.dirty = true
 	f.r.state.mu.Unlock()
@@ -793,6 +818,7 @@ func (f *fullReconciler) refreshStateMeta(rel string, l, r observedMeta) {
 		RemoteMtimeMs: r.mtimeMs,
 		Target:        targetFromMeta(l, r),
 		LastSyncedAt:  now,
+		Version:       f.r.state.nextVersion(),
 	}
 	f.r.state.dirty = true
 }

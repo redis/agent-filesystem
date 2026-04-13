@@ -13,7 +13,7 @@ import (
 // syncStateVersion is bumped whenever the on-disk SyncState format changes in
 // an incompatible way. v2 adds ChunkSize/ChunkHashes to SyncEntry for
 // chunk-level delta sync. v1 entries have zero-value ChunkSize (= inline).
-const syncStateVersion = 2
+const syncStateVersion = 3
 
 // SyncEntry is the per-path record the reconciler maintains. It records what
 // the daemon last knew about both sides — local hash/mtime and the corresponding
@@ -33,6 +33,11 @@ type SyncEntry struct {
 	// Chunked sync fields (v2). ChunkSize==0 means inline (not chunked).
 	ChunkSize   int      `json:"chunk_size,omitempty"`
 	ChunkHashes []string `json:"chunk_hashes,omitempty"`
+	// Version counter (v3) — monotonically increasing per state write.
+	Version uint64 `json:"version"`
+	// Deleted marks the entry as a tombstone (v3). The entry is kept so
+	// buildPlan can distinguish "intentionally deleted" from "never seen".
+	Deleted bool `json:"deleted,omitempty"`
 }
 
 // SyncState is the persisted view of every path the daemon has ever observed
@@ -46,6 +51,8 @@ type SyncState struct {
 	LastStreamID string               `json:"last_stream_id,omitempty"`
 	Entries      map[string]SyncEntry `json:"entries"`
 	UpdatedAt    time.Time            `json:"updated_at"`
+	// NextVersion is the monotonic counter used by nextVersion().
+	NextVersion uint64 `json:"next_version"`
 }
 
 // newSyncState returns an empty state ready to be populated by a reconciler
@@ -161,6 +168,14 @@ func newStateWriter(st *SyncState, debounce time.Duration) *stateWriter {
 		flushCh:  make(chan struct{}, 1),
 		doneCh:   make(chan struct{}),
 	}
+}
+
+// nextVersion returns the next monotonic version and increments the counter.
+// Must be called with w.mu held.
+func (w *stateWriter) nextVersion() uint64 {
+	v := w.state.NextVersion
+	w.state.NextVersion++
+	return v
 }
 
 // run loops until ctx is done, persisting the latest state at most once per

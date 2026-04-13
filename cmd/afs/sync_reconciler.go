@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/client"
@@ -53,14 +52,6 @@ type reconciler struct {
 
 	pendingFullSweep bool
 	fullSweepRequest chan struct{}
-
-	// pendingDeletes tracks paths whose local deletion has been queued for
-	// upload but not yet confirmed. buildPlan and execDownload skip
-	// re-downloading these files so a full reconciliation cannot reverse a
-	// pending local delete. Guarded by pendingDeletesMu because the
-	// fullReconciler runs in a separate goroutine.
-	pendingDeletesMu sync.Mutex
-	pendingDeletes   map[string]struct{}
 }
 
 func newReconciler(
@@ -102,7 +93,6 @@ func newReconciler(
 		uploadResCh:      make(chan uploadResult, 256),
 		downloadResCh:    make(chan downloadResult, 256),
 		fullSweepRequest: make(chan struct{}, 1),
-		pendingDeletes:   make(map[string]struct{}),
 	}
 }
 
@@ -344,13 +334,19 @@ func (r *reconciler) handleLocalDir(rel, abs string, info fs.FileInfo) {
 func (r *reconciler) handleLocalDelete(rel string) {
 	r.state.mu.Lock()
 	stored, hasStored := r.state.state.Entries[rel]
-	r.state.mu.Unlock()
 	if !hasStored {
+		r.state.mu.Unlock()
 		return
 	}
-	r.pendingDeletesMu.Lock()
-	r.pendingDeletes[rel] = struct{}{}
-	r.pendingDeletesMu.Unlock()
+	// Tombstone immediately — buildPlan sees this before upload completes.
+	stored.Deleted = true
+	stored.Version = r.state.nextVersion()
+	stored.LastSyncedAt = time.Now().UTC()
+	r.state.state.Entries[rel] = stored
+	r.state.dirty = true
+	r.state.mu.Unlock()
+	r.state.markDirty()
+
 	r.uploadCh <- uploadOp{
 		Kind:        opUploadDelete,
 		Path:        rel,
@@ -376,19 +372,17 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 	if r.ignore.shouldIgnore(rel, false) {
 		return
 	}
-	// Skip remote events for paths with a pending local delete — the delete
+
+	// Skip remote events for paths with a local tombstone — the delete
 	// upload will propagate the removal to Redis shortly.
-	r.pendingDeletesMu.Lock()
-	_, pending := r.pendingDeletes[rel]
-	r.pendingDeletesMu.Unlock()
-	if pending {
+	r.state.mu.Lock()
+	stored, hasStored := r.state.state.Entries[rel]
+	r.state.mu.Unlock()
+	if hasStored && stored.Deleted {
 		return
 	}
 
 	abs := filepath.Join(r.root, filepath.FromSlash(rel))
-	r.state.mu.Lock()
-	stored, hasStored := r.state.state.Entries[rel]
-	r.state.mu.Unlock()
 
 	stat, err := r.fs.Stat(ctx, absoluteRemotePath(rel))
 	if err != nil && !isClientNotFound(err) {
@@ -397,6 +391,17 @@ func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
 	}
 	if stat == nil {
 		if hasStored {
+			// Mark tombstone immediately so buildPlan racing concurrently sees it.
+			r.state.mu.Lock()
+			if entry, ok := r.state.state.Entries[rel]; ok && !entry.Deleted {
+				entry.Deleted = true
+				entry.Version = r.state.nextVersion()
+				entry.LastSyncedAt = time.Now().UTC()
+				r.state.state.Entries[rel] = entry
+				r.state.dirty = true
+			}
+			r.state.mu.Unlock()
+
 			r.log.RemoteChange(rel, "deleted")
 			r.downloadCh <- downloadOp{
 				Kind:        opDownloadDelete,
@@ -502,11 +507,6 @@ func (r *reconciler) detectConflict(rel, abs string, stored SyncEntry, hasStored
 }
 
 func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
-	if res.Op.Kind == opUploadDelete {
-		r.pendingDeletesMu.Lock()
-		delete(r.pendingDeletes, res.Op.Path)
-		r.pendingDeletesMu.Unlock()
-	}
 	if res.Err != nil {
 		r.log.Err("upload "+res.Op.Path, res.Err.Error())
 		return
@@ -543,6 +543,7 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 			LastSyncedAt:  now,
 			ChunkSize:     res.Op.ChunkSize,
 			ChunkHashes:   res.Op.ChunkHashes,
+			Version:       r.state.nextVersion(),
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
@@ -554,6 +555,7 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 			Type:         "symlink",
 			Target:       res.Op.Symlink,
 			LastSyncedAt: now,
+			Version:      r.state.nextVersion(),
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
@@ -565,12 +567,18 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 			Type:         "dir",
 			Mode:         res.Op.Mode,
 			LastSyncedAt: now,
+			Version:      r.state.nextVersion(),
 		}
 	case opUploadDelete:
-		delete(r.state.state.Entries, res.Op.Path)
+		// Tombstone was already set in handleLocalDelete. Just update LastSyncedAt.
+		if entry, ok := r.state.state.Entries[res.Op.Path]; ok {
+			entry.LastSyncedAt = now
+			r.state.state.Entries[res.Op.Path] = entry
+		}
 	case opUploadChmod:
 		if entry, ok := r.state.state.Entries[res.Op.Path]; ok {
 			entry.Mode = res.Op.Mode
+			entry.Version = r.state.nextVersion()
 			entry.LastSyncedAt = now
 			r.state.state.Entries[res.Op.Path] = entry
 		}
@@ -596,18 +604,18 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 		r.log.Err("download "+res.Op.Path, res.Err.Error())
 		return
 	}
-	// If a local delete is in-flight for this path, discard the download
+	// If a local tombstone exists for this path, discard the download
 	// result — the file was written to disk by the downloader but the user
 	// already deleted it. Remove the re-created file immediately so it does
 	// not reappear, and let the pending upload carry the delete to Redis.
-	r.pendingDeletesMu.Lock()
-	_, pending := r.pendingDeletes[res.Op.Path]
-	r.pendingDeletesMu.Unlock()
-	if pending {
+	r.state.mu.Lock()
+	if entry, ok := r.state.state.Entries[res.Op.Path]; ok && entry.Deleted {
+		r.state.mu.Unlock()
 		abs := filepath.Join(r.root, filepath.FromSlash(res.Op.Path))
 		_ = os.Remove(abs)
 		return
 	}
+	r.state.mu.Unlock()
 	if res.ConflictPath != "" {
 		r.log.Conflict(res.Op.Path, res.ConflictPath)
 		go triggerConflictCheckpoint(ctx, r.store, r.workspace)
@@ -627,6 +635,7 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 			LastSyncedAt:  now,
 			ChunkSize:     res.Op.ChunkSize,
 			ChunkHashes:   res.Op.ChunkHashes,
+			Version:       r.state.nextVersion(),
 		}
 		r.state.state.Entries[res.Op.Path] = entry
 	case opDownloadSymlink:
@@ -634,19 +643,27 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 			Type:         "symlink",
 			Target:       res.Target,
 			LastSyncedAt: now,
+			Version:      r.state.nextVersion(),
 		}
 	case opDownloadMkdir:
 		entry := SyncEntry{
 			Type:         "dir",
 			Mode:         res.Op.Mode,
 			LastSyncedAt: now,
+			Version:      r.state.nextVersion(),
 		}
 		r.state.state.Entries[res.Op.Path] = entry
 	case opDownloadDelete:
-		delete(r.state.state.Entries, res.Op.Path)
+		if entry, ok := r.state.state.Entries[res.Op.Path]; ok {
+			entry.Deleted = true
+			entry.Version = r.state.nextVersion()
+			entry.LastSyncedAt = now
+			r.state.state.Entries[res.Op.Path] = entry
+		}
 	case opDownloadChmod:
 		if entry, ok := r.state.state.Entries[res.Op.Path]; ok {
 			entry.Mode = res.Mode
+			entry.Version = r.state.nextVersion()
 			entry.LastSyncedAt = now
 			r.state.state.Entries[res.Op.Path] = entry
 		}
