@@ -51,16 +51,19 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	t.Helper()
 
-	// First-run flow: Redis → Mode → (mount surface). Leave the Redis prompts
-	// at defaults, switch to live mount mode, then leave the mountpoint empty
-	// so the test exercises the "no mounted filesystem" path.
+	mr := miniredis.RunT(t)
+
+	// First-run flow: Redis → workspace creation → mode → mount surface.
+	// Switch to live mount mode, then type "none" so the test exercises the
+	// explicit "no mounted filesystem" path.
 	input := stringsJoinLines(
-		"",  // redis addr default
-		"",  // redis username default
-		"",  // redis password
-		"",  // tls default
+		mr.Addr(), // redis addr
+		"",        // redis username default
+		"",        // redis password
+		"",        // tls default
+		"demo",
 		"2", // mode: live mount
-		"",  // no mounted filesystem
+		"none",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 
@@ -74,18 +77,24 @@ func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	if cfg.LocalPath != "" {
 		t.Fatalf("Mountpoint = %q, want empty", cfg.LocalPath)
 	}
+	if cfg.CurrentWorkspace != "demo" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "demo")
+	}
 }
 
 func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 	t.Helper()
 
+	mr := miniredis.RunT(t)
+
 	input := stringsJoinLines(
-		"",  // redis addr default
-		"",  // redis username default
-		"",  // redis password
-		"",  // tls default
+		mr.Addr(), // redis addr
+		"",        // redis username default
+		"",        // redis password
+		"",        // tls default
+		"demo",
 		"2", // mode: live mount
-		"",  // no mounted filesystem
+		"none",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
 	var output bytes.Buffer
@@ -101,8 +110,183 @@ func TestRunSetupWizardNoMountSkipsLegacyFilesystemKeyPrompt(t *testing.T) {
 	if !strings.Contains(got, "Filesystem Mount") || !strings.Contains(got, "Choose local mount point") {
 		t.Fatalf("no-mount setup output = %q, want local mount point prompt", got)
 	}
-	if strings.Contains(got, "Current Workspace") || strings.Contains(got, "current workspace") {
-		t.Fatalf("no-mount setup output unexpectedly mentioned current workspace:\n%s", got)
+	if !strings.Contains(got, "Create your first workspace") {
+		t.Fatalf("no-mount setup output = %q, want first-workspace prompt", got)
+	}
+}
+
+func TestRunSetupWizardSelectsExistingWorkspaceAndDefaultsLocalPath(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	store := newAFSStore(mustRedisClient(t, cfg))
+	defer func() { _ = store.rdb.Close() }()
+
+	if err := createEmptyWorkspace(context.Background(), cfg, store, "alpha"); err != nil {
+		t.Fatalf("createEmptyWorkspace(alpha) returned error: %v", err)
+	}
+	if err := createEmptyWorkspace(context.Background(), cfg, store, "beta"); err != nil {
+		t.Fatalf("createEmptyWorkspace(beta) returned error: %v", err)
+	}
+
+	input := stringsJoinLines(
+		mr.Addr(),
+		"",
+		"",
+		"",
+		"beta",
+		"",
+		"",
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+	var output bytes.Buffer
+
+	got, err := runSetupWizard(reader, &output, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.CurrentWorkspace != "beta" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "beta")
+	}
+	wantLocalPath := filepath.Join(homeDir, "beta")
+	if got.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", got.LocalPath, wantLocalPath)
+	}
+	if got.Mode != modeSync {
+		t.Fatalf("Mode = %q, want %q", got.Mode, modeSync)
+	}
+	rendered := output.String()
+	for _, want := range []string{
+		"Choose a workspace from Redis",
+		"Workspace name",
+		"Files/Folders",
+		"Last updated",
+		"0 files/0 folders",
+		"0 B",
+		"Create a new workspace",
+		"Connected",
+		"alpha",
+		"beta",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("setup output = %q, want substring %q", rendered, want)
+		}
+	}
+}
+
+func TestRunSetupWizardCanCreateNewWorkspaceFromExistingList(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	store := newAFSStore(mustRedisClient(t, cfg))
+	defer func() { _ = store.rdb.Close() }()
+
+	if err := createEmptyWorkspace(context.Background(), cfg, store, "alpha"); err != nil {
+		t.Fatalf("createEmptyWorkspace(alpha) returned error: %v", err)
+	}
+
+	input := stringsJoinLines(
+		mr.Addr(),
+		"",
+		"",
+		"",
+		"2",
+		"gamma",
+		"",
+		"",
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+
+	got, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.CurrentWorkspace != "gamma" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "gamma")
+	}
+	wantLocalPath := filepath.Join(homeDir, "gamma")
+	if got.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", got.LocalPath, wantLocalPath)
+	}
+
+	exists, err := store.workspaceExists(context.Background(), "gamma")
+	if err != nil {
+		t.Fatalf("workspaceExists(gamma) returned error: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected setup to create the selected new workspace")
+	}
+}
+
+func TestRunSetupWizardCreatesFirstWorkspaceAndDefaultsLocalPath(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
+
+	input := stringsJoinLines(
+		mr.Addr(),
+		"",
+		"",
+		"",
+		"demo",
+		"",
+		"",
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+
+	got, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.CurrentWorkspace != "demo" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "demo")
+	}
+	wantLocalPath := filepath.Join(homeDir, "demo")
+	if got.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", got.LocalPath, wantLocalPath)
+	}
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	store := newAFSStore(mustRedisClient(t, cfg))
+	defer func() { _ = store.rdb.Close() }()
+
+	exists, err := store.workspaceExists(context.Background(), "demo")
+	if err != nil {
+		t.Fatalf("workspaceExists(demo) returned error: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected first workspace to be created during setup")
 	}
 }
 
@@ -148,8 +332,19 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	t.Helper()
 
+	mr := miniredis.RunT(t)
 	existing := defaultConfig()
+	existing.RedisAddr = mr.Addr()
 	existing.CurrentWorkspace = "demo"
+	store := newAFSStore(mustRedisClient(t, existing))
+	defer func() { _ = store.rdb.Close() }()
+
+	if err := createEmptyWorkspace(context.Background(), existing, store, "demo"); err != nil {
+		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
+	}
+	if err := createEmptyWorkspace(context.Background(), existing, store, "repo-two"); err != nil {
+		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
+	}
 
 	// Edit-menu items: 4 = current workspace, 5 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
@@ -167,16 +362,34 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	}
 }
 
-func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
+func TestRunSetupWizardAllowsCreatingWorkspaceFromCurrentWorkspaceMenu(t *testing.T) {
 	t.Helper()
 
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	mr := miniredis.RunT(t)
 	existing := defaultConfig()
+	existing.RedisAddr = mr.Addr()
 	existing.CurrentWorkspace = "demo"
+	store := newAFSStore(mustRedisClient(t, existing))
+	defer func() { _ = store.rdb.Close() }()
+
+	if err := createEmptyWorkspace(context.Background(), existing, store, "demo"); err != nil {
+		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
+	}
 
 	// Edit-menu items: 4 = current workspace, 5 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
 		"4",
-		"none",
+		"2",
+		"repo-three",
 		"5",
 	)))
 
@@ -184,8 +397,19 @@ func TestRunSetupWizardAllowsClearingCurrentWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
-	if cfg.CurrentWorkspace != "" {
-		t.Fatalf("CurrentWorkspace = %q, want empty", cfg.CurrentWorkspace)
+	if cfg.CurrentWorkspace != "repo-three" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "repo-three")
+	}
+	wantLocalPath := filepath.Join("~", "repo-three")
+	if cfg.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", cfg.LocalPath, wantLocalPath)
+	}
+	exists, err := store.workspaceExists(context.Background(), "repo-three")
+	if err != nil {
+		t.Fatalf("workspaceExists(repo-three) returned error: %v", err)
+	}
+	if !exists {
+		t.Fatal("expected edit-mode workspace menu to create repo-three")
 	}
 }
 
@@ -243,16 +467,26 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 	t.Helper()
 
+	mr := miniredis.RunT(t)
 	existing := defaultConfig()
-	existing.RedisAddr = "redis.example:6379"
+	existing.RedisAddr = mr.Addr()
 	existing.CurrentWorkspace = "demo"
 	existing.MountBackend = mountBackendNone
+	store := newAFSStore(mustRedisClient(t, existing))
+	defer func() { _ = store.rdb.Close() }()
+
+	if err := createEmptyWorkspace(context.Background(), existing, store, "demo"); err != nil {
+		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
+	}
+	if err := createEmptyWorkspace(context.Background(), existing, store, "repo-two"); err != nil {
+		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
+	}
 
 	// Edit-menu items: 4 = current workspace, 5 = save. Exercise the loop
-	// by picking workspace twice (set, clear) then saving.
+	// by picking workspace twice, then saving.
 	input := stringsJoinLines(
 		"4", "repo-two",
-		"4", "none",
+		"4", "demo",
 		"5",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -262,8 +496,8 @@ func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
-	if cfg.CurrentWorkspace != "" {
-		t.Fatalf("CurrentWorkspace = %q, want empty after second edit", cfg.CurrentWorkspace)
+	if cfg.CurrentWorkspace != "demo" {
+		t.Fatalf("CurrentWorkspace = %q, want %q after second edit", cfg.CurrentWorkspace, "demo")
 	}
 	if strings.Count(output.String(), "What would you like to change?") < 3 {
 		t.Fatalf("menu should have been shown 3 times (two edits + final exit), got:\n%s", output.String())
@@ -295,6 +529,7 @@ func TestRunSetupWizardEditModeUnknownChoiceReprompts(t *testing.T) {
 func TestCmdSetupDoesNotStartServices(t *testing.T) {
 	t.Helper()
 
+	mr := miniredis.RunT(t)
 	homeDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	if err := os.Setenv("HOME", homeDir); err != nil {
@@ -313,12 +548,13 @@ func TestCmdSetupDoesNotStartServices(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
-		"",  // default addr
-		"",  // default user
-		"",  // no password
-		"",  // no tls
-		"2", // mode: live mount (keeps the "no mounted filesystem" path alive)
-		"",  // no mounted filesystem
+		mr.Addr(),
+		"", // default user
+		"", // no password
+		"", // no tls
+		"demo",
+		"", // mode: sync
+		"", // default local path
 	)
 	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {
 		t.Fatalf("WriteFile(stdin) returned error: %v", err)
@@ -436,6 +672,7 @@ func TestPromptLocalFilesystemSetupRejectsExistingFileMountpoint(t *testing.T) {
 func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
 	t.Helper()
 
+	mr := miniredis.RunT(t)
 	homeDir := t.TempDir()
 	origHome := os.Getenv("HOME")
 	if err := os.Setenv("HOME", homeDir); err != nil {
@@ -459,10 +696,11 @@ func TestCmdSetupRejectsExistingFileMountpointBeforeSavingConfig(t *testing.T) {
 
 	stdinPath := filepath.Join(t.TempDir(), "setup-input.txt")
 	input := stringsJoinLines(
-		"",             // redis addr default
-		"",             // redis username default
-		"",             // redis password
-		"",             // tls default
+		mr.Addr(),
+		"", // redis username default
+		"", // redis password
+		"", // tls default
+		"demo",
 		"2",            // mode: live mount (so we reach the mountpoint prompt)
 		mountpointFile, // invalid mountpoint
 	)

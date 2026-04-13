@@ -13,6 +13,8 @@ const (
 type afsLocalState = worktree.LocalState
 
 type workspaceMeta = controlplane.WorkspaceMeta
+type workspaceSummary = controlplane.WorkspaceSummary
+type workspaceListResponse = controlplane.WorkspaceListResponse
 type savepointMeta = controlplane.SavepointMeta
 type manifest = controlplane.Manifest
 type manifestEntry = controlplane.ManifestEntry

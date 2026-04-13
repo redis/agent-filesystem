@@ -207,6 +207,9 @@ func loadConfigForUpWithIOAndMode(args []string, mode optionalString, r *bufio.R
 	if err != nil {
 		return cfg, err
 	}
+	if !presence.filePresent {
+		return cfg, fmt.Errorf("no configuration found\nRun '%s setup' to get started", filepath.Base(os.Args[0]))
+	}
 
 	if err := validateUpModeOverride(mode); err != nil {
 		return cfg, err

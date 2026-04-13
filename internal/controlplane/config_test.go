@@ -1,4 +1,4 @@
-package main
+package controlplane
 
 import (
 	"crypto/tls"
@@ -6,14 +6,18 @@ import (
 	"time"
 )
 
-func TestBuildRedisOptionsIncludesUsernameAndTLS(t *testing.T) {
+func TestBuildRedisOptionsIncludesReadTimeoutAndTLS(t *testing.T) {
 	t.Helper()
-	cfg := config{}
-	cfg.RedisAddr = "hosted.redis.example.com:16379"
-	cfg.RedisUsername = "default"
-	cfg.RedisPassword = "secret"
-	cfg.RedisDB = 0
-	cfg.RedisTLS = true
+
+	cfg := Config{
+		RedisConfig: RedisConfig{
+			RedisAddr:     "hosted.redis.example.com:16379",
+			RedisUsername: "default",
+			RedisPassword: "secret",
+			RedisDB:       7,
+			RedisTLS:      true,
+		},
+	}
 
 	opts := buildRedisOptions(cfg, 12)
 	if opts.Addr != cfg.RedisAddr {
@@ -24,6 +28,9 @@ func TestBuildRedisOptionsIncludesUsernameAndTLS(t *testing.T) {
 	}
 	if opts.Password != cfg.RedisPassword {
 		t.Fatalf("Password = %q, want %q", opts.Password, cfg.RedisPassword)
+	}
+	if opts.DB != cfg.RedisDB {
+		t.Fatalf("DB = %d, want %d", opts.DB, cfg.RedisDB)
 	}
 	if opts.PoolSize != 12 {
 		t.Fatalf("PoolSize = %d, want 12", opts.PoolSize)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // cmdSetup runs the interactive configuration wizard and writes the config
@@ -95,7 +99,7 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 				return cfg, err
 			}
 		case "2":
-			if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+			if err := promptRedisSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
 		case "3":
@@ -131,7 +135,7 @@ func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	if strings.TrimSpace(cfg.Mode) == "" {
 		cfg.Mode = modeSync
 	}
-	if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+	if err := promptRedisSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
 	if err := promptModeSetup(r, out, &cfg); err != nil {
@@ -273,12 +277,284 @@ func promptRedisConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) err
 	return nil
 }
 
+func promptRedisSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	if err := promptRedisConnectionSetup(r, out, cfg); err != nil {
+		return err
+	}
+	return promptWorkspaceSetupWithConfiguredRedis(r, out, cfg)
+}
+
+func promptWorkspaceSetupWithConfiguredRedis(r *bufio.Reader, out io.Writer, cfg *config) error {
+	store, closeStore, err := connectSetupStore(out, *cfg)
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	if err := promptWorkspaceSelectionSetup(r, out, cfg, store); err != nil {
+		return err
+	}
+	applySuggestedWorkspaceLocalPath(cfg)
+	return nil
+}
+
+func connectSetupStore(out io.Writer, cfg config) (*afsStore, func(), error) {
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Connecting to ")+clr(ansiBold, configRemoteLabel(cfg)))
+
+	rdb := redis.NewClient(buildRedisOptions(cfg, 4))
+	closeFn := func() {
+		_ = rdb.Close()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		closeFn()
+		return nil, func() {}, fmt.Errorf("cannot connect to Redis at %s: %w", cfg.RedisAddr, err)
+	}
+
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Connected"))
+	fmt.Fprintln(out)
+	return newAFSStore(rdb), closeFn, nil
+}
+
+func promptWorkspaceSelectionSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	if store == nil {
+		return fmt.Errorf("missing Redis store")
+	}
+
+	ctx := context.Background()
+	service := controlPlaneServiceFromStore(*cfg, store)
+	workspaces, err := service.ListWorkspaceSummaries(ctx)
+	if err != nil {
+		return err
+	}
+	if len(workspaces.Items) == 0 {
+		return promptCreateFirstWorkspaceSetup(r, out, cfg, store)
+	}
+	return promptChooseExistingWorkspaceSetup(r, out, cfg, store, workspaces.Items)
+}
+
+func promptCreateFirstWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore) error {
+	return promptCreateWorkspaceSetup(r, out, cfg, store, true)
+}
+
+func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore, workspaces []workspaceSummary) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Workspace"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  Choose a workspace from Redis:")
+	fmt.Fprintln(out)
+	printSetupWorkspaceTable(out, workspaces)
+	fmt.Fprintln(out)
+
+	defaultChoice := setupWorkspaceDefaultChoice(*cfg, workspaces)
+	for {
+		choice, err := promptString(r, out,
+			"  Choose workspace\n"+
+				"  "+clr(ansiDim, "Enter a number, workspace name, or 'create'"), defaultChoice)
+		if err != nil {
+			return err
+		}
+		workspace, createNew, ok := resolveSetupWorkspaceChoice(choice, workspaces)
+		if ok && createNew {
+			if err := promptCreateWorkspaceSetup(r, out, cfg, store, false); err != nil {
+				return err
+			}
+			return nil
+		}
+		if ok {
+			cfg.CurrentWorkspace = workspace
+			fmt.Fprintln(out, "  "+clr(ansiDim, "Using workspace ")+clr(ansiBold, workspace))
+			fmt.Fprintln(out)
+			return nil
+		}
+		fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown workspace ")+clr(ansiBold, strings.TrimSpace(choice))+clr(ansiDim, "; choose a listed workspace or create a new one."))
+		fmt.Fprintln(out)
+	}
+}
+
+func printSetupWorkspaceTable(out io.Writer, workspaces []workspaceSummary) {
+	nameHeader := clr(ansiDim, "Workspace name")
+	countsHeader := clr(ansiDim, "Files/Folders")
+	sizeHeader := clr(ansiDim, "Size")
+	updatedHeader := clr(ansiDim, "Last updated")
+
+	nameWidth := runeWidth(nameHeader)
+	countsWidth := runeWidth(countsHeader)
+	sizeWidth := runeWidth(sizeHeader)
+	for i, ws := range workspaces {
+		nameWidth = maxInt(nameWidth, runeWidth(setupWorkspaceRowName(i+1, ws.Name)))
+		countsWidth = maxInt(countsWidth, runeWidth(setupWorkspaceCountsLabel(ws)))
+		sizeWidth = maxInt(sizeWidth, runeWidth(formatBytes(ws.TotalBytes)))
+	}
+	nameWidth = maxInt(nameWidth, runeWidth(setupWorkspaceCreateRowLabel(len(workspaces)+1)))
+
+	fmt.Fprintf(out, "    %s   %s   %s   %s\n",
+		padVisibleText(nameHeader, nameWidth),
+		padVisibleText(countsHeader, countsWidth),
+		padVisibleText(sizeHeader, sizeWidth),
+		updatedHeader,
+	)
+	for i, ws := range workspaces {
+		fmt.Fprintf(out, "    %s   %s   %s   %s\n",
+			padVisibleText(setupWorkspaceRowName(i+1, ws.Name), nameWidth),
+			padVisibleText(setupWorkspaceCountsLabel(ws), countsWidth),
+			padVisibleText(formatBytes(ws.TotalBytes), sizeWidth),
+			setupWorkspaceUpdatedLabel(ws.UpdatedAt),
+		)
+	}
+	fmt.Fprintf(out, "    %s\n", setupWorkspaceCreateRowLabel(len(workspaces)+1))
+}
+
+func setupWorkspaceRowName(index int, name string) string {
+	return fmt.Sprintf("%d. %s", index, clr(ansiBold, name))
+}
+
+func setupWorkspaceCreateRowLabel(index int) string {
+	return fmt.Sprintf("%d. %s", index, clr(ansiBold, "Create a new workspace"))
+}
+
+func setupWorkspaceCountsLabel(summary workspaceSummary) string {
+	return fmt.Sprintf("%d files/%d folders", summary.FileCount, summary.FolderCount)
+}
+
+func setupWorkspaceUpdatedLabel(raw string) string {
+	if updated := strings.TrimSpace(formatDisplayTimestamp(raw)); updated != "" {
+		return updated
+	}
+	return "unknown"
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func setupWorkspaceDefaultChoice(cfg config, workspaces []workspaceSummary) string {
+	current := strings.TrimSpace(cfg.CurrentWorkspace)
+	if current != "" {
+		for _, ws := range workspaces {
+			if ws.Name == current {
+				return current
+			}
+		}
+	}
+	if len(workspaces) == 0 {
+		return ""
+	}
+	return "1"
+}
+
+func resolveSetupWorkspaceChoice(choice string, workspaces []workspaceSummary) (string, bool, bool) {
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return "", false, false
+	}
+	switch strings.ToLower(choice) {
+	case "create", "new":
+		return "", true, true
+	}
+	if idx, err := strconv.Atoi(choice); err == nil {
+		if idx >= 1 && idx <= len(workspaces) {
+			return workspaces[idx-1].Name, false, true
+		}
+		if idx == len(workspaces)+1 {
+			return "", true, true
+		}
+		return "", false, false
+	}
+	for _, ws := range workspaces {
+		if ws.Name == choice {
+			return ws.Name, false, true
+		}
+	}
+	return "", false, false
+}
+
+func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, store *afsStore, first bool) error {
+	if cfg == nil {
+		return fmt.Errorf("missing config")
+	}
+	if store == nil {
+		return fmt.Errorf("missing Redis store")
+	}
+
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Workspace"))
+	fmt.Fprintln(out)
+	if first {
+		fmt.Fprintln(out, "  "+clr(ansiDim, "No workspaces found in this Redis database."))
+		fmt.Fprintln(out)
+	}
+
+	label := "  Create a new workspace"
+	hint := "  " + clr(ansiDim, "Example: demo")
+	if first {
+		label = "  Create your first workspace"
+	}
+	workspace, err := promptString(r, out, label+"\n"+hint, "")
+	if err != nil {
+		return err
+	}
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return fmt.Errorf("workspace name cannot be empty")
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
+	if err := createEmptyWorkspace(context.Background(), *cfg, store, workspace); err != nil {
+		return err
+	}
+
+	cfg.CurrentWorkspace = workspace
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Created workspace ")+clr(ansiBold, workspace))
+	fmt.Fprintln(out)
+	return nil
+}
+
+func applySuggestedWorkspaceLocalPath(cfg *config) {
+	if cfg == nil {
+		return
+	}
+	if !shouldApplyWorkspaceLocalPathDefault(cfg.LocalPath) {
+		return
+	}
+	if suggested := suggestedWorkspaceLocalPath(cfg.CurrentWorkspace); suggested != "" {
+		cfg.LocalPath = suggested
+	}
+}
+
+func shouldApplyWorkspaceLocalPathDefault(localPath string) bool {
+	trimmed := strings.TrimSpace(localPath)
+	if trimmed == "" {
+		return true
+	}
+	return trimmed == strings.TrimSpace(defaultConfig().LocalPath)
+}
+
+func suggestedWorkspaceLocalPath(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return strings.TrimSpace(defaultConfig().LocalPath)
+	}
+	return filepath.Join("~", workspace)
+}
+
 func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, firstRun bool) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Filesystem Mount"))
 	fmt.Fprintln(out)
-	mountDefault := ""
-	if !firstRun {
+	mountDefault := strings.TrimSpace(cfg.LocalPath)
+	if mountDefault == "" {
+		mountDefault = suggestedWorkspaceLocalPath(cfg.CurrentWorkspace)
+	}
+	if !firstRun && mountDefault == "" {
 		backendName, err := normalizeMountBackend(cfg.MountBackend)
 		if err != nil {
 			return err
@@ -387,7 +663,7 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	case "1", "", "sync":
 		cfg.Mode = modeSync
 		if strings.TrimSpace(cfg.LocalPath) == "" {
-			cfg.LocalPath = "~/afs"
+			cfg.LocalPath = suggestedWorkspaceLocalPath(cfg.CurrentWorkspace)
 			fmt.Fprintln(out, "  "+clr(ansiDim, "Sync local path defaulted to ")+clr(ansiBold, cfg.LocalPath)+clr(ansiDim, " (edit it from the menu)"))
 			fmt.Fprintln(out)
 		}
@@ -408,6 +684,9 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 	fmt.Fprintln(out)
 
 	defaultValue := strings.TrimSpace(cfg.LocalPath)
+	if defaultValue == "" {
+		defaultValue = suggestedWorkspaceLocalPath(cfg.CurrentWorkspace)
+	}
 	promptHint := "  " + clr(ansiDim, "Enter the local directory AFS should sync to. Example: ~/afs")
 	if defaultValue != "" {
 		promptHint = "  " + clr(ansiDim, "Press enter to keep "+defaultValue+", or type a new path")
@@ -432,34 +711,7 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 }
 
 func promptCurrentWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Current Workspace"))
-	fmt.Fprintln(out)
-
-	promptHint := "  " + clr(ansiDim, "Enter a workspace name, or type none to clear the current workspace")
-	defaultValue := strings.TrimSpace(cfg.CurrentWorkspace)
-	if defaultValue != "" {
-		promptHint = "  " + clr(ansiDim, "Press enter to keep "+defaultValue+", or type none to clear the current workspace")
-	}
-
-	workspace, err := promptString(r, out, "  Workspace name\n"+promptHint, defaultValue)
-	if err != nil {
-		return err
-	}
-	workspace = strings.TrimSpace(workspace)
-	if strings.EqualFold(workspace, "none") {
-		cfg.CurrentWorkspace = ""
-		return nil
-	}
-	if workspace == "" {
-		cfg.CurrentWorkspace = ""
-		return nil
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
-	cfg.CurrentWorkspace = workspace
-	return nil
+	return promptWorkspaceSetupWithConfiguredRedis(r, out, cfg)
 }
 
 func suggestNFSPort(host string, preferred int) (int, bool, error) {

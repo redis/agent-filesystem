@@ -70,11 +70,14 @@ func OpenStore(ctx context.Context, cfg Config) (*Store, func(), error) {
 
 func buildRedisOptions(cfg Config, poolSize int) *redis.Options {
 	return &redis.Options{
-		Addr:         cfg.RedisAddr,
-		Username:     cfg.RedisUsername,
-		Password:     cfg.RedisPassword,
-		DB:           cfg.RedisDB,
-		PoolSize:     poolSize,
+		Addr:     cfg.RedisAddr,
+		Username: cfg.RedisUsername,
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDB,
+		PoolSize: poolSize,
+		// Match the CLI/mount client timeout so manifest reads don't hit the
+		// library's 3s default on hosted Redis.
+		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		TLSConfig:    buildRedisTLSConfig(cfg.RedisTLS),
 	}

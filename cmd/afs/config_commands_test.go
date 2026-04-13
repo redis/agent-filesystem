@@ -209,6 +209,31 @@ func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *test
 	}
 }
 
+func TestLoadConfigForUpWithoutConfigSuggestsSetup(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	_, err := loadConfigForUpWithIO([]string{}, bufio.NewReader(bytes.NewBuffer(nil)), &bytes.Buffer{}, true)
+	if err == nil {
+		t.Fatal("loadConfigForUpWithIO() returned nil error, want missing config guidance")
+	}
+
+	if !strings.Contains(err.Error(), "no configuration found") {
+		t.Fatalf("loadConfigForUpWithIO() error = %q, want missing config message", err)
+	}
+
+	want := "Run '" + filepath.Base(os.Args[0]) + " setup' to get started"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("loadConfigForUpWithIO() error = %q, want setup guidance %q", err, want)
+	}
+}
+
 func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	t.Helper()
 
@@ -381,6 +406,8 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 
 func TestLoadConfigForUpRejectsSinglePositionalArgument(t *testing.T) {
 	t.Helper()
+
+	saveTempConfig(t, defaultConfig())
 
 	_, err := loadConfigForUp([]string{"claude-code"})
 	if err == nil {
