@@ -70,12 +70,10 @@ type HTTPWorkspaceSummary = {
   database_id: string;
   database_name: string;
   redis_key: string;
-  status: AFSWorkspaceSummary["status"];
   file_count: number;
   folder_count: number;
   total_bytes: number;
   checkpoint_count: number;
-  draft_state: AFSWorkspaceSummary["draftState"];
   last_checkpoint_at: string;
   updated_at: string;
   region: string;
@@ -124,11 +122,9 @@ type HTTPWorkspaceDetail = {
   database_name: string;
   redis_key: string;
   region: string;
-  status: AFSWorkspaceSummary["status"];
   source: AFSWorkspaceSource;
   created_at: string;
   updated_at: string;
-  draft_state: AFSWorkspaceSummary["draftState"];
   head_checkpoint_id: string;
   tags?: string[];
   file_count: number;
@@ -334,12 +330,10 @@ function workspaceToSummary(workspace: AFSWorkspace): AFSWorkspaceSummary {
     databaseId: normalized.databaseId,
     databaseName: normalized.databaseName,
     redisKey: normalized.redisKey,
-    status: normalized.status,
     fileCount: normalized.fileCount,
     folderCount: normalized.folderCount,
     totalBytes: normalized.totalBytes,
     checkpointCount: normalized.checkpointCount,
-    draftState: normalized.draftState,
     lastCheckpointAt: lastCheckpointAt(normalized),
     updatedAt: normalized.updatedAt,
     region: normalized.region,
@@ -675,11 +669,9 @@ This workspace was created from the AFS Web UI.
         redisKey: `afs:${id}`,
         region: input.region?.trim() || "",
         mountedPath: `~/.afs/workspaces/${id}`,
-        status: input.source === "blank" ? "healthy" : "syncing",
         source: input.source,
         createdAt,
         updatedAt: createdAt,
-        draftState: "clean",
         headSavepointId: initialSavepoint.id,
         tags: [(input.region?.trim() || ""), sourceLabel(input.source)],
         files: baseFiles,
@@ -769,7 +761,6 @@ This workspace was created from the AFS Web UI.
         file.content = input.content;
         file.modifiedAt = modifiedAt;
       }
-      workspace.draftState = "dirty";
       workspace.capabilities = demoCapabilities();
       touchWorkspace(workspace);
       workspace.activity.unshift(
@@ -803,7 +794,6 @@ This workspace was created from the AFS Web UI.
       );
       workspace.savepoints.unshift(savepoint);
       workspace.headSavepointId = savepoint.id;
-      workspace.draftState = "clean";
       workspace.updatedAt = savepoint.createdAt;
       workspace.checkpointCount = workspace.savepoints.length;
       workspace.activity.unshift(
@@ -832,7 +822,6 @@ This workspace was created from the AFS Web UI.
       const savepoint = requireSavepoint(workspace, input.savepointId);
       workspace.files = clone(savepoint.filesSnapshot);
       workspace.headSavepointId = savepoint.id;
-      workspace.draftState = "clean";
       touchWorkspace(workspace);
       workspace.activity.unshift(
         createActivity(
@@ -1013,12 +1002,10 @@ function mapWorkspaceSummary(input: HTTPWorkspaceSummary): AFSWorkspaceSummary {
     databaseId: input.database_id,
     databaseName: input.database_name,
     redisKey: input.redis_key,
-    status: input.status,
     fileCount: input.file_count,
     folderCount: input.folder_count,
     totalBytes: input.total_bytes,
     checkpointCount: input.checkpoint_count,
-    draftState: input.draft_state,
     lastCheckpointAt: input.last_checkpoint_at,
     updatedAt: input.updated_at,
     region: input.region,
@@ -1036,11 +1023,9 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     databaseName: input.database_name,
     redisKey: input.redis_key,
     region: input.region,
-    status: input.status,
     source: input.source,
     createdAt: input.created_at,
     updatedAt: input.updated_at,
-    draftState: input.draft_state,
     headSavepointId: input.head_checkpoint_id,
     tags: input.tags ?? [],
     fileCount: input.file_count,

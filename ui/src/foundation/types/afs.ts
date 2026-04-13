@@ -1,5 +1,3 @@
-export type AFSWorkspaceStatus = "healthy" | "syncing" | "attention";
-export type AFSDraftState = "clean" | "dirty";
 export type AFSWorkspaceSource = "blank" | "git-import" | "cloud-import";
 export type AFSClientMode = "demo" | "http";
 export type AFSWorkspaceView = "head" | `checkpoint:${string}` | "working-copy";
@@ -89,11 +87,9 @@ export type AFSWorkspace = {
   redisKey: string;
   region: string;
   mountedPath?: string;
-  status: AFSWorkspaceStatus;
   source: AFSWorkspaceSource;
   createdAt: string;
   updatedAt: string;
-  draftState: AFSDraftState;
   headSavepointId: string;
   tags: string[];
   fileCount: number;
@@ -113,12 +109,10 @@ export type AFSWorkspaceSummary = {
   databaseId: string;
   databaseName: string;
   redisKey: string;
-  status: AFSWorkspaceStatus;
   fileCount: number;
   folderCount: number;
   totalBytes: number;
   checkpointCount: number;
-  draftState: AFSDraftState;
   lastCheckpointAt: string;
   updatedAt: string;
   region: string;

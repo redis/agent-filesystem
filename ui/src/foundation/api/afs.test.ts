@@ -38,18 +38,14 @@ describe("afsApi", () => {
       content: "# Updated",
     });
 
-    const dirtyWorkspace = await afsApi.getWorkspace(paymentsDatabaseId, "payments-portal");
-    expect(dirtyWorkspace?.draftState).toBe("dirty");
-
     await afsApi.createSavepoint({
       databaseId: paymentsDatabaseId,
-      workspaceId: dirtyWorkspace?.id ?? "",
+      workspaceId: workspace?.id ?? "",
       name: "after-update",
       note: "Checkpoint after editing",
     });
 
     const savedWorkspace = await afsApi.getWorkspace(paymentsDatabaseId, "payments-portal");
-    expect(savedWorkspace?.draftState).toBe("clean");
     expect(savedWorkspace?.savepoints[0]?.name).toBe("after-update");
   });
 

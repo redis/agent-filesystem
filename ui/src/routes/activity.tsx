@@ -1,7 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Loader } from "@redislabsdev/redis-ui-components";
-import { PageStack, SectionCard, SectionGrid, SectionTitle } from "../components/afs-kit";
-import { useDatabaseScope, useScopedActivity } from "../foundation/database-scope";
+import {
+  PageStack,
+  SectionCard,
+  SectionGrid,
+  SectionHeader,
+  SectionTitle,
+} from "../components/afs-kit";
+import { useScopedActivity } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import type { AFSActivityEvent } from "../foundation/types/afs";
 
@@ -12,7 +18,6 @@ export const Route = createFileRoute("/activity")({
 function ActivityPage() {
   const navigate = useNavigate();
   const activityQuery = useScopedActivity(50);
-  const { selectedDatabase } = useDatabaseScope();
 
   if (activityQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -44,9 +49,14 @@ function ActivityPage() {
 
   return (
     <PageStack>
-          <div style={{ marginTop: 16 }}>
-            <ActivityTable rows={events} onOpenActivity={openActivity} />
-          </div>
+      <SectionGrid>
+        <SectionCard $span={12}>
+          <SectionHeader>
+            <SectionTitle title="Recent activity" />
+          </SectionHeader>
+          <ActivityTable rows={events} onOpenActivity={openActivity} />
+        </SectionCard>
+      </SectionGrid>
     </PageStack>
   );
 }

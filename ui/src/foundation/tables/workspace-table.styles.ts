@@ -29,38 +29,22 @@ export const TableViewport = styled.div`
 `;
 
 export const RegistryTableViewport = styled(TableViewport)`
-  /* Remove vertical separator between Health | Workspace (columns 1|2). */
-  thead tr > *:nth-child(1),
-  [role="row"] > [role="columnheader"]:nth-child(1) {
+  /* Remove vertical separator between Updated | More actions (last two columns). */
+  thead tr > *:nth-child(6),
+  [role="row"] > [role="columnheader"]:nth-child(6) {
     border-right: none !important;
     box-shadow: none !important;
   }
 
-  thead tr > *:nth-child(2),
-  [role="row"] > [role="columnheader"]:nth-child(2) {
-    border-left: none !important;
-  }
-
-  /* Remove vertical separator between Updated | More actions (columns 7|8). */
   thead tr > *:nth-child(7),
   [role="row"] > [role="columnheader"]:nth-child(7) {
-    border-right: none !important;
-    box-shadow: none !important;
-  }
-
-  thead tr > *:nth-child(8),
-  [role="row"] > [role="columnheader"]:nth-child(8) {
     border-left: none !important;
   }
 
-  thead tr > *:nth-child(1)::before,
-  thead tr > *:nth-child(1)::after,
-  thead tr > *:nth-child(7)::before,
-  thead tr > *:nth-child(7)::after,
-  [role="row"] > [role="columnheader"]:nth-child(1)::before,
-  [role="row"] > [role="columnheader"]:nth-child(1)::after,
-  [role="row"] > [role="columnheader"]:nth-child(7)::before,
-  [role="row"] > [role="columnheader"]:nth-child(7)::after {
+  thead tr > *:nth-child(6)::before,
+  thead tr > *:nth-child(6)::after,
+  [role="row"] > [role="columnheader"]:nth-child(6)::before,
+  [role="row"] > [role="columnheader"]:nth-child(6)::after {
     border: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
@@ -125,28 +109,6 @@ export const MetaBadge = styled.span`
   line-height: 1.4;
 `;
 
-export const HealthDot = styled.span<{ $active: boolean; $syncing?: boolean }>`
-  width: 8px;
-  height: 8px;
-  min-width: 8px;
-  border-radius: 999px;
-  display: inline-block;
-  background-color: ${({ $active, $syncing, theme }) =>
-    !$active
-      ? theme.semantic.color.background.danger500
-      : $syncing
-        ? theme.semantic.color.background.warning500
-        : theme.semantic.color.background.success500};
-`;
-
-export const HealthCell = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  min-width: 16px;
-  overflow: visible;
-`;
 
 const actionButtonBase = styled.button`
   border: none;

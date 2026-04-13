@@ -1,12 +1,18 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import { useEffect, useState } from "react";
-import styled from "styled-components";
 import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogError,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
   Field,
   FormGrid,
   PageStack,
-  SectionTitle,
   TextArea,
   TextInput,
 } from "../components/afs-kit";
@@ -226,19 +232,22 @@ function WorkspacesPage() {
         >
           <DialogCard>
             <DialogHeader>
-              <SectionTitle
-                eyebrow={isEditing ? "Edit Workspace" : "Add Workspace"}
-                title={isEditing ? "Update workspace details" : "Create a workspace"}
-                body={
-                  isEditing
-                    ? "Update the workspace metadata without leaving the registry."
-                    : `Create a workspace inside ${selectedDatabase?.displayName ?? "the current database"}.`
-                }
-              />
+              <div>
+                <DialogTitle>
+                  {isEditing ? "Edit workspace" : "Add workspace"}
+                </DialogTitle>
+                <DialogBody>
+                  {isEditing
+                    ? "Update the workspace name and description."
+                    : `Add a new workspace to ${selectedDatabase?.displayName ?? "the current database"}.`}
+                </DialogBody>
+              </div>
+              <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>
+                &times;
+              </DialogCloseButton>
             </DialogHeader>
 
             <FormGrid
-              id="workspace-dialog-form"
               onSubmit={(event) => {
                 event.preventDefault();
                 if (form.name.trim() === "") {
@@ -285,7 +294,7 @@ function WorkspacesPage() {
                       setFormError(
                         mutationErrorMessage(
                           error,
-                          "Unable to create the workspace in the selected database.",
+                          "Unable to create the workspace.",
                         ),
                       );
                     },
@@ -294,8 +303,9 @@ function WorkspacesPage() {
               }}
             >
               <Field>
-                Workspace name
+                Name
                 <TextInput
+                  autoFocus
                   disabled={isEditing}
                   value={form.name}
                   onChange={(event) => updateForm("name", event.target.value)}
@@ -311,21 +321,10 @@ function WorkspacesPage() {
                   placeholder="What this workspace is for, who owns it, and why it exists."
                 />
               </Field>
-            </FormGrid>
 
-            {formError ? <DialogError role="alert">{formError}</DialogError> : null}
+              {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
-            <DialogFooter>
               <DialogActions>
-                <Button disabled={formBusy} size="medium" type="submit" form="workspace-dialog-form">
-                  {isEditing
-                    ? updateWorkspace.isPending
-                      ? "Saving..."
-                      : "Save changes"
-                    : createWorkspace.isPending
-                      ? "Creating..."
-                      : "Create workspace"}
-                </Button>
                 <Button
                   disabled={formBusy}
                   size="medium"
@@ -335,8 +334,17 @@ function WorkspacesPage() {
                 >
                   Cancel
                 </Button>
+                <Button disabled={formBusy} size="medium" type="submit">
+                  {isEditing
+                    ? updateWorkspace.isPending
+                      ? "Saving..."
+                      : "Save changes"
+                    : createWorkspace.isPending
+                      ? "Adding..."
+                      : "Add workspace"}
+                </Button>
               </DialogActions>
-            </DialogFooter>
+            </FormGrid>
           </DialogCard>
         </DialogOverlay>
       ) : null}
@@ -344,62 +352,3 @@ function WorkspacesPage() {
   );
 }
 
-const DialogOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(8, 6, 13, 0.36);
-`;
-
-const DialogCard = styled.div`
-  width: min(760px, 100%);
-  max-height: min(88vh, 860px);
-  overflow: auto;
-  border: 1px solid var(--afs-line);
-  border-radius: 24px;
-  padding: 24px 24px 0;
-  background: #fff;
-  box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
-`;
-
-const DialogHeader = styled.div`
-  margin-bottom: 18px;
-`;
-
-const DialogFooter = styled.div`
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  justify-content: flex-end;
-  gap: 16px;
-  align-items: flex-end;
-  margin: 20px -24px 0;
-  padding: 18px 24px 24px;
-  border-top: 1px solid var(--afs-line);
-  background: #fff;
-
-  @media (max-width: 720px) {
-    flex-direction: column;
-    align-items: stretch;
-  }
-`;
-
-const DialogError = styled.p`
-  margin: 16px 0 0;
-  color: #c2364a;
-  font-size: 14px;
-  line-height: 1.5;
-`;
-
-const DialogActions = styled.div`
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 10px;
-  align-items: center;
-  justify-content: flex-end;
-  overflow-x: auto;
-`;

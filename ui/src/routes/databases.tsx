@@ -4,6 +4,14 @@ import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import styled from "styled-components";
 import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogError,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
   Field,
   FormGrid,
   PageStack,
@@ -149,9 +157,8 @@ function DatabasesPage() {
       <PageSection>
         <PageHeader>
           <SectionTitle
-            eyebrow="Database Scope"
-            title="Configure databases"
-            body="Manage the databases shown in the selector, edit connection metadata, and keep the current scope aligned with the database you want this UI to operate against."
+            title="Databases"
+            body="Manage database connections and select the active scope."
           />
           <Button size="medium" onClick={openCreateDialog}>
             Add database
@@ -178,20 +185,24 @@ function DatabasesPage() {
         >
           <DialogCard>
             <DialogHeader>
-              <SectionTitle
-                eyebrow="Database Scope"
-                title={dialogMode === "create" ? "Add database" : `Edit ${editingDatabase?.displayName || editingDatabase?.databaseName || "database"}`}
-                body="These settings control how the database appears in the selector and what metadata is attached to it throughout the UI."
-              />
-              <Button size="medium" variant="secondary-fill" onClick={closeDialog}>
-                Close
-              </Button>
+              <div>
+                <DialogTitle>
+                  {dialogMode === "create" ? "Add database" : `Edit ${editingDatabase?.displayName || editingDatabase?.databaseName || "database"}`}
+                </DialogTitle>
+                <DialogBody>
+                  Configure how this database appears in the selector and what connection settings it uses.
+                </DialogBody>
+              </div>
+              <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>
+                &times;
+              </DialogCloseButton>
             </DialogHeader>
 
             <FormGrid onSubmit={submitForm}>
               <Field>
                 Name
                 <TextInput
+                  autoFocus
                   value={form.displayName}
                   onChange={(event) => updateForm("displayName", event.target.value)}
                   placeholder="localhost:6388"
@@ -257,12 +268,9 @@ function DatabasesPage() {
                 </label>
               </CheckboxRow>
 
-              {formError ? <HelperText role="alert">{formError}</HelperText> : null}
+              {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
               <DialogActions>
-                <Button size="medium" type="submit">
-                  {dialogMode === "create" ? "Add database" : "Save changes"}
-                </Button>
                 <Button
                   size="medium"
                   type="button"
@@ -270,6 +278,9 @@ function DatabasesPage() {
                   onClick={closeDialog}
                 >
                   Cancel
+                </Button>
+                <Button size="medium" type="submit">
+                  {dialogMode === "create" ? "Add database" : "Save changes"}
                 </Button>
               </DialogActions>
             </FormGrid>
@@ -297,47 +308,6 @@ const PageHeader = styled.div`
   }
 `;
 
-const DialogOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(8, 6, 13, 0.36);
-`;
-
-const DialogCard = styled.div`
-  width: min(720px, 100%);
-  max-height: min(88vh, 760px);
-  overflow: auto;
-  border: 1px solid var(--afs-line);
-  border-radius: 24px;
-  padding: 24px;
-  background: #fff;
-  box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
-`;
-
-const DialogHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 18px;
-
-  @media (max-width: 720px) {
-    flex-direction: column;
-  }
-`;
-
-const HelperText = styled.p`
-  margin: 0;
-  color: #c2364a;
-  font-size: 13px;
-  line-height: 1.6;
-`;
-
 const CheckboxRow = styled.div`
   display: flex;
   align-items: center;
@@ -350,11 +320,4 @@ const CheckboxRow = styled.div`
     color: var(--afs-ink);
     font-size: 14px;
   }
-`;
-
-const DialogActions = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
 `;

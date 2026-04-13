@@ -84,24 +84,6 @@ export function WorkspaceTable({
     () =>
       [
         {
-          id: "health",
-          accessorKey: "status",
-          header: "",
-          size: 20,
-          minSize: 20,
-          maxSize: 20,
-          enableSorting: false,
-          cell: ({ row }) => (
-            <S.HealthCell>
-              <S.HealthDot
-                $active={row.original.status !== "attention"}
-                $syncing={row.original.status === "syncing"}
-                aria-label={`health-${row.original.status}`}
-              />
-            </S.HealthCell>
-          ),
-        },
-        {
           accessorKey: "name",
           header: "Workspace name",
           size: 110,
