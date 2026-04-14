@@ -134,7 +134,7 @@ export function WorkspaceTable({
         {
           accessorKey: "totalBytes",
           header: "Size",
-          size: 80,
+          size: 60,
           enableSorting: true,
           cell: ({ row }) => (
             <Typography.Body component="span">
@@ -159,7 +159,7 @@ export function WorkspaceTable({
         {
           accessorKey: "updatedAt",
           header: "Last updated",
-          size: 65,
+          size: 120,
           enableSorting: true,
           cell: ({ row }) => new Date(row.original.updatedAt).toLocaleString(),
         },
@@ -181,7 +181,7 @@ export function WorkspaceTable({
                   <MoreactionsIcon size="S" />
                 </S.MoreActionsTrigger>
               </Menu.Trigger>
-              <Menu.Content align="end">
+              <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <Menu.Content.Item
                   text="Open workspace"
                   onClick={() => onOpenWorkspace(row.original)}

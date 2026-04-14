@@ -14,7 +14,6 @@ import {
   FormGrid,
   PageStack,
   Select,
-  TextArea,
   TextInput,
 } from "../components/afs-kit";
 import {
@@ -46,6 +45,35 @@ type WorkspaceFormState = {
 };
 
 type DialogMode = "create" | "edit" | null;
+
+function ComingSoonDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return (
+    <DialogOverlay
+      style={{ zIndex: 1100 }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <DialogCard style={{ maxWidth: 400 }}>
+        <DialogHeader>
+          <DialogTitle>Coming soon</DialogTitle>
+          <DialogCloseButton type="button" aria-label="Close" onClick={onClose}>
+            &times;
+          </DialogCloseButton>
+        </DialogHeader>
+        <DialogBody>
+          File import is not yet available. This feature is coming in a future release.
+        </DialogBody>
+        <DialogActions>
+          <Button size="medium" onClick={onClose}>
+            OK
+          </Button>
+        </DialogActions>
+      </DialogCard>
+    </DialogOverlay>
+  );
+}
 
 function createWorkspaceDefaults(database?: AFSDatabaseScopeRecord | null) {
   return {
@@ -82,6 +110,7 @@ function WorkspacesPage() {
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
+  const [comingSoonOpen, setComingSoonOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -346,12 +375,22 @@ function WorkspacesPage() {
 
               <Field>
                 Description
-                <TextArea
+                <TextInput
                   value={form.description}
                   onChange={(event) => updateForm("description", event.target.value)}
                   placeholder="What this workspace is for, who owns it, and why it exists."
                 />
               </Field>
+
+              <Button
+                size="medium"
+                type="button"
+                variant="secondary-fill"
+                style={{ opacity: 0.5, cursor: "default", width: "100%" }}
+                onClick={() => setComingSoonOpen(true)}
+              >
+                Import files into this workspace
+              </Button>
 
               {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
@@ -379,6 +418,8 @@ function WorkspacesPage() {
           </DialogCard>
         </DialogOverlay>
       ) : null}
+
+      <ComingSoonDialog open={comingSoonOpen} onClose={() => setComingSoonOpen(false)} />
     </PageStack>
   );
 }

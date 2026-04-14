@@ -52,9 +52,7 @@ body {
 }
 
 [data-theme="light"] body {
-  background:
-    radial-gradient(circle at top right, rgba(170, 59, 255, 0.08), transparent 28%),
-    linear-gradient(180deg, #f9fbff 0%, #f3f6fb 100%);
+  background: #edf1f7;
 }
 
 [data-theme="dark"] body {
