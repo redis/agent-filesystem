@@ -160,7 +160,12 @@ export type AFSDatabase = {
   redisDB: number;
   redisTLS: boolean;
   workspaceCount: number;
+  activeSessionCount: number;
   connectionError?: string;
+  lastWorkspaceRefreshAt?: string;
+  lastWorkspaceRefreshError?: string;
+  lastSessionReconcileAt?: string;
+  lastSessionReconcileError?: string;
 };
 
 export type AFSDatabaseListResponse = {
@@ -182,7 +187,7 @@ export type CreateWorkspaceInput = {
 };
 
 export type UpdateWorkspaceInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   description: string;
   cloudAccount?: string;
@@ -191,7 +196,7 @@ export type UpdateWorkspaceInput = {
 };
 
 export type UpdateWorkspaceFileInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   path: string;
   content: string;
@@ -199,20 +204,20 @@ export type UpdateWorkspaceFileInput = {
 };
 
 export type CreateSavepointInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   name: string;
   note: string;
 };
 
 export type RestoreSavepointInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   savepointId: string;
 };
 
 export type GetWorkspaceTreeInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;
@@ -220,7 +225,7 @@ export type GetWorkspaceTreeInput = {
 };
 
 export type GetWorkspaceFileContentInput = {
-  databaseId: string;
+  databaseId?: string;
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;

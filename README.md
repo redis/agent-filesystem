@@ -307,7 +307,10 @@ For command help:
 ./afs --help
 ./afs workspace --help
 ./afs checkpoint --help
+make help
 ```
+
+Note: `make --help` is handled by GNU `make` itself, so it shows make's built-in flags rather than this repo's targets. Use `make help` for the project target list.
 
 ## `.afsignore`
 
@@ -386,6 +389,7 @@ make install
 Other build targets:
 
 ```bash
+make help
 make module
 make mount
 make web-install

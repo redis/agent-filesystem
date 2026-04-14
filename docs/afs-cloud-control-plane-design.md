@@ -80,16 +80,18 @@ This section reflects the repository as it exists today.
 - the web UI now exposes connected-agent counts per workspace plus an Agents view
 - the managed CLI path is now workspace-first for listing, selection, and `afs up`; it no longer requires `controlPlane.databaseID` for the normal self-hosted flow
 - the control plane now owns a SQLite workspace catalog for aggregate workspace listing and workspace-to-database routing
+- the control plane catalog now also owns the registered database list, replacing `afs.databases.json` as the primary persistent registry
+- the control plane catalog now indexes session lifecycle metadata while Redis remains the live lease/presence plane
+- the control plane now exposes catalog health and repair endpoints for workspace/session reconciliation
 - the web UI primary navigation is now workspace-first; the database selector has been removed and databases are now a normal management tab in the sidebar
 - workspace detail, agents, overview, and activity views now carry enough workspace/database routing context to operate without a globally selected database
 
 ### Partially completed
 
 - route-surface split exists, but there is still no auth boundary between them
-- workspace-first routing now exists, but stable opaque workspace ids do not; the current workspace id is still effectively the workspace name
-- a control-plane-owned SQLite workspace catalog now exists for aggregate workspace listing and routing, but database registry data still lives in `afs.databases.json`
+- workspace-first routing now exists with stable opaque workspace ids, but some mutation paths and follow-on UX still need cleanup around fully id-first APIs
 - `self-hosted` `afs up` works only for `sync`; mount mode is still local-only
-- the web UI is now mostly workspace-first for browsing, but creation, mutation plumbing, and route identity still depend on database context in a few places because workspace ids are not yet opaque and globally stable
+- the web UI is now mostly workspace-first, but a few creation/mutation paths still depend on scoped database endpoints under the hood
 
 ### Not started yet
 
@@ -182,7 +184,7 @@ The control plane should own a separate metadata catalog for workspace-first rou
 
 Recommended first implementation:
 
-- SQLite file colocated with the control-plane config and database registry
+- SQLite file colocated with the control-plane config
 - stores workspace routing metadata and cached list summaries
 - does not store manifests, blobs, checkpoints, or live filesystem state
 
@@ -199,7 +201,7 @@ Recommended follow-up shape:
 
 - introduce an opaque stable `workspace_id` distinct from display name
 - treat workspace name as user-facing metadata, not routing identity
-- store database bindings, workspace ids, and session ownership in the control-plane catalog
+- store database bindings, workspace ids, and session ownership/index metadata in the control-plane catalog
 - keep Redis responsible for workspace contents and per-workspace operational state
 
 ### Data plane responsibilities
@@ -1161,10 +1163,10 @@ Concretely:
 
 Move the remaining workspace-first metadata and routing concerns into the catalog:
 
-- decide whether the database registry should remain JSON-backed or also move into SQLite
 - define reconciliation and repair behavior for out-of-band Redis changes
-- decide whether session ownership and presence metadata should stay in per-database Redis only or also be indexed in the control-plane catalog
-- add explicit catalog repair and health visibility in the control plane
+- keep Redis as the live session lease plane while expanding the SQLite session catalog as the durable ownership/index layer
+- broaden catalog-backed routes so UI and CLI mutation flows use opaque workspace ids end-to-end without hidden database context
+- continue improving explicit catalog repair and health visibility in the control plane and UI
 
 ### Then: cloud identity and auth
 
@@ -1202,7 +1204,7 @@ Before implementation, the next detailed spec should cover:
 
 - opaque `workspace_id` schema and backfill strategy
 - name lookup and duplicate-name behavior once names are no longer routing identity
-- catalog schema evolution: workspaces, database bindings, and whether database registry data moves into SQLite
+- catalog schema evolution: workspaces, database bindings, database registry, and session catalog ownership
 - CLI managed-mode config/state changes needed to persist workspace ids
 - UI routing changes needed to use workspace ids everywhere without database-selection context
 - catalog reconciliation and repair behavior for out-of-band Redis changes

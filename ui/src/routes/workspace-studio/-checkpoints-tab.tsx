@@ -25,12 +25,11 @@ type StudioTab = "overview" | "files" | "checkpoints" | "activity";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
-  databaseId: string;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
   onTabChange: (tab: StudioTab) => void;
 };
 
-export function CheckpointsTab({ workspace, databaseId, onBrowserViewChange, onTabChange }: Props) {
+export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: Props) {
   const createSavepoint = useCreateSavepointMutation();
   const restoreSavepoint = useRestoreSavepointMutation();
 
@@ -53,7 +52,6 @@ export function CheckpointsTab({ workspace, databaseId, onBrowserViewChange, onT
                 }
 
                 createSavepoint.mutate({
-                  databaseId,
                   workspaceId: workspace.id,
                   name: savepointName,
                   note: savepointNote,
@@ -143,7 +141,6 @@ export function CheckpointsTab({ workspace, databaseId, onBrowserViewChange, onT
                     }
                     onClick={() =>
                       restoreSavepoint.mutate({
-                        databaseId,
                         workspaceId: workspace.id,
                         savepointId: savepoint.id,
                       })

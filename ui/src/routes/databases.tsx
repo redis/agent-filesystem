@@ -1,25 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Button } from "@redislabsdev/redis-ui-components";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import { useMemo, useState } from "react";
 import styled from "styled-components";
 import {
-  DialogActions,
-  DialogBody,
-  DialogCard,
-  DialogCloseButton,
-  DialogError,
-  DialogHeader,
-  DialogOverlay,
-  DialogTitle,
-  Field,
-  FormGrid,
   PageStack,
   SectionTitle,
-  TextArea,
-  TextInput,
-  TwoColumnFields,
 } from "../components/afs-kit";
+import { AddDatabaseDialog } from "../components/add-database-dialog";
 import { DatabaseTable } from "../foundation/tables/database-table";
 import { useDatabaseScope } from "../foundation/database-scope";
 
@@ -29,45 +16,12 @@ export const Route = createFileRoute("/databases")({
 
 type DialogMode = "create" | "edit" | null;
 
-type DatabaseFormState = {
-  displayName: string;
-  description: string;
-  endpointLabel: string;
-  dbIndex: string;
-  username: string;
-  password: string;
-  useTLS: boolean;
-};
-
-function createInitialFormState(
-  value?: Partial<DatabaseFormState>,
-): DatabaseFormState {
-  return {
-    displayName: value?.displayName ?? "",
-    description: value?.description ?? "",
-    endpointLabel: value?.endpointLabel ?? "",
-    dbIndex: value?.dbIndex ?? "0",
-    username: value?.username ?? "",
-    password: value?.password ?? "",
-    useTLS: value?.useTLS ?? false,
-  };
-}
-
 function DatabasesPage() {
-  const { databases, saveDatabase, removeDatabase, isLoading } = useDatabaseScope();
+  const { databases, saveDatabase, removeDatabase, reconcileCatalog, isLoading, errorMessage } = useDatabaseScope();
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [form, setForm] = useState<DatabaseFormState>(createInitialFormState());
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  const isDialogOpen = dialogMode != null;
-
-  useEffect(() => {
-    if (isDialogOpen) {
-      requestAnimationFrame(() => nameInputRef.current?.focus());
-    }
-  }, [isDialogOpen]);
+  const [pageMessage, setPageMessage] = useState<string | null>(null);
+  const [isReconciling, setIsReconciling] = useState(false);
 
   const editingDatabase = useMemo(
     () => databases.find((database) => database.id === editingDatabaseId) ?? null,
@@ -77,85 +31,40 @@ function DatabasesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingDatabaseId(null);
-    setFormError(null);
-    setForm(createInitialFormState());
   }
 
   function openCreateDialog() {
     setDialogMode("create");
     setEditingDatabaseId(null);
-    setFormError(null);
-    setForm(createInitialFormState());
   }
 
   function openEditDialog(databaseId: string) {
-    const database = databases.find((item) => item.id === databaseId);
-    if (database == null) {
-      return;
-    }
-
     setDialogMode("edit");
     setEditingDatabaseId(databaseId);
-    setForm(
-      createInitialFormState({
-        displayName: database.displayName,
-        description: database.description,
-        endpointLabel: database.endpointLabel,
-        dbIndex: database.dbIndex,
-        username: database.username,
-        password: database.password,
-        useTLS: database.useTLS,
-      }),
-    );
   }
 
-  function updateForm<TKey extends keyof DatabaseFormState>(
-    key: TKey,
-    value: DatabaseFormState[TKey],
-  ) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
-  async function submitForm(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (form.displayName.trim() === "" || form.endpointLabel.trim() === "") {
-      return;
-    }
-
-    try {
-      setFormError(null);
-      await saveDatabase({
-        id: editingDatabaseId ?? undefined,
-        name: form.displayName,
-        description: form.description,
-        redisAddr: form.endpointLabel,
-        redisUsername: form.username,
-        redisPassword: form.password,
-        redisDB: Number.parseInt(form.dbIndex || "0", 10) || 0,
-        redisTLS: form.useTLS,
-      });
-      closeDialog();
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Unable to save database.");
-    }
-  }
-
-  async function deleteDatabase(databaseId: string) {
+  function deleteDatabase(databaseId: string) {
     const database = databases.find((item) => item.id === databaseId);
     const confirmed = window.confirm(
       `Remove database "${database?.displayName || database?.databaseName || databaseId}" from the control plane configuration list?`,
     );
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
+    void removeDatabase(databaseId).then(() => {
+      if (editingDatabaseId === databaseId) closeDialog();
+    });
+  }
+
+  async function repairCatalog() {
     try {
-      await removeDatabase(databaseId);
-      if (editingDatabaseId === databaseId) {
-        closeDialog();
-      }
+      setPageMessage(null);
+      setIsReconciling(true);
+      await reconcileCatalog();
+      setPageMessage("Catalog repair completed.");
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : "Unable to remove database.");
+      setPageMessage(error instanceof Error ? error.message : "Unable to repair the catalog.");
+    } finally {
+      setIsReconciling(false);
     }
   }
 
@@ -167,131 +76,35 @@ function DatabasesPage() {
             title="Databases"
             body="Manage the databases available to the control plane and workspace catalog."
           />
-          <Button size="medium" onClick={openCreateDialog}>
-            Add database
-          </Button>
+          <HeaderActions>
+            <RefreshButton size="medium" onClick={repairCatalog} disabled={isReconciling}>
+              {isReconciling ? "Refreshing..." : "Refresh"}
+            </RefreshButton>
+            <Button size="medium" onClick={openCreateDialog}>
+              Add database
+            </Button>
+          </HeaderActions>
         </PageHeader>
+
+        {pageMessage ? <StatusMessage>{pageMessage}</StatusMessage> : null}
 
         <DatabaseTable
           rows={databases}
           loading={isLoading}
-          onEditDatabase={openEditDialog}
-          onDeleteDatabase={deleteDatabase}
+          error={errorMessage != null}
+          errorMessage={errorMessage ?? undefined}
+          onOpenDatabase={openEditDialog}
         />
       </PageSection>
 
-      {isDialogOpen ? (
-        <DialogOverlay
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              closeDialog();
-            }
-          }}
-        >
-          <DialogCard>
-            <DialogHeader>
-              <div>
-                <DialogTitle>
-                  {dialogMode === "create" ? "Add database" : `Edit ${editingDatabase?.displayName || editingDatabase?.databaseName || "database"}`}
-                </DialogTitle>
-                <DialogBody>
-                  Configure how this database appears in the app and what connection settings it uses.
-                </DialogBody>
-              </div>
-              <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>
-                &times;
-              </DialogCloseButton>
-            </DialogHeader>
-
-            <FormGrid onSubmit={submitForm}>
-              <Field>
-                Name
-                <TextInput
-                  ref={nameInputRef}
-                  value={form.displayName}
-                  onChange={(event) => updateForm("displayName", event.target.value)}
-                  placeholder="localhost:6388"
-                />
-              </Field>
-
-              <Field>
-                Description
-                <TextArea
-                  value={form.description}
-                  onChange={(event) => updateForm("description", event.target.value)}
-                  placeholder="Shared Claude workspace database for local agent state."
-                />
-              </Field>
-
-              <TwoColumnFields>
-                <Field>
-                  Redis address
-                  <TextInput
-                    value={form.endpointLabel}
-                    onChange={(event) => updateForm("endpointLabel", event.target.value)}
-                    placeholder="localhost:6379"
-                  />
-                </Field>
-                <Field>
-                  Database index
-                  <TextInput
-                    value={form.dbIndex}
-                    onChange={(event) => updateForm("dbIndex", event.target.value)}
-                    placeholder="0"
-                  />
-                </Field>
-              </TwoColumnFields>
-
-              <TwoColumnFields>
-                <Field>
-                  Username
-                  <TextInput
-                    value={form.username}
-                    onChange={(event) => updateForm("username", event.target.value)}
-                    placeholder="default"
-                  />
-                </Field>
-                <Field>
-                  Password
-                  <TextInput
-                    type="password"
-                    value={form.password}
-                    onChange={(event) => updateForm("password", event.target.value)}
-                    placeholder="••••••••"
-                  />
-                </Field>
-              </TwoColumnFields>
-
-              <CheckboxRow>
-                <label>
-                  <input
-                    checked={form.useTLS}
-                    type="checkbox"
-                    onChange={(event) => updateForm("useTLS", event.target.checked)}
-                  />
-                  Use TLS
-                </label>
-              </CheckboxRow>
-
-              {formError ? <DialogError role="alert">{formError}</DialogError> : null}
-
-              <DialogActions>
-                <Button
-                  size="medium"
-                  type="button"
-                  variant="secondary-fill"
-                  onClick={closeDialog}
-                >
-                  Cancel
-                </Button>
-                <Button size="medium" type="submit">
-                  {dialogMode === "create" ? "Add database" : "Save changes"}
-                </Button>
-              </DialogActions>
-            </FormGrid>
-          </DialogCard>
-        </DialogOverlay>
-      ) : null}
+      <AddDatabaseDialog
+        isOpen={dialogMode != null}
+        onClose={closeDialog}
+        saveDatabase={saveDatabase}
+        mode={dialogMode === "edit" ? "edit" : "create"}
+        editingDatabase={editingDatabase}
+        onDelete={deleteDatabase}
+      />
     </PageStack>
   );
 }
@@ -313,16 +126,28 @@ const PageHeader = styled.div`
   }
 `;
 
-const CheckboxRow = styled.div`
+const HeaderActions = styled.div`
   display: flex;
+  gap: 12px;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 10px;
+`;
 
-  label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--afs-ink);
-    font-size: 14px;
+const RefreshButton = styled(Button)`
+  && {
+    white-space: nowrap;
+    background: transparent;
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink-soft);
   }
+
+  &&:hover:not(:disabled) {
+    background: var(--afs-panel);
+    border-color: var(--afs-muted);
+  }
+`;
+
+const StatusMessage = styled.div`
+  color: var(--afs-muted-ink);
+  font-size: 14px;
 `;

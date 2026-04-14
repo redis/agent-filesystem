@@ -1,9 +1,12 @@
 import type { IconType } from "@redislabsdev/redis-ui-icons";
 import {
-  ClusterIcon,
+  CloudDownloadIcon,
   DashboardIcon,
   DatabaseIcon,
+  DocumentationIcon,
+  FoldersIcon,
   NotificationsIcon,
+  RedisCopilotIcon,
   SupportIcon,
 } from "@redislabsdev/redis-ui-icons";
 
@@ -33,15 +36,21 @@ export type NavigationTitleParts = {
 
 export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Overview", path: "/", icon: DashboardIcon },
-  { kind: "route", label: "Workspaces", path: "/workspaces", icon: ClusterIcon },
+  { kind: "route", label: "Workspaces", path: "/workspaces", icon: FoldersIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
-  { kind: "route", label: "Agents", path: "/agents", icon: SupportIcon },
+  { kind: "route", label: "Agents", path: "/agents", icon: RedisCopilotIcon },
   {
     kind: "route",
     label: "Activity",
     path: "/activity",
     icon: NotificationsIcon,
   },
+];
+
+export const bottomNavigationItems: ReadonlyArray<NavigationRouteItem> = [
+  { kind: "route", label: "Downloads", path: "/downloads", icon: CloudDownloadIcon, title: "Downloads" },
+  { kind: "route", label: "Docs", path: "/docs", icon: DocumentationIcon, title: "Documentation" },
+  { kind: "route", label: "Agent Guide", path: "/agent-guide", icon: SupportIcon, title: "Agent Guide" },
 ];
 
 function isPathMatch(pathname: string, path: string) {
@@ -69,6 +78,18 @@ export function getSidebarPanelForPath(pathname: string): SidebarPanelId {
 }
 
 export function resolveNavigationTitleParts(pathname: string): NavigationTitleParts {
+  if (pathname.startsWith("/downloads")) {
+    return { page: "Downloads" };
+  }
+
+  if (pathname.startsWith("/docs")) {
+    return { page: "Documentation" };
+  }
+
+  if (pathname.startsWith("/agent-guide")) {
+    return { page: "Agent Guide" };
+  }
+
   if (pathname.startsWith("/databases")) {
     return { page: "Databases" };
   }

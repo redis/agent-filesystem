@@ -30,11 +30,13 @@ import type {
 const STORAGE_KEY = "afs-ui-demo-state-v1";
 const DATABASE_STORAGE_KEY = "afs-ui-demo-databases-v1";
 const DEMO_DELAY_MS = 120;
-const HTTP_BASE_URL = import.meta.env.VITE_AFS_API_BASE_URL?.replace(/\/+$/, "") ?? "";
+const CLIENT_MODE_OVERRIDE = String(import.meta.env.VITE_AFS_CLIENT_MODE ?? "").trim().toLowerCase();
+const HTTP_REQUEST_TIMEOUT_MS = 8000;
 
 type AFSClient = {
   mode: AFSClientMode;
   listDatabases: () => Promise<AFSDatabase[]>;
+  reconcileCatalog: () => Promise<void>;
   saveDatabase: (input: SaveDatabaseInput) => Promise<AFSDatabase>;
   deleteDatabase: (databaseId: string) => Promise<void>;
   listWorkspaceSummaries: (databaseId?: string) => Promise<AFSWorkspaceSummary[]>;
@@ -58,11 +60,15 @@ type HTTPDatabase = {
   description?: string;
   redis_addr: string;
   redis_username?: string;
-  redis_password?: string;
   redis_db: number;
   redis_tls: boolean;
   workspace_count: number;
+  active_session_count?: number;
   connection_error?: string;
+  last_workspace_refresh_at?: string;
+  last_workspace_refresh_error?: string;
+  last_session_reconcile_at?: string;
+  last_session_reconcile_error?: string;
 };
 
 type HTTPWorkspaceSummary = {
@@ -202,6 +208,22 @@ class HTTPError extends Error {
     this.status = status;
   }
 }
+
+function inferLocalHTTPBaseURL() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const hostname = window.location.hostname.trim().toLowerCase();
+  if (hostname !== "127.0.0.1" && hostname !== "localhost") {
+    return "";
+  }
+  return `${window.location.protocol}//${hostname}:8091`;
+}
+
+const HTTP_BASE_URL = (
+  import.meta.env.VITE_AFS_API_BASE_URL?.replace(/\/+$/, "") ??
+  inferLocalHTTPBaseURL()
+).trim();
 
 function clone<T>(value: T) {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -435,6 +457,11 @@ function requireSavepoint(workspace: AFSWorkspace, savepointId: string) {
   return savepoint;
 }
 
+function matchesOptionalDatabase(databaseId: string | undefined, workspace: AFSWorkspace) {
+  const resolved = databaseId?.trim() ?? "";
+  return resolved === "" || workspace.databaseId === resolved;
+}
+
 function touchWorkspace(workspace: AFSWorkspace) {
   workspace.updatedAt = nowISO();
   workspace.fileCount = workspace.files.length;
@@ -463,6 +490,7 @@ function deriveDemoDatabases(state: AFSState) {
         redisDB: 0,
         redisTLS: false,
         workspaceCount: 1,
+        activeSessionCount: 0,
       });
       continue;
     }
@@ -475,6 +503,7 @@ function deriveDemoDatabases(state: AFSState) {
     grouped.set(database.id, {
       ...database,
       workspaceCount: existing?.workspaceCount ?? database.workspaceCount ?? 0,
+      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount ?? 0,
     });
   }
 
@@ -622,6 +651,10 @@ const demoAFSClient: AFSClient = {
     return deriveDemoDatabases(loadState());
   },
 
+  async reconcileCatalog() {
+    await wait();
+  },
+
   async saveDatabase(input: SaveDatabaseInput) {
     await wait();
     const current = loadDatabaseState();
@@ -636,6 +669,7 @@ const demoAFSClient: AFSClient = {
       redisDB: input.redisDB,
       redisTLS: input.redisTLS,
       workspaceCount: deriveDemoDatabases(loadState()).find((item) => item.id === id)?.workspaceCount ?? 0,
+      activeSessionCount: 0,
     };
     const next = current.filter((item) => item.id !== id);
     next.unshift(nextRecord);
@@ -749,7 +783,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     updateState((draft) => {
       draft.workspaces = draft.workspaces.filter(
-        (workspace) => !(workspace.id === workspaceId && workspace.databaseId === databaseId),
+        (workspace) => !(workspace.id === workspaceId && matchesOptionalDatabase(databaseId, workspace)),
       );
     });
   },
@@ -758,7 +792,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      if (workspace.databaseId !== input.databaseId) {
+      if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
       workspace.description = input.description.trim();
@@ -787,7 +821,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      if (workspace.databaseId !== input.databaseId) {
+      if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
       const modifiedAt = nowISO();
@@ -828,7 +862,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      if (workspace.databaseId !== input.databaseId) {
+      if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
       const savepoint = createSavepointRecord(
@@ -861,7 +895,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
-      if (workspace.databaseId !== input.databaseId) {
+      if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
       const savepoint = requireSavepoint(workspace, input.savepointId);
@@ -896,7 +930,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = loadState();
     const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
-    if (workspace.databaseId !== input.databaseId) {
+    if (!matchesOptionalDatabase(input.databaseId, workspace)) {
       throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
     }
     const files = demoFilesForView(workspace, input.view);
@@ -913,7 +947,7 @@ This workspace was created from the AFS Web UI.
     await wait();
     const state = loadState();
     const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
-    if (workspace.databaseId !== input.databaseId) {
+    if (!matchesOptionalDatabase(input.databaseId, workspace)) {
       throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
     }
     const files = demoFilesForView(workspace, input.view);
@@ -947,13 +981,28 @@ This workspace was created from the AFS Web UI.
 };
 
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${HTTP_BASE_URL}/v1${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
+  const url = `${HTTP_BASE_URL}/v1${path}`;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), HTTP_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`Request to ${path} timed out after ${HTTP_REQUEST_TIMEOUT_MS / 1000}s.`);
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
   const rawBody = response.status === 204 ? "" : await response.text();
 
   if (!response.ok) {
@@ -975,11 +1024,35 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     return undefined as T;
   }
 
-  return JSON.parse(rawBody) as T;
+  try {
+    return JSON.parse(rawBody) as T;
+  } catch (error) {
+    const contentType = response.headers.get("content-type") ?? "unknown";
+    const preview = rawBody.slice(0, 160).replace(/\s+/g, " ").trim();
+    throw new Error(
+      `Expected JSON from ${url}, but received ${contentType} (status ${response.status}). Body preview: ${preview || "<empty>"}`,
+      { cause: error },
+    );
+  }
 }
 
 function hasHTTPBackend() {
   return HTTP_BASE_URL !== "";
+}
+
+function workspaceBasePath(databaseId: string | undefined, workspaceId: string) {
+  const resolvedDatabaseID = databaseId?.trim() ?? "";
+  if (resolvedDatabaseID === "") {
+    return `/workspaces/${workspaceId}`;
+  }
+  return `/databases/${resolvedDatabaseID}/workspaces/${workspaceId}`;
+}
+
+function resolveAFSClient() {
+  if (CLIENT_MODE_OVERRIDE === "demo") {
+    return demoAFSClient;
+  }
+  return httpAFSClient;
 }
 
 function mapCapabilities(input: HTTPWorkspaceCapabilities): AFSWorkspaceCapabilities {
@@ -1000,11 +1073,16 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     description: input.description ?? "",
     redisAddr: input.redis_addr,
     redisUsername: input.redis_username ?? "",
-    redisPassword: input.redis_password ?? "",
+    redisPassword: "",
     redisDB: input.redis_db,
     redisTLS: input.redis_tls,
     workspaceCount: input.workspace_count,
+    activeSessionCount: input.active_session_count ?? 0,
     connectionError: input.connection_error,
+    lastWorkspaceRefreshAt: input.last_workspace_refresh_at,
+    lastWorkspaceRefreshError: input.last_workspace_refresh_error,
+    lastSessionReconcileAt: input.last_session_reconcile_at,
+    lastSessionReconcileError: input.last_session_reconcile_error,
   };
 }
 
@@ -1162,6 +1240,12 @@ const httpAFSClient: AFSClient = {
     return response.items.map(mapDatabase);
   },
 
+  async reconcileCatalog() {
+    await requestJSON<void>("/catalog/reconcile", {
+      method: "POST",
+    });
+  },
+
   async saveDatabase(input: SaveDatabaseInput) {
     return mapDatabase(
       await requestJSON<HTTPDatabase>(input.id ? `/databases/${input.id}` : "/databases", {
@@ -1194,14 +1278,16 @@ const httpAFSClient: AFSClient = {
 
   async getWorkspace(databaseId = "", workspaceId: string) {
     try {
-      const basePath =
-        databaseId === ""
-          ? `/workspaces/${workspaceId}`
-          : `/databases/${databaseId}/workspaces/${workspaceId}`;
-      const [detail, sessions] = await Promise.all([
+      const basePath = workspaceBasePath(databaseId, workspaceId);
+      const [detailResult, sessionsResult] = await Promise.allSettled([
         requestJSON<HTTPWorkspaceDetail>(basePath),
         requestJSON<HTTPWorkspaceSessionList>(`${basePath}/sessions`),
       ]);
+      if (detailResult.status !== "fulfilled") {
+        throw detailResult.reason;
+      }
+      const detail = detailResult.value;
+      const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value : { items: [] };
       return {
         ...mapWorkspaceDetail(detail),
         agents: sessions.items.map((item) =>
@@ -1218,10 +1304,10 @@ const httpAFSClient: AFSClient = {
 
   async listAgents(databaseId = "") {
     const workspaces = await httpAFSClient.listWorkspaceSummaries(databaseId);
-    const sessions = await Promise.all(
+    const sessions = await Promise.allSettled(
       workspaces.map(async (workspace) => {
         const response = await requestJSON<HTTPWorkspaceSessionList>(
-          `/databases/${workspace.databaseId}/workspaces/${workspace.id}/sessions`,
+          `${workspaceBasePath("", workspace.id)}/sessions`,
         );
         return response.items.map((item) =>
           mapAgentSession(
@@ -1236,7 +1322,7 @@ const httpAFSClient: AFSClient = {
     );
 
     return sessions
-      .flat()
+      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
@@ -1260,14 +1346,14 @@ const httpAFSClient: AFSClient = {
   },
 
   async deleteWorkspace(databaseId: string, workspaceId: string) {
-    await requestJSON<void>(`/databases/${databaseId}/workspaces/${workspaceId}`, {
+    await requestJSON<void>(workspaceBasePath(databaseId, workspaceId), {
       method: "DELETE",
     });
   },
 
   async updateWorkspace(input: UpdateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>(`/databases/${input.databaseId}/workspaces/${input.workspaceId}`, {
+      await requestJSON<HTTPWorkspaceDetail>(workspaceBasePath(input.databaseId, input.workspaceId), {
         method: "PUT",
         body: JSON.stringify({
           description: input.description,
@@ -1288,14 +1374,14 @@ const httpAFSClient: AFSClient = {
   },
 
   async restoreSavepoint(input: RestoreSavepointInput) {
-    await requestJSON<void>(`/databases/${input.databaseId}/workspaces/${input.workspaceId}:restore`, {
+    await requestJSON<void>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:restore`, {
       method: "POST",
       body: JSON.stringify({
         checkpoint_id: input.savepointId,
       }),
     });
 
-    return httpAFSClient.getWorkspace(input.databaseId, input.workspaceId);
+    return httpAFSClient.getWorkspace(input.databaseId ?? "", input.workspaceId);
   },
 
   async listActivity(databaseId = "", limit = 50) {
@@ -1311,7 +1397,7 @@ const httpAFSClient: AFSClient = {
     }
 
     const databases = await httpAFSClient.listDatabases();
-    const responses = await Promise.all(
+    const responses = await Promise.allSettled(
       databases.map(async (database) => {
         const response = await requestJSON<HTTPActivityList>(
           `/databases/${database.id}/activity?limit=${limit}`,
@@ -1326,7 +1412,7 @@ const httpAFSClient: AFSClient = {
     );
 
     return responses
-      .flat()
+      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, limit);
   },
@@ -1334,7 +1420,7 @@ const httpAFSClient: AFSClient = {
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
     return mapTreeResponse(
       await requestJSON<HTTPTreeResponse>(
-        `/databases/${input.databaseId}/workspaces/${input.workspaceId}/tree?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}&depth=${input.depth ?? 1}`,
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/tree?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}&depth=${input.depth ?? 1}`,
       ),
     );
   },
@@ -1343,7 +1429,7 @@ const httpAFSClient: AFSClient = {
     try {
       return mapFileContent(
         await requestJSON<HTTPFileContent>(
-          `/databases/${input.databaseId}/workspaces/${input.workspaceId}/files/content?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}`,
+          `${workspaceBasePath(input.databaseId, input.workspaceId)}/files/content?view=${encodeURIComponent(input.view)}&path=${encodeURIComponent(input.path)}`,
         ),
       );
     } catch (error) {
@@ -1359,10 +1445,14 @@ const httpAFSClient: AFSClient = {
   },
 };
 
-export const afsApi = hasHTTPBackend() ? httpAFSClient : demoAFSClient;
+export const afsApi = resolveAFSClient();
 
 export function getAFSClientMode() {
   return afsApi.mode;
+}
+
+export function getDemoAFSClientForTesting() {
+  return demoAFSClient;
 }
 
 export function formatBytes(value: number) {

@@ -1,0 +1,36 @@
+# AFS — full stack: Redis + control plane + embedded UI
+#
+# Usage:
+#   docker compose up
+#
+# Then open http://localhost:8091 in your browser.
+# The AFS CLI can connect to Redis at localhost:6379.
+
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  afs:
+    build:
+      context: .
+      args:
+        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN:-}
+    ports:
+      - "8091:8091"
+    environment:
+      AFS_REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:

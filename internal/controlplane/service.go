@@ -234,8 +234,11 @@ type viewRef struct {
 }
 
 type Service struct {
-	cfg   Config
-	store *Store
+	cfg                 Config
+	store               *Store
+	catalog             *workspaceCatalog
+	catalogDatabaseID   string
+	catalogDatabaseName string
 }
 
 type Capabilities = capabilities
@@ -270,6 +273,16 @@ type SaveCheckpointRequest struct {
 
 func NewService(cfg Config, store *Store) *Service {
 	return &Service{cfg: cfg, store: store}
+}
+
+func NewServiceWithCatalog(cfg Config, store *Store, catalog *workspaceCatalog, databaseID, databaseName string) *Service {
+	return &Service{
+		cfg:                 cfg,
+		store:               store,
+		catalog:             catalog,
+		catalogDatabaseID:   strings.TrimSpace(databaseID),
+		catalogDatabaseName: strings.TrimSpace(databaseName),
+	}
 }
 
 func (s *Service) ListWorkspaceSummaries(ctx context.Context) (WorkspaceListResponse, error) {
@@ -324,7 +337,10 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 		return session, nil
 	}
 
-	now := time.Now().UTC()
+	now, err := s.store.Now(ctx)
+	if err != nil {
+		return WorkspaceSession{}, err
+	}
 	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, now); err != nil {
 		return WorkspaceSession{}, err
 	}
@@ -349,6 +365,9 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
 		return WorkspaceSession{}, err
 	}
+	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
+		return WorkspaceSession{}, err
+	}
 	_ = s.store.Audit(ctx, workspace, "session_start", map[string]any{
 		"session_id":  record.SessionID,
 		"client_kind": defaultString(record.ClientKind, "sync"),
@@ -362,8 +381,17 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 }
 
 func (s *Service) ListWorkspaceSessions(ctx context.Context, workspace string) (WorkspaceSessionListResponse, error) {
-	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, time.Now().UTC()); err != nil {
+	now, err := s.store.Now(ctx)
+	if err != nil {
 		return WorkspaceSessionListResponse{}, err
+	}
+	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, now); err != nil {
+		return WorkspaceSessionListResponse{}, err
+	}
+	if items, ok, err := s.listWorkspaceSessionsFromCatalog(ctx, workspace); err != nil {
+		return WorkspaceSessionListResponse{}, err
+	} else if ok {
+		return WorkspaceSessionListResponse{Items: items}, nil
 	}
 	records, err := s.store.ListWorkspaceSessions(ctx, workspace)
 	if err != nil {
@@ -384,11 +412,17 @@ func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sess
 	if record.State == workspaceSessionStateClosed {
 		return WorkspaceSessionInfo{}, os.ErrNotExist
 	}
-	now := time.Now().UTC()
+	now, err := s.store.Now(ctx)
+	if err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
 	record.State = workspaceSessionStateActive
 	record.LastSeenAt = now
 	record.LeaseExpiresAt = now.Add(workspaceSessionLeaseTTL)
 	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
 		return WorkspaceSessionInfo{}, err
 	}
 	return workspaceSessionInfoFromRecord(record), nil
@@ -399,7 +433,10 @@ func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionI
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
+	now, err := s.store.Now(ctx)
+	if err != nil {
+		return err
+	}
 	record.State = workspaceSessionStateClosed
 	record.LastSeenAt = now
 	record.LeaseExpiresAt = now
@@ -407,6 +444,9 @@ func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionI
 		return err
 	}
 	if err := s.store.PutWorkspaceSessionWithTTL(ctx, record, workspaceSessionRecordTTL); err != nil {
+		return err
+	}
+	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, "explicit"); err != nil {
 		return err
 	}
 	_ = s.store.Audit(ctx, workspace, "session_close", map[string]any{
@@ -478,6 +518,8 @@ func workspaceSessionInfoFromRecord(record WorkspaceSessionRecord) workspaceSess
 	}
 }
 
+const timeRFC3339 = time.RFC3339
+
 func newWorkspaceSessionID() (string, error) {
 	var raw [8]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -487,30 +529,33 @@ func newWorkspaceSessionID() (string, error) {
 }
 
 func (s *Service) reapExpiredWorkspaceSessions(ctx context.Context, workspace string, now time.Time) error {
-	expiredIDs, err := s.store.ListExpiredWorkspaceSessionIDs(ctx, workspace, now)
+	records, err := s.store.ListWorkspaceSessions(ctx, workspace)
 	if err != nil {
 		return err
 	}
-	for _, sessionID := range expiredIDs {
-		record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
+	for _, record := range records {
+		alive, err := s.store.WorkspaceSessionLeaseAlive(ctx, workspace, record.SessionID)
 		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				_ = s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID)
-				continue
-			}
 			return err
 		}
+		if alive && !record.LeaseExpiresAt.Before(now) {
+			continue
+		}
 		if record.State == workspaceSessionStateClosed {
-			if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID); err != nil {
+			if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, record.SessionID); err != nil {
 				return err
 			}
 			continue
 		}
 		record.State = workspaceSessionStateStale
-		if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID); err != nil {
+		record.LastSeenAt = now
+		if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, record.SessionID); err != nil {
 			return err
 		}
 		if err := s.store.PutWorkspaceSessionWithTTL(ctx, record, workspaceSessionRecordTTL); err != nil {
+			return err
+		}
+		if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, "expired"); err != nil {
 			return err
 		}
 		_ = s.store.Audit(ctx, workspace, "session_stale", map[string]any{
@@ -520,6 +565,97 @@ func (s *Service) reapExpiredWorkspaceSessions(ctx context.Context, workspace st
 		})
 	}
 	return nil
+}
+
+func (s *Service) listWorkspaceSessionsFromCatalog(ctx context.Context, workspace string) ([]workspaceSessionInfo, bool, error) {
+	if s.catalog == nil {
+		return nil, false, nil
+	}
+	route, meta, ok, err := s.resolveWorkspaceCatalogRoute(ctx, workspace)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
+	}
+	records, err := s.catalog.ListSessionsForWorkspace(ctx, route.WorkspaceID)
+	if err != nil {
+		return nil, false, err
+	}
+	items := make([]workspaceSessionInfo, 0, len(records))
+	for _, record := range records {
+		items = append(items, workspaceSessionInfo{
+			SessionID:       record.SessionID,
+			Workspace:       defaultString(record.WorkspaceName, meta.Name),
+			ClientKind:      record.ClientKind,
+			AFSVersion:      record.AFSVersion,
+			Hostname:        record.Hostname,
+			OperatingSystem: record.OperatingSystem,
+			LocalPath:       record.LocalPath,
+			Readonly:        record.Readonly,
+			State:           record.State,
+			StartedAt:       record.StartedAt,
+			LastSeenAt:      record.LastSeenAt,
+			LeaseExpiresAt:  record.LeaseExpiresAt,
+		})
+	}
+	return items, true, nil
+}
+
+func (s *Service) syncWorkspaceSessionCatalog(ctx context.Context, workspace string, record WorkspaceSessionRecord, closeReason string) error {
+	if s.catalog == nil {
+		return nil
+	}
+	route, meta, ok, err := s.resolveWorkspaceCatalogRoute(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	return s.catalog.UpsertSession(ctx, workspaceSessionCatalogRecord(route, meta, record, closeReason))
+}
+
+func (s *Service) resolveWorkspaceCatalogRoute(ctx context.Context, workspace string) (workspaceCatalogRoute, WorkspaceMeta, bool, error) {
+	if s.catalog == nil {
+		return workspaceCatalogRoute{}, WorkspaceMeta{}, false, nil
+	}
+	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return workspaceCatalogRoute{}, WorkspaceMeta{}, false, err
+	}
+	meta = applyWorkspaceMetaDefaults(s.cfg, meta)
+	databaseID := meta.DatabaseID
+	if strings.TrimSpace(s.catalogDatabaseID) != "" {
+		databaseID = s.catalogDatabaseID
+	}
+	route, err := s.catalog.ResolveWorkspaceInDatabase(ctx, databaseID, workspace)
+	if err == nil {
+		return route, meta, true, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return workspaceCatalogRoute{}, WorkspaceMeta{}, false, err
+	}
+	detail, err := s.getWorkspace(ctx, workspace)
+	if err != nil {
+		return workspaceCatalogRoute{}, WorkspaceMeta{}, false, err
+	}
+	summary := workspaceSummaryFromDetail(detail)
+	if strings.TrimSpace(s.catalogDatabaseID) != "" {
+		summary.DatabaseID = s.catalogDatabaseID
+	}
+	if strings.TrimSpace(s.catalogDatabaseName) != "" {
+		summary.DatabaseName = s.catalogDatabaseName
+	}
+	summary, err = s.catalog.UpsertWorkspace(ctx, summary)
+	if err != nil {
+		return workspaceCatalogRoute{}, WorkspaceMeta{}, false, err
+	}
+	return workspaceCatalogRoute{
+		DatabaseID:  summary.DatabaseID,
+		WorkspaceID: summary.ID,
+		Name:        summary.Name,
+	}, meta, true, nil
 }
 
 func (s *Service) listWorkspaceSummaries(ctx context.Context) (workspaceListResponse, error) {

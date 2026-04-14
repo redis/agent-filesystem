@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
 import styled, { keyframes, css } from "styled-components";
+import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
+import type { AgentSortField } from "./agents-table-utils";
 import {
   DialogOverlay,
   DialogCard,
@@ -69,11 +71,11 @@ const ActiveDot = styled.span<{ $active: boolean }>`
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: ${({ $active }) => ($active ? "#22c55e" : "#d1d5db")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line-strong)")};
   ${({ $active }) =>
     $active &&
     css`
-      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+      box-shadow: 0 0 8px var(--afs-accent-soft);
       animation: ${pulse} 2s ease-in-out infinite;
     `}
 `;
@@ -131,7 +133,7 @@ const AgentCard = styled.button<{ $active: boolean }>`
   padding: 22px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 16px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   text-align: left;
   cursor: pointer;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -145,7 +147,7 @@ const AgentCard = styled.button<{ $active: boolean }>`
   ${({ $active }) =>
     $active &&
     css`
-      border-color: rgba(34, 197, 94, 0.25);
+      border-color: var(--afs-line-strong);
     `}
 `;
 
@@ -179,8 +181,8 @@ const CardStatusBadge = styled.span<{ $active: boolean }>`
   padding: 3px 10px;
   border-radius: 999px;
   flex-shrink: 0;
-  background: ${({ $active }) => ($active ? "rgba(34,197,94,0.12)" : "rgba(161,161,170,0.12)")};
-  color: ${({ $active }) => ($active ? "#16a34a" : "#71717a")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel)")};
+  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-muted)")};
 `;
 
 const CardWorkspace = styled.span`
@@ -202,8 +204,9 @@ const CardMetaTag = styled.span`
   gap: 4px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(8, 6, 13, 0.04);
+  background: var(--afs-panel);
   color: var(--afs-muted, #71717a);
+  border: 1px solid var(--afs-line);
   font-size: 11px;
   font-weight: 600;
 `;
@@ -220,7 +223,7 @@ const CardFooter = styled.div`
   justify-content: space-between;
   gap: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(8, 6, 13, 0.06);
+  border-top: 1px solid var(--afs-line);
   margin-top: 2px;
 `;
 
@@ -231,7 +234,7 @@ const ClockWrap = styled.div<{ $active: boolean }>`
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: ${({ $active }) => ($active ? "#16a34a" : "var(--afs-muted, #71717a)")};
+  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-muted, #71717a)")};
 `;
 
 const ClockIcon = styled.span<{ $spinning: boolean }>`
@@ -264,19 +267,19 @@ const ToggleGroup = styled.div`
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
-  background: rgba(8, 6, 13, 0.05);
-  border: 1px solid rgba(8, 6, 13, 0.06);
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
 `;
 
 const ToggleButton = styled.button<{ $active: boolean }>`
-  border: none;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "#fff" : "transparent")};
+  background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "transparent")};
   box-shadow: ${({ $active }) => ($active ? "0 2px 6px rgba(8,6,13,0.08)" : "none")};
   transition: background 160ms ease, color 160ms ease;
 
@@ -288,8 +291,6 @@ const ToggleButton = styled.button<{ $active: boolean }>`
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-type AgentSortField = "hostname" | "workspaceName" | "lastSeenAt";
-
 type ViewMode = "table" | "cards";
 
 type Props = {
@@ -299,19 +300,6 @@ type Props = {
   errorMessage?: string;
   onOpenWorkspace: (agent: AFSAgentSession) => void;
 };
-
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-
-  return direction === "asc" ? result : result * -1;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Detail dialog component                                            */
@@ -425,26 +413,16 @@ export function AgentsTable({
   // Tick every second so live counters (uptime, time-ago) update in real-time.
   useTick();
 
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    const baseRows =
-      query === ""
-        ? rows
-        : rows.filter((row) =>
-            [row.workspaceName, row.hostname, row.state, row.clientKind].some(
-              (value) => value.toLowerCase().includes(query),
-            ),
-          );
-
-    return [...baseRows].sort((left, right) =>
-      compareValues(left[sortBy], right[sortBy], sortDirection),
-    );
-  }, [rows, search, sortBy, sortDirection]);
+  const filteredRows = useMemo(
+    () => filterAndSortAgents(rows, search, sortBy, sortDirection),
+    [rows, search, sortBy, sortDirection],
+  );
 
   const sorting = useMemo<SortingState>(
     () => [{ id: sortBy, desc: sortDirection === "desc" }],
     [sortBy, sortDirection],
   );
+  const isFiltering = normalizeSearchValue(search) !== "";
 
   const columns = useMemo(
     () =>
@@ -503,8 +481,8 @@ export function AgentsTable({
       <ToolbarWrap>
         <S.SearchInput
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search agents..."
+          onChange={setSearch}
+          placeholder="Search by name, path, workspace..."
         />
         <ToggleGroup>
           <ToggleButton
@@ -525,7 +503,11 @@ export function AgentsTable({
       {loading ? <S.EmptyState>Loading connected agents...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
-        <S.EmptyState>No connected agents are currently reporting in.</S.EmptyState>
+        <S.EmptyState>
+          {isFiltering
+            ? "No agents match the current filter."
+            : "No connected agents are currently reporting in."}
+        </S.EmptyState>
       ) : null}
 
       {/* ---- TABLE VIEW ---- */}

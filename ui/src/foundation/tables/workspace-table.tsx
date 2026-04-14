@@ -3,6 +3,7 @@ import { MoreactionsIcon } from "@redislabsdev/redis-ui-icons/monochrome";
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
 import { useMemo, useState, type ReactNode } from "react";
+import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
 import type { AFSWorkspaceSummary } from "../types/afs";
 import * as S from "./workspace-table.styles";
@@ -31,7 +32,7 @@ type Props = {
 };
 
 function workspaceRowKey(workspace: AFSWorkspaceSummary) {
-  return `${workspace.databaseId}:${workspace.id}`;
+  return workspace.id;
 }
 
 function compareValues(
@@ -109,23 +110,9 @@ export function WorkspaceTable({
               >
                 {row.original.name}
               </S.WorkspaceNameButton>
-              <Typography.Body color="secondary" component="span">
+              <SecondaryLine color="secondary" component="span">
                 {row.original.redisKey}
-              </Typography.Body>
-            </S.Stack>
-          ),
-        },
-        {
-          accessorKey: "databaseName",
-          header: "Database hosting",
-          size: 110,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="strong">{row.original.databaseName}</Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                {row.original.cloudAccount} · {row.original.region}
-              </Typography.Body>
+              </SecondaryLine>
             </S.Stack>
           ),
         },
@@ -138,8 +125,8 @@ export function WorkspaceTable({
             const count = connectedAgentsByWorkspace[workspaceRowKey(row.original)] ?? 0;
             return (
               <S.CountCell>
+                <LiveDot $active={count > 0} />
                 <Typography.Body component="strong">{count}</Typography.Body>
-                <S.MetaBadge>live</S.MetaBadge>
               </S.CountCell>
             );
           },
@@ -156,6 +143,20 @@ export function WorkspaceTable({
           ),
         },
         {
+          accessorKey: "databaseName",
+          header: "Database hosting",
+          size: 110,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.Stack>
+              <Typography.Body component="strong">{row.original.databaseName}</Typography.Body>
+              <SecondaryLine color="secondary" component="span">
+                {row.original.cloudAccount} · {row.original.region}
+              </SecondaryLine>
+            </S.Stack>
+          ),
+        },
+        {
           accessorKey: "updatedAt",
           header: "Last updated",
           size: 65,
@@ -164,9 +165,9 @@ export function WorkspaceTable({
         },
         {
           id: "actions",
-          header: "",
-          size: 10,
-          maxSize: 10,
+          header: "Actions",
+          size: 72,
+          maxSize: 72,
           enableSorting: false,
           cell: ({ row }) => (
             <Menu>
@@ -211,7 +212,7 @@ export function WorkspaceTable({
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={setSearch}
           placeholder="Search workspace, database, ..."
         />
         {toolbarAction}
@@ -257,3 +258,30 @@ export function WorkspaceTable({
     </>
   );
 }
+
+const SecondaryLine = styled(Typography.Body)`
+  && {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+`;
+
+const pulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+`;
+
+const LiveDot = styled.span<{ $active: boolean }>`
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line-strong)")};
+  ${({ $active }) =>
+    $active &&
+    css`
+      box-shadow: 0 0 8px var(--afs-accent-soft);
+      animation: ${pulse} 2s ease-in-out infinite;
+    `}
+`;

@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/redis/agent-filesystem/internal/uistatic"
 )
 
 type saveCheckpointHTTPResponse struct {
@@ -33,8 +36,59 @@ type saveCheckpointRequest struct {
 func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
-	root.Handle("/", newAdminMux(manager))
+
+	admin := newAdminMux(manager)
+
+	// Serve embedded UI for non-API paths, falling back to index.html for SPA routes.
+	uiFS, err := fs.Sub(uistatic.Content, "dist")
+	if err != nil {
+		// If the UI is not embedded (e.g. dev build), serve API only.
+		root.Handle("/", admin)
+		return cors(root, allowOrigin)
+	}
+
+	// Check if the embedded UI has real content (not just the placeholder).
+	if _, err := fs.Stat(uiFS, "index.html"); err != nil {
+		// No UI built — serve API only.
+		root.Handle("/", admin)
+		return cors(root, allowOrigin)
+	}
+
+	fileServer := http.FileServer(http.FS(uiFS))
+	spaHandler := &spaFallbackHandler{fs: uiFS, fileServer: fileServer, admin: admin}
+	root.Handle("/", spaHandler)
 	return cors(root, allowOrigin)
+}
+
+// spaFallbackHandler serves static files from the embedded UI filesystem.
+// API routes (/v1/, /healthz) are forwarded to the admin mux.
+// Non-API paths that don't match a static file get index.html (SPA routing).
+type spaFallbackHandler struct {
+	fs         fs.FS
+	fileServer http.Handler
+	admin      http.Handler
+}
+
+func (h *spaFallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Route API requests to the admin mux.
+	if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/healthz" {
+		h.admin.ServeHTTP(w, r)
+		return
+	}
+
+	// Try serving the file from the embedded FS.
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+	if _, err := fs.Stat(h.fs, path); err == nil {
+		h.fileServer.ServeHTTP(w, r)
+		return
+	}
+
+	// SPA fallback: serve index.html for any unmatched route.
+	r.URL.Path = "/"
+	h.fileServer.ServeHTTP(w, r)
 }
 
 func NewAdminHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
@@ -80,6 +134,32 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		default:
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 		}
+	})
+
+	mux.HandleFunc("/v1/catalog/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.CatalogHealth(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/catalog/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ReconcileCatalog(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	})
 
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {

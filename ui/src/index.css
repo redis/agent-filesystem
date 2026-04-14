@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="light"] {
   color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -21,6 +22,23 @@
   --afs-mono: "Monaco", "Menlo", monospace;
 }
 
+[data-theme="dark"] {
+  color-scheme: dark;
+  --afs-bg: #0b1b24;
+  --afs-bg-soft: #203847;
+  --afs-panel: rgba(18, 39, 51, 0.9);
+  --afs-panel-strong: #122733;
+  --afs-line: rgba(58, 92, 110, 0.62);
+  --afs-line-strong: rgba(86, 127, 148, 0.8);
+  --afs-ink: #f2f5f4;
+  --afs-ink-soft: #c5d1d4;
+  --afs-muted: #98aab1;
+  --afs-accent: #dcff31;
+  --afs-accent-soft: rgba(220, 255, 49, 0.16);
+  --afs-amber: #dcff31;
+  --afs-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+}
+
 html,
 body,
 #root {
@@ -29,9 +47,18 @@ body,
 
 body {
   margin: 0;
+  background: var(--afs-bg);
+  transition: background 0.2s ease;
+}
+
+[data-theme="light"] body {
   background:
     radial-gradient(circle at top right, rgba(170, 59, 255, 0.08), transparent 28%),
     linear-gradient(180deg, #f9fbff 0%, #f3f6fb 100%);
+}
+
+[data-theme="dark"] body {
+  background: linear-gradient(180deg, #0f2230 0%, #0b1b24 16%, #0b1b24 100%);
 }
 
 button,

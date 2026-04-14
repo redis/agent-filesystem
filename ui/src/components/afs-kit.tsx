@@ -8,14 +8,14 @@ import type {
 const panelSurface = css`
   border: 1px solid var(--afs-line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   box-shadow: none;
 `;
 
 const insetSurface = css`
   border: 1px solid var(--afs-line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   box-shadow: none;
 `;
 
@@ -58,9 +58,9 @@ export const StatCard = styled(Card)`
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 18px;
-  min-height: 152px;
-  padding: 22px 22px 20px;
+  gap: 10px;
+  min-height: 100px;
+  padding: 16px 18px 14px;
 `;
 
 export const StatLabel = styled.span`
@@ -74,7 +74,7 @@ export const StatLabel = styled.span`
 export const StatValue = styled.span`
   display: block;
   color: var(--afs-ink);
-  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: -0.04em;
@@ -168,7 +168,7 @@ export const Tag = styled.span`
   border-radius: 999px;
   padding: 7px 11px;
   border: 1px solid var(--afs-line);
-  background: rgba(255, 255, 255, 0.78);
+  background: var(--afs-panel);
   color: var(--afs-ink-soft);
   font-size: 12px;
   font-weight: 600;
@@ -177,16 +177,16 @@ export const Tag = styled.span`
 
 const toneStyles = {
   blank: css`
-    background: rgba(8, 6, 13, 0.08);
-    color: #40384d;
+    background: var(--afs-panel);
+    color: var(--afs-ink-soft);
   `,
   "git-import": css`
-    background: rgba(170, 59, 255, 0.12);
-    color: #7d14ff;
+    background: var(--afs-accent-soft);
+    color: var(--afs-accent);
   `,
   "cloud-import": css`
-    background: rgba(71, 191, 255, 0.14);
-    color: #095b8a;
+    background: var(--afs-bg-soft);
+    color: var(--afs-ink-soft);
   `,
 } as const;
 
@@ -233,7 +233,7 @@ const fieldBase = css`
   width: 100%;
   border-radius: 16px;
   border: 1px solid var(--afs-line);
-  background: rgba(255, 255, 255, 0.94);
+  background: var(--afs-panel);
   color: var(--afs-ink);
   padding: 12px 14px;
   outline: none;
@@ -272,23 +272,53 @@ export const EmptyState = styled.div`
   padding: 18px;
 `;
 
+export const NoticeCard = styled.div<{ $tone?: "warning" | "danger" | "neutral" }>`
+  ${insetSurface}
+  padding: 16px 18px;
+  border-color: ${({ $tone = "neutral" }) =>
+    $tone === "warning"
+      ? "rgba(217, 119, 6, 0.28)"
+      : $tone === "danger"
+        ? "rgba(220, 38, 38, 0.26)"
+        : "var(--afs-line)"};
+  background: ${({ $tone = "neutral" }) =>
+    $tone === "warning"
+      ? "rgba(245, 158, 11, 0.08)"
+      : $tone === "danger"
+        ? "rgba(239, 68, 68, 0.08)"
+        : "var(--afs-panel-strong)"};
+`;
+
+export const NoticeTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 14px;
+  font-weight: 700;
+`;
+
+export const NoticeBody = styled.div`
+  margin-top: 6px;
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.5;
+`;
+
 export const Tabs = styled.div`
   display: inline-flex;
   gap: 8px;
   padding: 7px;
   border-radius: 999px;
-  border: 1px solid rgba(8, 6, 13, 0.06);
-  background: rgba(8, 6, 13, 0.05);
+  border: 1px solid var(--afs-line-strong);
+  background: var(--afs-bg-soft);
 `;
 
 export const TabButton = styled.button<{ $active?: boolean }>`
-  border: none;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
   border-radius: 999px;
   padding: 10px 15px;
   cursor: pointer;
   font-weight: 700;
   color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-muted)")};
-  background: ${({ $active }) => ($active ? "#fff" : "transparent")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "transparent")};
   box-shadow: ${({ $active }) =>
     $active ? "0 4px 10px rgba(8, 6, 13, 0.08)" : "none"};
   transition:
@@ -297,6 +327,7 @@ export const TabButton = styled.button<{ $active?: boolean }>`
     transform 160ms ease;
 
   &:hover {
+    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel)")};
     transform: translateY(-1px);
   }
 `;
@@ -322,9 +353,9 @@ export const FileButton = styled.button<{ $active?: boolean }>`
   gap: 6px;
   width: 100%;
   border: 1px solid
-    ${({ $active }) => ($active ? "#47bfff" : "var(--afs-line)")};
+    ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line)")};
   background: ${({ $active }) =>
-    $active ? "rgba(71, 191, 255, 0.08)" : "#fff"};
+    $active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)"};
   border-radius: 18px;
   padding: 13px 14px;
   text-align: left;
@@ -336,7 +367,7 @@ export const FileButton = styled.button<{ $active?: boolean }>`
 
   &:hover {
     transform: translateY(-1px);
-    border-color: rgba(170, 59, 255, 0.18);
+    border-color: var(--afs-line-strong);
   }
 `;
 
@@ -352,7 +383,7 @@ export const EditorArea = styled.textarea`
   font-family: var(--afs-mono);
   font-size: 13px;
   line-height: 1.6;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--afs-panel);
 `;
 
 export const SavepointGrid = styled.div`
@@ -425,7 +456,7 @@ export const DialogCard = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 24px;
   padding: 24px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
 `;
 
@@ -451,7 +482,7 @@ export const DialogFooter = styled.div`
   margin: 20px -24px 0;
   padding: 18px 24px 24px;
   border-top: 1px solid var(--afs-line);
-  background: #fff;
+  background: var(--afs-panel-strong);
 
   @media (max-width: 720px) {
     flex-direction: column;

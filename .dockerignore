@@ -19,6 +19,16 @@ __pycache__/
 /sandbox/sandbox
 /sandbox/sandbox-cli
 
-# Frontend dependencies
+# Frontend dependencies and build output
 /ui/node_modules
+/ui/dist
 
+# Control plane build artifact
+/afs-control-plane
+
+# Runtime state
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+afs.config.json
+afs.databases.json

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 import { afsApi, getAFSClientMode } from "./api/afs";
@@ -24,7 +25,13 @@ export type AFSDatabaseScopeRecord = {
   password: string;
   useTLS: boolean;
   workspaceCount: number;
+  activeSessionCount: number;
+  isHealthy: boolean;
   connectionError?: string;
+  lastWorkspaceRefreshAt?: string;
+  lastWorkspaceRefreshError?: string;
+  lastSessionReconcileAt?: string;
+  lastSessionReconcileError?: string;
 };
 
 type LegacySavedDatabaseRecord = {
@@ -42,9 +49,12 @@ type LegacySavedDatabaseRecord = {
 type DatabaseScopeContextValue = {
   clientMode: AFSClientMode;
   databases: AFSDatabaseScopeRecord[];
+  unavailableDatabases: AFSDatabaseScopeRecord[];
   isLoading: boolean;
+  errorMessage: string | null;
   saveDatabase: (input: SaveDatabaseInput) => Promise<void>;
   removeDatabase: (databaseId: string) => Promise<void>;
+  reconcileCatalog: () => Promise<void>;
 };
 
 const DatabaseScopeContext = createContext<DatabaseScopeContextValue | null>(null);
@@ -79,12 +89,19 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     password: input.redisPassword,
     useTLS: input.redisTLS,
     workspaceCount: input.workspaceCount,
+    activeSessionCount: input.activeSessionCount,
+    isHealthy: !input.connectionError,
     connectionError: input.connectionError,
+    lastWorkspaceRefreshAt: input.lastWorkspaceRefreshAt,
+    lastWorkspaceRefreshError: input.lastWorkspaceRefreshError,
+    lastSessionReconcileAt: input.lastSessionReconcileAt,
+    lastSessionReconcileError: input.lastSessionReconcileError,
   };
 }
 
 export function DatabaseScopeProvider(props: PropsWithChildren) {
   const clientMode = getAFSClientMode();
+  const queryClient = useQueryClient();
   const databasesQuery = useDatabases();
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
@@ -93,6 +110,15 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const databases = useMemo(
     () => (databasesQuery.data ?? []).map(mapDatabaseRecord),
     [databasesQuery.data],
+  );
+  const errorMessage = databasesQuery.error instanceof Error
+    ? databasesQuery.error.message
+    : databasesQuery.error != null
+      ? "Unable to load databases."
+      : null;
+  const unavailableDatabases = useMemo(
+    () => databases.filter((database) => !database.isHealthy),
+    [databases],
   );
 
   useEffect(() => {
@@ -148,19 +174,30 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     () => ({
       clientMode,
       databases,
+      unavailableDatabases,
       isLoading: databasesQuery.isLoading,
+      errorMessage,
       saveDatabase: async (input: SaveDatabaseInput) => {
         await saveDatabaseMutation.mutateAsync(input);
       },
       removeDatabase: async (databaseId: string) => {
         await deleteDatabaseMutation.mutateAsync(databaseId);
       },
+      reconcileCatalog: async () => {
+        await afsApi.reconcileCatalog();
+        await queryClient.invalidateQueries({
+          predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "afs",
+        });
+      },
     }),
     [
       clientMode,
       databases,
+      unavailableDatabases,
       databasesQuery.isLoading,
+      errorMessage,
       deleteDatabaseMutation,
+      queryClient,
       saveDatabaseMutation,
     ],
   );

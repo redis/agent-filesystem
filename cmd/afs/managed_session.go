@@ -110,5 +110,8 @@ func configFromState(st state) config {
 	if strings.TrimSpace(st.CurrentWorkspace) != "" {
 		cfg.CurrentWorkspace = strings.TrimSpace(st.CurrentWorkspace)
 	}
+	if strings.TrimSpace(st.CurrentWorkspaceID) != "" {
+		cfg.CurrentWorkspaceID = strings.TrimSpace(st.CurrentWorkspaceID)
+	}
 	return cfg
 }

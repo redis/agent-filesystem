@@ -10,8 +10,11 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as DownloadsRouteImport } from './routes/downloads'
+import { Route as DocsRouteImport } from './routes/docs'
 import { Route as DatabasesRouteImport } from './routes/databases'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AgentGuideRouteImport } from './routes/agent-guide'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
@@ -19,6 +22,16 @@ import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DownloadsRoute = DownloadsRouteImport.update({
+  id: '/downloads',
+  path: '/downloads',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsRoute = DocsRouteImport.update({
+  id: '/docs',
+  path: '/docs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DatabasesRoute = DatabasesRouteImport.update({
@@ -29,6 +42,11 @@ const DatabasesRoute = DatabasesRouteImport.update({
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AgentGuideRoute = AgentGuideRouteImport.update({
+  id: '/agent-guide',
+  path: '/agent-guide',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivityRoute = ActivityRouteImport.update({
@@ -50,16 +68,22 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/databases': typeof DatabasesRoute
+  '/docs': typeof DocsRoute
+  '/downloads': typeof DownloadsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/databases': typeof DatabasesRoute
+  '/docs': typeof DocsRoute
+  '/downloads': typeof DownloadsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
@@ -67,8 +91,11 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/databases': typeof DatabasesRoute
+  '/docs': typeof DocsRoute
+  '/downloads': typeof DownloadsRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
@@ -77,24 +104,33 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity'
+    | '/agent-guide'
     | '/agents'
     | '/databases'
+    | '/docs'
+    | '/downloads'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/activity'
+    | '/agent-guide'
     | '/agents'
     | '/databases'
+    | '/docs'
+    | '/downloads'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   id:
     | '__root__'
     | '/'
     | '/activity'
+    | '/agent-guide'
     | '/agents'
     | '/databases'
+    | '/docs'
+    | '/downloads'
     | '/workspaces'
     | '/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
@@ -102,8 +138,11 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
+  AgentGuideRoute: typeof AgentGuideRoute
   AgentsRoute: typeof AgentsRoute
   DatabasesRoute: typeof DatabasesRoute
+  DocsRoute: typeof DocsRoute
+  DownloadsRoute: typeof DownloadsRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
 }
 
@@ -114,6 +153,20 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/downloads': {
+      id: '/downloads'
+      path: '/downloads'
+      fullPath: '/downloads'
+      preLoaderRoute: typeof DownloadsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs': {
+      id: '/docs'
+      path: '/docs'
+      fullPath: '/docs'
+      preLoaderRoute: typeof DocsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/databases': {
@@ -128,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/agent-guide': {
+      id: '/agent-guide'
+      path: '/agent-guide'
+      fullPath: '/agent-guide'
+      preLoaderRoute: typeof AgentGuideRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activity': {
@@ -169,8 +229,11 @@ const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
+  AgentGuideRoute: AgentGuideRoute,
   AgentsRoute: AgentsRoute,
   DatabasesRoute: DatabasesRoute,
+  DocsRoute: DocsRoute,
+  DownloadsRoute: DownloadsRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
 }
 export const routeTree = rootRouteImport

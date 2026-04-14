@@ -43,17 +43,52 @@ func LoadConfigWithPresence(configPathOverride string) (Config, bool, error) {
 	data, err := os.ReadFile(configPath(configPathOverride))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cfg, false, nil
+			// No config file — apply env overrides and treat as present if any were set.
+			envSet := applyEnvOverrides(&cfg)
+			if err := prepareConfig(&cfg); err != nil {
+				return cfg, envSet, err
+			}
+			return cfg, envSet, nil
 		}
 		return cfg, false, err
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return cfg, true, err
 	}
+	applyEnvOverrides(&cfg)
 	if err := prepareConfig(&cfg); err != nil {
 		return cfg, true, err
 	}
 	return cfg, true, nil
+}
+
+// applyEnvOverrides reads AFS_REDIS_* environment variables and applies them
+// on top of the current config. Returns true if any env var was set.
+func applyEnvOverrides(cfg *Config) bool {
+	set := false
+	if v := os.Getenv("AFS_REDIS_ADDR"); v != "" {
+		cfg.RedisAddr = v
+		set = true
+	}
+	if v := os.Getenv("AFS_REDIS_USERNAME"); v != "" {
+		cfg.RedisUsername = v
+		set = true
+	}
+	if v := os.Getenv("AFS_REDIS_PASSWORD"); v != "" {
+		cfg.RedisPassword = v
+		set = true
+	}
+	if v := os.Getenv("AFS_REDIS_DB"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RedisDB = n
+			set = true
+		}
+	}
+	if v := os.Getenv("AFS_REDIS_TLS"); v != "" {
+		cfg.RedisTLS = v == "1" || v == "true"
+		set = true
+	}
+	return set
 }
 
 func OpenStore(ctx context.Context, cfg Config) (*Store, func(), error) {

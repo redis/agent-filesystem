@@ -2,7 +2,9 @@ package controlplane
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,7 +71,52 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			PRIMARY KEY (database_id, workspace_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_workspace_catalog_name ON workspace_catalog(name)`,
+		`CREATE INDEX IF NOT EXISTS idx_workspace_catalog_database_name ON workspace_catalog(database_id, name)`,
 		`CREATE INDEX IF NOT EXISTS idx_workspace_catalog_updated_at ON workspace_catalog(updated_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS session_catalog (
+			session_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			database_id TEXT NOT NULL,
+			workspace_name TEXT NOT NULL DEFAULT '',
+			client_kind TEXT NOT NULL DEFAULT '',
+			afs_version TEXT NOT NULL DEFAULT '',
+			hostname TEXT NOT NULL DEFAULT '',
+			os TEXT NOT NULL DEFAULT '',
+			local_path TEXT NOT NULL DEFAULT '',
+			readonly INTEGER NOT NULL DEFAULT 0,
+			state TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			last_seen_at TEXT NOT NULL,
+			lease_expires_at TEXT NOT NULL,
+			closed_at TEXT NOT NULL DEFAULT '',
+			close_reason TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_catalog_workspace_id ON session_catalog(workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_catalog_database_id ON session_catalog(database_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_catalog_state_lease ON session_catalog(state, lease_expires_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_session_catalog_last_seen ON session_catalog(last_seen_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS database_catalog_health (
+			database_id TEXT PRIMARY KEY,
+			database_name TEXT NOT NULL DEFAULT '',
+			last_workspace_refresh_at TEXT NOT NULL DEFAULT '',
+			last_workspace_refresh_error TEXT NOT NULL DEFAULT '',
+			last_session_reconcile_at TEXT NOT NULL DEFAULT '',
+			last_session_reconcile_error TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE TABLE IF NOT EXISTS database_registry (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			redis_addr TEXT NOT NULL,
+			redis_username TEXT NOT NULL DEFAULT '',
+			redis_password TEXT NOT NULL DEFAULT '',
+			redis_db INTEGER NOT NULL DEFAULT 0,
+			redis_tls INTEGER NOT NULL DEFAULT 0,
+			order_index INTEGER NOT NULL DEFAULT 0
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_database_registry_order ON database_registry(order_index ASC)`,
 	}
 	for _, statement := range statements {
 		if _, err := c.db.ExecContext(ctx, statement); err != nil {
@@ -79,78 +126,68 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 	return nil
 }
 
-func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databaseID string, items []workspaceSummary) error {
+func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databaseID string, items []workspaceSummary) ([]workspaceSummary, error) {
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() {
 		_ = tx.Rollback()
 	}()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ?`, strings.TrimSpace(databaseID)); err != nil {
-		return err
-	}
-
 	statement, err := tx.PrepareContext(ctx, workspaceCatalogUpsertSQL)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer statement.Close()
 
+	existingByName, err := catalogRoutesByName(ctx, tx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	keepNames := make(map[string]struct{}, len(items))
+	synced := make([]workspaceSummary, 0, len(items))
 	for _, item := range items {
-		if _, err := statement.ExecContext(
-			ctx,
-			strings.TrimSpace(item.DatabaseID),
-			strings.TrimSpace(item.ID),
-			strings.TrimSpace(item.Name),
-			strings.TrimSpace(item.DatabaseName),
-			strings.TrimSpace(item.CloudAccount),
-			strings.TrimSpace(item.RedisKey),
-			strings.TrimSpace(item.Status),
-			item.FileCount,
-			item.FolderCount,
-			item.TotalBytes,
-			item.CheckpointCount,
-			strings.TrimSpace(item.DraftState),
-			strings.TrimSpace(item.LastCheckpointAt),
-			strings.TrimSpace(item.UpdatedAt),
-			strings.TrimSpace(item.Region),
-			strings.TrimSpace(item.Source),
-		); err != nil {
-			return err
+		item.DatabaseID = strings.TrimSpace(databaseID)
+		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, existingByName, item)
+		if err != nil {
+			return nil, err
 		}
+		keepNames[item.Name] = struct{}{}
+		synced = append(synced, item)
 	}
 
-	return tx.Commit()
+	if err := deleteCatalogDatabaseRowsNotInNames(ctx, tx, databaseID, keepNames); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return synced, nil
 }
 
-func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSummary) error {
-	_, err := c.db.ExecContext(
-		ctx,
-		workspaceCatalogUpsertSQL,
-		strings.TrimSpace(item.DatabaseID),
-		strings.TrimSpace(item.ID),
-		strings.TrimSpace(item.Name),
-		strings.TrimSpace(item.DatabaseName),
-		strings.TrimSpace(item.CloudAccount),
-		strings.TrimSpace(item.RedisKey),
-		strings.TrimSpace(item.Status),
-		item.FileCount,
-		item.FolderCount,
-		item.TotalBytes,
-		item.CheckpointCount,
-		strings.TrimSpace(item.DraftState),
-		strings.TrimSpace(item.LastCheckpointAt),
-		strings.TrimSpace(item.UpdatedAt),
-		strings.TrimSpace(item.Region),
-		strings.TrimSpace(item.Source),
-	)
-	return err
+func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSummary) (workspaceSummary, error) {
+	statement, err := c.db.PrepareContext(ctx, workspaceCatalogUpsertSQL)
+	if err != nil {
+		return workspaceSummary{}, err
+	}
+	defer statement.Close()
+
+	existingByName, err := catalogRoutesByName(ctx, c.db, item.DatabaseID)
+	if err != nil {
+		return workspaceSummary{}, err
+	}
+	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, existingByName, item)
 }
 
 func (c *workspaceCatalog) DeleteWorkspace(ctx context.Context, databaseID, workspaceID string) error {
 	_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(workspaceID))
+	return err
+}
+
+func (c *workspaceCatalog) DeleteWorkspaceByName(ctx context.Context, databaseID, name string) error {
+	_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND name = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(name))
 	return err
 }
 
@@ -254,6 +291,171 @@ func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace strin
 		routes = append(routes, route)
 	}
 	return routes, rows.Err()
+}
+
+func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, databaseID, workspace string) (workspaceCatalogRoute, error) {
+	rows, err := c.db.QueryContext(
+		ctx,
+		`SELECT database_id, workspace_id, name
+		 FROM workspace_catalog
+		 WHERE database_id = ? AND (workspace_id = ? OR name = ?)
+		 ORDER BY workspace_id`,
+		strings.TrimSpace(databaseID),
+		strings.TrimSpace(workspace),
+		strings.TrimSpace(workspace),
+	)
+	if err != nil {
+		return workspaceCatalogRoute{}, err
+	}
+	defer rows.Close()
+
+	var routes []workspaceCatalogRoute
+	for rows.Next() {
+		var route workspaceCatalogRoute
+		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name); err != nil {
+			return workspaceCatalogRoute{}, err
+		}
+		routes = append(routes, route)
+	}
+	if err := rows.Err(); err != nil {
+		return workspaceCatalogRoute{}, err
+	}
+	switch len(routes) {
+	case 0:
+		return workspaceCatalogRoute{}, os.ErrNotExist
+	case 1:
+		return routes[0], nil
+	default:
+		return workspaceCatalogRoute{}, fmt.Errorf("workspace %q is ambiguous in database %q", workspace, databaseID)
+	}
+}
+
+func catalogRoutesByName(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, databaseID string) (map[string]workspaceCatalogRoute, error) {
+	rows, err := queryer.QueryContext(
+		ctx,
+		`SELECT database_id, workspace_id, name
+		 FROM workspace_catalog
+		 WHERE database_id = ?`,
+		strings.TrimSpace(databaseID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	routes := make(map[string]workspaceCatalogRoute)
+	for rows.Next() {
+		var route workspaceCatalogRoute
+		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name); err != nil {
+			return nil, err
+		}
+		routes[route.Name] = route
+	}
+	return routes, rows.Err()
+}
+
+func upsertCatalogWorkspaceSummary(
+	ctx context.Context,
+	execer interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	},
+	statement interface {
+		ExecContext(context.Context, ...any) (sql.Result, error)
+	},
+	existingByName map[string]workspaceCatalogRoute,
+	item workspaceSummary,
+) (workspaceSummary, error) {
+	item.DatabaseID = strings.TrimSpace(item.DatabaseID)
+	item.Name = strings.TrimSpace(item.Name)
+	if item.DatabaseID == "" {
+		return workspaceSummary{}, fmt.Errorf("workspace database id is required")
+	}
+	if item.Name == "" {
+		return workspaceSummary{}, fmt.Errorf("workspace name is required")
+	}
+
+	assignedID := strings.TrimSpace(item.ID)
+	if existing, ok := existingByName[item.Name]; ok {
+		assignedID = strings.TrimSpace(existing.WorkspaceID)
+	}
+	if assignedID == "" || assignedID == item.Name {
+		var err error
+		assignedID, err = newOpaqueWorkspaceID()
+		if err != nil {
+			return workspaceSummary{}, err
+		}
+	}
+
+	if existing, ok := existingByName[item.Name]; ok && strings.TrimSpace(existing.WorkspaceID) != assignedID {
+		if _, err := execer.ExecContext(
+			ctx,
+			`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`,
+			item.DatabaseID,
+			strings.TrimSpace(existing.WorkspaceID),
+		); err != nil {
+			return workspaceSummary{}, err
+		}
+	}
+
+	item.ID = assignedID
+	if _, err := statement.ExecContext(
+		ctx,
+		item.DatabaseID,
+		item.ID,
+		item.Name,
+		strings.TrimSpace(item.DatabaseName),
+		strings.TrimSpace(item.CloudAccount),
+		strings.TrimSpace(item.RedisKey),
+		strings.TrimSpace(item.Status),
+		item.FileCount,
+		item.FolderCount,
+		item.TotalBytes,
+		item.CheckpointCount,
+		strings.TrimSpace(item.DraftState),
+		strings.TrimSpace(item.LastCheckpointAt),
+		strings.TrimSpace(item.UpdatedAt),
+		strings.TrimSpace(item.Region),
+		strings.TrimSpace(item.Source),
+	); err != nil {
+		return workspaceSummary{}, err
+	}
+	return item, nil
+}
+
+func deleteCatalogDatabaseRowsNotInNames(
+	ctx context.Context,
+	execer interface {
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	},
+	databaseID string,
+	keepNames map[string]struct{},
+) error {
+	databaseID = strings.TrimSpace(databaseID)
+	if len(keepNames) == 0 {
+		_, err := execer.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ?`, databaseID)
+		return err
+	}
+
+	placeholders := make([]string, 0, len(keepNames))
+	args := make([]any, 0, len(keepNames)+1)
+	args = append(args, databaseID)
+	for name := range keepNames {
+		placeholders = append(placeholders, "?")
+		args = append(args, name)
+	}
+	query := `DELETE FROM workspace_catalog WHERE database_id = ? AND name NOT IN (` + strings.Join(placeholders, ", ") + `)`
+	_, err := execer.ExecContext(ctx, query, args...)
+	return err
+}
+
+func newOpaqueWorkspaceID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "ws_" + hex.EncodeToString(raw[:]), nil
 }
 
 func workspaceCatalogPath(configPathOverride string) string {

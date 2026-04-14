@@ -47,7 +47,6 @@ export function OverviewTab({ workspace }: Props) {
                         to: "/agents",
                         search: {
                           workspaceId: workspace.id,
-                          databaseId: workspace.databaseId,
                         },
                       });
                     }}

@@ -164,6 +164,10 @@ func prepareConfigForSave(cfg *config) error {
 		}
 		cfg.CurrentWorkspace = strings.TrimSpace(cfg.CurrentWorkspace)
 	}
+	cfg.CurrentWorkspaceID = strings.TrimSpace(cfg.CurrentWorkspaceID)
+	if productMode == productModeDirect {
+		cfg.CurrentWorkspaceID = ""
+	}
 
 	mode, err := effectiveMode(*cfg)
 	if err != nil {

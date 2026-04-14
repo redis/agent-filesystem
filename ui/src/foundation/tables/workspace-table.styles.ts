@@ -2,10 +2,10 @@ import styled from "styled-components";
 import { TableHeading } from "@redislabsdev/redis-ui-components";
 
 export const TableCard = styled.div`
-  border: 1px solid ${({ theme }) => theme.semantic.color.border.neutral200};
+  border: 1px solid var(--afs-line);
   border-radius: 8px;
   overflow: hidden;
-  background: ${({ theme }) => theme.semantic.color.background.neutral0};
+  background: var(--afs-panel-strong);
 `;
 
 export const TableViewport = styled.div`
@@ -16,7 +16,7 @@ export const TableViewport = styled.div`
     position: sticky;
     top: 0;
     z-index: 2;
-    background: ${({ theme }) => theme.semantic.color.background.neutral0};
+    background: var(--afs-panel-strong);
   }
 
   tbody tr {
@@ -24,7 +24,7 @@ export const TableViewport = styled.div`
   }
 
   tbody tr:hover {
-    background: ${({ theme }) => theme.semantic.color.background.neutral100};
+    background: var(--afs-panel);
   }
 `;
 
@@ -55,16 +55,16 @@ export const RegistryTableViewport = styled(TableViewport)`
 export const EmptyState = styled.div`
   padding: 40px;
   text-align: center;
-  color: ${({ theme }) => theme.semantic.color.text.neutral600};
+  color: var(--afs-muted);
 `;
 
 export const WorkspaceNameButton = styled.button`
   border: none;
   background: transparent;
   padding: 0;
-  color: ${({ theme }) => theme.semantic.color.text.primary600};
+  color: var(--afs-ink);
   font: inherit;
-  font-weight: 700;
+  font-weight: 400;
   cursor: pointer;
   text-align: left;
 
@@ -88,7 +88,7 @@ export const SingleLineText = styled.span`
 `;
 
 export const StatusCaption = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral600};
+  color: var(--afs-muted);
   font-size: 12px;
 `;
 
@@ -110,8 +110,9 @@ export const MetaBadge = styled.span`
   align-items: center;
   padding: 2px 6px;
   border-radius: 999px;
-  background: ${({ theme }) => theme.semantic.color.background.neutral100};
-  color: ${({ theme }) => theme.semantic.color.text.neutral700};
+  background: var(--afs-panel);
+  color: var(--afs-ink-soft);
+  border: 1px solid var(--afs-line);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.4;
@@ -135,7 +136,7 @@ const actionButtonBase = styled.button`
 `;
 
 export const TextActionButton = styled(actionButtonBase)`
-  color: ${({ theme }) => theme.semantic.color.text.primary600};
+  color: var(--afs-accent);
 `;
 
 export const DangerActionButton = styled(actionButtonBase)`
@@ -143,18 +144,34 @@ export const DangerActionButton = styled(actionButtonBase)`
 `;
 
 export const MoreActionsTrigger = styled.button`
-  border: none;
-  background: transparent;
+  border: 1px solid var(--afs-line);
+  background: var(--afs-panel-strong);
   cursor: pointer;
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  color: var(--afs-ink-soft);
+  box-shadow: 0 1px 2px rgba(8, 6, 13, 0.06);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 
   &:hover {
-    background: ${({ theme }) => theme.semantic.color.background.neutral100};
+    background: var(--afs-panel);
+    border-color: var(--afs-line-strong);
+    box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--afs-accent);
+    box-shadow: 0 0 0 3px var(--afs-accent-soft);
   }
 `;
 
@@ -167,8 +184,8 @@ export const SearchInput = styled(TableHeading.SearchInput)`
   min-width: 0;
   width: 100%;
   border-radius: 8px !important;
-  border: 1px solid ${({ theme }) => theme.semantic.color.border.neutral200} !important;
-  background: ${({ theme }) => theme.semantic.color.background.neutral0} !important;
+  border: 1px solid var(--afs-line) !important;
+  background: var(--afs-panel-strong) !important;
   box-shadow: none !important;
 `;
 

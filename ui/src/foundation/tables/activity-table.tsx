@@ -142,7 +142,7 @@ export function ActivityTable({
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          onChange={setSearch}
           placeholder="Search activity..."
         />
       </S.HeadingWrap>

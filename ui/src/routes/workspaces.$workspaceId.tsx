@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
+  EmptyState,
+  NoticeBody,
+  NoticeCard,
+  NoticeTitle,
   PageStack,
   SectionCard,
   SectionGrid,
@@ -14,6 +18,7 @@ import {
   useDeleteWorkspaceMutation,
   useWorkspace,
 } from "../foundation/hooks/use-afs";
+import { useDatabaseScope } from "../foundation/database-scope";
 import type { AFSWorkspaceView } from "../foundation/types/afs";
 import { OverviewTab } from "./workspace-studio/-overview-tab";
 import { FilesTab } from "./workspace-studio/-files-tab";
@@ -24,7 +29,6 @@ type StudioTab = "overview" | "files" | "checkpoints" | "activity";
 
 const workspaceStudioSearchSchema = z.object({
   tab: z.enum(["overview", "files", "checkpoints", "activity"]).optional(),
-  databaseId: z.string().optional(),
 });
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
@@ -36,7 +40,8 @@ function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
   const search = Route.useSearch();
-  const workspaceQuery = useWorkspace(search.databaseId, workspaceId);
+  const { unavailableDatabases } = useDatabaseScope();
+  const workspaceQuery = useWorkspace(null, workspaceId);
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
@@ -55,18 +60,20 @@ function WorkspaceStudioPage() {
   }, [workspace]);
 
   function setStudioTab(nextTab: StudioTab) {
-    const nextDatabaseId = workspace?.databaseId ?? search.databaseId;
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId },
       search: nextTab === "overview"
-        ? (nextDatabaseId ? { databaseId: nextDatabaseId } : {})
-        : { ...(nextDatabaseId ? { databaseId: nextDatabaseId } : {}), tab: nextTab },
+        ? {}
+        : { tab: nextTab },
       replace: true,
     });
   }
 
   function deleteCurrentWorkspace() {
+    if (workspace == null) {
+      return;
+    }
     const confirmed = window.confirm(
       `Delete workspace "${workspace?.name ?? workspaceId}"? This removes it from the workspace registry.`,
     );
@@ -76,7 +83,6 @@ function WorkspaceStudioPage() {
     }
 
     deleteWorkspace.mutate({
-      databaseId: workspace.databaseId,
       workspaceId,
     }, {
       onSuccess: () => {
@@ -89,12 +95,41 @@ function WorkspaceStudioPage() {
     return <Loader data-testid="loader--spinner" />;
   }
 
+  if (workspaceQuery.isError) {
+    return (
+      <PageStack>
+        <EmptyState role="alert">
+          <NoticeTitle>Workspace unavailable</NoticeTitle>
+          <NoticeBody>
+            {workspaceQuery.error instanceof Error
+              ? workspaceQuery.error.message
+              : "This workspace could not be loaded right now."}
+          </NoticeBody>
+          {unavailableDatabases.length > 0 ? (
+            <NoticeBody>
+              Disconnected databases:{" "}
+              {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
+            </NoticeBody>
+          ) : null}
+        </EmptyState>
+      </PageStack>
+    );
+  }
+
   if (workspace == null) {
     throw new Error("Workspace not found.");
   }
 
   return (
     <PageStack>
+      {unavailableDatabases.length > 0 ? (
+        <NoticeCard $tone="warning" role="status">
+          <NoticeTitle>Some databases are unavailable</NoticeTitle>
+          <NoticeBody>
+            Workspace browsing will continue for healthy backends, but data from disconnected databases may be incomplete.
+          </NoticeBody>
+        </NoticeCard>
+      ) : null}
       <StudioNavRow>
         <BreadcrumbGroup>
           <BreadcrumbButton
@@ -117,7 +152,6 @@ function WorkspaceStudioPage() {
                 to: "/agents",
                 search: {
                   workspaceId,
-                  databaseId: workspace.databaseId,
                 },
               });
             }}
@@ -134,31 +168,26 @@ function WorkspaceStudioPage() {
         </StudioActions>
       </StudioNavRow>
 
-      <SectionGrid>
-        <SectionCard $span={12}>
-          <Tabs>
-            <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
-              Overview
-            </TabButton>
-            <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
-              Files
-            </TabButton>
-            <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
-              Checkpoints
-            </TabButton>
-            <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
-              Activity
-            </TabButton>
-          </Tabs>
-        </SectionCard>
-      </SectionGrid>
+      <Tabs>
+        <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
+          Overview
+        </TabButton>
+        <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
+          Files
+        </TabButton>
+        <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
+          Checkpoints
+        </TabButton>
+        <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
+          Activity
+        </TabButton>
+      </Tabs>
 
       {tab === "overview" ? <OverviewTab workspace={workspace} /> : null}
 
       {tab === "files" ? (
         <FilesTab
           workspace={workspace}
-          databaseId={workspace.databaseId}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
         />
@@ -167,7 +196,6 @@ function WorkspaceStudioPage() {
       {tab === "checkpoints" ? (
         <CheckpointsTab
           workspace={workspace}
-          databaseId={workspace.databaseId}
           onBrowserViewChange={setBrowserView}
           onTabChange={setStudioTab}
         />
@@ -230,9 +258,9 @@ const BreadcrumbSeparator = styled.span`
 `;
 
 const BreadcrumbCurrent = styled.span`
-  color: var(--afs-muted);
+  color: var(--afs-ink);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 400;
 `;
 
 const ViewAgentsButton = styled(Button)`

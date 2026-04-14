@@ -47,6 +47,7 @@ type config struct {
 	ProductMode          string `json:"productMode,omitempty"`
 	Mode                 string `json:"mode,omitempty"`
 	CurrentWorkspace     string `json:"currentWorkspace"`
+	CurrentWorkspaceID   string `json:"currentWorkspaceID,omitempty"`
 	LocalPath            string `json:"localPath,omitempty"`
 	mountSettings        `json:"mount"`
 	logSettings          `json:"logs"`
@@ -67,6 +68,7 @@ type state struct {
 	RedisAddr            string    `json:"redis_addr"`
 	RedisDB              int       `json:"redis_db"`
 	CurrentWorkspace     string    `json:"current_workspace,omitempty"`
+	CurrentWorkspaceID   string    `json:"current_workspace_id,omitempty"`
 	MountedHeadSavepoint string    `json:"mounted_head_savepoint,omitempty"`
 	MountPID             int       `json:"mount_pid"`
 	MountBackend         string    `json:"mount_backend"`

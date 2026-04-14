@@ -6,6 +6,7 @@ server_bin=${AFS_WEB_SERVER_BIN:?AFS_WEB_SERVER_BIN is required}
 server_addr=${AFS_WEB_SERVER_ADDR:-127.0.0.1:8091}
 allow_origin=${AFS_WEB_ALLOW_ORIGIN:-*}
 api_base_url=${AFS_WEB_API_BASE_URL:-http://127.0.0.1:8091}
+client_mode=${AFS_WEB_CLIENT_MODE:-}
 ui_dir=${AFS_WEB_UI_DIR:?AFS_WEB_UI_DIR is required}
 ui_host=${AFS_WEB_UI_HOST:-127.0.0.1}
 ui_port=${AFS_WEB_UI_PORT:-5173}
@@ -78,4 +79,4 @@ echo "AFS control plane ready at $api_base_url"
 echo "Starting AFS Web UI at http://$ui_host:$ui_port"
 
 cd "$ui_dir"
-VITE_AFS_API_BASE_URL="$api_base_url" exec "$npm_bin" run dev -- --host "$ui_host" --port "$ui_port"
+VITE_AFS_API_BASE_URL="$api_base_url" VITE_AFS_CLIENT_MODE="$client_mode" exec "$npm_bin" run dev -- --host "$ui_host" --port "$ui_port"

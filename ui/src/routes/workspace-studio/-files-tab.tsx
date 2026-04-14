@@ -28,12 +28,11 @@ import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../../foundation/type
 
 type Props = {
   workspace: AFSWorkspaceDetail;
-  databaseId: string;
   browserView: AFSWorkspaceView;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
 };
 
-export function FilesTab({ workspace, databaseId, browserView, onBrowserViewChange }: Props) {
+export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props) {
   const updateFile = useUpdateWorkspaceFileMutation();
 
   const [currentPath, setCurrentPath] = useState("/");
@@ -47,7 +46,6 @@ export function FilesTab({ workspace, databaseId, browserView, onBrowserViewChan
 
   const treeQuery = useWorkspaceTree(
     {
-      databaseId,
       workspaceId: workspace.id,
       view: browserView,
       path: currentPath,
@@ -58,7 +56,6 @@ export function FilesTab({ workspace, databaseId, browserView, onBrowserViewChan
 
   const selectedFileQuery = useWorkspaceFileContent(
     {
-      databaseId,
       workspaceId: workspace.id,
       view: browserView,
       path: selectedPath,
@@ -217,7 +214,6 @@ export function FilesTab({ workspace, databaseId, browserView, onBrowserViewChan
                 onSubmit={(event) => {
                   event.preventDefault();
                   updateFile.mutate({
-                    databaseId,
                     workspaceId: workspace.id,
                     path: selectedFile.path,
                     content: draftContent,
@@ -339,7 +335,7 @@ const BrowserMetric = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 18px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--afs-panel);
 `;
 
 const BrowserMetricLabel = styled.div`
@@ -362,7 +358,7 @@ const BrowserPanel = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 24px;
   padding: 18px;
-  background: #fff;
+  background: var(--afs-panel-strong);
 `;
 
 const PanelNote = styled.p`
@@ -384,8 +380,9 @@ const FileKind = styled.span`
   align-items: center;
   padding: 4px 8px;
   border-radius: 999px;
-  background: rgba(8, 6, 13, 0.08);
-  color: var(--afs-muted);
+  border: 1px solid var(--afs-line);
+  background: var(--afs-panel);
+  color: var(--afs-ink-soft);
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.12em;

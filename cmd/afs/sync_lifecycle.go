@@ -43,14 +43,14 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 		return syncBootstrap{}, func() {}, err
 	}
 
-	workspace, err := currentWorkspaceNameFromControlPlane(ctx, resolvedCfg, service)
+	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
 	if err != nil {
 		closeFn()
 		return syncBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can sync: %w", err)
 	}
 
 	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
-	session, err := service.CreateWorkspaceSession(ctx, workspace, sessionInput)
+	session, err := service.CreateWorkspaceSession(ctx, selection.ID, sessionInput)
 	if err != nil {
 		closeFn()
 		return syncBootstrap{}, func() {}, err
@@ -58,6 +58,7 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 
 	runtimeCfg := resolvedCfg
 	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.CurrentWorkspaceID = selection.ID
 	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
 	runtimeCfg.RedisAddr = session.Redis.RedisAddr
 	runtimeCfg.RedisUsername = session.Redis.RedisUsername
@@ -168,6 +169,7 @@ func startSyncServices(cfg config, foreground bool) error {
 			RedisAddr:            runtimeCfg.RedisAddr,
 			RedisDB:              runtimeCfg.RedisDB,
 			CurrentWorkspace:     bootstrap.workspace,
+			CurrentWorkspaceID:   runtimeCfg.CurrentWorkspaceID,
 			MountBackend:         mountBackendNone,
 			ReadOnly:             runtimeCfg.ReadOnly,
 			RedisKey:             bootstrap.redisKey,
@@ -254,6 +256,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		RedisAddr:            runtimeCfg.RedisAddr,
 		RedisDB:              runtimeCfg.RedisDB,
 		CurrentWorkspace:     bootstrap.workspace,
+		CurrentWorkspaceID:   runtimeCfg.CurrentWorkspaceID,
 		MountBackend:         mountBackendNone,
 		ReadOnly:             runtimeCfg.ReadOnly,
 		RedisKey:             bootstrap.redisKey,

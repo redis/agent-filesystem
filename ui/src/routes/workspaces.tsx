@@ -68,8 +68,8 @@ function createInitialFormState(database?: AFSDatabaseScopeRecord | null): Works
   };
 }
 
-function workspaceRowKey(workspaceId: string, databaseId: string) {
-  return `${databaseId}:${workspaceId}`;
+function workspaceRowKey(workspaceId: string) {
+  return workspaceId;
 }
 
 function WorkspacesPage() {
@@ -84,14 +84,13 @@ function WorkspacesPage() {
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
-  const [editingWorkspaceDatabaseId, setEditingWorkspaceDatabaseId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
     createInitialFormState(databases[0] ?? null),
   );
 
   const editingWorkspaceQuery = useWorkspace(
-    editingWorkspaceDatabaseId,
+    null,
     editingWorkspaceId ?? "",
     dialogMode === "edit" && editingWorkspaceId != null,
   );
@@ -126,7 +125,7 @@ function WorkspacesPage() {
 
   const workspaces = workspacesQuery.data;
   const connectedAgentsByWorkspace = agentsQuery.data.reduce<Record<string, number>>((counts, session) => {
-    const key = workspaceRowKey(session.workspaceId, session.databaseId ?? "");
+    const key = workspaceRowKey(session.workspaceId);
     counts[key] = (counts[key] ?? 0) + 1;
     return counts;
   }, {});
@@ -145,7 +144,6 @@ function WorkspacesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
-    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
     setForm(createInitialFormState(databases[0] ?? null));
   }
@@ -158,7 +156,6 @@ function WorkspacesPage() {
 
     setDialogMode("create");
     setEditingWorkspaceId(null);
-    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
     setForm(createInitialFormState(databases[0] ?? null));
   }
@@ -166,7 +163,6 @@ function WorkspacesPage() {
   function openEditDialog(workspace: AFSWorkspaceSummary) {
     setDialogMode("edit");
     setEditingWorkspaceId(workspace.id);
-    setEditingWorkspaceDatabaseId(workspace.databaseId);
     setFormError(null);
   }
 
@@ -189,7 +185,6 @@ function WorkspacesPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: workspace.id },
-      search: workspace.databaseId ? { databaseId: workspace.databaseId } : {},
     });
   }
 
@@ -203,14 +198,10 @@ function WorkspacesPage() {
     }
 
     deleteWorkspace.mutate({
-      databaseId: workspace.databaseId,
       workspaceId: workspace.id,
     }, {
       onSuccess: () => {
-        if (
-          editingWorkspaceId === workspace.id &&
-          editingWorkspaceDatabaseId === workspace.databaseId
-        ) {
+        if (editingWorkspaceId === workspace.id) {
           closeDialog();
         }
       },
@@ -230,10 +221,7 @@ function WorkspacesPage() {
         connectedAgentsByWorkspace={connectedAgentsByWorkspace}
         deletingWorkspaceKey={
           deleteWorkspace.isPending && deleteWorkspace.variables != null
-            ? workspaceRowKey(
-                deleteWorkspace.variables.workspaceId,
-                deleteWorkspace.variables.databaseId,
-              )
+            ? workspaceRowKey(deleteWorkspace.variables.workspaceId)
             : null
         }
         toolbarAction={(
@@ -281,7 +269,6 @@ function WorkspacesPage() {
                 if (editingWorkspaceId != null) {
                   updateWorkspace.mutate(
                     {
-                      databaseId: form.databaseId,
                       workspaceId: editingWorkspaceId,
                       description: form.description,
                       cloudAccount: form.cloudAccount,

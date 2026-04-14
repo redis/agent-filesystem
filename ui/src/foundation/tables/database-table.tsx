@@ -11,17 +11,26 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
-  onEditDatabase: (databaseId: string) => void;
-  onDeleteDatabase: (databaseId: string) => void;
+  onOpenDatabase: (databaseId: string) => void;
 };
+
+function formatCatalogTimestamp(value?: string) {
+  if (value == null || value.trim() === "") {
+    return "Not yet recorded";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
+}
 
 export function DatabaseTable({
   rows,
   loading = false,
   error = false,
   errorMessage = "Unable to load databases. Please retry.",
-  onEditDatabase,
-  onDeleteDatabase,
+  onOpenDatabase,
 }: Props) {
   const columns = useMemo(
     () =>
@@ -35,11 +44,38 @@ export function DatabaseTable({
             <S.Stack>
               <PlainText>{row.original.displayName || row.original.databaseName}</PlainText>
               {row.original.description ? (
-                <Typography.Body color="secondary" component="span">
+                <SecondaryLine color="secondary" component="span">
                   {row.original.description}
-                </Typography.Body>
+                </SecondaryLine>
               ) : null}
             </S.Stack>
+          ),
+        },
+        {
+          accessorKey: "isHealthy",
+          header: "Status",
+          size: 84,
+          enableSorting: false,
+          cell: ({ row }) => (
+            <StatusCell>
+              <StatusDot $healthy={row.original.isHealthy} />
+              <S.Stack>
+                <PlainText>{row.original.isHealthy ? "Connected" : "Unavailable"}</PlainText>
+                {!row.original.isHealthy && row.original.connectionError ? (
+                  <SecondaryLine color="secondary" component="span">
+                    {row.original.connectionError}
+                  </SecondaryLine>
+                ) : null}
+                <SecondaryLine color="secondary" component="span">
+                  {formatCatalogTimestamp(row.original.lastWorkspaceRefreshAt)}
+                </SecondaryLine>
+                {row.original.lastWorkspaceRefreshError ? (
+                  <SecondaryLine color="secondary" component="span">
+                    {row.original.lastWorkspaceRefreshError}
+                  </SecondaryLine>
+                ) : null}
+              </S.Stack>
+            </StatusCell>
           ),
         },
         {
@@ -47,7 +83,14 @@ export function DatabaseTable({
           header: "Endpoint",
           size: 120,
           enableSorting: false,
-          cell: ({ row }) => row.original.endpointLabel || "Not configured",
+          cell: ({ row }) => (
+            <S.Stack>
+              <PlainText>{row.original.endpointLabel || "Not configured"}</PlainText>
+              <SecondaryLine color="secondary" component="span">
+                DB {row.original.dbIndex}{row.original.useTLS ? " · TLS" : ""}
+              </SecondaryLine>
+            </S.Stack>
+          ),
         },
         {
           accessorKey: "workspaceCount",
@@ -56,35 +99,26 @@ export function DatabaseTable({
           enableSorting: false,
         },
         {
-          id: "actions",
-          header: "",
-          size: 60,
+          accessorKey: "activeSessionCount",
+          header: "Sessions",
+          size: 72,
           enableSorting: false,
           cell: ({ row }) => (
-            <S.ActionRow>
-              <S.TextActionButton
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEditDatabase(row.original.id);
-                }}
-              >
-                Edit
-              </S.TextActionButton>
-              <S.DangerActionButton
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onDeleteDatabase(row.original.id);
-                }}
-              >
-                Remove
-              </S.DangerActionButton>
-            </S.ActionRow>
+            <S.Stack>
+              <PlainText>{row.original.activeSessionCount}</PlainText>
+              <SecondaryLine color="secondary" component="span">
+                Reconcile: {formatCatalogTimestamp(row.original.lastSessionReconcileAt)}
+              </SecondaryLine>
+              {row.original.lastSessionReconcileError ? (
+                <SecondaryLine color="secondary" component="span">
+                  {row.original.lastSessionReconcileError}
+                </SecondaryLine>
+              ) : null}
+            </S.Stack>
           ),
         },
       ] as ColumnDef<AFSDatabaseScopeRecord>[],
-    [onDeleteDatabase, onEditDatabase],
+    [],
   );
 
   return (
@@ -96,14 +130,15 @@ export function DatabaseTable({
       ) : null}
 
       {!loading && !error && rows.length > 0 ? (
-        <S.TableViewport>
+        <ClickableTableViewport>
           <Table
             columns={columns}
             data={rows}
             getRowId={(row) => row.id}
             stripedRows
+            onRowClick={(rowData) => onOpenDatabase(rowData.id)}
           />
-        </S.TableViewport>
+        </ClickableTableViewport>
       ) : null}
     </S.TableCard>
   );
@@ -113,4 +148,37 @@ const PlainText = styled.span`
   color: var(--afs-ink);
   font-size: 14px;
   font-weight: 400;
+`;
+
+const SecondaryLine = styled(Typography.Body)`
+  && {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+`;
+
+const StatusCell = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+`;
+
+const StatusDot = styled.span<{ $healthy: boolean }>`
+  display: inline-flex;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: ${({ $healthy }) => ($healthy ? "#16a34a" : "#dc2626")};
+  box-shadow: ${({ $healthy }) =>
+    $healthy
+      ? "0 0 0 4px rgba(34, 197, 94, 0.12)"
+      : "0 0 0 4px rgba(239, 68, 68, 0.12)"};
+  flex-shrink: 0;
+`;
+
+const ClickableTableViewport = styled(S.TableViewport)`
+  tbody tr {
+    cursor: pointer;
+  }
 `;

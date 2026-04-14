@@ -576,6 +576,13 @@ func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST scoped workspace create status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
 	}
+	var created workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Decode(created workspace) returned error: %v", err)
+	}
+	if created.ID == "" || created.ID == created.Name {
+		t.Fatalf("created workspace id = %q, want opaque id distinct from name %q", created.ID, created.Name)
+	}
 
 	resp, err = http.Get(server.URL + "/v1/workspaces")
 	if err != nil {
@@ -595,7 +602,7 @@ func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
 		t.Fatalf("len(workspaces.items) = %d, want 2", len(workspaces.Items))
 	}
 
-	resp, err = http.Get(server.URL + "/v1/workspaces/repo-secondary")
+	resp, err = http.Get(server.URL + "/v1/workspaces/" + created.ID)
 	if err != nil {
 		t.Fatalf("GET /v1/workspaces/:id returned error: %v", err)
 	}
@@ -608,9 +615,12 @@ func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
 	if detail.DatabaseID != secondary.ID {
 		t.Fatalf("detail database_id = %q, want %q", detail.DatabaseID, secondary.ID)
 	}
+	if detail.Name != "repo-secondary" {
+		t.Fatalf("detail name = %q, want %q", detail.Name, "repo-secondary")
+	}
 
 	resp, err = http.Post(
-		server.URL+"/v1/client/workspaces/repo-secondary/sessions",
+		server.URL+"/v1/client/workspaces/"+created.ID+"/sessions",
 		"application/json",
 		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo-secondary"}`),
 	)
@@ -635,7 +645,7 @@ func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
 	}
 }
 
-func TestHTTPWorkspaceFirstListUsesCatalogWithoutPerRequestFanout(t *testing.T) {
+func TestHTTPWorkspaceFirstListSkipsDatabasesThatAreNoLongerReachable(t *testing.T) {
 	t.Helper()
 
 	manager, _ := newTestManager(t)
@@ -690,8 +700,55 @@ func TestHTTPWorkspaceFirstListUsesCatalogWithoutPerRequestFanout(t *testing.T) 
 	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
 		t.Fatalf("Decode(workspaces) returned error: %v", err)
 	}
-	if len(workspaces.Items) != 2 {
-		t.Fatalf("len(workspaces.items) = %d, want 2", len(workspaces.Items))
+	if len(workspaces.Items) != 1 {
+		t.Fatalf("len(workspaces.items) = %d, want 1", len(workspaces.Items))
+	}
+	if workspaces.Items[0].DatabaseID == secondary.ID {
+		t.Fatalf("stale workspace from unreachable database %q was still listed", secondary.ID)
+	}
+}
+
+func TestHTTPWorkspaceFirstListRefreshesStaleCatalogEntriesAgainstLiveRedis(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/workspaces")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("initial GET /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.DeleteWorkspace(context.Background(), "repo"); err != nil {
+		t.Fatalf("DeleteWorkspace() returned error: %v", err)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces after live delete returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces after live delete status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var workspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("Decode(workspaces after live delete) returned error: %v", err)
+	}
+	if len(workspaces.Items) != 0 {
+		t.Fatalf("len(workspaces.items) after live delete = %d, want 0", len(workspaces.Items))
 	}
 }
 
@@ -730,6 +787,21 @@ func TestHTTPWorkspaceFirstRouteRejectsAmbiguousWorkspaceNames(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
+	var created workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Decode(created workspace) returned error: %v", err)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/" + created.ID)
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces/:id returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces/:id status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
 	resp, err = http.Get(server.URL + "/v1/workspaces/repo")
 	if err != nil {
 		t.Fatalf("GET /v1/workspaces/repo returned error: %v", err)
@@ -742,6 +814,72 @@ func TestHTTPWorkspaceFirstRouteRejectsAmbiguousWorkspaceNames(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if !strings.Contains(string(body), "multiple databases") {
 		t.Fatalf("GET /v1/workspaces/repo body = %q, want ambiguity guidance", string(body))
+	}
+}
+
+func TestHTTPCatalogHealthAndReconcile(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/catalog/health")
+	if err != nil {
+		t.Fatalf("GET /v1/catalog/health returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/catalog/health status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var health catalogHealthResponse
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatalf("Decode(catalog health) returned error: %v", err)
+	}
+	if len(health.Items) != 1 {
+		t.Fatalf("len(catalog health items) = %d, want 1", len(health.Items))
+	}
+	if health.Items[0].ID != databaseID {
+		t.Fatalf("catalog health database id = %q, want %q", health.Items[0].ID, databaseID)
+	}
+	if health.Items[0].LastWorkspaceRefreshAt == "" {
+		t.Fatal("expected last_workspace_refresh_at to be populated")
+	}
+
+	resp, err = http.Post(server.URL+"/v1/client/workspaces/"+health.Items[0].ID+"/sessions", "application/json", strings.NewReader(`{"client_kind":"sync","hostname":"devbox","local_path":"/tmp/repo"}`))
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	resp, err = http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions", "application/json", strings.NewReader(`{"client_kind":"sync","hostname":"devbox","local_path":"/tmp/repo"}`))
+	if err != nil {
+		t.Fatalf("POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	resp, err = http.Post(server.URL+"/v1/catalog/reconcile", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST /v1/catalog/reconcile returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/catalog/reconcile status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatalf("Decode(catalog reconcile response) returned error: %v", err)
+	}
+	if health.Items[0].LastSessionReconcileAt == "" {
+		t.Fatal("expected last_session_reconcile_at to be populated")
+	}
+	if health.Items[0].ActiveSessionCount != 1 {
+		t.Fatalf("active_session_count = %d, want 1", health.Items[0].ActiveSessionCount)
 	}
 }
 

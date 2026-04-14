@@ -128,6 +128,14 @@ func NewStore(rdb *redis.Client) *Store {
 	return &Store{rdb: rdb}
 }
 
+func (s *Store) Now(ctx context.Context) (time.Time, error) {
+	now, err := s.rdb.Time(ctx).Result()
+	if err != nil {
+		return time.Time{}, err
+	}
+	return now.UTC(), nil
+}
+
 func (s *Store) WorkspaceExists(ctx context.Context, workspace string) (bool, error) {
 	count, err := s.rdb.Exists(ctx, workspaceMetaKey(workspace)).Result()
 	if err != nil {
@@ -351,6 +359,13 @@ func (s *Store) PutWorkspaceSession(ctx context.Context, record WorkspaceSession
 	if err := setJSON(ctx, s.rdb, workspaceSessionKey(record.Workspace, record.SessionID), record); err != nil {
 		return err
 	}
+	ttl := time.Until(record.LeaseExpiresAt)
+	if ttl <= 0 {
+		ttl = time.Second
+	}
+	if err := s.rdb.Set(ctx, workspaceSessionLeaseKey(record.Workspace, record.SessionID), "1", ttl).Err(); err != nil {
+		return err
+	}
 	return s.rdb.ZAdd(ctx, workspaceSessionsKey(record.Workspace), redis.Z{
 		Score:  float64(record.LeaseExpiresAt.UTC().UnixMilli()),
 		Member: record.SessionID,
@@ -375,7 +390,12 @@ func (s *Store) GetWorkspaceSession(ctx context.Context, workspace, sessionID st
 }
 
 func (s *Store) RemoveWorkspaceSessionPresence(ctx context.Context, workspace, sessionID string) error {
-	return s.rdb.ZRem(ctx, workspaceSessionsKey(workspace), sessionID).Err()
+	_, err := s.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.ZRem(ctx, workspaceSessionsKey(workspace), sessionID)
+		pipe.Del(ctx, workspaceSessionLeaseKey(workspace, sessionID))
+		return nil
+	})
+	return err
 }
 
 func (s *Store) ListWorkspaceSessions(ctx context.Context, workspace string) ([]WorkspaceSessionRecord, error) {
@@ -406,6 +426,14 @@ func (s *Store) ListExpiredWorkspaceSessionIDs(ctx context.Context, workspace st
 		Min: "-inf",
 		Max: strconv.FormatInt(now.UTC().UnixMilli(), 10),
 	}).Result()
+}
+
+func (s *Store) WorkspaceSessionLeaseAlive(ctx context.Context, workspace, sessionID string) (bool, error) {
+	count, err := s.rdb.Exists(ctx, workspaceSessionLeaseKey(workspace, sessionID)).Result()
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[string]any) error {
@@ -572,6 +600,10 @@ func workspaceAuditKey(workspace string) string {
 
 func workspaceSessionKey(workspace, sessionID string) string {
 	return fmt.Sprintf("afs:{%s}:workspace:session:%s", workspace, sessionID)
+}
+
+func workspaceSessionLeaseKey(workspace, sessionID string) string {
+	return fmt.Sprintf("afs:{%s}:workspace:session:%s:lease", workspace, sessionID)
 }
 
 func savepointMetaKey(workspace, savepoint string) string {

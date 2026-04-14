@@ -5,9 +5,8 @@ export const HeaderContainer = styled.header`
   justify-content: flex-start;
   gap: 16px;
   min-height: 5.25rem;
-  background-color: ${({ theme }) => theme.semantic.color.background.neutral0};
-  border-bottom: 1px solid
-    ${({ theme }) => theme.semantic.color.border.neutral200};
+  background-color: var(--afs-bg-soft);
+  border-bottom: 1px solid var(--afs-line);
   padding: 1rem 2rem 1rem 3.2rem;
   align-items: center;
 
@@ -24,6 +23,11 @@ export const HeaderTitleGroup = styled.div`
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
+  color: var(--afs-ink);
+
+  h1, h2, h3, h4, h5, h6 {
+    color: var(--afs-ink);
+  }
 `;
 
 export const HeaderActions = styled.div`
@@ -41,11 +45,11 @@ export const HeaderActions = styled.div`
 `;
 
 export const TitleSection = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral500};
+  color: var(--afs-muted);
 `;
 
 export const TitlePage = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral900};
+  color: var(--afs-ink);
 `;
 
 export const DatabaseTrigger = styled.button`
@@ -68,7 +72,7 @@ export const DatabaseTrigger = styled.button`
   }
 
   &:focus-visible {
-    outline: 2px solid ${({ theme }) => theme.semantic.color.border.brand500};
+    outline: 2px solid var(--afs-accent);
     outline-offset: 4px;
   }
 
@@ -83,7 +87,7 @@ export const DatabaseTrigger = styled.button`
 `;
 
 export const DatabaseTriggerValue = styled.span`
-  color: ${({ theme }) => theme.semantic.color.text.neutral900};
+  color: var(--afs-ink);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
@@ -92,7 +96,7 @@ export const DatabaseTriggerValue = styled.span`
 export const TriggerCaret = styled.span`
   display: inline-flex;
   align-items: center;
-  color: ${({ theme }) => theme.semantic.color.icon.neutral500};
+  color: var(--afs-muted);
 `;
 
 export const DatabaseMenuItemText = styled.span<{ $selected: boolean }>`
@@ -117,9 +121,7 @@ export const DialogCard = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 24px;
   padding: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(249, 251, 255, 0.94)),
-    var(--afs-panel);
+  background: var(--afs-panel-strong);
   box-shadow: var(--afs-shadow);
 `;
 

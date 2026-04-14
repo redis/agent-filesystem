@@ -155,16 +155,15 @@ func cmdWorkspaceList(args []string) error {
 	}
 
 	nameWidth := 0
-	selected := selectedWorkspaceName(cfg)
 	for _, meta := range workspaces.Items {
-		if w := runeWidth(workspaceListName(meta.Name, meta.Name == selected)); w > nameWidth {
+		if w := runeWidth(workspaceListName(meta.Name, workspaceListSelected(cfg, meta))); w > nameWidth {
 			nameWidth = w
 		}
 	}
 
 	rows := make([]boxRow, 0, len(workspaces.Items))
 	for _, meta := range workspaces.Items {
-		value := workspaceListLine(meta.Name, checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt), meta.Name == selected, nameWidth)
+		value := workspaceListLine(meta.Name, checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt), workspaceListSelected(cfg, meta), nameWidth)
 		rows = append(rows, boxRow{
 			Value: value,
 		})
@@ -238,22 +237,22 @@ func cmdWorkspaceUse(args []string) error {
 	}
 	defer closeStore()
 
-	if _, err := service.GetWorkspace(context.Background(), workspace); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("workspace %q does not exist", workspace)
-		}
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
+	if err != nil {
 		return err
 	}
 	if active, err := activeMountedWorkspaceState(); err != nil {
 		return err
-	} else if active.workspace != "" && active.workspace != workspace {
+	} else if active.workspace != "" && active.workspace != selection.Name {
 		if active.mountpoint != "" {
-			return fmt.Errorf("active workspace %q mounted at %s\nRun '%s down' before selecting %q", active.workspace, active.mountpoint, filepath.Base(os.Args[0]), workspace)
+			return fmt.Errorf("active workspace %q mounted at %s\nRun '%s down' before selecting %q", active.workspace, active.mountpoint, filepath.Base(os.Args[0]), selection.Name)
 		}
-		return fmt.Errorf("active workspace %q mounted\nRun '%s down' before selecting %q", active.workspace, filepath.Base(os.Args[0]), workspace)
+		return fmt.Errorf("active workspace %q mounted\nRun '%s down' before selecting %q", active.workspace, filepath.Base(os.Args[0]), selection.Name)
 	}
 
-	cfg.CurrentWorkspace = workspace
+	if err := applyWorkspaceSelection(&cfg, selection); err != nil {
+		return err
+	}
 	if err := prepareConfigForSave(&cfg); err != nil {
 		return err
 	}
@@ -262,7 +261,7 @@ func cmdWorkspaceUse(args []string) error {
 	}
 
 	printBox(markerSuccess+" "+clr(ansiBold, "workspace selected"), []boxRow{
-		{Label: "workspace", Value: workspace},
+		{Label: "workspace", Value: selection.Name},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "config", Value: configPathLabel()},
 	})
@@ -454,11 +453,8 @@ func cmdWorkspaceFork(args []string) error {
 	} else {
 		newWorkspace = args[2]
 	}
-	sourceWorkspace, err = resolveWorkspaceNameFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
+	sourceSelection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
 	if err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", sourceWorkspace); err != nil {
 		return err
 	}
 	if err := validateAFSName("workspace", newWorkspace); err != nil {
@@ -466,13 +462,13 @@ func cmdWorkspaceFork(args []string) error {
 	}
 
 	ctx := context.Background()
-	if err := service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace); err != nil {
+	if err := service.ForkWorkspace(ctx, sourceSelection.ID, newWorkspace); err != nil {
 		return err
 	}
 
 	printBox(markerSuccess+" "+clr(ansiBold, "workspace forked"), []boxRow{
 		{Label: "workspace", Value: newWorkspace},
-		{Label: "source", Value: sourceWorkspace},
+		{Label: "source", Value: sourceSelection.Name},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace use " + newWorkspace},
 	})
@@ -721,15 +717,12 @@ func cmdCheckpointList(args []string) error {
 	if len(args) == 3 {
 		workspace = args[2]
 	}
-	workspace, err = resolveWorkspaceNameFromControlPlane(context.Background(), cfg, service, workspace)
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
 
-	checkpoints, err := service.ListCheckpoints(context.Background(), workspace, 100)
+	checkpoints, err := service.ListCheckpoints(context.Background(), selection.ID, 100)
 	if err != nil {
 		return err
 	}
@@ -747,7 +740,7 @@ func cmdCheckpointList(args []string) error {
 	if len(rows) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No checkpoints found")})
 	}
-	printBox(clr(ansiBold, "checkpoints in workspace: "+workspace), rows)
+	printBox(clr(ansiBold, "checkpoints in workspace: "+selection.Name), rows)
 	return nil
 }
 
@@ -886,7 +879,15 @@ func checkpointCountLabel(count int) string {
 }
 
 func hasCurrentWorkspaceSelection(cfg config) bool {
-	return selectedWorkspaceName(cfg) != ""
+	return selectedWorkspaceReference(cfg) != ""
+}
+
+func workspaceListSelected(cfg config, summary workspaceSummary) bool {
+	selected := selectedWorkspaceReference(cfg)
+	if selected == "" {
+		return false
+	}
+	return selected == summary.ID || selected == summary.Name
 }
 
 func workspaceUsageText(bin string) string {

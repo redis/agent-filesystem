@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { afsApi } from "./afs";
+import { getDemoAFSClientForTesting } from "./afs";
 
 describe("afsApi", () => {
   const paymentsDatabaseId = "db-payments-portal";
+  const afsApi = getDemoAFSClientForTesting();
 
   beforeEach(() => {
     window.localStorage.clear();

@@ -14,10 +14,12 @@ import { routeTree } from "./routeTree.gen";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AppErrorBoundary } from "./error-boundaries/app-error-boundary";
 import { DatabaseScopeProvider } from "./foundation/database-scope";
+import { ColorModeProvider } from "./foundation/theme-context";
 
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      retry: false,
       refetchOnWindowFocus: false,
       refetchIntervalInBackground: true,
     },
@@ -46,16 +48,20 @@ if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <StrictMode>
-      <ThemeProvider theme={themesRebrand.light}>
-        <CommonStyles />
-        <AppErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <DatabaseScopeProvider>
-              <RouterProvider router={router} />
-            </DatabaseScopeProvider>
-          </QueryClientProvider>
-        </AppErrorBoundary>
-      </ThemeProvider>
+      <ColorModeProvider>
+        {(colorMode) => (
+          <ThemeProvider theme={themesRebrand[colorMode]}>
+            <CommonStyles />
+            <AppErrorBoundary>
+              <QueryClientProvider client={queryClient}>
+                <DatabaseScopeProvider>
+                  <RouterProvider router={router} />
+                </DatabaseScopeProvider>
+              </QueryClientProvider>
+            </AppErrorBoundary>
+          </ThemeProvider>
+        )}
+      </ColorModeProvider>
     </StrictMode>
   );
 }

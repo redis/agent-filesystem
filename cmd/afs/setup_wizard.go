@@ -553,8 +553,10 @@ func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *con
 			return nil
 		}
 		if ok {
-			cfg.CurrentWorkspace = workspace
-			fmt.Fprintln(out, "  "+clr(ansiDim, "Using workspace ")+clr(ansiBold, workspace))
+			if err := applyWorkspaceSelection(cfg, workspaceSelection{ID: workspace.ID, Name: workspace.Name}); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "  "+clr(ansiDim, "Using workspace ")+clr(ansiBold, workspace.Name))
 			fmt.Fprintln(out)
 			return nil
 		}
@@ -623,10 +625,21 @@ func maxInt(a, b int) int {
 }
 
 func setupWorkspaceDefaultChoice(cfg config, workspaces []workspaceSummary) string {
+	currentID := strings.TrimSpace(cfg.CurrentWorkspaceID)
+	if currentID != "" {
+		for _, ws := range workspaces {
+			if ws.ID == currentID {
+				return currentID
+			}
+		}
+	}
 	current := strings.TrimSpace(cfg.CurrentWorkspace)
 	if current != "" {
 		for _, ws := range workspaces {
 			if ws.Name == current {
+				if ws.ID != "" {
+					return ws.ID
+				}
 				return current
 			}
 		}
@@ -637,30 +650,39 @@ func setupWorkspaceDefaultChoice(cfg config, workspaces []workspaceSummary) stri
 	return "1"
 }
 
-func resolveSetupWorkspaceChoice(choice string, workspaces []workspaceSummary) (string, bool, bool) {
+func resolveSetupWorkspaceChoice(choice string, workspaces []workspaceSummary) (workspaceSummary, bool, bool) {
 	choice = strings.TrimSpace(choice)
 	if choice == "" {
-		return "", false, false
+		return workspaceSummary{}, false, false
 	}
 	switch strings.ToLower(choice) {
 	case "create", "new":
-		return "", true, true
+		return workspaceSummary{}, true, true
 	}
 	if idx, err := strconv.Atoi(choice); err == nil {
 		if idx >= 1 && idx <= len(workspaces) {
-			return workspaces[idx-1].Name, false, true
+			return workspaces[idx-1], false, true
 		}
 		if idx == len(workspaces)+1 {
-			return "", true, true
+			return workspaceSummary{}, true, true
 		}
-		return "", false, false
+		return workspaceSummary{}, false, false
 	}
 	for _, ws := range workspaces {
-		if ws.Name == choice {
-			return ws.Name, false, true
+		if ws.ID == choice {
+			return ws, false, true
 		}
 	}
-	return "", false, false
+	var matches []workspaceSummary
+	for _, ws := range workspaces {
+		if ws.Name == choice {
+			matches = append(matches, ws)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], false, true
+	}
+	return workspaceSummary{}, false, false
 }
 
 func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, service setupWorkspaceService, first bool) error {
@@ -694,16 +716,19 @@ func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, ser
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
-	if _, err := service.CreateWorkspace(context.Background(), controlplane.CreateWorkspaceRequest{
+	detail, err := service.CreateWorkspace(context.Background(), controlplane.CreateWorkspaceRequest{
 		Name: workspace,
 		Source: controlplane.SourceRef{
 			Kind: controlplane.SourceBlank,
 		},
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 
-	cfg.CurrentWorkspace = workspace
+	if err := applyWorkspaceSelection(cfg, workspaceSelection{ID: detail.ID, Name: detail.Name}); err != nil {
+		return err
+	}
 	fmt.Fprintln(out, "  "+clr(ansiDim, "Created workspace ")+clr(ansiBold, workspace))
 	fmt.Fprintln(out)
 	return nil

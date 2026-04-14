@@ -2,25 +2,20 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { SideBar } from "@redislabsdev/redis-ui-components";
 import {
-  DocumentationIcon,
   DoubleChevronLeftIcon,
   DoubleChevronRightIcon,
-  SupportIcon,
 } from "@redislabsdev/redis-ui-icons";
 import {
   RedisLogoDarkFullIcon,
   RedisLogoDarkMinIcon,
 } from "@redislabsdev/redis-ui-icons/multicolor";
 import * as S from "./sidebar.styles";
-import { isNavigationItemActive, navigationItems } from "./navigation-items";
+import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
+import { useColorMode } from "../foundation/theme-context";
+import { useDatabaseScope } from "../foundation/database-scope";
 
 const SIDEBAR_LOCALSTORAGE_KEY = "afs_sidebar_open";
-
-const bottomItems = [
-  { label: "Support", icon: SupportIcon },
-  { label: "Documentation", icon: DocumentationIcon },
-];
 
 function readInitialSidebarState() {
   const stored = localStorage.getItem(SIDEBAR_LOCALSTORAGE_KEY);
@@ -34,11 +29,18 @@ function readInitialSidebarState() {
   }
 }
 
+/** Routes that remain active even when no databases are configured. */
+const ALWAYS_ENABLED_PATHS = new Set(["/", "/docs", "/agent-guide", "/downloads"]);
+
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { colorMode, toggleColorMode } = useColorMode();
+  const { databases, isLoading } = useDatabaseScope();
 
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
+
+  const isEmpty = !isLoading && databases.length === 0;
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_LOCALSTORAGE_KEY, JSON.stringify(isExpanded));
@@ -57,17 +59,24 @@ export function AppSidebar() {
 
   const handleNavigate = (path: string) => void navigate({ to: path });
 
-  const renderRouteItem = (item: NavigationItem) => (
-    <SideBar.Item
-      key={item.path}
-      isActive={isNavigationItemActive(item, location.pathname)}
-      tooltipProps={{ text: item.label, placement: "right" }}
-      onClick={() => handleNavigate(item.path)}
-    >
-      <SideBar.Item.Icon icon={item.icon} aria-label={item.label} />
-      <SideBar.Item.Text>{item.label}</SideBar.Item.Text>
-    </SideBar.Item>
-  );
+  const renderRouteItem = (item: NavigationItem) => {
+    const disabled = isEmpty && !ALWAYS_ENABLED_PATHS.has(item.path);
+    return (
+      <S.NavItemWrapper key={item.path} $disabled={disabled}>
+        <SideBar.Item
+          isActive={isNavigationItemActive(item, location.pathname)}
+          tooltipProps={{
+            text: disabled ? `${item.label} (add a database first)` : item.label,
+            placement: "right",
+          }}
+          onClick={disabled ? undefined : () => handleNavigate(item.path)}
+        >
+          <SideBar.Item.Icon icon={item.icon} aria-label={item.label} />
+          <SideBar.Item.Text>{item.label}</SideBar.Item.Text>
+        </SideBar.Item>
+      </S.NavItemWrapper>
+    );
+  };
 
   return (
     <S.SidebarContainer>
@@ -101,22 +110,28 @@ export function AppSidebar() {
           <SideBar.Divider fullWidth />
 
           <SideBar.ItemsContainer>
-            {bottomItems.map((item) => (
-              <SideBar.Item
-                key={item.label}
-                tooltipProps={{ text: item.label, placement: "right" }}
-                onClick={() => {}}
-              >
-                <SideBar.Item.Icon icon={item.icon} aria-label={item.label} />
-                <SideBar.Item.Text>{item.label}</SideBar.Item.Text>
-              </SideBar.Item>
-            ))}
+            {bottomNavigationItems.map(renderRouteItem)}
           </SideBar.ItemsContainer>
+
         </SideBar.ScrollContainer>
 
         <SideBar.Footer>
           <>
             <SideBar.Divider fullWidth />
+            <S.DarkModeRow>
+              <S.DarkModeToggle
+                role="switch"
+                aria-checked={colorMode === "dark"}
+                aria-label="Toggle dark mode"
+                onClick={toggleColorMode}
+              >
+                <S.ToggleTrack $on={colorMode === "dark"}>
+                  <S.ToggleSun $on={colorMode === "dark"}>☀</S.ToggleSun>
+                  <S.ToggleMoon $on={colorMode === "dark"}>☾</S.ToggleMoon>
+                  <S.ToggleThumb $on={colorMode === "dark"} />
+                </S.ToggleTrack>
+              </S.DarkModeToggle>
+            </S.DarkModeRow>
             <SideBar.Footer.MetaData>
               <SideBar.Footer.Link href="#" target="_blank" rel="noreferrer">
                 Terms

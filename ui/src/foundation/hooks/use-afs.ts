@@ -31,7 +31,7 @@ const afsKeys = {
     [
       ...afsKeys.all,
       "databases",
-      input.databaseId,
+      input.databaseId ?? "all",
       "workspaces",
       input.workspaceId,
       "tree",
@@ -43,7 +43,7 @@ const afsKeys = {
     [
       ...afsKeys.all,
       "databases",
-      input.databaseId,
+      input.databaseId ?? "all",
       "workspaces",
       input.workspaceId,
       "files",
@@ -106,7 +106,7 @@ export function useWorkspaceTree(input: GetWorkspaceTreeInput, enabled = true) {
     queryOptions({
       queryKey: afsKeys.workspaceTree(input),
       queryFn: () => afsApi.getWorkspaceTree(input),
-      enabled: enabled && input.databaseId !== "" && input.workspaceId !== "",
+      enabled: enabled && input.workspaceId !== "",
     }),
   );
 }
@@ -116,7 +116,7 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
     queryOptions({
       queryKey: afsKeys.workspaceFile(input),
       queryFn: () => afsApi.getWorkspaceFileContent(input),
-      enabled: enabled && input.databaseId !== "" && input.workspaceId !== "",
+      enabled: enabled && input.workspaceId !== "",
     }),
   );
 }
@@ -168,8 +168,8 @@ export function useDeleteWorkspaceMutation() {
   const invalidate = useWorkspaceInvalidation();
 
   return useMutation({
-    mutationFn: (input: { databaseId: string; workspaceId: string }) =>
-      afsApi.deleteWorkspace(input.databaseId, input.workspaceId),
+    mutationFn: (input: { databaseId?: string; workspaceId: string }) =>
+      afsApi.deleteWorkspace(input.databaseId ?? "", input.workspaceId),
     onSuccess: async () => {
       await invalidate();
     },

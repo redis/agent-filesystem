@@ -1,4 +1,5 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { Button, Loader } from "@redislabsdev/redis-ui-components";
 import styled from "styled-components";
 import {
@@ -9,7 +10,18 @@ import {
   StatLabel,
   StatValue,
 } from "../components/afs-kit";
+import {
+  CodeBlock,
+  InlineCode,
+  CrossLinkCard,
+  CrossLinkText,
+  CrossLinkTitle,
+  CrossLinkDesc,
+  CrossLinkArrow,
+} from "../components/doc-kit";
+import { AddDatabaseDialog } from "../components/add-database-dialog";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
+import { LiveTopologyCard } from "../components/live-topology-card";
 import { formatBytes } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 
@@ -20,58 +32,14 @@ export const Route = createFileRoute("/")({
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
-  const { databases, isLoading: databasesLoading } = useDatabaseScope();
+  const { databases, saveDatabase, isLoading: databasesLoading } = useDatabaseScope();
 
   if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
   if (databases.length === 0) {
-    return (
-      <PageStack>
-        <EmptyStateLayout>
-          <EmptyStateContent>
-            <ProductName>Agent Filesystem</ProductName>
-            <Headline>Durable workspaces for AI agents, backed by Redis</Headline>
-            <Description>
-              Agent Filesystem gives every agent a persistent, checkpointed workspace.
-              Browse files, create recovery points, and track activity across workspaces
-              all from one UI.
-            </Description>
-            <Link to="/databases">
-              <CTAButton size="large">Add database to get started</CTAButton>
-            </Link>
-          </EmptyStateContent>
-
-          <FeatureGrid>
-            <FeatureCard>
-              <FeatureIcon>01</FeatureIcon>
-              <FeatureTitle>Connect a Redis database</FeatureTitle>
-              <FeatureBody>
-                Point AFS at any Redis instance. Workspaces, files, and checkpoints are stored as
-                Redis keys with no extra infrastructure needed.
-              </FeatureBody>
-            </FeatureCard>
-            <FeatureCard>
-              <FeatureIcon>02</FeatureIcon>
-              <FeatureTitle>Create workspaces</FeatureTitle>
-              <FeatureBody>
-                Each workspace is an isolated filesystem an agent can read, write, and checkpoint.
-                Browse and edit files directly in the studio.
-              </FeatureBody>
-            </FeatureCard>
-            <FeatureCard>
-              <FeatureIcon>03</FeatureIcon>
-              <FeatureTitle>Checkpoint and recover</FeatureTitle>
-              <FeatureBody>
-                Save named snapshots at any point. Compare history, restore previous state, and
-                keep a full audit trail of every change.
-              </FeatureBody>
-            </FeatureCard>
-          </FeatureGrid>
-        </EmptyStateLayout>
-      </PageStack>
-    );
+    return <GettingStartedView saveDatabase={saveDatabase} />;
   }
 
   const workspaces = workspacesQuery.data;
@@ -102,11 +70,24 @@ function OverviewPage() {
   const connectedAgents = agentsQuery.data.length;
   const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
+  return <DashboardView databases={databases} workspaces={workspaces} agents={agentsQuery.data} checkpointCount={checkpointCount} checkpointCoverage={checkpointCoverage} totalBytes={totalBytes} />;
+}
+
+function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
+  databases: { length: number };
+  workspaces: { length: number }[];
+  agents: unknown[];
+  checkpointCount: number;
+  checkpointCoverage: number;
+  totalBytes: number;
+}) {
+  const navigate = useNavigate();
+  const connectedAgents = agents.length;
+
   return (
     <PageStack>
-      <AgentHeroAnimation />
       <StatGrid>
-        <StatCard>
+        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
           <div>
             <StatLabel>Workspaces</StatLabel>
             <StatValue>{workspaces.length}</StatValue>
@@ -115,22 +96,22 @@ function OverviewPage() {
             {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered across{" "}
             {databases.length} database{databases.length === 1 ? "" : "s"}.
           </StatDetail>
-        </StatCard>
-        <StatCard>
+        </ClickableStatCard>
+        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
           <div>
             <StatLabel>Stored Data</StatLabel>
             <StatValue>{formatBytes(totalBytes)}</StatValue>
           </div>
           <StatDetail>Total durable content tracked across all workspaces.</StatDetail>
-        </StatCard>
-        <StatCard>
+        </ClickableStatCard>
+        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
           <div>
             <StatLabel>Checkpoints</StatLabel>
             <StatValue>{checkpointCount}</StatValue>
           </div>
           <StatDetail>{checkpointCoverage}% of workspaces have checkpoint history.</StatDetail>
-        </StatCard>
-        <StatCard>
+        </ClickableStatCard>
+        <ClickableStatCard onClick={() => navigate({ to: "/agents" })}>
           <div>
             <StatLabel>Connected Agents</StatLabel>
             <StatValue>{connectedAgents}</StatValue>
@@ -140,13 +121,122 @@ function OverviewPage() {
               ? "No agents are currently connected."
               : `${connectedAgents} live ${connectedAgents === 1 ? "agent" : "agents"} reporting workspace sessions.`}
           </StatDetail>
-        </StatCard>
+        </ClickableStatCard>
       </StatGrid>
+      <LiveTopologyCard agents={agents as any} workspaces={workspaces as any} />
     </PageStack>
   );
 }
 
-/* ── Empty state layout ── */
+/* ── Getting Started (empty-state) ── */
+
+import type { SaveDatabaseInput } from "../foundation/types/afs";
+
+function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDatabaseInput) => Promise<void> }) {
+  const [showAddDb, setShowAddDb] = useState(false);
+
+  return (
+    <PageStack>
+      <EmptyStateLayout>
+        <AgentHeroAnimation />
+        <EmptyStateContent>
+          <ProductName>Agent Filesystem</ProductName>
+          <Headline>
+            Fast, durable filesystem workspaces for AI agents, backed by Redis
+          </Headline>
+          <Description>
+            Give every AI agent a persistent, checkpointed workspace.
+            Browse files, create recovery points, and track activity — all from one UI.
+          </Description>
+          <CTAButton size="large" onClick={() => setShowAddDb(true)}>
+            Add database to get started
+          </CTAButton>
+        </EmptyStateContent>
+
+        {/* ── Steps ── */}
+        <StepsSection>
+          <StepsSectionTitle>Get up and running in 3 steps</StepsSectionTitle>
+
+          <StepCard>
+            <StepNumber>01</StepNumber>
+            <StepBody>
+              <StepTitle>Connect a Redis database</StepTitle>
+              <StepDesc>
+                AFS stores workspaces, files, and checkpoints as Redis keys — no extra
+                infrastructure needed. Click <strong>Add database</strong> above to point AFS
+                at any Redis instance (local or remote).
+              </StepDesc>
+            </StepBody>
+          </StepCard>
+
+          <StepCard>
+            <StepNumber>02</StepNumber>
+            <StepBody>
+              <StepTitle>Create a workspace</StepTitle>
+              <StepDesc>
+                A workspace is an isolated filesystem an agent can read, write, and
+                checkpoint. Create one from the <strong>Workspaces</strong> page, or let
+                an agent create its own via the CLI or MCP tools.
+              </StepDesc>
+            </StepBody>
+          </StepCard>
+
+          <StepCard>
+            <StepNumber>03</StepNumber>
+            <StepBody>
+              <StepTitle>Connect an agent</StepTitle>
+              <StepDesc>
+                Use the CLI to mount a workspace as a local directory. The agent reads and
+                writes files normally — AFS syncs everything to Redis in the background.
+              </StepDesc>
+              <CodeBlock>
+                <code>{`# select and mount a workspace
+afs workspace use my-project
+afs up
+
+# the agent works in ~/afs/my-project/ with normal file I/O`}</code>
+              </CodeBlock>
+              <StepDesc style={{ marginTop: 12 }}>
+                Alternatively, agents can connect via{" "}
+                <strong>MCP</strong> (Model Context Protocol) for tool-based access. Add
+                the following to your agent's MCP configuration:
+              </StepDesc>
+              <CodeBlock>
+                <code>{`{
+  "mcpServers": {
+    "agent-filesystem": {
+      "command": "/absolute/path/to/afs",
+      "args": ["mcp"]
+    }
+  }
+}`}</code>
+              </CodeBlock>
+            </StepBody>
+          </StepCard>
+        </StepsSection>
+
+        {/* ── Learn more ── */}
+        <CrossLinkCard as={Link} to="/agent-guide" style={{ width: "100%" }}>
+          <CrossLinkText>
+            <CrossLinkTitle>Agent Guide</CrossLinkTitle>
+            <CrossLinkDesc>
+              Full reference for MCP tools, CLI commands, workflows, and best practices.
+            </CrossLinkDesc>
+          </CrossLinkText>
+          <CrossLinkArrow>&rarr;</CrossLinkArrow>
+        </CrossLinkCard>
+      </EmptyStateLayout>
+
+      <AddDatabaseDialog
+        isOpen={showAddDb}
+        onClose={() => setShowAddDb(false)}
+        saveDatabase={saveDatabase}
+      />
+    </PageStack>
+  );
+}
+
+/* ── Styled components ── */
 
 const EmptyStateLayout = styled.div`
   display: flex;
@@ -154,6 +244,8 @@ const EmptyStateLayout = styled.div`
   align-items: center;
   gap: 48px;
   padding: 40px 0 20px;
+  max-width: 780px;
+  margin: 0 auto;
 `;
 
 const EmptyStateContent = styled.div`
@@ -195,49 +287,85 @@ const CTAButton = styled(Button)`
   }
 `;
 
-/* ── Feature cards ── */
+const ClickableStatCardWrap = styled.div`
+  cursor: pointer;
+  transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+  border-radius: 16px;
 
-const FeatureGrid = styled.div`
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  width: 100%;
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(8, 6, 13, 0.08);
+  }
 
-  @media (max-width: 900px) {
-    grid-template-columns: 1fr;
+  &:hover > * {
+    border-color: var(--afs-accent, #6366f1);
   }
 `;
 
-const FeatureCard = styled.div`
+function ClickableStatCard({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
+  return (
+    <ClickableStatCardWrap onClick={onClick}>
+      <StatCard>{children}</StatCard>
+    </ClickableStatCardWrap>
+  );
+}
+
+/* ── Steps ── */
+
+const StepsSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+`;
+
+const StepsSectionTitle = styled.h3`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+`;
+
+const StepCard = styled.div`
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
   border: 1px solid var(--afs-line);
   border-radius: 16px;
   padding: 20px;
   background: var(--afs-panel);
 `;
 
-const FeatureIcon = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
+const StepNumber = styled.div`
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   border-radius: 10px;
-  background: var(--afs-accent-soft);
-  color: var(--afs-accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
   font-weight: 800;
-  margin-bottom: 12px;
+  color: var(--afs-accent);
+  background: var(--afs-accent-soft);
 `;
 
-const FeatureTitle = styled.div`
+const StepBody = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const StepTitle = styled.div`
   color: var(--afs-ink);
   font-size: 15px;
   font-weight: 700;
   line-height: 1.45;
+  margin-bottom: 6px;
 `;
 
-const FeatureBody = styled.p`
-  margin: 8px 0 0;
+const StepDesc = styled.p`
+  margin: 0;
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.65;

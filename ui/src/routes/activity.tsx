@@ -1,7 +1,12 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Loader } from "@redislabsdev/redis-ui-components";
-import { PageStack } from "../components/afs-kit";
-import { useScopedActivity } from "../foundation/database-scope";
+import {
+  NoticeBody,
+  NoticeCard,
+  NoticeTitle,
+  PageStack,
+} from "../components/afs-kit";
+import { useDatabaseScope, useScopedActivity } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import type { AFSActivityEvent } from "../foundation/types/afs";
 
@@ -11,6 +16,7 @@ export const Route = createFileRoute("/activity")({
 
 function ActivityPage() {
   const navigate = useNavigate();
+  const { unavailableDatabases } = useDatabaseScope();
   const activityQuery = useScopedActivity(50);
 
   if (activityQuery.isLoading) {
@@ -27,25 +33,38 @@ function ActivityPage() {
       return;
     }
 
-    const baseSearch = event.databaseId ? { databaseId: event.databaseId } : {};
-
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: event.workspaceId },
       search:
         event.scope === "savepoint"
-          ? { ...baseSearch, tab: "checkpoints" }
+          ? { tab: "checkpoints" }
           : event.scope === "file"
-            ? { ...baseSearch, tab: "files" }
+            ? { tab: "files" }
             : event.scope === "workspace"
-              ? baseSearch
-              : { ...baseSearch, tab: "activity" },
+              ? {}
+              : { tab: "activity" },
     });
   }
 
   return (
     <PageStack>
-      <ActivityTable rows={events} onOpenActivity={openActivity} />
+      {unavailableDatabases.length > 0 ? (
+        <NoticeCard $tone="warning" role="status">
+          <NoticeTitle>Some databases are unavailable</NoticeTitle>
+          <NoticeBody>
+            Activity below is partial while these databases are disconnected:{" "}
+            {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
+          </NoticeBody>
+        </NoticeCard>
+      ) : null}
+      <ActivityTable
+        rows={events}
+        loading={activityQuery.isLoading}
+        error={activityQuery.isError}
+        errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
+        onOpenActivity={openActivity}
+      />
     </PageStack>
   );
 }

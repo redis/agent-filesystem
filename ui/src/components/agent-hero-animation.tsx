@@ -103,7 +103,7 @@ const AgentNode = styled.div<{ $i: number }>`
   padding: 8px 12px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   opacity: 0;
   animation:
     ${fadeInUp} 0.4s ease forwards,
@@ -197,7 +197,7 @@ const WorkspaceNode = styled.div<{ $i: number }>`
   padding: 8px 12px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
-  background: #fff;
+  background: var(--afs-panel-strong);
   opacity: 0;
   animation:
     ${fadeInUp} 0.4s ease forwards,
@@ -213,8 +213,8 @@ const FolderIcon = styled.div`
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  background: rgba(99, 102, 241, 0.1);
-  color: #6366f1;
+  background: var(--afs-accent-soft);
+  color: var(--afs-accent);
   flex-shrink: 0;
 `;
 
