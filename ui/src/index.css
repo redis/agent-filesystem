@@ -9,14 +9,14 @@
   --afs-bg-soft: #f9fbff;
   --afs-panel: rgba(255, 255, 255, 0.84);
   --afs-panel-strong: #ffffff;
-  --afs-line: rgba(170, 59, 255, 0.08);
-  --afs-line-strong: rgba(170, 59, 255, 0.16);
+  --afs-line: rgba(216, 44, 32, 0.08);
+  --afs-line-strong: rgba(216, 44, 32, 0.16);
   --afs-ink: #08060d;
   --afs-ink-soft: #40384d;
   --afs-muted: #626b78;
-  --afs-accent: #aa3bff;
-  --afs-accent-soft: rgba(170, 59, 255, 0.1);
-  --afs-amber: #aa3bff;
+  --afs-accent: #D82C20;
+  --afs-accent-soft: rgba(216, 44, 32, 0.1);
+  --afs-amber: #D82C20;
   --afs-shadow: 0 24px 70px rgba(8, 6, 13, 0.08);
   --afs-sans: inherit;
   --afs-mono: "Monaco", "Menlo", monospace;
@@ -33,9 +33,9 @@
   --afs-ink: #f2f5f4;
   --afs-ink-soft: #c5d1d4;
   --afs-muted: #98aab1;
-  --afs-accent: #dcff31;
-  --afs-accent-soft: rgba(220, 255, 49, 0.16);
-  --afs-amber: #dcff31;
+  --afs-accent: #FF4F44;
+  --afs-accent-soft: rgba(255, 79, 68, 0.16);
+  --afs-amber: #FF4F44;
   --afs-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
 }
 
@@ -64,6 +64,15 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+*:focus-visible {
+  outline: none;
+}
+
+/* Remove Redis UI component library inset box-shadow borders */
+button {
+  box-shadow: none !important;
 }
 
 * {

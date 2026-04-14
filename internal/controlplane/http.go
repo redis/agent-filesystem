@@ -8,6 +8,9 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -162,6 +165,28 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/cli", handleCLIDownload)
+
+	mux.HandleFunc("/v1/quickstart", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input QuickstartRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.Quickstart(r.Context(), input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
+	})
+
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -264,6 +289,22 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 			default:
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			}
+		case rest == "workspaces:import-local":
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			var input ImportLocalRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.ImportLocal(r.Context(), databaseID, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
 		case strings.HasPrefix(rest, "workspaces/"):
 			workspacePath := strings.TrimPrefix(rest, "workspaces/")
 			workspacePath = strings.Trim(workspacePath, "/")
@@ -799,6 +840,126 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 		}
 	}
+}
+
+// handleCLIDownload serves the afs CLI binary from the same directory as the
+// control plane binary. This lets new users install with a single curl command.
+// On macOS the binary is ad-hoc code-signed before serving so that Gatekeeper
+// does not kill it on the client side.
+func handleCLIDownload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		return
+	}
+
+	binaryPath, err := findCLIBinary()
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "CLI binary not found: " + err.Error(),
+		})
+		return
+	}
+
+	servePath, cleanup, err := ensureCodeSigned(binaryPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to prepare CLI binary: " + err.Error(),
+		})
+		return
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	info, err := os.Stat(servePath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "CLI binary not available",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="afs"`)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	http.ServeFile(w, r, servePath)
+}
+
+// findCLIBinary looks for the afs binary next to the running control plane binary,
+// then falls back to well-known locations.
+func findCLIBinary() (string, error) {
+	// Try sibling of this executable.
+	exe, err := executablePath()
+	if err == nil {
+		sibling := filepath.Join(filepath.Dir(exe), "afs")
+		if info, err := os.Stat(sibling); err == nil && !info.IsDir() {
+			return sibling, nil
+		}
+	}
+
+	// Try well-known paths (Docker, /usr/local/bin).
+	for _, path := range []string{"/usr/local/bin/afs", "/usr/bin/afs"} {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("afs binary not found next to control plane or in /usr/local/bin")
+}
+
+// ensureCodeSigned returns a path to a binary with a valid ad-hoc code
+// signature. On non-macOS platforms or when the binary already verifies, the
+// original path is returned. On macOS with an invalid signature, a temp copy
+// is created and signed; the caller must invoke the returned cleanup func.
+// If signing fails (e.g. structurally invalid binary), the original is
+// returned as-is so non-macOS clients can still use it.
+func ensureCodeSigned(binaryPath string) (servePath string, cleanup func(), _ error) {
+	if runtime.GOOS != "darwin" {
+		return binaryPath, nil, nil
+	}
+
+	// Check if the binary already has a valid signature.
+	if err := exec.Command("codesign", "-v", binaryPath).Run(); err == nil {
+		return binaryPath, nil, nil
+	}
+
+	// Copy to a temp file and ad-hoc sign it.
+	tmp, err := os.CreateTemp("", "afs-signed-*")
+	if err != nil {
+		// Can't create temp — serve the original and hope for the best.
+		return binaryPath, nil, nil
+	}
+	tmpPath := tmp.Name()
+
+	src, err := os.Open(binaryPath)
+	if err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return binaryPath, nil, nil
+	}
+	if _, err := io.Copy(tmp, src); err != nil {
+		src.Close()
+		tmp.Close()
+		os.Remove(tmpPath)
+		return binaryPath, nil, nil
+	}
+	src.Close()
+	tmp.Close()
+
+	if err := os.Chmod(tmpPath, 0755); err != nil {
+		os.Remove(tmpPath)
+		return binaryPath, nil, nil
+	}
+
+	if err := exec.Command("codesign", "-s", "-", "--force", tmpPath).Run(); err != nil {
+		// Signing failed (binary may be structurally invalid). Serve the
+		// original — it will work on Linux and the install script can
+		// re-sign on the client side if needed.
+		os.Remove(tmpPath)
+		return binaryPath, nil, nil
+	}
+
+	return tmpPath, func() { os.Remove(tmpPath) }, nil
 }
 
 func cors(next http.Handler, allowOrigin string) http.Handler {

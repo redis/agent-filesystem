@@ -45,22 +45,7 @@ function OverviewPage() {
   const workspaces = workspacesQuery.data;
 
   if (workspaces.length === 0) {
-    return (
-      <PageStack>
-        <EmptyStateLayout>
-          <EmptyStateContent>
-            <Headline>No workspaces in the catalog yet</Headline>
-            <Description>
-              Create your first workspace to start managing files, checkpoints, and activity
-              across your connected databases.
-            </Description>
-            <Link to="/workspaces">
-              <CTAButton size="large">Add workspace</CTAButton>
-            </Link>
-          </EmptyStateContent>
-        </EmptyStateLayout>
-      </PageStack>
-    );
+    return <EmptyWorkspacesView />;
   }
 
   /* ── Dashboard ── */
@@ -71,6 +56,55 @@ function OverviewPage() {
   const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
   return <DashboardView databases={databases} workspaces={workspaces} agents={agentsQuery.data} checkpointCount={checkpointCount} checkpointCoverage={checkpointCoverage} totalBytes={totalBytes} />;
+}
+
+function EmptyWorkspacesView() {
+  const navigate = useNavigate();
+  const quickstartMutation = useQuickstartMutation();
+
+  const handleQuickstart = async () => {
+    try {
+      const result = await quickstartMutation.mutateAsync({});
+      navigate({
+        to: "/workspaces/$workspaceId",
+        params: { workspaceId: result.workspaceId },
+        search: { tab: "overview", welcome: true },
+      });
+    } catch {
+      // Error is stored in quickstartMutation.error
+    }
+  };
+
+  return (
+    <PageStack>
+      <EmptyStateLayout>
+        <EmptyStateContent>
+          <Headline>No workspaces yet</Headline>
+          <Description>
+            Create your first workspace with sample files to explore, or add an empty one
+            from the Workspaces page.
+          </Description>
+          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+            <CTAButton
+              size="large"
+              onClick={handleQuickstart}
+              disabled={quickstartMutation.isPending}
+            >
+              {quickstartMutation.isPending ? "Setting up..." : "Create sample workspace"}
+            </CTAButton>
+            <Link to="/workspaces">
+              <SecondaryButton size="large">Add workspace</SecondaryButton>
+            </Link>
+          </div>
+          {quickstartMutation.isError && (
+            <QuickstartError>
+              {quickstartMutation.error?.message ?? "Something went wrong."}
+            </QuickstartError>
+          )}
+        </EmptyStateContent>
+      </EmptyStateLayout>
+    </PageStack>
+  );
 }
 
 function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
@@ -131,9 +165,25 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 /* ── Getting Started (empty-state) ── */
 
 import type { SaveDatabaseInput } from "../foundation/types/afs";
+import { useQuickstartMutation } from "../foundation/hooks/use-afs";
 
 function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDatabaseInput) => Promise<void> }) {
   const [showAddDb, setShowAddDb] = useState(false);
+  const navigate = useNavigate();
+  const quickstartMutation = useQuickstartMutation();
+
+  const handleQuickstart = async () => {
+    try {
+      const result = await quickstartMutation.mutateAsync({});
+      navigate({
+        to: "/workspaces/$workspaceId",
+        params: { workspaceId: result.workspaceId },
+        search: { tab: "overview", welcome: true },
+      });
+    } catch {
+      // Error is stored in quickstartMutation.error
+    }
+  };
 
   return (
     <PageStack>
@@ -148,23 +198,76 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
             Give every AI agent a persistent, checkpointed workspace.
             Browse files, create recovery points, and track activity — all from one UI.
           </Description>
-          <CTAButton size="large" onClick={() => setShowAddDb(true)}>
-            Add database to get started
-          </CTAButton>
         </EmptyStateContent>
+
+        {/* ── Two-path onboarding ── */}
+        <OnboardingPaths>
+          <OnboardingCard $primary>
+            <OnboardingCardIcon>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            </OnboardingCardIcon>
+            <OnboardingCardTitle>Quick Start</OnboardingCardTitle>
+            <OnboardingCardDesc>
+              Connect to local Redis, create a workspace with sample files, and start
+              exploring — all in one click.
+            </OnboardingCardDesc>
+            <CTAButton
+              size="large"
+              onClick={handleQuickstart}
+              disabled={quickstartMutation.isPending}
+            >
+              {quickstartMutation.isPending ? "Setting up..." : "Create my first workspace"}
+            </CTAButton>
+            {quickstartMutation.isError && (
+              <QuickstartError>
+                {quickstartMutation.error?.message?.includes("cannot connect")
+                  ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
+                  : quickstartMutation.error?.message ?? "Something went wrong."}
+              </QuickstartError>
+            )}
+            <OnboardingCardHint>
+              Requires Redis running on localhost:6379
+            </OnboardingCardHint>
+          </OnboardingCard>
+
+          <OnboardingDivider>
+            <OnboardingDividerLine />
+            <OnboardingDividerLabel>or</OnboardingDividerLabel>
+            <OnboardingDividerLine />
+          </OnboardingDivider>
+
+          <OnboardingCard>
+            <OnboardingCardIcon>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+              </svg>
+            </OnboardingCardIcon>
+            <OnboardingCardTitle>Connect a remote database</OnboardingCardTitle>
+            <OnboardingCardDesc>
+              Point AFS at any Redis instance — local, hosted, or Redis Cloud.
+              You'll create workspaces manually after connecting.
+            </OnboardingCardDesc>
+            <SecondaryButton size="large" onClick={() => setShowAddDb(true)}>
+              Add database manually
+            </SecondaryButton>
+          </OnboardingCard>
+        </OnboardingPaths>
 
         {/* ── Steps ── */}
         <StepsSection>
-          <StepsSectionTitle>Get up and running in 3 steps</StepsSectionTitle>
+          <StepsSectionTitle>How it works</StepsSectionTitle>
 
           <StepCard>
             <StepNumber>01</StepNumber>
             <StepBody>
-              <StepTitle>Connect a Redis database</StepTitle>
+              <StepTitle>Workspace = isolated filesystem</StepTitle>
               <StepDesc>
-                AFS stores workspaces, files, and checkpoints as Redis keys — no extra
-                infrastructure needed. Click <strong>Add database</strong> above to point AFS
-                at any Redis instance (local or remote).
+                Each workspace is a self-contained file tree an agent can read, write, and
+                checkpoint. Workspaces are stored entirely in Redis — no local state required.
               </StepDesc>
             </StepBody>
           </StepCard>
@@ -172,11 +275,10 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
           <StepCard>
             <StepNumber>02</StepNumber>
             <StepBody>
-              <StepTitle>Create a workspace</StepTitle>
+              <StepTitle>Checkpoints = instant rollback</StepTitle>
               <StepDesc>
-                A workspace is an isolated filesystem an agent can read, write, and
-                checkpoint. Create one from the <strong>Workspaces</strong> page, or let
-                an agent create its own via the CLI or MCP tools.
+                Save a checkpoint before risky operations. If something goes wrong, restore
+                to any previous state in seconds. Think of it as git commits for your workspace.
               </StepDesc>
             </StepBody>
           </StepCard>
@@ -184,32 +286,17 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
           <StepCard>
             <StepNumber>03</StepNumber>
             <StepBody>
-              <StepTitle>Connect an agent</StepTitle>
+              <StepTitle>Connect agents via CLI or MCP</StepTitle>
               <StepDesc>
-                Use the CLI to mount a workspace as a local directory. The agent reads and
-                writes files normally — AFS syncs everything to Redis in the background.
+                Mount a workspace as a local directory, or give agents direct access via
+                MCP tools. Either way, every file operation is durable and trackable.
               </StepDesc>
               <CodeBlock>
-                <code>{`# select and mount a workspace
-afs workspace use my-project
-afs up
+                <code>{`# mount a workspace locally
+afs workspace use my-project && afs up
 
-# the agent works in ~/afs/my-project/ with normal file I/O`}</code>
-              </CodeBlock>
-              <StepDesc style={{ marginTop: 12 }}>
-                Alternatively, agents can connect via{" "}
-                <strong>MCP</strong> (Model Context Protocol) for tool-based access. Add
-                the following to your agent's MCP configuration:
-              </StepDesc>
-              <CodeBlock>
-                <code>{`{
-  "mcpServers": {
-    "agent-filesystem": {
-      "command": "/absolute/path/to/afs",
-      "args": ["mcp"]
-    }
-  }
-}`}</code>
+# or connect via MCP tools
+{ "mcpServers": { "afs": { "command": "afs", "args": ["mcp"] } } }`}</code>
               </CodeBlock>
             </StepBody>
           </StepCard>
@@ -298,7 +385,7 @@ const ClickableStatCardWrap = styled.div`
   }
 
   &:hover > * {
-    border-color: var(--afs-accent, #6366f1);
+    border-color: var(--afs-accent, #D82C20);
   }
 `;
 
@@ -369,4 +456,113 @@ const StepDesc = styled.p`
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.65;
+`;
+
+/* ── Onboarding paths ── */
+
+const OnboardingPaths = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+`;
+
+const OnboardingCard = styled.div<{ $primary?: boolean }>`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  border: 1.5px solid ${(p) => (p.$primary ? "var(--afs-accent, #D82C20)" : "var(--afs-line)")};
+  border-radius: 20px;
+  padding: 32px 28px 28px;
+  background: var(--afs-panel);
+  text-align: center;
+  width: 100%;
+  max-width: 480px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+
+  ${(p) =>
+    p.$primary &&
+    `
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #D82C20) 12%, transparent);
+  `}
+`;
+
+const OnboardingCardIcon = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: var(--afs-accent-soft, #fef2f1);
+  color: var(--afs-accent, #D82C20);
+`;
+
+const OnboardingCardTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+`;
+
+const OnboardingCardDesc = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.65;
+  max-width: 380px;
+`;
+
+const OnboardingCardHint = styled.div`
+  color: var(--afs-muted);
+  font-size: 12px;
+  opacity: 0.7;
+`;
+
+const QuickstartError = styled.div`
+  color: #dc2626;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border-radius: 8px;
+  width: 100%;
+`;
+
+const SecondaryButton = styled(Button)`
+  && {
+    background: transparent;
+    border: 1.5px solid var(--afs-line);
+    color: var(--afs-ink);
+
+    &:hover {
+      border-color: var(--afs-accent, #D82C20);
+      color: var(--afs-accent, #D82C20);
+    }
+  }
+`;
+
+const OnboardingDivider = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 480px;
+  padding: 16px 0;
+`;
+
+const OnboardingDividerLine = styled.div`
+  flex: 1;
+  height: 1px;
+  background: var(--afs-line);
+`;
+
+const OnboardingDividerLabel = styled.span`
+  color: var(--afs-muted);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 `;

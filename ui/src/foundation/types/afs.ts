@@ -241,3 +241,32 @@ export type SaveDatabaseInput = {
   redisDB: number;
   redisTLS: boolean;
 };
+
+export type QuickstartInput = {
+  redisAddr?: string;
+  redisPassword?: string;
+  redisUsername?: string;
+  redisDB?: number;
+  redisTLS?: boolean;
+};
+
+export type QuickstartResponse = {
+  databaseId: string;
+  workspaceId: string;
+  workspace: AFSWorkspaceDetail;
+};
+
+export type ImportLocalInput = {
+  databaseId: string;
+  name: string;
+  path: string;
+  description?: string;
+};
+
+export type ImportLocalResponse = {
+  workspaceId: string;
+  workspace: AFSWorkspaceDetail;
+  fileCount: number;
+  dirCount: number;
+  totalBytes: number;
+};

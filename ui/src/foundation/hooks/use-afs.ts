@@ -14,6 +14,8 @@ import type {
   SaveDatabaseInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
+  QuickstartInput,
+  ImportLocalInput,
 } from "../types/afs";
 
 const afsKeys = {
@@ -214,6 +216,28 @@ export function useRestoreSavepointMutation() {
 
   return useMutation({
     mutationFn: (input: RestoreSavepointInput) => afsApi.restoreSavepoint(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useQuickstartMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: QuickstartInput) => afsApi.quickstart(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useImportLocalMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: ImportLocalInput) => afsApi.importLocal(input),
     onSuccess: async () => {
       await invalidate();
     },

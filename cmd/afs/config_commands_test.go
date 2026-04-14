@@ -442,17 +442,23 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 	}
 }
 
-func TestLoadConfigForUpRejectsSinglePositionalArgument(t *testing.T) {
+func TestLoadConfigForUpAcceptsSinglePositionalArgument(t *testing.T) {
 	t.Helper()
 
-	saveTempConfig(t, defaultConfig())
+	cfg := defaultConfig()
+	cfg.Mode = modeSync
+	saveTempConfig(t, cfg)
 
-	_, err := loadConfigForUp([]string{"claude-code"})
-	if err == nil {
-		t.Fatal("loadConfigForUp() returned nil error, want usage error")
+	result, err := loadConfigForUp([]string{"my-workspace"})
+	if err != nil {
+		t.Fatalf("loadConfigForUp() returned error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "up <workspace> <mountpoint>") {
-		t.Fatalf("loadConfigForUp() error = %q, want positional usage", err)
+	if result.CurrentWorkspace != "my-workspace" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", result.CurrentWorkspace, "my-workspace")
+	}
+	// The mountpoint should be auto-derived under ~/afs/<workspace>.
+	if !strings.HasSuffix(result.LocalPath, filepath.Join("afs", "my-workspace")) {
+		t.Fatalf("LocalPath = %q, want suffix %q", result.LocalPath, filepath.Join("afs", "my-workspace"))
 	}
 }
 
@@ -547,7 +553,7 @@ func TestCmdUpHelpListsPositionalOverrides(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"up <workspace> <mountpoint>",
+		"up <workspace> [<mountpoint>]",
 		"--mode <sync|mount>",
 		"Redis connection, mount backend, and readonly mode come from config",
 		"Current workspace must already be selected",

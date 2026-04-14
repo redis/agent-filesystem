@@ -25,6 +25,10 @@ import type {
   SaveDatabaseInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
+  QuickstartInput,
+  QuickstartResponse,
+  ImportLocalInput,
+  ImportLocalResponse,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
@@ -51,6 +55,8 @@ type AFSClient = {
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
+  quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
+  importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   resetDemo: () => AFSState;
 };
 
@@ -973,6 +979,14 @@ This workspace was created from the AFS Web UI.
     };
   },
 
+  async quickstart() {
+    throw new Error("Quickstart is not available in demo mode.");
+  },
+
+  async importLocal() {
+    throw new Error("Import is not available in demo mode.");
+  },
+
   resetDemo() {
     const seeded = cloneInitialAFSState();
     saveState(seeded);
@@ -1440,6 +1454,52 @@ const httpAFSClient: AFSClient = {
     }
   },
 
+  async quickstart(input: QuickstartInput) {
+    const response = await requestJSON<{
+      database_id: string;
+      workspace_id: string;
+      workspace: HTTPWorkspaceDetail;
+    }>("/quickstart", {
+      method: "POST",
+      body: JSON.stringify({
+        redis_addr: input.redisAddr,
+        redis_password: input.redisPassword,
+        redis_username: input.redisUsername,
+        redis_db: input.redisDB,
+        redis_tls: input.redisTLS,
+      }),
+    });
+    return {
+      databaseId: response.database_id,
+      workspaceId: response.workspace_id,
+      workspace: mapWorkspaceDetail(response.workspace),
+    } as QuickstartResponse;
+  },
+
+  async importLocal(input: ImportLocalInput) {
+    const response = await requestJSON<{
+      workspace_id: string;
+      workspace: HTTPWorkspaceDetail;
+      file_count: number;
+      dir_count: number;
+      total_bytes: number;
+    }>(`/databases/${input.databaseId}/workspaces:import-local`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        path: input.path,
+        description: input.description,
+      }),
+    });
+    return {
+      workspaceId: response.workspace_id,
+      workspace: mapWorkspaceDetail(response.workspace),
+      fileCount: response.file_count,
+      dirCount: response.dir_count,
+      totalBytes: response.total_bytes,
+    } as ImportLocalResponse;
+  },
+
   resetDemo() {
     return demoAFSClient.resetDemo();
   },
@@ -1449,6 +1509,11 @@ export const afsApi = resolveAFSClient();
 
 export function getAFSClientMode() {
   return afsApi.mode;
+}
+
+/** Returns the control plane base URL (e.g. "http://localhost:8091"). */
+export function getControlPlaneURL() {
+  return HTTP_BASE_URL;
 }
 
 export function getDemoAFSClientForTesting() {

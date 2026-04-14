@@ -20,6 +20,7 @@ import {
   useCreateWorkspaceMutation,
   useDeleteWorkspaceMutation,
   useUpdateWorkspaceMutation,
+  useImportLocalMutation,
   useWorkspace,
 } from "../foundation/hooks/use-afs";
 import {
@@ -46,8 +47,39 @@ type WorkspaceFormState = {
 
 type DialogMode = "create" | "edit" | null;
 
-function ComingSoonDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+type ImportFormState = {
+  name: string;
+  path: string;
+  description: string;
+  databaseId: string;
+};
+
+function ImportDialog({
+  open,
+  onClose,
+  databases,
+}: {
+  open: boolean;
+  onClose: () => void;
+  databases: AFSDatabaseScopeRecord[];
+}) {
+  const navigate = useNavigate();
+  const importLocal = useImportLocalMutation();
+  const [form, setForm] = useState<ImportFormState>({
+    name: "",
+    path: "",
+    description: "",
+    databaseId: databases[0]?.id ?? "",
+  });
+  const [error, setError] = useState<string | null>(null);
+
   if (!open) return null;
+
+  function update<K extends keyof ImportFormState>(key: K, value: ImportFormState[K]) {
+    setError(null);
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
   return (
     <DialogOverlay
       style={{ zIndex: 1100 }}
@@ -55,21 +87,104 @@ function ComingSoonDialog({ open, onClose }: { open: boolean; onClose: () => voi
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <DialogCard style={{ maxWidth: 400 }}>
+      <DialogCard>
         <DialogHeader>
-          <DialogTitle>Coming soon</DialogTitle>
+          <div>
+            <DialogTitle>Import from local directory</DialogTitle>
+            <DialogBody>
+              Create a workspace from a directory on this machine. Files are scanned and
+              stored in Redis.
+            </DialogBody>
+          </div>
           <DialogCloseButton type="button" aria-label="Close" onClick={onClose}>
             &times;
           </DialogCloseButton>
         </DialogHeader>
-        <DialogBody>
-          File import is not yet available. This feature is coming in a future release.
-        </DialogBody>
-        <DialogActions>
-          <Button size="medium" onClick={onClose}>
-            OK
-          </Button>
-        </DialogActions>
+        <FormGrid
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (form.name.trim() === "" || form.path.trim() === "") {
+              setError("Name and path are required.");
+              return;
+            }
+            importLocal.mutate(
+              {
+                databaseId: form.databaseId,
+                name: form.name,
+                path: form.path,
+                description: form.description,
+              },
+              {
+                onSuccess: (result) => {
+                  onClose();
+                  void navigate({
+                    to: "/workspaces/$workspaceId",
+                    params: { workspaceId: result.workspaceId },
+                    search: { tab: "files" },
+                  });
+                },
+                onError: (err) => {
+                  setError(err instanceof Error ? err.message : "Import failed.");
+                },
+              },
+            );
+          }}
+        >
+          <Field>
+            Workspace name
+            <TextInput
+              autoFocus
+              value={form.name}
+              onChange={(e) => update("name", e.target.value)}
+              placeholder="my-project"
+            />
+          </Field>
+
+          <Field>
+            Local directory path
+            <TextInput
+              value={form.path}
+              onChange={(e) => update("path", e.target.value)}
+              placeholder="~/code/my-project"
+            />
+          </Field>
+
+          {databases.length > 1 && (
+            <Field>
+              Database
+              <Select
+                value={form.databaseId}
+                onChange={(e) => update("databaseId", e.target.value)}
+              >
+                {databases.map((db) => (
+                  <option key={db.id} value={db.id}>
+                    {db.displayName || db.databaseName}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+
+          <Field>
+            Description
+            <TextInput
+              value={form.description}
+              onChange={(e) => update("description", e.target.value)}
+              placeholder="Optional description"
+            />
+          </Field>
+
+          {error && <DialogError role="alert">{error}</DialogError>}
+
+          <DialogActions>
+            <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button size="medium" type="submit" disabled={importLocal.isPending}>
+              {importLocal.isPending ? "Importing..." : "Import"}
+            </Button>
+          </DialogActions>
+        </FormGrid>
       </DialogCard>
     </DialogOverlay>
   );
@@ -110,7 +225,7 @@ function WorkspacesPage() {
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
-  const [comingSoonOpen, setComingSoonOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -254,9 +369,14 @@ function WorkspacesPage() {
             : null
         }
         toolbarAction={(
-          <Button size="medium" onClick={openCreateDialog}>
-            Add workspace
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button size="medium" variant="secondary-fill" onClick={() => setImportOpen(true)}>
+              Import directory
+            </Button>
+            <Button size="medium" onClick={openCreateDialog}>
+              Add workspace
+            </Button>
+          </div>
         )}
         onOpenWorkspace={openWorkspace}
         onEditWorkspace={openEditDialog}
@@ -386,10 +506,13 @@ function WorkspacesPage() {
                 size="medium"
                 type="button"
                 variant="secondary-fill"
-                style={{ opacity: 0.5, cursor: "default", width: "100%" }}
-                onClick={() => setComingSoonOpen(true)}
+                style={{ width: "100%" }}
+                onClick={() => {
+                  closeDialog();
+                  setImportOpen(true);
+                }}
               >
-                Import files into this workspace
+                Import from local directory instead
               </Button>
 
               {formError ? <DialogError role="alert">{formError}</DialogError> : null}
@@ -419,7 +542,7 @@ function WorkspacesPage() {
         </DialogOverlay>
       ) : null}
 
-      <ComingSoonDialog open={comingSoonOpen} onClose={() => setComingSoonOpen(false)} />
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} databases={databases} />
     </PageStack>
   );
 }

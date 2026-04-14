@@ -229,6 +229,15 @@ func loadConfigForUpWithIOAndMode(args []string, mode optionalString, r *bufio.R
 			return cfg, err
 		}
 		changed = changed || promptedChanged
+	case 1:
+		mountpoint, err := defaultMountpointForWorkspace(args[0])
+		if err != nil {
+			return cfg, err
+		}
+		if err := applyUpWorkspaceAndMountpoint(&cfg, args[0], mountpoint); err != nil {
+			return cfg, err
+		}
+		changed = true
 	case 2:
 		if err := applyUpWorkspaceAndMountpoint(&cfg, args[0], args[1]); err != nil {
 			return cfg, err
@@ -260,6 +269,26 @@ func prepareMountedConfig(cfg config, workspace, mountpoint string) (config, err
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+// defaultMountpointForWorkspace returns ~/afs/<workspace> and verifies the
+// path is available (not already occupied by a non-directory or a mount).
+func defaultMountpointForWorkspace(workspace string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	mountpoint := filepath.Join(home, "afs", workspace)
+
+	info, err := os.Stat(mountpoint)
+	if err == nil {
+		// Path exists — only accept it if it's a directory.
+		if !info.IsDir() {
+			return "", fmt.Errorf("default mountpoint %s already exists and is not a directory; specify a mountpoint explicitly", mountpoint)
+		}
+	}
+	// Path doesn't exist or is a directory — both are fine.
+	return mountpoint, nil
 }
 
 func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) error {
@@ -653,11 +682,11 @@ Examples:
 func upUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
   %s up [flags]
-  %s up <workspace> <mountpoint>
+  %s up <workspace> [<mountpoint>]
 
 Start AFS using the saved config.
-If <workspace> and <mountpoint> are provided, AFS saves them into %s before
-starting so future runs use the updated workspace and mountpoint.
+If <workspace> is provided, AFS saves it and starts. The mountpoint defaults
+to ~/afs/<workspace> when omitted. Both are persisted so future runs reuse them.
 
 Flags:
   --mode <sync|mount>
@@ -668,7 +697,7 @@ Flags:
 Notes:
   Redis connection, mount backend, and readonly mode come from config.
   Current workspace must already be selected with '%s workspace use <workspace>'
-  unless you pass <workspace> and <mountpoint> positionally.
+  unless you pass <workspace> positionally.
   If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.
   Use '%s config set ...' to change Redis or mount settings persistently.
 
@@ -677,7 +706,7 @@ Examples:
   %s up --mode sync
   %s up --interactive
   %s up claude-code ~/.claude
-`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin, bin)
+`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {
@@ -691,6 +720,10 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 	}
 	if overrides.controlPlaneURL.set {
 		cfg.URL = strings.TrimSpace(overrides.controlPlaneURL.value)
+		// Providing a control plane URL implies self-hosted mode.
+		if !overrides.connection.set {
+			cfg.ProductMode = productModeSelfHosted
+		}
 	}
 	if overrides.controlPlaneDatabase.set {
 		cfg.DatabaseID = strings.TrimSpace(overrides.controlPlaneDatabase.value)

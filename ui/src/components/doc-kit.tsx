@@ -101,7 +101,7 @@ export const CalloutBox = styled.div<{ $tone?: "info" | "tip" | "warn" }>`
         ? "#22c55e"
         : $tone === "warn"
           ? "#f59e0b"
-          : "var(--afs-accent, #6366f1)"};
+          : "var(--afs-accent, #D82C20)"};
   background: ${({ $tone = "info" }) =>
     $tone === "tip"
       ? "rgba(220,255,49,0.09)"
@@ -133,8 +133,8 @@ const StepNumber = styled.div`
   justify-content: center;
   font-size: 13px;
   font-weight: 800;
-  color: var(--afs-accent, #6366f1);
-  background: var(--afs-accent-soft, rgba(99, 102, 241, 0.1));
+  color: var(--afs-accent, #D82C20);
+  background: var(--afs-accent-soft, rgba(216, 44, 32, 0.1));
 `;
 
 const StepBody = styled.div`
@@ -212,7 +212,7 @@ export const CrossLinkCard = styled.a`
   transition: border-color 180ms ease, transform 180ms ease;
 
   &:hover {
-    border-color: var(--afs-accent, #6366f1);
+    border-color: var(--afs-accent, #D82C20);
     transform: translateY(-1px);
   }
 `;
@@ -235,7 +235,7 @@ export const CrossLinkDesc = styled.div`
 
 export const CrossLinkArrow = styled.span`
   font-size: 18px;
-  color: var(--afs-accent, #6366f1);
+  color: var(--afs-accent, #D82C20);
 `;
 
 /* ---- Prominent raw-file link ---- */
@@ -244,10 +244,10 @@ export const RawFileLink = styled.a`
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  border: 1px solid var(--afs-accent, #6366f1);
+  border: 1px solid var(--afs-accent, #D82C20);
   border-radius: 10px;
-  background: var(--afs-accent-soft, rgba(99, 102, 241, 0.08));
-  color: var(--afs-accent, #6366f1);
+  background: var(--afs-accent-soft, rgba(216, 44, 32, 0.08));
+  color: var(--afs-accent, #D82C20);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;

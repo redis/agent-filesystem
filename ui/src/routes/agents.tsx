@@ -124,10 +124,10 @@ function AgentsEmptyState() {
       <EmptyHeader>
         <EmptyIcon>
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <rect width="48" height="48" rx="14" fill="var(--afs-accent-soft, rgba(99,102,241,0.1))" />
+            <rect width="48" height="48" rx="14" fill="var(--afs-accent-soft, rgba(216,44,32,0.1))" />
             <path
               d="M24 14v4m0 12v4m-10-10h4m12 0h4m-14.24-7.07 2.83 2.83m9.65 9.65 2.83 2.83m0-15.31-2.83 2.83m-9.65 9.65-2.83 2.83"
-              stroke="var(--afs-accent, #6366f1)"
+              stroke="var(--afs-accent, #D82C20)"
               strokeWidth="2"
               strokeLinecap="round"
             />
