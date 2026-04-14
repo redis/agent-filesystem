@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -122,6 +123,7 @@ func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace s
 		if err := store.rdb.Del(ctx,
 			"afs:{"+fsKey+"}:info",
 			"afs:{"+fsKey+"}:next_inode",
+			searchindex.ReadyKey(fsKey),
 			workspaceRootHeadKey(fsKey),
 			workspaceRootDirtyKey(fsKey),
 		).Err(); err != nil {
@@ -184,6 +186,7 @@ func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey str
 	if err := rdb.Del(ctx,
 		"afs:{"+fsKey+"}:info",
 		"afs:{"+fsKey+"}:next_inode",
+		searchindex.ReadyKey(fsKey),
 		workspaceRootHeadKey(fsKey),
 		workspaceRootDirtyKey(fsKey),
 	).Err(); err != nil {
@@ -362,6 +365,9 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 		}
 		fields["size"] = int64(len(data))
 		fields["content"] = string(data)
+		indexFields := searchindex.BuildFileFields(data)
+		fields["search_state"] = indexFields.SearchState
+		fields["grep_grams_ci"] = indexFields.GrepGramsCI
 		return fields, int64(len(data)), nil
 	case "symlink":
 		size := node.Entry.Size

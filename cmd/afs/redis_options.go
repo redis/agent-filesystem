@@ -21,6 +21,20 @@ func buildRedisOptions(cfg config, poolSize int) *redis.Options {
 	}
 }
 
+func buildSearchRedisOptions(base *redis.Client) *redis.Options {
+	opts := *base.Options()
+	// go-redis v9 gates RediSearch response handling behind either RESP2 or
+	// RESP3+UnstableResp3. A RESP2 clone keeps the search path isolated from
+	// the rest of the client's protocol settings.
+	opts.Protocol = 2
+	opts.UnstableResp3 = false
+	return &opts
+}
+
+func newSearchRedisClient(base *redis.Client) *redis.Client {
+	return redis.NewClient(buildSearchRedisOptions(base))
+}
+
 func buildRedisTLSConfig(enabled bool) *tls.Config {
 	if !enabled {
 		return nil

@@ -3,20 +3,27 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
 const grepTreeMaxDepth = 4096
+const grepIndexedContentBatchSize = 256
+const grepProfileEnv = "AFS_GREP_PROFILE"
+const grepProfilePrefix = "AFS_GREP_PROFILE "
 
 type grepOptions struct {
 	workspace        string
@@ -55,9 +62,36 @@ type grepMatcher struct {
 }
 
 type grepFileTarget struct {
-	path    string
-	content []byte
-	loaded  bool
+	path     string
+	inodeID  string
+	inodeKey string
+	content  []byte
+	loaded   bool
+}
+
+type grepExecutionProfile struct {
+	Pattern             string  `json:"pattern"`
+	SearchPath          string  `json:"search_path"`
+	Mode                string  `json:"mode,omitempty"`
+	IndexedAttempted    bool    `json:"indexed_attempted"`
+	IndexedUsed         bool    `json:"indexed_used"`
+	IndexedFallback     string  `json:"indexed_fallback_reason,omitempty"`
+	IndexedError        string  `json:"indexed_error,omitempty"`
+	StatMS              float64 `json:"stat_ms,omitempty"`
+	EnsureIndexMS       float64 `json:"ensure_index_ms,omitempty"`
+	NonReadyCheckMS     float64 `json:"non_ready_check_ms,omitempty"`
+	NonReadyFiles       int     `json:"non_ready_files,omitempty"`
+	FTSearchMS          float64 `json:"ft_search_ms,omitempty"`
+	FTSearchPages       int     `json:"ft_search_pages,omitempty"`
+	CandidateFiles      int     `json:"candidate_files,omitempty"`
+	ContentLoadMS       float64 `json:"content_load_ms,omitempty"`
+	VerificationMS      float64 `json:"verification_ms,omitempty"`
+	VerifiedFiles       int     `json:"verified_files,omitempty"`
+	VerifiedBytes       int64   `json:"verified_bytes,omitempty"`
+	BackendScanMS       float64 `json:"backend_scan_ms,omitempty"`
+	CollectTargetsMS    float64 `json:"collect_targets_ms,omitempty"`
+	CollectTargetsFiles int     `json:"collect_targets_files,omitempty"`
+	TotalMS             float64 `json:"total_ms"`
 }
 
 func cmdGrep(args []string) error {
@@ -93,17 +127,28 @@ func cmdGrep(args []string) error {
 	}
 
 	searchPath := normalizeAFSGrepPath(opts.path)
-	fsClient := client.New(store.rdb, fsKey)
+	profile := newGrepExecutionProfile(opts, searchPath)
+	started := time.Now()
+	defer func() {
+		if profile == nil {
+			return
+		}
+		profile.TotalMS = elapsedMS(started)
+		profile.emit()
+	}()
+	searchRDB := newSearchRedisClient(store.rdb)
+	defer func() { _ = searchRDB.Close() }()
+	fsClient := client.NewWithCache(store.rdb, fsKey, time.Hour)
 
 	if useFastGrepBackend(opts) {
-		return runFastGrep(ctx, fsClient, searchPath, workspace, opts)
+		return runFastGrep(ctx, searchRDB, fsKey, fsClient, searchPath, workspace, opts, profile)
 	}
 
 	matcher, err := compileGrepMatcher(opts)
 	if err != nil {
 		return err
 	}
-	return runAdvancedGrep(ctx, fsClient, searchPath, workspace, opts, matcher)
+	return runAdvancedGrep(ctx, fsClient, searchPath, workspace, opts, matcher, profile)
 }
 
 func parseGrepArgs(args []string) (grepOptions, error) {
@@ -275,13 +320,45 @@ func useFastGrepBackend(opts grepOptions) bool {
 	return true
 }
 
-func runFastGrep(ctx context.Context, fs client.Client, searchPath, workspace string, opts grepOptions) error {
+func runFastGrep(ctx context.Context, rdb *redis.Client, fsKey string, fs client.Client, searchPath, workspace string, opts grepOptions, profile *grepExecutionProfile) error {
+	statStarted := time.Now()
+	if _, err := fs.Stat(ctx, searchPath); err != nil {
+		if profile != nil {
+			profile.StatMS += elapsedMS(statStarted)
+		}
+		if errors.Is(err, redis.Nil) {
+			return fmt.Errorf("path %q does not exist in workspace %q", searchPath, workspace)
+		}
+		return err
+	}
+	if profile != nil {
+		profile.StatMS += elapsedMS(statStarted)
+	}
+
+	if !opts.glob {
+		if targets, ok := collectIndexedLiteralTargets(ctx, rdb, fsKey, searchPath, opts.patterns[0], profile); ok {
+			matcher, err := compileGrepMatcher(opts)
+			if err != nil {
+				return err
+			}
+			if profile != nil {
+				profile.Mode = "fast_literal_indexed"
+			}
+			return runIndexedGrepTargets(ctx, rdb, fsKey, fs, targets, opts, matcher, profile)
+		}
+	}
+
 	searchPattern := opts.patterns[0]
 	if !opts.glob {
 		searchPattern = literalGlobPattern(searchPattern)
 	}
 
+	scanStarted := time.Now()
 	matches, err := fs.Grep(ctx, searchPath, searchPattern, opts.ignoreCase)
+	if profile != nil {
+		profile.Mode = "fast_backend_grep"
+		profile.BackendScanMS += elapsedMS(scanStarted)
+	}
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("path %q does not exist in workspace %q", searchPath, workspace)
@@ -378,28 +455,294 @@ func compileGrepRegexp(pattern string, literal bool, opts grepOptions) (*regexp.
 	return compiled, nil
 }
 
-func runAdvancedGrep(ctx context.Context, fs client.Client, searchPath, workspace string, opts grepOptions, matcher *grepMatcher) error {
+func runAdvancedGrep(ctx context.Context, fs client.Client, searchPath, workspace string, opts grepOptions, matcher *grepMatcher, profile *grepExecutionProfile) error {
+	if profile != nil {
+		profile.Mode = "advanced"
+	}
+	collectStarted := time.Now()
 	targets, err := collectGrepTargets(ctx, fs, searchPath)
+	if profile != nil {
+		profile.CollectTargetsMS += elapsedMS(collectStarted)
+		profile.CollectTargetsFiles = len(targets)
+	}
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return fmt.Errorf("path %q does not exist in workspace %q", searchPath, workspace)
 		}
 		return err
 	}
+	return runGrepTargets(ctx, fs, targets, opts, matcher, profile)
+}
 
+func runGrepTargets(ctx context.Context, fs client.Client, targets []grepFileTarget, opts grepOptions, matcher *grepMatcher, profile *grepExecutionProfile) error {
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].path < targets[j].path
+	})
 	for _, target := range targets {
 		content := target.content
 		if !target.loaded {
+			var err error
+			loadStarted := time.Now()
 			content, err = fs.Cat(ctx, target.path)
+			if profile != nil {
+				profile.ContentLoadMS += elapsedMS(loadStarted)
+			}
 			if err != nil {
 				return err
 			}
 		}
+		verifyStarted := time.Now()
 		if err := grepProcessFile(target.path, content, opts, matcher); err != nil {
 			return err
 		}
+		if profile != nil {
+			profile.VerificationMS += elapsedMS(verifyStarted)
+			profile.VerifiedFiles++
+			profile.VerifiedBytes += int64(len(content))
+		}
 	}
 	return nil
+}
+
+func runIndexedGrepTargets(ctx context.Context, rdb *redis.Client, fsKey string, fs client.Client, targets []grepFileTarget, opts grepOptions, matcher *grepMatcher, profile *grepExecutionProfile) error {
+	sort.Slice(targets, func(i, j int) bool {
+		return targets[i].path < targets[j].path
+	})
+	for start := 0; start < len(targets); start += grepIndexedContentBatchSize {
+		end := start + grepIndexedContentBatchSize
+		if end > len(targets) {
+			end = len(targets)
+		}
+		batch := targets[start:end]
+		loadStarted := time.Now()
+		if err := loadIndexedTargetContentBatch(ctx, rdb, fsKey, batch); err != nil {
+			if profile != nil {
+				profile.ContentLoadMS += elapsedMS(loadStarted)
+				profile.IndexedFallback = "indexed_content_load_failed"
+			}
+			return runGrepTargets(ctx, fs, batch, opts, matcher, profile)
+		}
+		if profile != nil {
+			profile.ContentLoadMS += elapsedMS(loadStarted)
+		}
+		for _, target := range batch {
+			verifyStarted := time.Now()
+			if err := grepProcessFile(target.path, target.content, opts, matcher); err != nil {
+				return err
+			}
+			if profile != nil {
+				profile.VerificationMS += elapsedMS(verifyStarted)
+				profile.VerifiedFiles++
+				profile.VerifiedBytes += int64(len(target.content))
+			}
+		}
+	}
+	return nil
+}
+
+func loadIndexedTargetContentBatch(ctx context.Context, rdb *redis.Client, fsKey string, targets []grepFileTarget) error {
+	metaPipe := rdb.Pipeline()
+	metaCmds := make([]*redis.SliceCmd, len(targets))
+	for i, target := range targets {
+		if target.inodeKey == "" {
+			return errors.New("missing indexed inode key")
+		}
+		metaCmds[i] = metaPipe.HMGet(ctx, target.inodeKey, "content_ref", "content")
+	}
+	if _, err := metaPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+
+	contentPipe := rdb.Pipeline()
+	contentCmds := make([]*redis.StringCmd, len(targets))
+	needsExternalContent := false
+	for i, cmd := range metaCmds {
+		values, err := cmd.Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		contentRef := searchIndexString(values, 0)
+		if contentRef == "ext" {
+			if targets[i].inodeID == "" {
+				return errors.New("missing indexed inode id")
+			}
+			contentCmds[i] = contentPipe.Get(ctx, fmt.Sprintf("afs:{%s}:content:%s", fsKey, targets[i].inodeID))
+			needsExternalContent = true
+			continue
+		}
+		targets[i].content = []byte(searchIndexString(values, 1))
+		targets[i].loaded = true
+	}
+	if needsExternalContent {
+		if _, err := contentPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+	}
+
+	for i, cmd := range contentCmds {
+		if cmd == nil {
+			continue
+		}
+		content, err := cmd.Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		targets[i].content = []byte(content)
+		targets[i].loaded = true
+	}
+	return nil
+}
+
+func collectIndexedLiteralTargets(ctx context.Context, rdb *redis.Client, fsKey, searchPath, literal string, profile *grepExecutionProfile) ([]grepFileTarget, bool) {
+	if profile != nil {
+		profile.IndexedAttempted = true
+	}
+	terms := searchindex.QueryTermsForLiteral(literal)
+	if len(terms) == 0 {
+		if profile != nil {
+			profile.IndexedFallback = "short_literal"
+		}
+		return nil, false
+	}
+
+	ensureStarted := time.Now()
+	ok, err := ensureWorkspaceSearchIndex(ctx, rdb, fsKey)
+	if profile != nil {
+		profile.EnsureIndexMS += elapsedMS(ensureStarted)
+	}
+	if err != nil || !ok {
+		if profile != nil {
+			if err != nil {
+				profile.IndexedFallback = "ensure_index_failed"
+				profile.IndexedError = err.Error()
+			} else {
+				profile.IndexedFallback = "search_unavailable"
+			}
+		}
+		return nil, false
+	}
+
+	indexName := searchindex.IndexName(fsKey)
+	scope := pathAncestorsQuery(searchPath)
+	nonReadyStarted := time.Now()
+	nonReady := nonReadyFileCount(ctx, rdb, indexName, scope)
+	if profile != nil {
+		profile.NonReadyCheckMS += elapsedMS(nonReadyStarted)
+		profile.NonReadyFiles = nonReady
+	}
+	if nonReady != 0 {
+		if profile != nil {
+			profile.IndexedFallback = "non_ready_files"
+		}
+		return nil, false
+	}
+
+	queryParts := []string{"@type:{file}", "@search_state:{ready}"}
+	if scope != "" {
+		queryParts = append(queryParts, scope)
+	}
+	for _, term := range terms {
+		queryParts = append(queryParts, "@grep_grams_ci:"+term)
+	}
+
+	targets := make([]grepFileTarget, 0)
+	searchStarted := time.Now()
+	for offset := 0; ; offset += 512 {
+		if profile != nil {
+			profile.FTSearchPages++
+		}
+		result, err := rdb.FTSearchWithArgs(ctx, indexName, strings.Join(queryParts, " "), &redis.FTSearchOptions{
+			Verbatim: true,
+			Return: []redis.FTSearchReturn{
+				{FieldName: "path"},
+			},
+			LimitOffset:    offset,
+			Limit:          512,
+			DialectVersion: 2,
+		}).Result()
+		if err != nil {
+			if profile != nil {
+				profile.FTSearchMS += elapsedMS(searchStarted)
+				profile.IndexedFallback = "ft_search_failed"
+				profile.IndexedError = err.Error()
+			}
+			return nil, false
+		}
+		for _, doc := range result.Docs {
+			p := doc.Fields["path"]
+			if p == "" {
+				continue
+			}
+			inodeKey := doc.ID
+			inodeID := strings.TrimPrefix(inodeKey, fmt.Sprintf("afs:{%s}:inode:", fsKey))
+			targets = append(targets, grepFileTarget{
+				path:     p,
+				inodeID:  inodeID,
+				inodeKey: inodeKey,
+			})
+		}
+		if len(result.Docs) < 512 {
+			break
+		}
+	}
+	if profile != nil {
+		profile.IndexedUsed = true
+		profile.CandidateFiles = len(targets)
+		profile.FTSearchMS += elapsedMS(searchStarted)
+	}
+	return targets, true
+}
+
+func nonReadyFileCount(ctx context.Context, rdb *redis.Client, indexName, scope string) int {
+	queryParts := []string{"@type:{file}", "@search_state:{binary|large}"}
+	if scope != "" {
+		queryParts = append(queryParts, scope)
+	}
+	result, err := rdb.FTSearchWithArgs(ctx, indexName, strings.Join(queryParts, " "), &redis.FTSearchOptions{
+		CountOnly:      true,
+		DialectVersion: 2,
+	}).Result()
+	if err != nil {
+		return 1
+	}
+	return result.Total
+}
+
+func pathAncestorsQuery(searchPath string) string {
+	if searchPath == "/" {
+		return ""
+	}
+	return "@path_ancestors:{" + searchindex.EscapeTagValue(searchPath) + "}"
+}
+
+func newGrepExecutionProfile(opts grepOptions, searchPath string) *grepExecutionProfile {
+	if strings.TrimSpace(os.Getenv(grepProfileEnv)) == "" {
+		return nil
+	}
+	pattern := ""
+	if len(opts.patterns) > 0 {
+		pattern = opts.patterns[0]
+	}
+	return &grepExecutionProfile{
+		Pattern:    pattern,
+		SearchPath: searchPath,
+	}
+}
+
+func (p *grepExecutionProfile) emit() {
+	if p == nil {
+		return
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s%s\n", grepProfilePrefix, `{"error":"marshal_failed"}`)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s%s\n", grepProfilePrefix, data)
+}
+
+func elapsedMS(start time.Time) float64 {
+	return float64(time.Since(start).Microseconds()) / 1000.0
 }
 
 func collectGrepTargets(ctx context.Context, fs client.Client, searchPath string) ([]grepFileTarget, error) {

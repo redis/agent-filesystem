@@ -1,0 +1,348 @@
+{
+  "timestamp_utc": "2026-04-14T19:59:10Z",
+  "platform": "darwin/arm64",
+  "go_version": "go1.26.1",
+  "redis_version": "Redis server v=8.0.3",
+  "redis_source": "docker redis:8",
+  "grep_version": "usage: grep [-abcdDEFGHhIiJLlMmnOopqRSsUVvwXxZz] [-A num] [-B num] [-C[num]]",
+  "afs_bin": "/var/folders/kg/0cp9s_gx4v5bjkc6bkmcx3f40000gn/T/afs-bench-md-3396565197/afs",
+  "grep_bin": "/usr/bin/grep",
+  "redis_addr": "127.0.0.1:54798",
+  "rounds": 1,
+  "warmup": 0,
+  "corpus": {
+    "workspace": "bench-md",
+    "markdown_files": 4000,
+    "approx_bytes_per_file": 8192,
+    "total_bytes": 33003031,
+    "total_dirs": 24,
+    "hot_files": [
+      "/team-00/runbooks/runbook-0000.md",
+      "/team-17/designs/design-0041.md",
+      "/team-10/meeting-notes/meeting-note-0082.md",
+      "/team-03/playbooks/playbook-0123.md",
+      "/team-20/runbooks/runbook-0164.md",
+      "/team-13/designs/design-0205.md",
+      "/team-06/meeting-notes/meeting-note-0246.md",
+      "/team-23/playbooks/playbook-0287.md",
+      "/team-16/runbooks/runbook-0328.md",
+      "/team-09/designs/design-0369.md",
+      "/team-02/meeting-notes/meeting-note-0410.md",
+      "/team-19/playbooks/playbook-0451.md",
+      "/team-12/runbooks/runbook-0492.md",
+      "/team-05/designs/design-0533.md",
+      "/team-22/meeting-notes/meeting-note-0574.md",
+      "/team-15/playbooks/playbook-0615.md",
+      "/team-08/runbooks/runbook-0656.md",
+      "/team-01/designs/design-0697.md",
+      "/team-18/meeting-notes/meeting-note-0738.md",
+      "/team-11/playbooks/playbook-0779.md",
+      "/team-04/runbooks/runbook-0820.md",
+      "/team-21/designs/design-0861.md",
+      "/team-14/meeting-notes/meeting-note-0902.md",
+      "/team-07/playbooks/playbook-0943.md",
+      "/team-00/runbooks/runbook-0984.md",
+      "/team-17/designs/design-1025.md",
+      "/team-10/meeting-notes/meeting-note-1066.md",
+      "/team-03/playbooks/playbook-1107.md",
+      "/team-20/runbooks/runbook-1148.md",
+      "/team-13/designs/design-1189.md",
+      "/team-06/meeting-notes/meeting-note-1230.md",
+      "/team-23/playbooks/playbook-1271.md",
+      "/team-16/runbooks/runbook-1312.md",
+      "/team-09/designs/design-1353.md",
+      "/team-02/meeting-notes/meeting-note-1394.md",
+      "/team-19/playbooks/playbook-1435.md",
+      "/team-12/runbooks/runbook-1476.md",
+      "/team-05/designs/design-1517.md",
+      "/team-22/meeting-notes/meeting-note-1558.md",
+      "/team-15/playbooks/playbook-1599.md",
+      "/team-08/runbooks/runbook-1640.md",
+      "/team-01/designs/design-1681.md",
+      "/team-18/meeting-notes/meeting-note-1722.md",
+      "/team-11/playbooks/playbook-1763.md",
+      "/team-04/runbooks/runbook-1804.md",
+      "/team-21/designs/design-1845.md",
+      "/team-14/meeting-notes/meeting-note-1886.md",
+      "/team-07/playbooks/playbook-1927.md",
+      "/team-00/runbooks/runbook-1968.md",
+      "/team-17/designs/design-2009.md",
+      "/team-10/meeting-notes/meeting-note-2050.md",
+      "/team-03/playbooks/playbook-2091.md",
+      "/team-20/runbooks/runbook-2132.md",
+      "/team-13/designs/design-2173.md",
+      "/team-06/meeting-notes/meeting-note-2214.md",
+      "/team-23/playbooks/playbook-2255.md",
+      "/team-16/runbooks/runbook-2296.md",
+      "/team-09/designs/design-2337.md",
+      "/team-02/meeting-notes/meeting-note-2378.md",
+      "/team-19/playbooks/playbook-2419.md",
+      "/team-12/runbooks/runbook-2460.md",
+      "/team-05/designs/design-2501.md",
+      "/team-22/meeting-notes/meeting-note-2542.md",
+      "/team-15/playbooks/playbook-2583.md",
+      "/team-08/runbooks/runbook-2624.md",
+      "/team-01/designs/design-2665.md",
+      "/team-18/meeting-notes/meeting-note-2706.md",
+      "/team-11/playbooks/playbook-2747.md",
+      "/team-04/runbooks/runbook-2788.md",
+      "/team-21/designs/design-2829.md",
+      "/team-14/meeting-notes/meeting-note-2870.md",
+      "/team-07/playbooks/playbook-2911.md",
+      "/team-00/runbooks/runbook-2952.md",
+      "/team-17/designs/design-2993.md",
+      "/team-10/meeting-notes/meeting-note-3034.md",
+      "/team-03/playbooks/playbook-3075.md",
+      "/team-20/runbooks/runbook-3116.md",
+      "/team-13/designs/design-3157.md",
+      "/team-06/meeting-notes/meeting-note-3198.md",
+      "/team-23/playbooks/playbook-3239.md",
+      "/team-16/runbooks/runbook-3280.md",
+      "/team-09/designs/design-3321.md",
+      "/team-02/meeting-notes/meeting-note-3362.md",
+      "/team-19/playbooks/playbook-3403.md",
+      "/team-12/runbooks/runbook-3444.md",
+      "/team-05/designs/design-3485.md",
+      "/team-22/meeting-notes/meeting-note-3526.md",
+      "/team-15/playbooks/playbook-3567.md",
+      "/team-08/runbooks/runbook-3608.md",
+      "/team-01/designs/design-3649.md",
+      "/team-18/meeting-notes/meeting-note-3690.md",
+      "/team-11/playbooks/playbook-3731.md",
+      "/team-04/runbooks/runbook-3772.md",
+      "/team-21/designs/design-3813.md",
+      "/team-14/meeting-notes/meeting-note-3854.md",
+      "/team-07/playbooks/playbook-3895.md"
+    ],
+    "rare_needle": "needle-redis-md-8675309",
+    "common_needle": "incident review action item",
+    "regex_pattern": "^## Escalation$",
+    "find_pattern": "*runbook*.md",
+    "rare_matches": 9,
+    "common_matches": 445,
+    "regex_matches": 48000,
+    "runbook_matches": 1000
+  },
+  "grep_results": [
+    {
+      "name": "grep_literal_rare",
+      "local_label": "grep",
+      "redis_label": "afs grep",
+      "local": [
+        {
+          "elapsed_ms": 371.093,
+          "count": 9
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 54.168,
+          "count": 1
+        }
+      ],
+      "local_median_ms": 371.093,
+      "local_min_ms": 371.093,
+      "local_max_ms": 371.093,
+      "redis_median_ms": 54.168,
+      "redis_min_ms": 54.168,
+      "redis_max_ms": 54.168,
+      "local_count_summary": "9",
+      "redis_count_summary": "1",
+      "redis_over_local_ratio": 0.1459688002737858,
+      "validation": "different normalized output (local=9 redis=0)"
+    },
+    {
+      "name": "grep_literal_common",
+      "local_label": "grep",
+      "redis_label": "afs grep",
+      "local": [
+        {
+          "elapsed_ms": 367.3,
+          "count": 445
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 48.026,
+          "count": 445
+        }
+      ],
+      "local_median_ms": 367.3,
+      "local_min_ms": 367.3,
+      "local_max_ms": 367.3,
+      "redis_median_ms": 48.026,
+      "redis_min_ms": 48.026,
+      "redis_max_ms": 48.026,
+      "local_count_summary": "445",
+      "redis_count_summary": "445",
+      "redis_over_local_ratio": 0.13075415191941192,
+      "validation": "different normalized output (local=445 redis=424)"
+    },
+    {
+      "name": "grep_regex_escalation",
+      "local_label": "grep",
+      "redis_label": "afs grep",
+      "local": [
+        {
+          "elapsed_ms": 227.153,
+          "count": 48000
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 1065.987,
+          "count": 48000
+        }
+      ],
+      "local_median_ms": 227.153,
+      "local_min_ms": 227.153,
+      "local_max_ms": 227.153,
+      "redis_median_ms": 1065.987,
+      "redis_min_ms": 1065.987,
+      "redis_max_ms": 1065.987,
+      "local_count_summary": "48000",
+      "redis_count_summary": "48000",
+      "redis_over_local_ratio": 4.692814974928793,
+      "validation": "identical normalized output"
+    }
+  ],
+  "ops_results": [
+    {
+      "name": "tree_walk",
+      "local_label": "filepath.WalkDir",
+      "redis_label": "client.Tree",
+      "local": [
+        {
+          "elapsed_ms": 3.031,
+          "count": 4049
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 38.824,
+          "count": 4049
+        }
+      ],
+      "local_median_ms": 3.031,
+      "local_min_ms": 3.031,
+      "local_max_ms": 3.031,
+      "redis_median_ms": 38.824,
+      "redis_min_ms": 38.824,
+      "redis_max_ms": 38.824,
+      "local_count_summary": "4049",
+      "redis_count_summary": "4049",
+      "redis_over_local_ratio": 12.80897393599472,
+      "validation": "counts match (4049)"
+    },
+    {
+      "name": "find_runbook_names",
+      "local_label": "local basename filter",
+      "redis_label": "client.Find",
+      "local": [
+        {
+          "elapsed_ms": 3.049,
+          "count": 1000
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 36.161,
+          "count": 1000
+        }
+      ],
+      "local_median_ms": 3.049,
+      "local_min_ms": 3.049,
+      "local_max_ms": 3.049,
+      "redis_median_ms": 36.161,
+      "redis_min_ms": 36.161,
+      "redis_max_ms": 36.161,
+      "local_count_summary": "1000",
+      "redis_count_summary": "1000",
+      "redis_over_local_ratio": 11.859954083306002,
+      "validation": "counts match (1000)"
+    },
+    {
+      "name": "read_hot_files",
+      "local_label": "os.ReadFile",
+      "redis_label": "client.Cat",
+      "local": [
+        {
+          "elapsed_ms": 1.331,
+          "count": 792005
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 164.523,
+          "count": 792005
+        }
+      ],
+      "local_median_ms": 1.331,
+      "local_min_ms": 1.331,
+      "local_max_ms": 1.331,
+      "redis_median_ms": 164.523,
+      "redis_min_ms": 164.523,
+      "redis_max_ms": 164.523,
+      "local_count_summary": "792005",
+      "redis_count_summary": "792005",
+      "redis_over_local_ratio": 123.60856498873028,
+      "validation": "counts match (792005)"
+    },
+    {
+      "name": "head_hot_files",
+      "local_label": "local head(40)",
+      "redis_label": "client.Head(40)",
+      "local": [
+        {
+          "elapsed_ms": 1.887,
+          "count": 75690
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 165.332,
+          "count": 75690
+        }
+      ],
+      "local_median_ms": 1.887,
+      "local_min_ms": 1.887,
+      "local_max_ms": 1.887,
+      "redis_median_ms": 165.332,
+      "redis_min_ms": 165.332,
+      "redis_max_ms": 165.332,
+      "local_count_summary": "75690",
+      "redis_count_summary": "75690",
+      "redis_over_local_ratio": 87.61632220455749,
+      "validation": "counts match (75690)"
+    },
+    {
+      "name": "line_window_hot_files",
+      "local_label": "local lines(15..35)",
+      "redis_label": "client.Lines(15..35)",
+      "local": [
+        {
+          "elapsed_ms": 1.848,
+          "count": 49587
+        }
+      ],
+      "redis": [
+        {
+          "elapsed_ms": 162.475,
+          "count": 49587
+        }
+      ],
+      "local_median_ms": 1.848,
+      "local_min_ms": 1.848,
+      "local_max_ms": 1.848,
+      "redis_median_ms": 162.475,
+      "redis_min_ms": 162.475,
+      "redis_max_ms": 162.475,
+      "local_count_summary": "49587",
+      "redis_count_summary": "49587",
+      "redis_over_local_ratio": 87.91937229437228,
+      "validation": "counts match (49587)"
+    }
+  ],
+  "local_root": "/var/folders/kg/0cp9s_gx4v5bjkc6bkmcx3f40000gn/T/afs-bench-md-3396565197/corpus",
+  "temp_root": "/var/folders/kg/0cp9s_gx4v5bjkc6bkmcx3f40000gn/T/afs-bench-md-3396565197"
+}

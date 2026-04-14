@@ -217,6 +217,56 @@ func TestMutationsMarkRootDirtyButReadsDoNot(t *testing.T) {
 	}
 }
 
+func TestFileWritesUpdateSearchFields(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	c := New(rdb, "searchfields")
+
+	if err := c.Echo(ctx, "/note.txt", []byte("hello world")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	if err := c.EchoAppend(ctx, "/note.txt", []byte("\nHELLO")); err != nil {
+		t.Fatalf("EchoAppend() returned error: %v", err)
+	}
+
+	stat, err := c.Stat(ctx, "/note.txt")
+	if err != nil {
+		t.Fatalf("Stat() returned error: %v", err)
+	}
+	if stat == nil {
+		t.Fatal("expected stat for /note.txt")
+	}
+
+	inodeKey := "afs:{searchfields}:inode:" + strconv.FormatUint(stat.Inode, 10)
+	assertSearchFields := func(wantContent string) {
+		t.Helper()
+
+		want := buildFileSearchFields(wantContent)
+		searchState, err := rdb.HGet(ctx, inodeKey, "search_state").Result()
+		if err != nil {
+			t.Fatalf("HGet(search_state) returned error: %v", err)
+		}
+		if searchState != want.SearchState {
+			t.Fatalf("search_state = %q, want %q", searchState, want.SearchState)
+		}
+
+		grepGrams, err := rdb.HGet(ctx, inodeKey, "grep_grams_ci").Result()
+		if err != nil {
+			t.Fatalf("HGet(grep_grams_ci) returned error: %v", err)
+		}
+		if grepGrams != want.GrepGramsCI {
+			t.Fatalf("grep_grams_ci = %q, want %q", grepGrams, want.GrepGramsCI)
+		}
+	}
+
+	assertSearchFields("hello world\nHELLO")
+
+	if err := c.Truncate(ctx, "/note.txt", 5); err != nil {
+		t.Fatalf("Truncate() returned error: %v", err)
+	}
+	assertSearchFields("hello")
+}
+
 // ---------------------------------------------------------------------------
 // Canonical inode storage verification
 // ---------------------------------------------------------------------------
@@ -1025,6 +1075,56 @@ func TestHeadTailLines(t *testing.T) {
 	if h2 != content {
 		t.Fatalf("head(100) = %q, want %q", h2, content)
 	}
+}
+
+func TestWarmReadHelpersIssueSingleRedisRead(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	fsKey := "read-hot"
+	c := NewWithCache(rdb, fsKey, time.Hour)
+
+	content := "line1\nline2\nline3\n"
+	if err := c.Echo(ctx, "/docs/note.txt", []byte(content)); err != nil {
+		t.Fatalf("echo: %v", err)
+	}
+	if _, err := c.Stat(ctx, "/docs/note.txt"); err != nil {
+		t.Fatalf("warm stat: %v", err)
+	}
+
+	var h countHook
+	rdb.AddHook(&hookGate{gate: &h, fsKey: fsKey})
+
+	assertSingleCommand := func(name string, run func() error) {
+		t.Helper()
+		before := h.total.Load()
+		if err := run(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := h.total.Load() - before; got != 1 {
+			t.Fatalf("%s command count = %d, want 1", name, got)
+		}
+	}
+
+	assertSingleCommand("Cat", func() error {
+		_, err := c.Cat(ctx, "/docs/note.txt")
+		return err
+	})
+	assertSingleCommand("Head", func() error {
+		_, err := c.Head(ctx, "/docs/note.txt", 2)
+		return err
+	})
+	assertSingleCommand("Tail", func() error {
+		_, err := c.Tail(ctx, "/docs/note.txt", 2)
+		return err
+	})
+	assertSingleCommand("Lines", func() error {
+		_, err := c.Lines(ctx, "/docs/note.txt", 2, 3)
+		return err
+	})
+	assertSingleCommand("Wc", func() error {
+		_, err := c.Wc(ctx, "/docs/note.txt")
+		return err
+	})
 }
 
 func TestWc(t *testing.T) {

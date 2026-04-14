@@ -52,7 +52,9 @@ func seedWorkspaceMountKey(ctx context.Context, store *afsStore, workspace strin
 	if err != nil {
 		return "", "", false, err
 	}
-	ensureWorkspaceSearchIndex(ctx, store.rdb, mountKey)
+	searchRDB := newSearchRedisClient(store.rdb)
+	defer searchRDB.Close()
+	_, _ = ensureWorkspaceSearchIndex(ctx, searchRDB, mountKey)
 	return mountKey, headSavepoint, initialized, nil
 }
 
@@ -126,8 +128,8 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 		// For inodes with content_ref="ext", we need a second pipeline to
 		// read content from the separate STRING key.
 		type extContent struct {
-			idx     int
-			cmd     *redis.StringCmd
+			idx int
+			cmd *redis.StringCmd
 		}
 		var extFetches []extContent
 

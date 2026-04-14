@@ -92,11 +92,17 @@ func (s *afsStore) ensureWorkspaceRoot(ctx context.Context, workspace string) (s
 }
 
 func (s *afsStore) syncWorkspaceRoot(ctx context.Context, workspace string, m manifest) error {
-	return controlplane.SyncWorkspaceRoot(ctx, s.cp, workspace, m)
+	return s.syncWorkspaceRootWithOptions(ctx, workspace, m, controlplane.SyncOptions{})
 }
 
 func (s *afsStore) syncWorkspaceRootWithOptions(ctx context.Context, workspace string, m manifest, opts controlplane.SyncOptions) error {
-	return controlplane.SyncWorkspaceRootWithOptions(ctx, s.cp, workspace, m, opts)
+	if err := controlplane.SyncWorkspaceRootWithOptions(ctx, s.cp, workspace, m, opts); err != nil {
+		return err
+	}
+	searchRDB := newSearchRedisClient(s.rdb)
+	defer searchRDB.Close()
+	_, err := ensureWorkspaceSearchIndex(ctx, searchRDB, workspaceRedisKey(workspace))
+	return err
 }
 
 func (s *afsStore) acquireImportLock(ctx context.Context, workspace string) (*controlplane.ImportLock, error) {

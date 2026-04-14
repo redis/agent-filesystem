@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -182,6 +184,71 @@ func TestCmdGrepSupportsInvertMatchAndMaxCount(t *testing.T) {
 	}
 	if strings.Count(limitedOutput, "/invert.txt:") != 1 {
 		t.Fatalf("cmdGrep(-m) output = %q, want only one emitted match", limitedOutput)
+	}
+}
+
+func TestRunIndexedGrepTargetsLoadsExternalAndInlineContent(t *testing.T) {
+	t.Helper()
+
+	_, store, closeStore := setupAFSGrepTest(t)
+	defer closeStore()
+
+	ctx := context.Background()
+	fsKey := "repo"
+	fsClient := client.New(store.rdb, fsKey)
+
+	if err := fsClient.Echo(ctx, "/ext.txt", []byte("alpha hello\n")); err != nil {
+		t.Fatalf("Echo(/ext.txt) returned error: %v", err)
+	}
+	stat, err := fsClient.Stat(ctx, "/ext.txt")
+	if err != nil {
+		t.Fatalf("Stat(/ext.txt) returned error: %v", err)
+	}
+	if stat == nil {
+		t.Fatal("expected stat for /ext.txt")
+	}
+
+	legacyInodeID := "99"
+	legacyInodeKey := fmt.Sprintf("afs:{%s}:inode:%s", fsKey, legacyInodeID)
+	if err := store.rdb.HSet(ctx, legacyInodeKey, map[string]any{
+		"type":    "file",
+		"content": "legacy hello\n",
+	}).Err(); err != nil {
+		t.Fatalf("HSet(%s) returned error: %v", legacyInodeKey, err)
+	}
+
+	opts := grepOptions{
+		showLineNumbers: true,
+		patterns:        []string{"hello"},
+	}
+	matcher, err := compileGrepMatcher(opts)
+	if err != nil {
+		t.Fatalf("compileGrepMatcher() returned error: %v", err)
+	}
+
+	output, err := captureStdout(t, func() error {
+		return runIndexedGrepTargets(ctx, store.rdb, fsKey, fsClient, []grepFileTarget{
+			{
+				path:     "/ext.txt",
+				inodeID:  strconv.FormatUint(stat.Inode, 10),
+				inodeKey: fmt.Sprintf("afs:{%s}:inode:%d", fsKey, stat.Inode),
+			},
+			{
+				path:     "/legacy.txt",
+				inodeID:  legacyInodeID,
+				inodeKey: legacyInodeKey,
+			},
+		}, opts, matcher, nil)
+	})
+	if err != nil {
+		t.Fatalf("runIndexedGrepTargets() returned error: %v", err)
+	}
+
+	if !strings.Contains(output, "/ext.txt:1:alpha hello") {
+		t.Fatalf("runIndexedGrepTargets() output = %q, want external-content match", output)
+	}
+	if !strings.Contains(output, "/legacy.txt:1:legacy hello") {
+		t.Fatalf("runIndexedGrepTargets() output = %q, want inline-content match", output)
 	}
 }
 

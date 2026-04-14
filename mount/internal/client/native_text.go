@@ -7,7 +7,7 @@ import (
 )
 
 func (c *nativeClient) Head(ctx context.Context, p string, n int) (string, error) {
-	resolved, inode, err := c.resolvePath(ctx, p, true)
+	_, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return "", err
 	}
@@ -18,8 +18,6 @@ func (c *nativeClient) Head(ctx context.Context, p string, n int) (string, error
 	if err != nil {
 		return "", err
 	}
-	inode.AtimeMs = nowMs()
-	_ = c.saveInodeMeta(ctx, resolved, inode)
 
 	lines := splitLines(content)
 	if n <= 0 {
@@ -32,7 +30,7 @@ func (c *nativeClient) Head(ctx context.Context, p string, n int) (string, error
 }
 
 func (c *nativeClient) Tail(ctx context.Context, p string, n int) (string, error) {
-	resolved, inode, err := c.resolvePath(ctx, p, true)
+	_, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return "", err
 	}
@@ -43,8 +41,6 @@ func (c *nativeClient) Tail(ctx context.Context, p string, n int) (string, error
 	if err != nil {
 		return "", err
 	}
-	inode.AtimeMs = nowMs()
-	_ = c.saveInodeMeta(ctx, resolved, inode)
 
 	lines := splitLines(content)
 	if n <= 0 {
@@ -57,7 +53,7 @@ func (c *nativeClient) Tail(ctx context.Context, p string, n int) (string, error
 }
 
 func (c *nativeClient) Lines(ctx context.Context, p string, start, end int) (string, error) {
-	resolved, inode, err := c.resolvePath(ctx, p, true)
+	_, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return "", err
 	}
@@ -68,8 +64,6 @@ func (c *nativeClient) Lines(ctx context.Context, p string, start, end int) (str
 	if err != nil {
 		return "", err
 	}
-	inode.AtimeMs = nowMs()
-	_ = c.saveInodeMeta(ctx, resolved, inode)
 
 	lines := splitLines(content)
 	if start < 1 {
@@ -85,7 +79,7 @@ func (c *nativeClient) Lines(ctx context.Context, p string, start, end int) (str
 }
 
 func (c *nativeClient) Wc(ctx context.Context, p string) (*WcResult, error) {
-	resolved, inode, err := c.resolvePath(ctx, p, true)
+	_, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +90,6 @@ func (c *nativeClient) Wc(ctx context.Context, p string) (*WcResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	inode.AtimeMs = nowMs()
-	_ = c.saveInodeMeta(ctx, resolved, inode)
 
 	chars := int64(len(content))
 	lineCount := int64(strings.Count(content, "\n"))

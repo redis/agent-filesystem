@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"strconv"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -115,6 +117,20 @@ func TestSyncWorkspaceRootMaterializesLiveWorkspaceFS(t *testing.T) {
 	if ancestors != "/src,/src/deep,/src/deep/main.go" {
 		t.Fatalf("path_ancestors = %q, want %q", ancestors, "/src,/src/deep,/src/deep/main.go")
 	}
+	searchState, err := rdb.HGet(ctx, workspaceFSInodeKey("repo", strconv.FormatUint(mainStat.Inode, 10)), "search_state").Result()
+	if err != nil {
+		t.Fatalf("HGet(search_state) returned error: %v", err)
+	}
+	if searchState != searchindex.StateReady {
+		t.Fatalf("search_state = %q, want %q", searchState, searchindex.StateReady)
+	}
+	grepGrams, err := rdb.HGet(ctx, workspaceFSInodeKey("repo", strconv.FormatUint(mainStat.Inode, 10)), "grep_grams_ci").Result()
+	if err != nil {
+		t.Fatalf("HGet(grep_grams_ci) returned error: %v", err)
+	}
+	if grepGrams != searchindex.BuildFileFields(mainGo).GrepGramsCI {
+		t.Fatalf("grep_grams_ci = %q, want %q", grepGrams, searchindex.BuildFileFields(mainGo).GrepGramsCI)
+	}
 
 	rootHead, err := rdb.Get(ctx, workspaceRootHeadKey("repo")).Result()
 	if err != nil {
@@ -137,5 +153,9 @@ func TestSyncWorkspaceRootMaterializesLiveWorkspaceFS(t *testing.T) {
 	}
 	if nextInode != "8" {
 		t.Fatalf("next_inode = %q, want %q", nextInode, "8")
+	}
+
+	if _, err := rdb.Get(ctx, searchindex.ReadyKey("repo")).Result(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("Get(search ready key) error = %v, want redis.Nil", err)
 	}
 }

@@ -1,7 +1,9 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
@@ -43,6 +45,21 @@ type warmedPathEntry struct {
 }
 
 var errNeedDirWatch = errors.New("need destination dir watch")
+
+const (
+	fileSearchGramSize        = 3
+	fileSearchMaxIndexedBytes = 256 << 10
+	fileSearchMaxUniqueGrams  = 16384
+
+	fileSearchStateReady  = "ready"
+	fileSearchStateBinary = "binary"
+	fileSearchStateLarge  = "large"
+)
+
+type fileSearchFields struct {
+	SearchState string
+	GrepGramsCI string
+}
 
 func (c *nativeClient) loadRootInode(ctx context.Context) (*inodeData, error) {
 	if c.cache != nil {
@@ -460,11 +477,72 @@ func (c *nativeClient) loadContentExternal(ctx context.Context, id, contentRef s
 	if v != "" {
 		pipe := c.rdb.Pipeline()
 		pipe.Set(ctx, c.keys.content(id), v, 0)
-		pipe.HSet(ctx, c.keys.inode(id), "content_ref", "ext")
+		pipe.HSet(ctx, c.keys.inode(id), mergeFieldMaps(map[string]interface{}{
+			"content_ref": "ext",
+		}, fileSearchIndexFields(v)))
 		pipe.HDel(ctx, c.keys.inode(id), "content")
 		_, _ = pipe.Exec(ctx)
 	}
 	return v, nil
+}
+
+func buildFileSearchFields(content string) fileSearchFields {
+	data := []byte(content)
+	switch {
+	case fileSearchIsBinaryPrefix(data):
+		return fileSearchFields{SearchState: fileSearchStateBinary}
+	case len(data) > fileSearchMaxIndexedBytes:
+		return fileSearchFields{SearchState: fileSearchStateLarge}
+	default:
+		return fileSearchFields{
+			SearchState: fileSearchStateReady,
+			GrepGramsCI: strings.Join(fileSearchGramTerms(bytes.ToLower(data)), " "),
+		}
+	}
+}
+
+func fileSearchIndexFields(content string) map[string]interface{} {
+	fields := buildFileSearchFields(content)
+	return map[string]interface{}{
+		"search_state":  fields.SearchState,
+		"grep_grams_ci": fields.GrepGramsCI,
+	}
+}
+
+func mergeFieldMaps(base map[string]interface{}, extras ...map[string]interface{}) map[string]interface{} {
+	for _, extra := range extras {
+		for key, value := range extra {
+			base[key] = value
+		}
+	}
+	return base
+}
+
+func fileSearchIsBinaryPrefix(data []byte) bool {
+	checkLen := len(data)
+	if checkLen > 8192 {
+		checkLen = 8192
+	}
+	return bytes.IndexByte(data[:checkLen], '\x00') >= 0
+}
+
+func fileSearchGramTerms(data []byte) []string {
+	if len(data) < fileSearchGramSize {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, 256)
+	terms := make([]string, 0, 256)
+	for i := 0; i+fileSearchGramSize <= len(data) && len(terms) < fileSearchMaxUniqueGrams; i++ {
+		term := "g" + hex.EncodeToString(data[i:i+fileSearchGramSize])
+		if _, ok := seen[term]; ok {
+			continue
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+	}
+	sort.Strings(terms)
+	return terms
 }
 
 func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData) error {
@@ -476,7 +554,7 @@ func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData
 		// in the same pipeline.
 		pipe := c.rdb.Pipeline()
 		pipe.Set(ctx, c.keys.content(inode.ID), inode.Content, 0)
-		pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, false))
+		pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(inode.Content)))
 		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 			return err
 		}
@@ -562,7 +640,7 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	if inode.Type == "file" {
 		// Content goes to the external STRING key; metadata-only to the HASH.
 		pipe.Set(ctx, c.keys.content(id), inode.Content, 0)
-		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, false))
+		pipe.HSet(ctx, c.keys.inode(id), mergeFieldMaps(c.inodeFieldsAtPath(inode, childPath, false), fileSearchIndexFields(inode.Content)))
 	} else {
 		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, false))
 	}
@@ -663,7 +741,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	// Content goes to the external STRING key; metadata (with content_ref="ext")
 	// goes to the inode HASH. includeContent=false because content_ref="ext".
 	pipe.Set(ctx, c.keys.content(inode.ID), content, 0)
-	pipe.HSet(ctx, c.keys.inode(inode.ID), c.inodeFieldsAtPath(inode, p, false))
+	pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(content)))
 	c.queueTouchTimes(pipe, parentInode.ID, now)
 	c.queueCreateInfo(pipe, inode)
 	if _, err := pipe.Exec(ctx); err != nil {

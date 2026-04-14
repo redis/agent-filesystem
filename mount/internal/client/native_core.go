@@ -434,7 +434,7 @@ func (c *nativeClient) Stat(ctx context.Context, p string) (*StatResult, error) 
 }
 
 func (c *nativeClient) Cat(ctx context.Context, p string) ([]byte, error) {
-	resolved, inode, err := c.resolvePath(ctx, p, true)
+	_, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return nil, err
 	}
@@ -445,8 +445,6 @@ func (c *nativeClient) Cat(ctx context.Context, p string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	inode.AtimeMs = nowMs()
-	_ = c.saveInodeMeta(ctx, resolved, inode)
 	return []byte(content), nil
 }
 
@@ -1060,6 +1058,17 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 	now := nowMs()
 	hashJSON, _ := encodeChunkHashes(hashes)
 	delta := newSize - inode.Size
+	searchFields := map[string]interface{}{
+		"search_state":  fileSearchStateLarge,
+		"grep_grams_ci": "",
+	}
+	if newSize <= fileSearchMaxIndexedBytes {
+		content, err := c.rdb.Get(ctx, c.keys.content(inode.ID)).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		searchFields = fileSearchIndexFields(content)
+	}
 	metaPipe := c.rdb.Pipeline()
 	metaPipe.HSet(ctx, c.keys.inode(inode.ID),
 		"size", newSize,
@@ -1069,6 +1078,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 		"chunk_size", chunkSize,
 		"chunk_hashes", hashJSON,
 	)
+	metaPipe.HSet(ctx, c.keys.inode(inode.ID), searchFields)
 	if delta != 0 {
 		metaPipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
 	}

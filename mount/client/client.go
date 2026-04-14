@@ -1,6 +1,8 @@
 package client
 
 import (
+	"time"
+
 	internal "github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -27,4 +29,8 @@ const (
 
 func New(rdb *redis.Client, key string) Client {
 	return internal.New(rdb, key)
+}
+
+func NewWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
+	return internal.NewWithCache(rdb, key, ttl)
 }
