@@ -68,3 +68,8 @@ ENV/
 htmlcov/
 
 .DS_Store
+
+!internal/uistatic/
+!internal/uistatic/dist/
+internal/uistatic/dist/*
+!internal/uistatic/dist/.keep

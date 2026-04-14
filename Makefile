@@ -97,6 +97,7 @@ embed-ui: ## Build UI and copy into Go embed directory.
 embed-ui: web-build
 	rm -rf internal/uistatic/dist
 	cp -r "$(UI_DIR)/dist" internal/uistatic/dist
+	touch internal/uistatic/dist/.keep
 
 web-server: ## Run afs-control-plane on $(AFS_WEB_SERVER_ADDR).
 web-server: afs-control-plane
