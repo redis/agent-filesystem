@@ -29,6 +29,18 @@ npm run build
 npm run test
 ```
 
+Because the UI depends on private `@redislabsdev/*` packages hosted on GitHub Packages,
+you must configure npm auth before `npm install` will work:
+
+```bash
+cd ui
+cp .npmrc.example .npmrc
+export NPM_AUTH_TOKEN=YOUR_TOKEN
+npm install
+```
+
+The token must be able to read the `redislabsdev` GitHub Packages scope.
+
 To run the UI against the local AFS control plane from the repo root:
 
 ```bash

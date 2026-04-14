@@ -1,5 +1,4 @@
 import { Typography } from "@redislabsdev/redis-ui-components";
-import { CheckThinIcon } from "@redislabsdev/redis-ui-icons/monochrome";
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef } from "@redislabsdev/redis-ui-table";
 import { useMemo } from "react";
@@ -12,31 +11,15 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
-  selectedDatabaseId: string | null;
-  onSelectDatabase: (databaseId: string) => void;
   onEditDatabase: (databaseId: string) => void;
   onDeleteDatabase: (databaseId: string) => void;
 };
-
-function selectedCellProps(database: AFSDatabaseScopeRecord, selectedDatabaseId: string | null) {
-  if (database.id !== selectedDatabaseId) {
-    return {};
-  }
-
-  return {
-    style: {
-      background: "rgba(71, 191, 255, 0.08)",
-    },
-  };
-}
 
 export function DatabaseTable({
   rows,
   loading = false,
   error = false,
   errorMessage = "Unable to load databases. Please retry.",
-  selectedDatabaseId,
-  onSelectDatabase,
   onEditDatabase,
   onDeleteDatabase,
 }: Props) {
@@ -44,25 +27,10 @@ export function DatabaseTable({
     () =>
       [
         {
-          id: "selected",
-          header: "",
-          size: 20,
-          minSize: 20,
-          maxSize: 20,
-          enableSorting: false,
-          getCellProps: (database) => selectedCellProps(database, selectedDatabaseId),
-          cell: ({ row }) => (
-            <SelectionCell>
-              {row.original.id === selectedDatabaseId ? <CheckThinIcon size="S" /> : null}
-            </SelectionCell>
-          ),
-        },
-        {
           accessorKey: "displayName",
           header: "Name",
           size: 120,
           enableSorting: false,
-          getCellProps: (database) => selectedCellProps(database, selectedDatabaseId),
           cell: ({ row }) => (
             <S.Stack>
               <PlainText>{row.original.displayName || row.original.databaseName}</PlainText>
@@ -79,7 +47,6 @@ export function DatabaseTable({
           header: "Endpoint",
           size: 120,
           enableSorting: false,
-          getCellProps: (database) => selectedCellProps(database, selectedDatabaseId),
           cell: ({ row }) => row.original.endpointLabel || "Not configured",
         },
         {
@@ -87,14 +54,12 @@ export function DatabaseTable({
           header: "Workspaces",
           size: 60,
           enableSorting: false,
-          getCellProps: (database) => selectedCellProps(database, selectedDatabaseId),
         },
         {
           id: "actions",
           header: "",
           size: 60,
           enableSorting: false,
-          getCellProps: (database) => selectedCellProps(database, selectedDatabaseId),
           cell: ({ row }) => (
             <S.ActionRow>
               <S.TextActionButton
@@ -119,7 +84,7 @@ export function DatabaseTable({
           ),
         },
       ] as ColumnDef<AFSDatabaseScopeRecord>[],
-    [onDeleteDatabase, onEditDatabase, onSelectDatabase, selectedDatabaseId],
+    [onDeleteDatabase, onEditDatabase],
   );
 
   return (
@@ -137,22 +102,12 @@ export function DatabaseTable({
             data={rows}
             getRowId={(row) => row.id}
             stripedRows
-            onRowClick={(rowData) => onSelectDatabase(rowData.id)}
           />
         </S.TableViewport>
       ) : null}
     </S.TableCard>
   );
 }
-
-const SelectionCell = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  min-width: 16px;
-  color: var(--afs-ink);
-`;
 
 const PlainText = styled.span`
   color: var(--afs-ink);

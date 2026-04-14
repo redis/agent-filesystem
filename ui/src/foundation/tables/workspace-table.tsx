@@ -10,11 +10,12 @@ import * as S from "./workspace-table.styles";
 type WorkspaceSortField =
   | "name"
   | "cloudAccount"
+  | "connectedAgents"
   | "databaseName"
-  | "fileCount"
   | "totalBytes"
-  | "checkpointCount"
   | "updatedAt";
+
+type RowWorkspaceSortField = Exclude<WorkspaceSortField, "connectedAgents">;
 
 type Props = {
   rows: AFSWorkspaceSummary[];
@@ -22,11 +23,16 @@ type Props = {
   error?: boolean;
   errorMessage?: string;
   toolbarAction?: ReactNode;
-  onOpenWorkspace: (workspaceId: string) => void;
-  onEditWorkspace: (workspaceId: string) => void;
-  onDeleteWorkspace: (workspaceId: string) => void;
-  deletingWorkspaceId?: string | null;
+  connectedAgentsByWorkspace?: Record<string, number>;
+  onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  onEditWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  onDeleteWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  deletingWorkspaceKey?: string | null;
 };
+
+function workspaceRowKey(workspace: AFSWorkspaceSummary) {
+  return `${workspace.databaseId}:${workspace.id}`;
+}
 
 function compareValues(
   left: string | number,
@@ -47,10 +53,11 @@ export function WorkspaceTable({
   error = false,
   errorMessage = "Unable to load workspaces. Please retry.",
   toolbarAction,
+  connectedAgentsByWorkspace = {},
   onOpenWorkspace,
   onEditWorkspace,
   onDeleteWorkspace,
-  deletingWorkspaceId = null,
+  deletingWorkspaceKey = null,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -68,11 +75,15 @@ export function WorkspaceTable({
           );
 
     return [...baseRows].sort((left, right) => {
-      const leftValue = left[sortBy];
-      const rightValue = right[sortBy];
+      const leftValue = sortBy === "connectedAgents"
+        ? connectedAgentsByWorkspace[workspaceRowKey(left)] ?? 0
+        : left[sortBy as RowWorkspaceSortField];
+      const rightValue = sortBy === "connectedAgents"
+        ? connectedAgentsByWorkspace[workspaceRowKey(right)] ?? 0
+        : right[sortBy as RowWorkspaceSortField];
       return compareValues(leftValue, rightValue, sortDirection);
     });
-  }, [rows, search, sortBy, sortDirection]);
+  }, [connectedAgentsByWorkspace, rows, search, sortBy, sortDirection]);
 
   const sorting = useMemo<SortingState>(
     () => [{ id: sortBy, desc: sortDirection === "desc" }],
@@ -93,7 +104,7 @@ export function WorkspaceTable({
               <S.WorkspaceNameButton
                 onClick={(event) => {
                   event.stopPropagation();
-                  onOpenWorkspace(row.original.id);
+                  onOpenWorkspace(row.original);
                 }}
               >
                 {row.original.name}
@@ -119,29 +130,30 @@ export function WorkspaceTable({
           ),
         },
         {
-          accessorKey: "fileCount",
-          header: "Files/Folder",
-          size: 70,
+          id: "connectedAgents",
+          header: "Agents",
+          size: 52,
           enableSorting: true,
-          cell: ({ row }) => (
-            <Typography.Body component="span">
-              {row.original.fileCount}/{row.original.folderCount}
-            </Typography.Body>
-          ),
+          cell: ({ row }) => {
+            const count = connectedAgentsByWorkspace[workspaceRowKey(row.original)] ?? 0;
+            return (
+              <S.CountCell>
+                <Typography.Body component="strong">{count}</Typography.Body>
+                <S.MetaBadge>live</S.MetaBadge>
+              </S.CountCell>
+            );
+          },
         },
         {
           accessorKey: "totalBytes",
           header: "Size",
-          size: 50,
+          size: 80,
           enableSorting: true,
-          cell: ({ row }) => formatBytes(row.original.totalBytes),
-        },
-        {
-          accessorKey: "checkpointCount",
-          header: "Checkpoints",
-          size: 65,
-          enableSorting: true,
-          cell: ({ row }) => row.original.checkpointCount,
+          cell: ({ row }) => (
+            <Typography.Body component="span">
+              {formatBytes(row.original.totalBytes)} ({row.original.fileCount} files)
+            </Typography.Body>
+          ),
         },
         {
           accessorKey: "updatedAt",
@@ -171,19 +183,19 @@ export function WorkspaceTable({
               <Menu.Content align="end">
                 <Menu.Content.Item
                   text="Open workspace"
-                  onClick={() => onOpenWorkspace(row.original.id)}
+                  onClick={() => onOpenWorkspace(row.original)}
                 />
                 <Menu.Content.Item
                   text="Edit workspace"
-                  onClick={() => onEditWorkspace(row.original.id)}
+                  onClick={() => onEditWorkspace(row.original)}
                 />
                 <Menu.Content.Item
-                  text={deletingWorkspaceId === row.original.id ? "Deleting..." : "Delete workspace"}
+                  text={deletingWorkspaceKey === workspaceRowKey(row.original) ? "Deleting..." : "Delete workspace"}
                   onClick={() => {
-                    if (deletingWorkspaceId === row.original.id) {
+                    if (deletingWorkspaceKey === workspaceRowKey(row.original)) {
                       return;
                     }
-                    onDeleteWorkspace(row.original.id);
+                    onDeleteWorkspace(row.original);
                   }}
                 />
               </Menu.Content>
@@ -191,12 +203,12 @@ export function WorkspaceTable({
           ),
         },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [deletingWorkspaceId, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace],
+    [connectedAgentsByWorkspace, deletingWorkspaceKey, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace],
   );
 
   return (
-    <S.TableCard>
-      <S.HeadingWrap>
+    <>
+      <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -216,30 +228,32 @@ export function WorkspaceTable({
       ) : null}
 
       {!loading && !error && filteredRows.length > 0 ? (
-        <S.RegistryTableViewport>
-          <Table
-            columns={columns}
-            data={filteredRows}
-            sorting={sorting}
-            manualSorting
-            onSortingChange={(nextState) => {
-              if (nextState.length === 0) {
-                setSortBy("updatedAt");
-                setSortDirection("desc");
-                return;
-              }
+        <S.TableCard>
+          <S.RegistryTableViewport>
+            <Table
+              columns={columns}
+              data={filteredRows}
+              sorting={sorting}
+              manualSorting
+              onSortingChange={(nextState) => {
+                if (nextState.length === 0) {
+                  setSortBy("updatedAt");
+                  setSortDirection("desc");
+                  return;
+                }
 
-              const next = nextState[0];
-              const nextSortBy = next.id as WorkspaceSortField;
-              setSortBy(nextSortBy);
-              setSortDirection(next.desc ? "desc" : "asc");
-            }}
-            enableSorting
-            stripedRows
-            onRowClick={(rowData) => onOpenWorkspace(rowData.id)}
-          />
-        </S.RegistryTableViewport>
+                const next = nextState[0];
+                const nextSortBy = next.id as WorkspaceSortField;
+                setSortBy(nextSortBy);
+                setSortDirection(next.desc ? "desc" : "asc");
+              }}
+              enableSorting
+              stripedRows
+              onRowClick={(rowData) => onOpenWorkspace(rowData)}
+            />
+          </S.RegistryTableViewport>
+        </S.TableCard>
       ) : null}
-    </S.TableCard>
+    </>
   );
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -79,6 +80,29 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		default:
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 		}
+	})
+
+	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListAllWorkspaceSummaries(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		workspacePath := strings.TrimPrefix(r.URL.Path, "/v1/workspaces/")
+		workspacePath = strings.Trim(workspacePath, "/")
+		if workspacePath == "" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		handleResolvedWorkspaceRoute(w, r, manager, workspacePath)
 	})
 
 	mux.HandleFunc("/v1/databases/", func(w http.ResponseWriter, r *http.Request) {
@@ -212,12 +236,117 @@ func newClientMux(manager *DatabaseManager) *http.ServeMux {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 				return
 			}
-			response, err := manager.CreateWorkspaceSession(r.Context(), databaseID, workspacePath)
+			var input createWorkspaceSessionRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.CreateWorkspaceSession(r.Context(), databaseID, workspacePath, input)
 			if err != nil {
 				writeError(w, err)
 				return
 			}
 			writeJSON(w, http.StatusCreated, response)
+		case strings.Contains(rest, "/sessions/") && strings.HasSuffix(rest, "/heartbeat"):
+			parts := strings.Split(strings.Trim(rest, "/"), "/")
+			if len(parts) != 5 || parts[0] != "workspaces" || parts[2] != "sessions" || parts[4] != "heartbeat" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			response, err := manager.HeartbeatWorkspaceSession(r.Context(), databaseID, parts[1], parts[3])
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case strings.Contains(rest, "/sessions/"):
+			parts := strings.Split(strings.Trim(rest, "/"), "/")
+			if len(parts) != 4 || parts[0] != "workspaces" || parts[2] != "sessions" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodDelete {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			if err := manager.CloseWorkspaceSession(r.Context(), databaseID, parts[1], parts[3]); err != nil {
+				writeError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			writeError(w, os.ErrNotExist)
+		}
+	})
+	mux.HandleFunc("/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		workspacePath := strings.TrimPrefix(r.URL.Path, "/workspaces/")
+		workspacePath = strings.Trim(workspacePath, "/")
+		switch {
+		case strings.HasSuffix(workspacePath, "/sessions"):
+			if manager == nil {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			workspace := strings.TrimSuffix(workspacePath, "/sessions")
+			workspace = strings.Trim(workspace, "/")
+			if workspace == "" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			var input createWorkspaceSessionRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.CreateResolvedWorkspaceSession(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		case strings.Contains(workspacePath, "/sessions/") && strings.HasSuffix(workspacePath, "/heartbeat"):
+			parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+			if len(parts) != 4 || parts[1] != "sessions" || parts[3] != "heartbeat" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			response, err := manager.HeartbeatResolvedWorkspaceSession(r.Context(), parts[0], parts[2])
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case strings.Contains(workspacePath, "/sessions/"):
+			parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+			if len(parts) != 3 || parts[1] != "sessions" {
+				writeError(w, os.ErrNotExist)
+				return
+			}
+			if r.Method != http.MethodDelete {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			if err := manager.CloseResolvedWorkspaceSession(r.Context(), parts[0], parts[2]); err != nil {
+				writeError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			writeError(w, os.ErrNotExist)
 		}
@@ -364,6 +493,18 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/sessions"):
+		workspace := strings.TrimSuffix(workspacePath, "/sessions")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListWorkspaceSessions(r.Context(), databaseID, workspace)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	default:
 		workspace := workspacePath
 		switch r.Method {
@@ -388,6 +529,188 @@ func handleWorkspaceRoute(
 			writeJSON(w, http.StatusOK, response)
 		case http.MethodDelete:
 			if err := manager.DeleteWorkspace(r.Context(), databaseID, workspace); err != nil {
+				writeError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	}
+}
+
+func handleResolvedWorkspaceRoute(
+	w http.ResponseWriter,
+	r *http.Request,
+	manager *DatabaseManager,
+	workspacePath string,
+) {
+	switch {
+	case strings.HasSuffix(workspacePath, ":fork"):
+		workspace := strings.TrimSuffix(workspacePath, ":fork")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input forkWorkspaceRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		if err := manager.ForkResolvedWorkspace(r.Context(), workspace, input.NewWorkspace); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case strings.HasSuffix(workspacePath, ":restore"):
+		workspace := strings.TrimSuffix(workspacePath, ":restore")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input restoreCheckpointRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		if err := manager.RestoreResolvedCheckpoint(r.Context(), workspace, input.CheckpointID); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case strings.HasSuffix(workspacePath, "/checkpoints"):
+		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
+		switch r.Method {
+		case http.MethodGet:
+			limit, err := queryInt(r, "limit", 100)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			response, err := manager.ListResolvedCheckpoints(r.Context(), workspace, limit)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input saveCheckpointRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			saved, err := manager.SaveResolvedCheckpoint(r.Context(), workspace, SaveCheckpointRequest{
+				Workspace:             workspace,
+				ExpectedHead:          input.ExpectedHead,
+				CheckpointID:          input.CheckpointID,
+				Manifest:              input.Manifest,
+				Blobs:                 input.Blobs,
+				FileCount:             input.FileCount,
+				DirCount:              input.DirCount,
+				TotalBytes:            input.TotalBytes,
+				SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+			})
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	case strings.HasSuffix(workspacePath, "/tree"):
+		workspace := strings.TrimSuffix(workspacePath, "/tree")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		depth, err := queryInt(r, "depth", 1)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.GetResolvedTree(
+			r.Context(),
+			workspace,
+			r.URL.Query().Get("view"),
+			r.URL.Query().Get("path"),
+			depth,
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/content"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/content")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.GetResolvedFileContent(
+			r.Context(),
+			workspace,
+			r.URL.Query().Get("view"),
+			r.URL.Query().Get("path"),
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/activity"):
+		workspace := strings.TrimSuffix(workspacePath, "/activity")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 50)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListResolvedWorkspaceActivity(r.Context(), workspace, limit)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/sessions"):
+		workspace := strings.TrimSuffix(workspacePath, "/sessions")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListResolvedWorkspaceSessions(r.Context(), workspace)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	default:
+		workspace := workspacePath
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetResolvedWorkspace(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input UpdateWorkspaceRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateResolvedWorkspace(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodDelete:
+			if err := manager.DeleteResolvedWorkspace(r.Context(), workspace); err != nil {
 				writeError(w, err)
 				return
 			}
@@ -439,6 +762,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusInternalServerError
 	case errors.Is(err, os.ErrNotExist):
 		status = http.StatusNotFound
+	case errors.Is(err, ErrAmbiguousWorkspace):
+		status = http.StatusBadRequest
 	case errors.Is(err, ErrWorkspaceConflict):
 		status = http.StatusConflict
 	case errors.Is(err, ErrUnsupportedView):

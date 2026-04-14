@@ -4,13 +4,14 @@ import styled from "styled-components";
 import {
   PageStack,
   StatCard,
-  StatDetail,
   StatGrid,
+  StatDetail,
   StatLabel,
   StatValue,
 } from "../components/afs-kit";
+import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { formatBytes } from "../foundation/api/afs";
-import { useDatabaseScope, useScopedWorkspaceSummaries } from "../foundation/database-scope";
+import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 
 export const Route = createFileRoute("/")({
   component: OverviewPage,
@@ -18,14 +19,14 @@ export const Route = createFileRoute("/")({
 
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
-  const { selectedDatabase } = useDatabaseScope();
+  const agentsQuery = useScopedAgents();
+  const { databases, isLoading: databasesLoading } = useDatabaseScope();
 
-  if (workspacesQuery.isLoading) {
+  if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  /* ── No database selected ── */
-  if (selectedDatabase == null) {
+  if (databases.length === 0) {
     return (
       <PageStack>
         <EmptyStateLayout>
@@ -35,7 +36,7 @@ function OverviewPage() {
             <Description>
               Agent Filesystem gives every agent a persistent, checkpointed workspace.
               Browse files, create recovery points, and track activity across workspaces
-              — all from one UI.
+              all from one UI.
             </Description>
             <Link to="/databases">
               <CTAButton size="large">Add database to get started</CTAButton>
@@ -48,7 +49,7 @@ function OverviewPage() {
               <FeatureTitle>Connect a Redis database</FeatureTitle>
               <FeatureBody>
                 Point AFS at any Redis instance. Workspaces, files, and checkpoints are stored as
-                Redis keys — no extra infrastructure needed.
+                Redis keys with no extra infrastructure needed.
               </FeatureBody>
             </FeatureCard>
             <FeatureCard>
@@ -75,16 +76,15 @@ function OverviewPage() {
 
   const workspaces = workspacesQuery.data;
 
-  /* ── Database selected but no workspaces ── */
   if (workspaces.length === 0) {
     return (
       <PageStack>
         <EmptyStateLayout>
           <EmptyStateContent>
-            <Headline>No workspaces in {selectedDatabase.displayName} yet</Headline>
+            <Headline>No workspaces in the catalog yet</Headline>
             <Description>
               Create your first workspace to start managing files, checkpoints, and activity
-              in this database.
+              across your connected databases.
             </Description>
             <Link to="/workspaces">
               <CTAButton size="large">Add workspace</CTAButton>
@@ -99,17 +99,22 @@ function OverviewPage() {
   const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
   const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
   const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
+  const connectedAgents = agentsQuery.data.length;
   const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
   return (
     <PageStack>
+      <AgentHeroAnimation />
       <StatGrid>
         <StatCard>
           <div>
             <StatLabel>Workspaces</StatLabel>
             <StatValue>{workspaces.length}</StatValue>
           </div>
-          <StatDetail>{workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered in this database.</StatDetail>
+          <StatDetail>
+            {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered across{" "}
+            {databases.length} database{databases.length === 1 ? "" : "s"}.
+          </StatDetail>
         </StatCard>
         <StatCard>
           <div>
@@ -124,6 +129,17 @@ function OverviewPage() {
             <StatValue>{checkpointCount}</StatValue>
           </div>
           <StatDetail>{checkpointCoverage}% of workspaces have checkpoint history.</StatDetail>
+        </StatCard>
+        <StatCard>
+          <div>
+            <StatLabel>Connected Agents</StatLabel>
+            <StatValue>{connectedAgents}</StatValue>
+          </div>
+          <StatDetail>
+            {connectedAgents === 0
+              ? "No agents are currently connected."
+              : `${connectedAgents} live ${connectedAgents === 1 ? "agent" : "agents"} reporting workspace sessions.`}
+          </StatDetail>
         </StatCard>
       </StatGrid>
     </PageStack>

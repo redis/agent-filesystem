@@ -1,5 +1,6 @@
 import type {
   AFSActivityEvent,
+  AFSAgentSession,
   AFSFile,
   AFSSavepoint,
   AFSWorkspaceCapabilities,
@@ -89,6 +90,37 @@ function buildActivity(
     kind,
     scope,
     title,
+  };
+}
+
+function buildAgent(
+  sessionId: string,
+  workspaceId: string,
+  workspaceName: string,
+  clientKind: string,
+  hostname: string,
+  operatingSystem: string,
+  localPath: string,
+  state: string,
+  startedAt: string,
+  lastSeenAt: string,
+  leaseExpiresAt: string,
+  afsVersion = "dev",
+): AFSAgentSession {
+  return {
+    sessionId,
+    workspaceId,
+    workspaceName,
+    clientKind,
+    afsVersion,
+    hostname,
+    operatingSystem,
+    localPath,
+    readonly: false,
+    state,
+    startedAt,
+    lastSeenAt,
+    leaseExpiresAt,
   };
 }
 
@@ -279,6 +311,34 @@ const paymentsWorkspace: AFSWorkspace = {
       "Captured a recovery point before the refactor.",
     ),
   ],
+  agents: [
+    buildAgent(
+      "sess-payments-sync-1",
+      "payments-portal",
+      "payments-portal",
+      "sync",
+      "maya-mbp",
+      "darwin",
+      "/Users/maya/workspaces/payments-portal",
+      "active",
+      "2026-04-03T10:18:00Z",
+      "2026-04-03T10:48:00Z",
+      "2026-04-03T10:49:00Z",
+    ),
+    buildAgent(
+      "sess-payments-mcp-1",
+      "payments-portal",
+      "payments-portal",
+      "mcp",
+      "support-gateway-01",
+      "linux",
+      "/srv/agents/payments-portal",
+      "idle",
+      "2026-04-03T09:58:00Z",
+      "2026-04-03T10:44:00Z",
+      "2026-04-03T10:45:00Z",
+    ),
+  ],
 };
 
 const memoryWorkspace: AFSWorkspace = {
@@ -312,6 +372,21 @@ const memoryWorkspace: AFSWorkspace = {
       "workspace",
       "Imported customer-memory",
       "Workspace imported from a managed Redis Cloud source.",
+    ),
+  ],
+  agents: [
+    buildAgent(
+      "sess-memory-sync-1",
+      "customer-memory",
+      "customer-memory",
+      "sync",
+      "anika-linux",
+      "linux",
+      "/home/anika/customer-memory",
+      "active",
+      "2026-04-02T16:05:00Z",
+      "2026-04-02T16:15:00Z",
+      "2026-04-02T16:16:00Z",
     ),
   ],
 };
@@ -349,6 +424,7 @@ const sandboxWorkspace: AFSWorkspace = {
       "Blank workspace provisioned for support workflows.",
     ),
   ],
+  agents: [],
 };
 
 export const initialAFSState: AFSState = {

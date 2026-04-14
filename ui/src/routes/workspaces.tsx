@@ -13,6 +13,7 @@ import {
   Field,
   FormGrid,
   PageStack,
+  Select,
   TextArea,
   TextInput,
 } from "../components/afs-kit";
@@ -25,9 +26,11 @@ import {
 import {
   type AFSDatabaseScopeRecord,
   useDatabaseScope,
+  useScopedAgents,
   useScopedWorkspaceSummaries,
 } from "../foundation/database-scope";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
+import type { AFSWorkspaceSummary } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/workspaces")({
   component: WorkspacesPage,
@@ -65,24 +68,30 @@ function createInitialFormState(database?: AFSDatabaseScopeRecord | null): Works
   };
 }
 
+function workspaceRowKey(workspaceId: string, databaseId: string) {
+  return `${databaseId}:${workspaceId}`;
+}
+
 function WorkspacesPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const workspacesQuery = useScopedWorkspaceSummaries();
-  const { selectedDatabase, selectedDatabaseId } = useDatabaseScope();
+  const agentsQuery = useScopedAgents();
+  const { databases } = useDatabaseScope();
   const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [editingWorkspaceDatabaseId, setEditingWorkspaceDatabaseId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
-    createInitialFormState(selectedDatabase),
+    createInitialFormState(databases[0] ?? null),
   );
 
   const editingWorkspaceQuery = useWorkspace(
-    selectedDatabaseId,
+    editingWorkspaceDatabaseId,
     editingWorkspaceId ?? "",
     dialogMode === "edit" && editingWorkspaceId != null,
   );
@@ -104,15 +113,23 @@ function WorkspacesPage() {
   }, [dialogMode, editingWorkspaceQuery.data]);
 
   useEffect(() => {
-    if (dialogMode !== "create" || selectedDatabase == null) {
+    if (dialogMode !== "create") {
       return;
     }
 
-    const defaults = createWorkspaceDefaults(selectedDatabase);
-    setForm((current) => ({ ...current, ...defaults }));
-  }, [dialogMode, selectedDatabase]);
+    setForm((current) => {
+      const currentDatabase = databases.find((item) => item.id === current.databaseId) ?? databases[0] ?? null;
+      const defaults = createWorkspaceDefaults(currentDatabase);
+      return { ...current, ...defaults };
+    });
+  }, [databases, dialogMode]);
 
   const workspaces = workspacesQuery.data;
+  const connectedAgentsByWorkspace = agentsQuery.data.reduce<Record<string, number>>((counts, session) => {
+    const key = workspaceRowKey(session.workspaceId, session.databaseId ?? "");
+    counts[key] = (counts[key] ?? 0) + 1;
+    return counts;
+  }, {});
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -128,25 +145,28 @@ function WorkspacesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
+    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
-    setForm(createInitialFormState(selectedDatabase));
+    setForm(createInitialFormState(databases[0] ?? null));
   }
 
   function openCreateDialog() {
-    if (selectedDatabase == null) {
+    if (databases.length === 0) {
       void navigate({ to: "/databases" });
       return;
     }
 
     setDialogMode("create");
     setEditingWorkspaceId(null);
+    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
-    setForm(createInitialFormState(selectedDatabase));
+    setForm(createInitialFormState(databases[0] ?? null));
   }
 
-  function openEditDialog(workspaceId: string) {
+  function openEditDialog(workspace: AFSWorkspaceSummary) {
     setDialogMode("edit");
-    setEditingWorkspaceId(workspaceId);
+    setEditingWorkspaceId(workspace.id);
+    setEditingWorkspaceDatabaseId(workspace.databaseId);
     setFormError(null);
   }
 
@@ -165,22 +185,17 @@ function WorkspacesPage() {
     return fallback;
   }
 
-  function openWorkspace(workspaceId: string) {
-    if (selectedDatabaseId == null) {
-      void navigate({ to: "/databases" });
-      return;
-    }
-
+  function openWorkspace(workspace: AFSWorkspaceSummary) {
     void navigate({
       to: "/workspaces/$workspaceId",
-      params: { workspaceId },
+      params: { workspaceId: workspace.id },
+      search: workspace.databaseId ? { databaseId: workspace.databaseId } : {},
     });
   }
 
-  function deleteSelectedWorkspace(workspaceId: string) {
-    const workspace = workspaces.find((item) => item.id === workspaceId);
+  function deleteSelectedWorkspace(workspace: AFSWorkspaceSummary) {
     const confirmed = window.confirm(
-      `Delete workspace "${workspace?.name ?? workspaceId}"? This removes its registry entry from the catalog.`,
+      `Delete workspace "${workspace.name}"? This removes its registry entry from the catalog.`,
     );
 
     if (!confirmed) {
@@ -188,11 +203,14 @@ function WorkspacesPage() {
     }
 
     deleteWorkspace.mutate({
-      databaseId: selectedDatabaseId ?? "",
-      workspaceId,
+      databaseId: workspace.databaseId,
+      workspaceId: workspace.id,
     }, {
       onSuccess: () => {
-        if (editingWorkspaceId === workspaceId) {
+        if (
+          editingWorkspaceId === workspace.id &&
+          editingWorkspaceDatabaseId === workspace.databaseId
+        ) {
           closeDialog();
         }
       },
@@ -209,8 +227,14 @@ function WorkspacesPage() {
         rows={workspaces}
         loading={workspacesQuery.isLoading}
         error={workspacesQuery.isError}
-        deletingWorkspaceId={
-          deleteWorkspace.isPending ? deleteWorkspace.variables?.workspaceId ?? null : null
+        connectedAgentsByWorkspace={connectedAgentsByWorkspace}
+        deletingWorkspaceKey={
+          deleteWorkspace.isPending && deleteWorkspace.variables != null
+            ? workspaceRowKey(
+                deleteWorkspace.variables.workspaceId,
+                deleteWorkspace.variables.databaseId,
+              )
+            : null
         }
         toolbarAction={(
           <Button size="medium" onClick={openCreateDialog}>
@@ -239,7 +263,7 @@ function WorkspacesPage() {
                 <DialogBody>
                   {isEditing
                     ? "Update the workspace name and description."
-                    : `Add a new workspace to ${selectedDatabase?.displayName ?? "the current database"}.`}
+                    : "Add a new workspace and choose which database will host it."}
                 </DialogBody>
               </div>
               <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>
@@ -313,6 +337,26 @@ function WorkspacesPage() {
                 />
               </Field>
 
+              {!isEditing ? (
+                <Field>
+                  Database
+                  <Select
+                    value={form.databaseId}
+                    onChange={(event) => {
+                      const nextDatabase = databases.find((item) => item.id === event.target.value);
+                      updateForm("databaseId", event.target.value);
+                      updateForm("databaseName", nextDatabase?.databaseName ?? nextDatabase?.displayName ?? "");
+                    }}
+                  >
+                    {databases.map((database) => (
+                      <option key={database.id} value={database.id}>
+                        {database.displayName || database.databaseName}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              ) : null}
+
               <Field>
                 Description
                 <TextArea
@@ -351,4 +395,3 @@ function WorkspacesPage() {
     </PageStack>
   );
 }
-

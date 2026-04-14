@@ -71,6 +71,7 @@ type UpsertDatabaseRequest = upsertDatabaseRequest
 type DatabaseManager struct {
 	mu           sync.Mutex
 	registryPath string
+	catalog      *workspaceCatalog
 	profiles     map[string]databaseProfile
 	order        []string
 	runtimes     map[string]*databaseRuntime
@@ -91,8 +92,14 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 		loadedProfiles = []databaseProfile{seedDatabaseProfile(seedCfg)}
 	}
 
+	catalog, err := openWorkspaceCatalog(configPathOverride)
+	if err != nil {
+		return nil, err
+	}
+
 	manager := &DatabaseManager{
 		registryPath: registryPath,
+		catalog:      catalog,
 		profiles:     make(map[string]databaseProfile, len(loadedProfiles)),
 		order:        make([]string, 0, len(loadedProfiles)),
 		runtimes:     make(map[string]*databaseRuntime),
@@ -109,6 +116,11 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 	}
 
 	if err := manager.saveRegistryLocked(); err != nil {
+		_ = manager.catalog.Close()
+		return nil, err
+	}
+	if err := manager.refreshWorkspaceCatalog(context.Background()); err != nil {
+		manager.Close()
 		return nil, err
 	}
 
@@ -122,6 +134,10 @@ func (m *DatabaseManager) Close() {
 	for id, runtime := range m.runtimes {
 		runtime.closeFn()
 		delete(m.runtimes, id)
+	}
+	if m.catalog != nil {
+		_ = m.catalog.Close()
+		m.catalog = nil
 	}
 }
 
@@ -229,6 +245,19 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 		record.ConnectionError = err.Error()
 	} else {
 		record.WorkspaceCount = len(workspaces.Items)
+		if m.catalog != nil {
+			for index := range workspaces.Items {
+				stampWorkspaceSummary(&workspaces.Items[index], profile)
+			}
+			if catalogErr := m.catalog.ReplaceDatabaseWorkspaces(ctx, profile.ID, workspaces.Items); catalogErr != nil {
+				return databaseRecord{}, catalogErr
+			}
+		}
+	}
+	if err != nil && m.catalog != nil {
+		if catalogErr := m.catalog.DeleteDatabaseWorkspaces(ctx, profile.ID); catalogErr != nil {
+			return databaseRecord{}, catalogErr
+		}
 	}
 	return record, nil
 }
@@ -260,6 +289,11 @@ func (m *DatabaseManager) DeleteDatabase(id string) error {
 	if oldRuntime != nil {
 		oldRuntime.closeFn()
 	}
+	if m.catalog != nil {
+		if err := m.catalog.DeleteDatabaseWorkspaces(context.Background(), id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -278,8 +312,32 @@ func (m *DatabaseManager) ListWorkspaceSummaries(ctx context.Context, databaseID
 	return response, nil
 }
 
+func (m *DatabaseManager) ListAllWorkspaceSummaries(ctx context.Context) (workspaceListResponse, error) {
+	if m.catalog != nil {
+		items, err := m.catalog.ListWorkspaces(ctx)
+		if err != nil {
+			return workspaceListResponse{}, err
+		}
+		return workspaceListResponse{Items: items}, nil
+	}
+	return m.listAllWorkspaceSummariesByFanout(ctx)
+}
+
 func (m *DatabaseManager) GetWorkspace(ctx context.Context, databaseID, workspace string) (workspaceDetail, error) {
 	service, profile, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	detail, err := service.GetWorkspace(ctx, workspace)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	stampWorkspaceDetail(&detail, profile)
+	return detail, nil
+}
+
+func (m *DatabaseManager) GetResolvedWorkspace(ctx context.Context, workspace string) (workspaceDetail, error) {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
 	if err != nil {
 		return workspaceDetail{}, err
 	}
@@ -306,6 +364,9 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 		return workspaceDetail{}, err
 	}
 	stampWorkspaceDetail(&detail, profile)
+	if err := m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(detail)); err != nil {
+		return workspaceDetail{}, err
+	}
 	return detail, nil
 }
 
@@ -325,6 +386,31 @@ func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, works
 		return workspaceDetail{}, err
 	}
 	stampWorkspaceDetail(&detail, profile)
+	if err := m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(detail)); err != nil {
+		return workspaceDetail{}, err
+	}
+	return detail, nil
+}
+
+func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	if strings.TrimSpace(input.DatabaseName) == "" {
+		input.DatabaseName = profile.Name
+	}
+	if strings.TrimSpace(input.CloudAccount) == "" {
+		input.CloudAccount = "Direct Redis"
+	}
+	detail, err := service.UpdateWorkspace(ctx, workspace, input)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	stampWorkspaceDetail(&detail, profile)
+	if err := m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(detail)); err != nil {
+		return workspaceDetail{}, err
+	}
 	return detail, nil
 }
 
@@ -333,7 +419,21 @@ func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, works
 	if err != nil {
 		return err
 	}
-	return service.DeleteWorkspace(ctx, workspace)
+	if err := service.DeleteWorkspace(ctx, workspace); err != nil {
+		return err
+	}
+	return m.deleteWorkspaceFromCatalog(ctx, databaseID, workspace)
+}
+
+func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace string) error {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if err := service.DeleteWorkspace(ctx, workspace); err != nil {
+		return err
+	}
+	return m.deleteWorkspaceFromCatalog(ctx, profile.ID, workspace)
 }
 
 func (m *DatabaseManager) ListGlobalActivity(ctx context.Context, databaseID string, limit int) (activityListResponse, error) {
@@ -352,16 +452,46 @@ func (m *DatabaseManager) ListWorkspaceActivity(ctx context.Context, databaseID,
 	return service.ListWorkspaceActivity(ctx, workspace, limit)
 }
 
+func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, workspace string, limit int) (activityListResponse, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return activityListResponse{}, err
+	}
+	return service.ListWorkspaceActivity(ctx, workspace, limit)
+}
+
 func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, workspace, checkpointID string) error {
 	service, _, err := m.serviceFor(ctx, databaseID)
 	if err != nil {
 		return err
 	}
-	return service.RestoreCheckpoint(ctx, workspace, checkpointID)
+	if err := service.RestoreCheckpoint(ctx, workspace, checkpointID); err != nil {
+		return err
+	}
+	return m.refreshWorkspaceCatalogEntry(ctx, databaseID, workspace)
+}
+
+func (m *DatabaseManager) RestoreResolvedCheckpoint(ctx context.Context, workspace, checkpointID string) error {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	if err := service.RestoreCheckpoint(ctx, workspace, checkpointID); err != nil {
+		return err
+	}
+	return m.refreshWorkspaceCatalogEntry(ctx, profile.ID, workspace)
 }
 
 func (m *DatabaseManager) ListCheckpoints(ctx context.Context, databaseID, workspace string, limit int) ([]checkpointSummary, error) {
 	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return service.ListCheckpoints(ctx, workspace, limit)
+}
+
+func (m *DatabaseManager) ListResolvedCheckpoints(ctx context.Context, workspace string, limit int) ([]checkpointSummary, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -374,7 +504,34 @@ func (m *DatabaseManager) SaveCheckpoint(ctx context.Context, databaseID, worksp
 		return false, err
 	}
 	input.Workspace = workspace
-	return service.SaveCheckpoint(ctx, input)
+	saved, err := service.SaveCheckpoint(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	if saved {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, databaseID, workspace); err != nil {
+			return false, err
+		}
+	}
+	return saved, nil
+}
+
+func (m *DatabaseManager) SaveResolvedCheckpoint(ctx context.Context, workspace string, input SaveCheckpointRequest) (bool, error) {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return false, err
+	}
+	input.Workspace = workspace
+	saved, err := service.SaveCheckpoint(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	if saved {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, profile.ID, workspace); err != nil {
+			return false, err
+		}
+	}
+	return saved, nil
 }
 
 func (m *DatabaseManager) ForkWorkspace(ctx context.Context, databaseID, sourceWorkspace, newWorkspace string) error {
@@ -382,15 +539,29 @@ func (m *DatabaseManager) ForkWorkspace(ctx context.Context, databaseID, sourceW
 	if err != nil {
 		return err
 	}
-	return service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace)
+	if err := service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace); err != nil {
+		return err
+	}
+	return m.refreshWorkspaceCatalogEntry(ctx, databaseID, newWorkspace)
 }
 
-func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID, workspace string) (workspaceSession, error) {
+func (m *DatabaseManager) ForkResolvedWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error {
+	service, profile, err := m.resolveWorkspaceService(ctx, sourceWorkspace)
+	if err != nil {
+		return err
+	}
+	if err := service.ForkWorkspace(ctx, sourceWorkspace, newWorkspace); err != nil {
+		return err
+	}
+	return m.refreshWorkspaceCatalogEntry(ctx, profile.ID, newWorkspace)
+}
+
+func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID, workspace string, input createWorkspaceSessionRequest) (workspaceSession, error) {
 	service, profile, err := m.serviceFor(ctx, databaseID)
 	if err != nil {
 		return workspaceSession{}, err
 	}
-	session, err := service.CreateWorkspaceSession(ctx, workspace)
+	session, err := service.CreateWorkspaceSession(ctx, workspace, input)
 	if err != nil {
 		return workspaceSession{}, err
 	}
@@ -406,8 +577,85 @@ func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID
 	return session, nil
 }
 
+func (m *DatabaseManager) CreateResolvedWorkspaceSession(ctx context.Context, workspace string, input createWorkspaceSessionRequest) (workspaceSession, error) {
+	service, profile, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return workspaceSession{}, err
+	}
+	session, err := service.CreateWorkspaceSession(ctx, workspace, input)
+	if err != nil {
+		return workspaceSession{}, err
+	}
+	session.DatabaseID = profile.ID
+	session.DatabaseName = profile.Name
+	session.Redis = RedisConfig{
+		RedisAddr:     profile.RedisAddr,
+		RedisUsername: profile.RedisUsername,
+		RedisPassword: profile.RedisPassword,
+		RedisDB:       profile.RedisDB,
+		RedisTLS:      profile.RedisTLS,
+	}
+	return session, nil
+}
+
+func (m *DatabaseManager) ListWorkspaceSessions(ctx context.Context, databaseID, workspace string) (workspaceSessionListResponse, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return workspaceSessionListResponse{}, err
+	}
+	return service.ListWorkspaceSessions(ctx, workspace)
+}
+
+func (m *DatabaseManager) ListResolvedWorkspaceSessions(ctx context.Context, workspace string) (workspaceSessionListResponse, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return workspaceSessionListResponse{}, err
+	}
+	return service.ListWorkspaceSessions(ctx, workspace)
+}
+
+func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) (workspaceSessionInfo, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return workspaceSessionInfo{}, err
+	}
+	return service.HeartbeatWorkspaceSession(ctx, workspace, sessionID)
+}
+
+func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string) (workspaceSessionInfo, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return workspaceSessionInfo{}, err
+	}
+	return service.HeartbeatWorkspaceSession(ctx, workspace, sessionID)
+}
+
+func (m *DatabaseManager) CloseWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) error {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return err
+	}
+	return service.CloseWorkspaceSession(ctx, workspace, sessionID)
+}
+
+func (m *DatabaseManager) CloseResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	return service.CloseWorkspaceSession(ctx, workspace, sessionID)
+}
+
 func (m *DatabaseManager) GetTree(ctx context.Context, databaseID, workspace, rawView, rawPath string, depth int) (treeResponse, error) {
 	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return treeResponse{}, err
+	}
+	return service.GetTree(ctx, workspace, rawView, rawPath, depth)
+}
+
+func (m *DatabaseManager) GetResolvedTree(ctx context.Context, workspace, rawView, rawPath string, depth int) (treeResponse, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
 	if err != nil {
 		return treeResponse{}, err
 	}
@@ -422,10 +670,24 @@ func (m *DatabaseManager) GetFileContent(ctx context.Context, databaseID, worksp
 	return service.GetFileContent(ctx, workspace, rawView, rawPath)
 }
 
+func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace, rawView, rawPath string) (fileContentResponse, error) {
+	service, _, err := m.resolveWorkspaceService(ctx, workspace)
+	if err != nil {
+		return fileContentResponse{}, err
+	}
+	return service.GetFileContent(ctx, workspace, rawView, rawPath)
+}
+
 func (m *DatabaseManager) serviceFor(ctx context.Context, databaseID string) (*Service, databaseProfile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.serviceForLocked(ctx, databaseID)
+}
+
+func (m *DatabaseManager) resolveWorkspaceService(ctx context.Context, workspace string) (*Service, databaseProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.resolveWorkspaceServiceLocked(ctx, workspace)
 }
 
 func (m *DatabaseManager) serviceForLocked(ctx context.Context, databaseID string) (*Service, databaseProfile, error) {
@@ -443,6 +705,172 @@ func (m *DatabaseManager) serviceForLocked(ctx context.Context, databaseID strin
 		m.runtimes[databaseID] = runtime
 	}
 	return NewService(runtime.cfg, runtime.store), profile, nil
+}
+
+func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, workspace string) (*Service, databaseProfile, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return nil, databaseProfile{}, fmt.Errorf("workspace id is required")
+	}
+
+	if m.catalog != nil {
+		routes, err := m.catalog.ResolveWorkspace(ctx, workspace)
+		if err != nil {
+			return nil, databaseProfile{}, err
+		}
+		switch len(routes) {
+		case 1:
+			return m.serviceForLocked(ctx, routes[0].DatabaseID)
+		case 0:
+			// Fall back to a scan so out-of-band changes can still be discovered.
+		default:
+			labels := make([]string, 0, len(routes))
+			for _, route := range routes {
+				profile := m.profiles[route.DatabaseID]
+				label := route.DatabaseID
+				if profile.Name != "" && profile.Name != route.DatabaseID {
+					label = profile.Name + " (" + route.DatabaseID + ")"
+				}
+				labels = append(labels, label)
+			}
+			sort.Strings(labels)
+			return nil, databaseProfile{}, fmt.Errorf("%w: workspace %q exists in multiple databases: %s", ErrAmbiguousWorkspace, workspace, strings.Join(labels, ", "))
+		}
+	}
+
+	var (
+		matchService *Service
+		matchProfile databaseProfile
+		matches      []databaseProfile
+	)
+
+	for _, id := range m.order {
+		service, profile, err := m.serviceForLocked(ctx, id)
+		if err != nil {
+			return nil, databaseProfile{}, err
+		}
+		exists, err := service.store.WorkspaceExists(ctx, workspace)
+		if err != nil {
+			return nil, databaseProfile{}, err
+		}
+		if !exists {
+			continue
+		}
+		if matchService == nil {
+			matchService = service
+			matchProfile = profile
+		}
+		matches = append(matches, profile)
+	}
+
+	switch len(matches) {
+	case 0:
+		return nil, databaseProfile{}, os.ErrNotExist
+	case 1:
+		return matchService, matchProfile, nil
+	default:
+		labels := make([]string, 0, len(matches))
+		for _, profile := range matches {
+			label := profile.ID
+			if profile.Name != "" && profile.Name != profile.ID {
+				label = profile.Name + " (" + profile.ID + ")"
+			}
+			labels = append(labels, label)
+		}
+		sort.Strings(labels)
+		return nil, databaseProfile{}, fmt.Errorf("%w: workspace %q exists in multiple databases: %s", ErrAmbiguousWorkspace, workspace, strings.Join(labels, ", "))
+	}
+}
+
+func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context) (workspaceListResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	items := make([]workspaceSummary, 0)
+	for _, id := range m.order {
+		service, profile, err := m.serviceForLocked(ctx, id)
+		if err != nil {
+			return workspaceListResponse{}, err
+		}
+		response, err := service.ListWorkspaceSummaries(ctx)
+		if err != nil {
+			return workspaceListResponse{}, err
+		}
+		for index := range response.Items {
+			stampWorkspaceSummary(&response.Items[index], profile)
+			items = append(items, response.Items[index])
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].UpdatedAt == items[j].UpdatedAt {
+			if items[i].Name == items[j].Name {
+				return items[i].DatabaseID < items[j].DatabaseID
+			}
+			return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
+		}
+		return items[i].UpdatedAt > items[j].UpdatedAt
+	})
+	return workspaceListResponse{Items: items}, nil
+}
+
+func (m *DatabaseManager) refreshWorkspaceCatalog(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.catalog == nil {
+		return nil
+	}
+	if err := m.catalog.PruneDatabases(ctx, m.order); err != nil {
+		return err
+	}
+	for _, id := range m.order {
+		service, profile, err := m.serviceForLocked(ctx, id)
+		if err != nil {
+			continue
+		}
+		response, err := service.ListWorkspaceSummaries(ctx)
+		if err != nil {
+			continue
+		}
+		for index := range response.Items {
+			stampWorkspaceSummary(&response.Items[index], profile)
+		}
+		if err := m.catalog.ReplaceDatabaseWorkspaces(ctx, id, response.Items); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *DatabaseManager) syncWorkspaceCatalogSummary(ctx context.Context, summary workspaceSummary) error {
+	if m.catalog == nil {
+		return nil
+	}
+	return m.catalog.UpsertWorkspace(ctx, summary)
+}
+
+func (m *DatabaseManager) deleteWorkspaceFromCatalog(ctx context.Context, databaseID, workspace string) error {
+	if m.catalog == nil {
+		return nil
+	}
+	return m.catalog.DeleteWorkspace(ctx, databaseID, workspace)
+}
+
+func (m *DatabaseManager) refreshWorkspaceCatalogEntry(ctx context.Context, databaseID, workspace string) error {
+	service, profile, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return err
+	}
+	detail, err := service.GetWorkspace(ctx, workspace)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m.deleteWorkspaceFromCatalog(ctx, databaseID, workspace)
+		}
+		return err
+	}
+	stampWorkspaceDetail(&detail, profile)
+	return m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(detail))
 }
 
 func (m *DatabaseManager) buildProfileLocked(id string, input upsertDatabaseRequest) (databaseProfile, bool, error) {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestOpenAFSStoreRejectsUnsupportedProductMode(t *testing.T) {
 	}
 }
 
-func TestOpenAFSControlPlaneSelfHostedAutoDiscoversSingleDatabase(t *testing.T) {
+func TestOpenAFSControlPlaneSelfHostedSingleDatabaseStillWorksWithoutConfiguredDatabase(t *testing.T) {
 	t.Helper()
 
 	server := newSelfHostedControlPlaneServer(t)
@@ -78,9 +79,8 @@ func TestOpenAFSControlPlaneSelfHostedAutoDiscoversSingleDatabase(t *testing.T) 
 		t.Fatalf("openAFSControlPlane() returned error: %v", err)
 	}
 	defer closeFn()
-
-	if strings.TrimSpace(loadedCfg.DatabaseID) == "" {
-		t.Fatal("expected self-hosted control plane session to resolve a database id")
+	if strings.TrimSpace(loadedCfg.DatabaseID) != "" {
+		t.Fatalf("loadedCfg.DatabaseID = %q, want empty workspace-first config", loadedCfg.DatabaseID)
 	}
 
 	workspaces, err := service.ListWorkspaceSummaries(context.Background())
@@ -91,7 +91,11 @@ func TestOpenAFSControlPlaneSelfHostedAutoDiscoversSingleDatabase(t *testing.T) 
 		t.Fatalf("workspaces = %#v, want one repo workspace", workspaces.Items)
 	}
 
-	session, err := service.CreateWorkspaceSession(context.Background(), "repo")
+	session, err := service.CreateWorkspaceSession(context.Background(), "repo", controlplane.CreateWorkspaceSessionRequest{
+		ClientKind: "sync",
+		Hostname:   "test-host",
+		LocalPath:  "/tmp/repo",
+	})
 	if err != nil {
 		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
 	}
@@ -100,6 +104,44 @@ func TestOpenAFSControlPlaneSelfHostedAutoDiscoversSingleDatabase(t *testing.T) 
 	}
 	if strings.TrimSpace(session.RedisKey) == "" {
 		t.Fatal("expected workspace session to include redis key")
+	}
+	if strings.TrimSpace(session.SessionID) == "" {
+		t.Fatal("expected workspace session to include a session id")
+	}
+}
+
+func TestPrepareSyncBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testing.T) {
+	t.Helper()
+
+	server, secondaryWorkspace, secondaryRedisAddr, secondaryDatabaseID := newMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.CurrentWorkspace = secondaryWorkspace
+	cfg.LocalPath = filepath.Join(t.TempDir(), secondaryWorkspace)
+
+	bootstrap, closeFn, err := prepareSyncBootstrap(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("prepareSyncBootstrap() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if bootstrap.workspace != secondaryWorkspace {
+		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, secondaryWorkspace)
+	}
+	if bootstrap.redisKey != workspaceRedisKey(secondaryWorkspace) {
+		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(secondaryWorkspace))
+	}
+	if bootstrap.cfg.RedisAddr != secondaryRedisAddr {
+		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, secondaryRedisAddr)
+	}
+	if bootstrap.cfg.DatabaseID != secondaryDatabaseID {
+		t.Fatalf("bootstrap DatabaseID = %q, want %q", bootstrap.cfg.DatabaseID, secondaryDatabaseID)
+	}
+	if strings.TrimSpace(bootstrap.sessionID) == "" {
+		t.Fatal("expected bootstrap session to include a session id")
 	}
 }
 
@@ -157,4 +199,62 @@ func newSelfHostedControlPlaneServer(t *testing.T) *httptest.Server {
 	server := httptest.NewServer(controlplane.NewHandler(manager, "*"))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func newMultiDatabaseSelfHostedControlPlaneServer(t *testing.T) (*httptest.Server, string, string, string) {
+	t.Helper()
+
+	primary := miniredis.RunT(t)
+	secondary := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = primary.Addr()
+	saveTempConfig(t, cfg)
+
+	manager, err := controlplane.OpenDatabaseManager(cfgPathOverride)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	databases, err := manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+	if len(databases.Items) != 1 {
+		t.Fatalf("len(databases.items) = %d, want 1", len(databases.Items))
+	}
+	primaryID := databases.Items[0].ID
+
+	secondaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
+		Name:      "secondary",
+		RedisAddr: secondary.Addr(),
+		RedisDB:   0,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDatabase(secondary) returned error: %v", err)
+	}
+
+	if _, err := manager.CreateWorkspace(context.Background(), primaryID, controlplane.CreateWorkspaceRequest{
+		Name: "repo",
+		Source: controlplane.SourceRef{
+			Kind: controlplane.SourceBlank,
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspace(primary) returned error: %v", err)
+	}
+
+	secondaryWorkspace := "repo-secondary"
+	if _, err := manager.CreateWorkspace(context.Background(), secondaryRecord.ID, controlplane.CreateWorkspaceRequest{
+		Name: secondaryWorkspace,
+		Source: controlplane.SourceRef{
+			Kind: controlplane.SourceBlank,
+		},
+	}); err != nil {
+		t.Fatalf("CreateWorkspace(secondary) returned error: %v", err)
+	}
+
+	server := httptest.NewServer(controlplane.NewHandler(manager, "*"))
+	t.Cleanup(server.Close)
+	return server, secondaryWorkspace, secondary.Addr(), secondaryRecord.ID
 }

@@ -37,12 +37,32 @@ export type AFSActivityEvent = {
   id: string;
   workspaceId?: string;
   workspaceName?: string;
+  databaseId?: string;
+  databaseName?: string;
   actor: string;
   createdAt: string;
   detail: string;
   kind: string;
   scope: string;
   title: string;
+};
+
+export type AFSAgentSession = {
+  sessionId: string;
+  workspaceId: string;
+  workspaceName: string;
+  databaseId?: string;
+  databaseName?: string;
+  clientKind: string;
+  afsVersion: string;
+  hostname: string;
+  operatingSystem: string;
+  localPath: string;
+  readonly: boolean;
+  state: string;
+  startedAt: string;
+  lastSeenAt: string;
+  leaseExpiresAt: string;
 };
 
 export type AFSTreeItem = {
@@ -99,6 +119,7 @@ export type AFSWorkspace = {
   files: AFSFile[];
   savepoints: AFSSavepoint[];
   activity: AFSActivityEvent[];
+  agents: AFSAgentSession[];
   capabilities: AFSWorkspaceCapabilities;
 };
 

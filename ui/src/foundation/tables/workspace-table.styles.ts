@@ -30,21 +30,21 @@ export const TableViewport = styled.div`
 
 export const RegistryTableViewport = styled(TableViewport)`
   /* Remove vertical separator between Updated | More actions (last two columns). */
-  thead tr > *:nth-child(6),
-  [role="row"] > [role="columnheader"]:nth-child(6) {
+  thead tr > *:nth-child(7),
+  [role="row"] > [role="columnheader"]:nth-child(7) {
     border-right: none !important;
     box-shadow: none !important;
   }
 
-  thead tr > *:nth-child(7),
-  [role="row"] > [role="columnheader"]:nth-child(7) {
+  thead tr > *:nth-child(8),
+  [role="row"] > [role="columnheader"]:nth-child(8) {
     border-left: none !important;
   }
 
-  thead tr > *:nth-child(6)::before,
-  thead tr > *:nth-child(6)::after,
-  [role="row"] > [role="columnheader"]:nth-child(6)::before,
-  [role="row"] > [role="columnheader"]:nth-child(6)::after {
+  thead tr > *:nth-child(7)::before,
+  thead tr > *:nth-child(7)::after,
+  [role="row"] > [role="columnheader"]:nth-child(7)::before,
+  [role="row"] > [role="columnheader"]:nth-child(7)::after {
     border: 0 !important;
     background: transparent !important;
     box-shadow: none !important;
@@ -77,6 +77,14 @@ export const Stack = styled.div`
   display: flex;
   flex-direction: column;
   gap: 4px;
+`;
+
+export const SingleLineText = styled.span`
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 export const StatusCaption = styled.span`

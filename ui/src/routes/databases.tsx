@@ -54,7 +54,7 @@ function createInitialFormState(
 }
 
 function DatabasesPage() {
-  const { databases, selectedDatabase, selectDatabase, saveDatabase, removeDatabase, isLoading } = useDatabaseScope();
+  const { databases, saveDatabase, removeDatabase, isLoading } = useDatabaseScope();
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -143,7 +143,7 @@ function DatabasesPage() {
   async function deleteDatabase(databaseId: string) {
     const database = databases.find((item) => item.id === databaseId);
     const confirmed = window.confirm(
-      `Remove database "${database?.displayName || database?.databaseName || databaseId}" from the picker and configuration list?`,
+      `Remove database "${database?.displayName || database?.databaseName || databaseId}" from the control plane configuration list?`,
     );
     if (!confirmed) {
       return;
@@ -165,7 +165,7 @@ function DatabasesPage() {
         <PageHeader>
           <SectionTitle
             title="Databases"
-            body="Manage database connections and select the active scope."
+            body="Manage the databases available to the control plane and workspace catalog."
           />
           <Button size="medium" onClick={openCreateDialog}>
             Add database
@@ -175,8 +175,6 @@ function DatabasesPage() {
         <DatabaseTable
           rows={databases}
           loading={isLoading}
-          selectedDatabaseId={selectedDatabase?.id ?? null}
-          onSelectDatabase={selectDatabase}
           onEditDatabase={openEditDialog}
           onDeleteDatabase={deleteDatabase}
         />
@@ -197,7 +195,7 @@ function DatabasesPage() {
                   {dialogMode === "create" ? "Add database" : `Edit ${editingDatabase?.displayName || editingDatabase?.databaseName || "database"}`}
                 </DialogTitle>
                 <DialogBody>
-                  Configure how this database appears in the selector and what connection settings it uses.
+                  Configure how this database appears in the app and what connection settings it uses.
                 </DialogBody>
               </div>
               <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>

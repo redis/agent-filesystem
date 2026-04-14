@@ -52,68 +52,73 @@ type httpSaveCheckpointResponse struct {
 }
 
 func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPlaneClient, string, error) {
+	_ = ctx
 	baseURL, err := normalizeControlPlaneURL(cfg.URL)
 	if err != nil {
 		return nil, "", err
 	}
 
 	client := &httpControlPlaneClient{
-		baseURL: baseURL,
+		baseURL:    baseURL,
+		databaseID: strings.TrimSpace(cfg.DatabaseID),
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
-
-	databaseID := strings.TrimSpace(cfg.DatabaseID)
-	if databaseID == "" {
-		list, err := client.listDatabases(ctx)
-		if err != nil {
-			return nil, "", err
-		}
-		switch len(list.Items) {
-		case 0:
-			return nil, "", fmt.Errorf("control plane at %s returned no databases", baseURL)
-		case 1:
-			databaseID = list.Items[0].ID
-		default:
-			return nil, "", fmt.Errorf("control plane at %s has %d databases; set controlPlane.databaseID or run '%s config set --control-plane-database <id>'", baseURL, len(list.Items), filepath.Base(os.Args[0]))
-		}
-	}
-
-	client.databaseID = databaseID
-	return client, databaseID, nil
+	return client, client.databaseID, nil
 }
 
 func (c *httpControlPlaneClient) ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error) {
 	var out controlplane.WorkspaceListResponse
-	err := c.doJSON(ctx, http.MethodGet, c.scopedPath("workspaces"), nil, &out, http.StatusOK)
+	path := "/v1/workspaces"
+	if c.hasScopedDatabase() {
+		path = c.scopedPath("workspaces")
+	}
+	err := c.doJSON(ctx, http.MethodGet, path, nil, &out, http.StatusOK)
 	return out, err
 }
 
 func (c *httpControlPlaneClient) GetWorkspace(ctx context.Context, workspace string) (controlplane.WorkspaceDetail, error) {
 	var out controlplane.WorkspaceDetail
-	err := c.doJSON(ctx, http.MethodGet, c.scopedPath("workspaces", workspace), nil, &out, http.StatusOK)
+	path := c.workspacePath(workspace)
+	err := c.doJSON(ctx, http.MethodGet, path, nil, &out, http.StatusOK)
 	return out, err
 }
 
 func (c *httpControlPlaneClient) CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
 	var out controlplane.WorkspaceDetail
-	err := c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces"), input, &out, http.StatusCreated)
+	databaseID, err := c.requireDatabaseID(ctx)
+	if err != nil {
+		return out, err
+	}
+	err = c.doJSON(ctx, http.MethodPost, c.scopedPathFor(databaseID, "workspaces"), input, &out, http.StatusCreated)
 	return out, err
 }
 
 func (c *httpControlPlaneClient) DeleteWorkspace(ctx context.Context, workspace string) error {
-	return c.doJSON(ctx, http.MethodDelete, c.scopedPath("workspaces", workspace), nil, nil, http.StatusNoContent)
+	return c.doJSON(ctx, http.MethodDelete, c.workspacePath(workspace), nil, nil, http.StatusNoContent)
 }
 
-func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, workspace string) (controlplane.WorkspaceSession, error) {
+func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error) {
 	var out controlplane.WorkspaceSession
-	err := c.doJSON(ctx, http.MethodPost, c.clientScopedPath("workspaces", workspace, "sessions"), nil, &out, http.StatusCreated)
+	path := c.clientWorkspacePath(workspace, "sessions")
+	err := c.doJSON(ctx, http.MethodPost, path, input, &out, http.StatusCreated)
 	return out, err
 }
 
+func (c *httpControlPlaneClient) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error) {
+	var out controlplane.WorkspaceSessionInfo
+	path := c.clientWorkspacePath(workspace, "sessions", sessionID, "heartbeat")
+	err := c.doJSON(ctx, http.MethodPost, path, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
+	return c.doJSON(ctx, http.MethodDelete, c.clientWorkspacePath(workspace, "sessions", sessionID), nil, nil, http.StatusNoContent)
+}
+
 func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error) {
-	rel := c.scopedPath("workspaces", workspace, "checkpoints")
+	rel := c.workspacePath(workspace, "checkpoints")
 	if limit > 0 {
 		rel += "?limit=" + strconv.Itoa(limit)
 	}
@@ -123,14 +128,14 @@ func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace 
 }
 
 func (c *httpControlPlaneClient) RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
-	return c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", workspace)+":restore", httpRestoreCheckpointRequest{
+	return c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":restore", httpRestoreCheckpointRequest{
 		CheckpointID: checkpointID,
 	}, nil, http.StatusNoContent)
 }
 
 func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error) {
 	var out httpSaveCheckpointResponse
-	err := c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", input.Workspace, "checkpoints"), httpSaveCheckpointRequest{
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(input.Workspace, "checkpoints"), httpSaveCheckpointRequest{
 		ExpectedHead:          input.ExpectedHead,
 		CheckpointID:          input.CheckpointID,
 		Manifest:              input.Manifest,
@@ -144,7 +149,7 @@ func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input contr
 }
 
 func (c *httpControlPlaneClient) ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error {
-	return c.doJSON(ctx, http.MethodPost, c.scopedPath("workspaces", sourceWorkspace)+":fork", httpForkWorkspaceRequest{
+	return c.doJSON(ctx, http.MethodPost, c.workspacePath(sourceWorkspace)+":fork", httpForkWorkspaceRequest{
 		NewWorkspace: newWorkspace,
 	}, nil, http.StatusNoContent)
 }
@@ -156,8 +161,12 @@ func (c *httpControlPlaneClient) listDatabases(ctx context.Context) (controlplan
 }
 
 func (c *httpControlPlaneClient) scopedPath(parts ...string) string {
+	return c.scopedPathFor(c.databaseID, parts...)
+}
+
+func (c *httpControlPlaneClient) scopedPathFor(databaseID string, parts ...string) string {
 	escaped := make([]string, 0, len(parts)+2)
-	escaped = append(escaped, "/v1/databases", url.PathEscape(c.databaseID))
+	escaped = append(escaped, "/v1/databases", url.PathEscape(databaseID))
 	for _, part := range parts {
 		escaped = append(escaped, url.PathEscape(part))
 	}
@@ -165,12 +174,61 @@ func (c *httpControlPlaneClient) scopedPath(parts ...string) string {
 }
 
 func (c *httpControlPlaneClient) clientScopedPath(parts ...string) string {
+	return c.clientScopedPathFor(c.databaseID, parts...)
+}
+
+func (c *httpControlPlaneClient) clientScopedPathFor(databaseID string, parts ...string) string {
 	escaped := make([]string, 0, len(parts)+3)
-	escaped = append(escaped, "/v1/client/databases", url.PathEscape(c.databaseID))
+	escaped = append(escaped, "/v1/client/databases", url.PathEscape(databaseID))
 	for _, part := range parts {
 		escaped = append(escaped, url.PathEscape(part))
 	}
 	return strings.Join(escaped, "/")
+}
+
+func (c *httpControlPlaneClient) workspacePath(workspace string, more ...string) string {
+	if c.hasScopedDatabase() {
+		return c.scopedPath(append([]string{"workspaces", workspace}, more...)...)
+	}
+	return c.unscopedPath("/v1/workspaces", append([]string{workspace}, more...)...)
+}
+
+func (c *httpControlPlaneClient) clientWorkspacePath(workspace string, more ...string) string {
+	if c.hasScopedDatabase() {
+		return c.clientScopedPath(append([]string{"workspaces", workspace}, more...)...)
+	}
+	return c.unscopedPath("/v1/client/workspaces", append([]string{workspace}, more...)...)
+}
+
+func (c *httpControlPlaneClient) unscopedPath(prefix string, parts ...string) string {
+	escaped := make([]string, 0, len(parts)+1)
+	escaped = append(escaped, prefix)
+	for _, part := range parts {
+		escaped = append(escaped, url.PathEscape(part))
+	}
+	return strings.Join(escaped, "/")
+}
+
+func (c *httpControlPlaneClient) hasScopedDatabase() bool {
+	return strings.TrimSpace(c.databaseID) != ""
+}
+
+func (c *httpControlPlaneClient) requireDatabaseID(ctx context.Context) (string, error) {
+	if c.hasScopedDatabase() {
+		return c.databaseID, nil
+	}
+	list, err := c.listDatabases(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch len(list.Items) {
+	case 0:
+		return "", fmt.Errorf("control plane at %s returned no databases", c.baseURL)
+	case 1:
+		return list.Items[0].ID, nil
+	default:
+		return "", fmt.Errorf("control plane at %s has %d databases; this operation requires a database choice, so set controlPlane.databaseID or run '%s config set --control-plane-database <id>'", c.baseURL, len(list.Items), filepath.Base(os.Args[0]))
+	}
 }
 
 func (c *httpControlPlaneClient) doJSON(ctx context.Context, method, rel string, requestBody any, out any, okStatuses ...int) error {

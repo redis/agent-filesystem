@@ -65,6 +65,21 @@ type SavepointMeta struct {
 	TotalBytes      int64     `json:"total_bytes"`
 }
 
+type WorkspaceSessionRecord struct {
+	SessionID       string    `json:"session_id"`
+	Workspace       string    `json:"workspace"`
+	ClientKind      string    `json:"client_kind,omitempty"`
+	AFSVersion      string    `json:"afs_version,omitempty"`
+	Hostname        string    `json:"hostname,omitempty"`
+	OperatingSystem string    `json:"os,omitempty"`
+	LocalPath       string    `json:"local_path,omitempty"`
+	Readonly        bool      `json:"readonly,omitempty"`
+	State           string    `json:"state"`
+	StartedAt       time.Time `json:"started_at"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	LeaseExpiresAt  time.Time `json:"lease_expires_at"`
+}
+
 type Manifest struct {
 	Version   int                      `json:"version"`
 	Workspace string                   `json:"workspace"`
@@ -323,6 +338,76 @@ func (s *Store) MoveWorkspaceHead(ctx context.Context, workspace, savepoint stri
 	}, workspaceMetaKey(workspace))
 }
 
+func (s *Store) PutWorkspaceSession(ctx context.Context, record WorkspaceSessionRecord) error {
+	if record.SessionID == "" {
+		return fmt.Errorf("workspace session id is required")
+	}
+	if record.Workspace == "" {
+		return fmt.Errorf("workspace session workspace is required")
+	}
+	if record.LeaseExpiresAt.IsZero() {
+		return fmt.Errorf("workspace session lease expiry is required")
+	}
+	if err := setJSON(ctx, s.rdb, workspaceSessionKey(record.Workspace, record.SessionID), record); err != nil {
+		return err
+	}
+	return s.rdb.ZAdd(ctx, workspaceSessionsKey(record.Workspace), redis.Z{
+		Score:  float64(record.LeaseExpiresAt.UTC().UnixMilli()),
+		Member: record.SessionID,
+	}).Err()
+}
+
+func (s *Store) PutWorkspaceSessionWithTTL(ctx context.Context, record WorkspaceSessionRecord, ttl time.Duration) error {
+	if record.SessionID == "" {
+		return fmt.Errorf("workspace session id is required")
+	}
+	if record.Workspace == "" {
+		return fmt.Errorf("workspace session workspace is required")
+	}
+	if err := setJSONWithTTL(ctx, s.rdb, workspaceSessionKey(record.Workspace, record.SessionID), record, ttl); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) GetWorkspaceSession(ctx context.Context, workspace, sessionID string) (WorkspaceSessionRecord, error) {
+	return getJSON[WorkspaceSessionRecord](ctx, s.rdb, workspaceSessionKey(workspace, sessionID))
+}
+
+func (s *Store) RemoveWorkspaceSessionPresence(ctx context.Context, workspace, sessionID string) error {
+	return s.rdb.ZRem(ctx, workspaceSessionsKey(workspace), sessionID).Err()
+}
+
+func (s *Store) ListWorkspaceSessions(ctx context.Context, workspace string) ([]WorkspaceSessionRecord, error) {
+	sessionIDs, err := s.rdb.ZRevRange(ctx, workspaceSessionsKey(workspace), 0, -1).Result()
+	if err != nil {
+		return nil, err
+	}
+	records := make([]WorkspaceSessionRecord, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		record, err := s.GetWorkspaceSession(ctx, workspace, sessionID)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				_ = s.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID)
+				continue
+			}
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].LastSeenAt.After(records[j].LastSeenAt)
+	})
+	return records, nil
+}
+
+func (s *Store) ListExpiredWorkspaceSessionIDs(ctx context.Context, workspace string, now time.Time) ([]string, error) {
+	return s.rdb.ZRangeByScore(ctx, workspaceSessionsKey(workspace), &redis.ZRangeBy{
+		Min: "-inf",
+		Max: strconv.FormatInt(now.UTC().UnixMilli(), 10),
+	}).Result()
+}
+
 func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[string]any) error {
 	fields := map[string]any{
 		"ts_ms":     strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
@@ -477,8 +562,16 @@ func workspaceSavepointsKey(workspace string) string {
 	return fmt.Sprintf("afs:{%s}:workspace:savepoints", workspace)
 }
 
+func workspaceSessionsKey(workspace string) string {
+	return fmt.Sprintf("afs:{%s}:workspace:sessions", workspace)
+}
+
 func workspaceAuditKey(workspace string) string {
 	return fmt.Sprintf("afs:{%s}:workspace:audit", workspace)
+}
+
+func workspaceSessionKey(workspace, sessionID string) string {
+	return fmt.Sprintf("afs:{%s}:workspace:session:%s", workspace, sessionID)
 }
 
 func savepointMetaKey(workspace, savepoint string) string {
@@ -507,6 +600,14 @@ func setJSON(ctx context.Context, cmd redis.Cmdable, key string, value any) erro
 		return err
 	}
 	return cmd.Set(ctx, key, data, 0).Err()
+}
+
+func setJSONWithTTL(ctx context.Context, cmd redis.Cmdable, key string, value any, ttl time.Duration) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return cmd.Set(ctx, key, data, ttl).Err()
 }
 
 func getJSON[T any](ctx context.Context, cmd redis.Cmdable, key string) (T, error) {

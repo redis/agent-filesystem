@@ -11,7 +11,6 @@ import {
   RedisLogoDarkFullIcon,
   RedisLogoDarkMinIcon,
 } from "@redislabsdev/redis-ui-icons/multicolor";
-import { useDatabaseScope } from "../foundation/database-scope";
 import * as S from "./sidebar.styles";
 import { isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
@@ -56,12 +55,6 @@ export function AppSidebar() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const { selectedDatabase } = useDatabaseScope();
-
-  const visibleItems = selectedDatabase == null
-    ? navigationItems.filter((item) => item.kind !== "route" || (item.path !== "/workspaces" && item.path !== "/activity"))
-    : navigationItems;
-
   const handleNavigate = (path: string) => void navigate({ to: path });
 
   const renderRouteItem = (item: NavigationItem) => (
@@ -102,7 +95,7 @@ export function AppSidebar() {
         </S.CenterSidebarHeader>
 
         <SideBar.ScrollContainer>
-          <SideBar.ItemsContainer>{visibleItems.map(renderRouteItem)}</SideBar.ItemsContainer>
+          <SideBar.ItemsContainer>{navigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
 
           <S.Spacer />
           <SideBar.Divider fullWidth />

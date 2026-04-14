@@ -1,12 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Loader } from "@redislabsdev/redis-ui-components";
-import {
-  PageStack,
-  SectionCard,
-  SectionGrid,
-  SectionHeader,
-  SectionTitle,
-} from "../components/afs-kit";
+import { PageStack } from "../components/afs-kit";
 import { useScopedActivity } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import type { AFSActivityEvent } from "../foundation/types/afs";
@@ -33,30 +27,25 @@ function ActivityPage() {
       return;
     }
 
+    const baseSearch = event.databaseId ? { databaseId: event.databaseId } : {};
+
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: event.workspaceId },
       search:
         event.scope === "savepoint"
-          ? { tab: "checkpoints" }
+          ? { ...baseSearch, tab: "checkpoints" }
           : event.scope === "file"
-            ? { tab: "files" }
+            ? { ...baseSearch, tab: "files" }
             : event.scope === "workspace"
-              ? {}
-              : { tab: "activity" },
+              ? baseSearch
+              : { ...baseSearch, tab: "activity" },
     });
   }
 
   return (
     <PageStack>
-      <SectionGrid>
-        <SectionCard $span={12}>
-          <SectionHeader>
-            <SectionTitle title="Recent activity" />
-          </SectionHeader>
-          <ActivityTable rows={events} onOpenActivity={openActivity} />
-        </SectionCard>
-      </SectionGrid>
+      <ActivityTable rows={events} onOpenActivity={openActivity} />
     </PageStack>
   );
 }

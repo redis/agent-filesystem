@@ -10,7 +10,6 @@ import {
   TabButton,
   Tabs,
 } from "../components/afs-kit";
-import { useDatabaseScope } from "../foundation/database-scope";
 import {
   useDeleteWorkspaceMutation,
   useWorkspace,
@@ -25,6 +24,7 @@ type StudioTab = "overview" | "files" | "checkpoints" | "activity";
 
 const workspaceStudioSearchSchema = z.object({
   tab: z.enum(["overview", "files", "checkpoints", "activity"]).optional(),
+  databaseId: z.string().optional(),
 });
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
@@ -36,8 +36,7 @@ function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
   const search = Route.useSearch();
-  const { selectedDatabaseId } = useDatabaseScope();
-  const workspaceQuery = useWorkspace(selectedDatabaseId, workspaceId);
+  const workspaceQuery = useWorkspace(search.databaseId, workspaceId);
   const deleteWorkspace = useDeleteWorkspaceMutation();
 
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
@@ -56,10 +55,13 @@ function WorkspaceStudioPage() {
   }, [workspace]);
 
   function setStudioTab(nextTab: StudioTab) {
+    const nextDatabaseId = workspace?.databaseId ?? search.databaseId;
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId },
-      search: nextTab === "overview" ? {} : { tab: nextTab },
+      search: nextTab === "overview"
+        ? (nextDatabaseId ? { databaseId: nextDatabaseId } : {})
+        : { ...(nextDatabaseId ? { databaseId: nextDatabaseId } : {}), tab: nextTab },
       replace: true,
     });
   }
@@ -74,7 +76,7 @@ function WorkspaceStudioPage() {
     }
 
     deleteWorkspace.mutate({
-      databaseId: selectedDatabaseId ?? "",
+      databaseId: workspace.databaseId,
       workspaceId,
     }, {
       onSuccess: () => {
@@ -85,10 +87,6 @@ function WorkspaceStudioPage() {
 
   if (workspaceQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
-  }
-
-  if (selectedDatabaseId == null) {
-    throw new Error("No database selected.");
   }
 
   if (workspace == null) {
@@ -110,13 +108,30 @@ function WorkspaceStudioPage() {
           <BreadcrumbSeparator>/</BreadcrumbSeparator>
           <BreadcrumbCurrent>{workspace.name}</BreadcrumbCurrent>
         </BreadcrumbGroup>
-        <DeleteWorkspaceButton
-          size="large"
-          disabled={deleteWorkspace.isPending}
-          onClick={deleteCurrentWorkspace}
-        >
-          {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
-        </DeleteWorkspaceButton>
+        <StudioActions>
+          <ViewAgentsButton
+            kind="ghost"
+            size="large"
+            onClick={() => {
+              void navigate({
+                to: "/agents",
+                search: {
+                  workspaceId,
+                  databaseId: workspace.databaseId,
+                },
+              });
+            }}
+          >
+            View agents
+          </ViewAgentsButton>
+          <DeleteWorkspaceButton
+            size="large"
+            disabled={deleteWorkspace.isPending}
+            onClick={deleteCurrentWorkspace}
+          >
+            {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
+          </DeleteWorkspaceButton>
+        </StudioActions>
       </StudioNavRow>
 
       <SectionGrid>
@@ -143,7 +158,7 @@ function WorkspaceStudioPage() {
       {tab === "files" ? (
         <FilesTab
           workspace={workspace}
-          databaseId={selectedDatabaseId}
+          databaseId={workspace.databaseId}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
         />
@@ -152,7 +167,7 @@ function WorkspaceStudioPage() {
       {tab === "checkpoints" ? (
         <CheckpointsTab
           workspace={workspace}
-          databaseId={selectedDatabaseId}
+          databaseId={workspace.databaseId}
           onBrowserViewChange={setBrowserView}
           onTabChange={setStudioTab}
         />
@@ -174,6 +189,18 @@ const StudioNavRow = styled.div`
   justify-content: space-between;
   gap: 16px;
   min-height: 24px;
+`;
+
+const StudioActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  @media (max-width: 720px) {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
 `;
 
 const BreadcrumbGroup = styled.div`
@@ -206,6 +233,12 @@ const BreadcrumbCurrent = styled.span`
   color: var(--afs-muted);
   font-size: 14px;
   font-weight: 500;
+`;
+
+const ViewAgentsButton = styled(Button)`
+  && {
+    white-space: nowrap;
+  }
 `;
 
 const DeleteWorkspaceButton = styled(Button)`

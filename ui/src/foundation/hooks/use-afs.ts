@@ -19,12 +19,14 @@ import type {
 const afsKeys = {
   all: ["afs"] as const,
   databases: () => [...afsKeys.all, "databases"] as const,
-  workspaceSummaries: (databaseId: string) =>
-    [...afsKeys.all, "databases", databaseId, "workspace-summaries"] as const,
-  workspace: (databaseId: string, workspaceId: string) =>
-    [...afsKeys.all, "databases", databaseId, "workspaces", workspaceId] as const,
-  activity: (databaseId: string, limit: number) =>
-    [...afsKeys.all, "databases", databaseId, "activity", limit] as const,
+  workspaceSummaries: (databaseId: string | null) =>
+    [...afsKeys.all, "workspaces", databaseId ?? "all", "summaries"] as const,
+  workspace: (databaseId: string | null, workspaceId: string) =>
+    [...afsKeys.all, "workspaces", databaseId ?? "all", workspaceId] as const,
+  agents: (databaseId: string | null) =>
+    [...afsKeys.all, "agents", databaseId ?? "all"] as const,
+  activity: (databaseId: string | null, limit: number) =>
+    [...afsKeys.all, "activity", databaseId ?? "all", limit] as const,
   workspaceTree: (input: GetWorkspaceTreeInput) =>
     [
       ...afsKeys.all,
@@ -62,9 +64,9 @@ export function useDatabases() {
 export function useWorkspaceSummaries(databaseId: string | null, enabled = true) {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.workspaceSummaries(databaseId ?? "none"),
+      queryKey: afsKeys.workspaceSummaries(databaseId),
       queryFn: () => afsApi.listWorkspaceSummaries(databaseId ?? ""),
-      enabled: enabled && databaseId != null && databaseId !== "",
+      enabled,
     }),
   );
 }
@@ -72,9 +74,19 @@ export function useWorkspaceSummaries(databaseId: string | null, enabled = true)
 export function useWorkspace(databaseId: string | null, workspaceId: string, enabled = true) {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.workspace(databaseId ?? "none", workspaceId),
+      queryKey: afsKeys.workspace(databaseId, workspaceId),
       queryFn: () => afsApi.getWorkspace(databaseId ?? "", workspaceId),
-      enabled: enabled && databaseId != null && databaseId !== "" && workspaceId !== "",
+      enabled: enabled && workspaceId !== "",
+    }),
+  );
+}
+
+export function useAgents(databaseId: string | null, enabled = true) {
+  return useQuery(
+    queryOptions({
+      queryKey: afsKeys.agents(databaseId),
+      queryFn: () => afsApi.listAgents(databaseId ?? ""),
+      enabled,
     }),
   );
 }
@@ -82,9 +94,9 @@ export function useWorkspace(databaseId: string | null, workspaceId: string, ena
 export function useActivity(databaseId: string | null, limit = 50, enabled = true) {
   return useQuery(
     queryOptions({
-      queryKey: afsKeys.activity(databaseId ?? "none", limit),
+      queryKey: afsKeys.activity(databaseId, limit),
       queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
-      enabled: enabled && databaseId != null && databaseId !== "",
+      enabled,
     }),
   );
 }

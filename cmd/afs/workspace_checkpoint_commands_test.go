@@ -105,6 +105,35 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	}
 }
 
+func TestWorkspaceListSelfHostedAggregatesAcrossDatabasesWithoutConfiguredDatabase(t *testing.T) {
+	t.Helper()
+
+	server, secondaryWorkspace, _, _ := newMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.CurrentWorkspace = secondaryWorkspace
+	saveTempConfig(t, cfg)
+
+	listOutput, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "list"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
+	}
+	if !strings.Contains(listOutput, "workspaces on "+server.URL+" (auto database)") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want workspace-first managed title", listOutput)
+	}
+	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, secondaryWorkspace) {
+		t.Fatalf("cmdWorkspace(list) output = %q, want workspaces from both databases", listOutput)
+	}
+	if !strings.Contains(listOutput, "✓ "+secondaryWorkspace) {
+		t.Fatalf("cmdWorkspace(list) output = %q, want selected workspace marker for %q", listOutput, secondaryWorkspace)
+	}
+}
+
 func TestWorkspaceCreateSuggestsMountFirst(t *testing.T) {
 	t.Helper()
 

@@ -2,7 +2,9 @@ import type { IconType } from "@redislabsdev/redis-ui-icons";
 import {
   ClusterIcon,
   DashboardIcon,
+  DatabaseIcon,
   NotificationsIcon,
+  SupportIcon,
 } from "@redislabsdev/redis-ui-icons";
 
 export type SidebarPanelId = "root" | "workspaces";
@@ -32,6 +34,8 @@ export type NavigationTitleParts = {
 export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Overview", path: "/", icon: DashboardIcon },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: ClusterIcon },
+  { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
+  { kind: "route", label: "Agents", path: "/agents", icon: SupportIcon },
   {
     kind: "route",
     label: "Activity",
@@ -74,6 +78,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
       section: "Workspaces",
       page: "Studio",
     };
+  }
+
+  if (pathname.startsWith("/agents")) {
+    return { page: "Agents" };
   }
 
   for (const item of navigationItems) {

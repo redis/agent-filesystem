@@ -2,16 +2,16 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 import { afsApi, getAFSClientMode } from "./api/afs";
 import {
-  useActivity,
   useDatabases,
   useDeleteDatabaseMutation,
   useSaveDatabaseMutation,
+  useActivity,
+  useAgents,
   useWorkspaceSummaries,
 } from "./hooks/use-afs";
 import type { AFSClientMode, SaveDatabaseInput } from "./types/afs";
 
 const LEGACY_SAVED_DATABASES_STORAGE_KEY = "afs_saved_databases_v1";
-const SELECTED_DATABASE_STORAGE_KEY = "afs_selected_database_v1";
 
 export type AFSDatabaseScopeRecord = {
   id: string;
@@ -42,19 +42,12 @@ type LegacySavedDatabaseRecord = {
 type DatabaseScopeContextValue = {
   clientMode: AFSClientMode;
   databases: AFSDatabaseScopeRecord[];
-  selectedDatabase: AFSDatabaseScopeRecord | null;
-  selectedDatabaseId: string | null;
   isLoading: boolean;
-  selectDatabase: (databaseId: string) => void;
   saveDatabase: (input: SaveDatabaseInput) => Promise<void>;
   removeDatabase: (databaseId: string) => Promise<void>;
 };
 
 const DatabaseScopeContext = createContext<DatabaseScopeContextValue | null>(null);
-
-function readSelectedDatabaseId() {
-  return localStorage.getItem(SELECTED_DATABASE_STORAGE_KEY);
-}
 
 function readLegacySavedDatabases(): LegacySavedDatabaseRecord[] {
   const raw = localStorage.getItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
@@ -95,36 +88,12 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const databasesQuery = useDatabases();
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
-  const [selectedDatabaseIdState, setSelectedDatabaseIdState] = useState(readSelectedDatabaseId);
   const [legacyMigrated, setLegacyMigrated] = useState(clientMode !== "http");
 
   const databases = useMemo(
     () => (databasesQuery.data ?? []).map(mapDatabaseRecord),
     [databasesQuery.data],
   );
-
-  useEffect(() => {
-    if (selectedDatabaseIdState == null && databases.length > 0) {
-      setSelectedDatabaseIdState(databases[0].id);
-      return;
-    }
-
-    if (
-      selectedDatabaseIdState != null &&
-      !databases.some((item) => item.id === selectedDatabaseIdState) &&
-      databases.length > 0
-    ) {
-      setSelectedDatabaseIdState(databases[0].id);
-    }
-  }, [databases, selectedDatabaseIdState]);
-
-  useEffect(() => {
-    if (selectedDatabaseIdState == null) {
-      localStorage.removeItem(SELECTED_DATABASE_STORAGE_KEY);
-      return;
-    }
-    localStorage.setItem(SELECTED_DATABASE_STORAGE_KEY, selectedDatabaseIdState);
-  }, [selectedDatabaseIdState]);
 
   useEffect(() => {
     if (clientMode !== "http" || legacyMigrated || databasesQuery.isLoading) {
@@ -175,34 +144,16 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     };
   }, [clientMode, databases, databasesQuery, legacyMigrated]);
 
-  const selectedDatabase = useMemo<AFSDatabaseScopeRecord | null>(() => {
-    if (selectedDatabaseIdState != null) {
-      const matching = databases.find((item) => item.id === selectedDatabaseIdState);
-      if (matching != null) {
-        return matching;
-      }
-    }
-    return databases[0] ?? null;
-  }, [databases, selectedDatabaseIdState]);
-
   const value = useMemo<DatabaseScopeContextValue>(
     () => ({
       clientMode,
       databases,
-      selectedDatabase,
-      selectedDatabaseId: selectedDatabase?.id ?? null,
       isLoading: databasesQuery.isLoading,
-      selectDatabase: (databaseId: string) => {
-        setSelectedDatabaseIdState(databaseId);
-      },
       saveDatabase: async (input: SaveDatabaseInput) => {
         await saveDatabaseMutation.mutateAsync(input);
       },
       removeDatabase: async (databaseId: string) => {
         await deleteDatabaseMutation.mutateAsync(databaseId);
-        if (selectedDatabaseIdState === databaseId) {
-          setSelectedDatabaseIdState(null);
-        }
       },
     }),
     [
@@ -211,8 +162,6 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
       databasesQuery.isLoading,
       deleteDatabaseMutation,
       saveDatabaseMutation,
-      selectedDatabase,
-      selectedDatabaseIdState,
     ],
   );
 
@@ -233,8 +182,7 @@ export function useDatabaseScope() {
 }
 
 export function useScopedWorkspaceSummaries() {
-  const { selectedDatabaseId } = useDatabaseScope();
-  const query = useWorkspaceSummaries(selectedDatabaseId);
+  const query = useWorkspaceSummaries(null);
 
   return {
     ...query,
@@ -243,8 +191,16 @@ export function useScopedWorkspaceSummaries() {
 }
 
 export function useScopedActivity(limit = 50) {
-  const { selectedDatabaseId } = useDatabaseScope();
-  const query = useActivity(selectedDatabaseId, limit);
+  const query = useActivity(null, limit);
+
+  return {
+    ...query,
+    data: query.data ?? [],
+  };
+}
+
+export function useScopedAgents() {
+  const query = useAgents(null);
 
   return {
     ...query,

@@ -61,7 +61,9 @@ type afsControlPlane interface {
 	GetWorkspace(ctx context.Context, workspace string) (controlplane.WorkspaceDetail, error)
 	CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error)
 	DeleteWorkspace(ctx context.Context, workspace string) error
-	CreateWorkspaceSession(ctx context.Context, workspace string) (controlplane.WorkspaceSession, error)
+	CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error)
+	HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error)
+	CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)
@@ -148,6 +150,14 @@ func openAFSBackendSession(ctx context.Context) (*afsBackendSession, error) {
 		return nil, err
 	}
 
+	return openAFSBackendSessionForConfig(ctx, cfg)
+}
+
+func openAFSBackendSessionForConfig(ctx context.Context, cfg config) (*afsBackendSession, error) {
+	if err := resolveConfigPaths(&cfg); err != nil {
+		return nil, err
+	}
+
 	backend, err := productBackendForConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -165,6 +175,14 @@ func openAFSBackendSession(ctx context.Context) (*afsBackendSession, error) {
 
 func openAFSControlPlane(ctx context.Context) (config, afsControlPlane, func(), error) {
 	session, err := openAFSBackendSession(ctx)
+	if err != nil {
+		return config{}, nil, func() {}, err
+	}
+	return session.cfg, session.controlPlane, session.close, nil
+}
+
+func openAFSControlPlaneForConfig(ctx context.Context, cfg config) (config, afsControlPlane, func(), error) {
+	session, err := openAFSBackendSessionForConfig(ctx, cfg)
 	if err != nil {
 		return config{}, nil, func() {}, err
 	}

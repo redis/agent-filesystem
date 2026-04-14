@@ -25,16 +25,20 @@ type syncBootstrap struct {
 	redisKey        string
 	headCheckpoint  string
 	initializedRoot bool
+	sessionID       string
+	heartbeatEvery  time.Duration
 }
 
 type syncDaemonBootstrap struct {
-	Config    config `json:"config"`
-	Workspace string `json:"workspace"`
-	RedisKey  string `json:"redis_key"`
+	Config                   config `json:"config"`
+	Workspace                string `json:"workspace"`
+	RedisKey                 string `json:"redis_key"`
+	SessionID                string `json:"session_id,omitempty"`
+	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds,omitempty"`
 }
 
 func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(), error) {
-	resolvedCfg, service, closeFn, err := openAFSControlPlane(ctx)
+	resolvedCfg, service, closeFn, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
 		return syncBootstrap{}, func() {}, err
 	}
@@ -45,7 +49,8 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 		return syncBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can sync: %w", err)
 	}
 
-	session, err := service.CreateWorkspaceSession(ctx, workspace)
+	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
+	session, err := service.CreateWorkspaceSession(ctx, workspace, sessionInput)
 	if err != nil {
 		closeFn()
 		return syncBootstrap{}, func() {}, err
@@ -53,6 +58,7 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 
 	runtimeCfg := resolvedCfg
 	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
 	runtimeCfg.RedisAddr = session.Redis.RedisAddr
 	runtimeCfg.RedisUsername = session.Redis.RedisUsername
 	runtimeCfg.RedisPassword = session.Redis.RedisPassword
@@ -65,6 +71,8 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 		redisKey:        session.RedisKey,
 		headCheckpoint:  session.HeadCheckpointID,
 		initializedRoot: session.Initialized,
+		sessionID:       strings.TrimSpace(session.SessionID),
+		heartbeatEvery:  time.Duration(session.HeartbeatIntervalSeconds) * time.Second,
 	}, closeFn, nil
 }
 
@@ -152,20 +160,30 @@ func startSyncServices(cfg config, foreground bool) error {
 		// --interactive: keep the daemon in this process with logs on stderr.
 		// Don't stop the daemon we just started — it's already running.
 		st := state{
-			StartedAt:        time.Now().UTC(),
-			RedisAddr:        runtimeCfg.RedisAddr,
-			RedisDB:          runtimeCfg.RedisDB,
-			CurrentWorkspace: bootstrap.workspace,
-			MountBackend:     mountBackendNone,
-			ReadOnly:         runtimeCfg.ReadOnly,
-			RedisKey:         bootstrap.redisKey,
-			Mode:             modeSync,
-			SyncPID:          os.Getpid(),
-			LocalPath:        localRoot,
-			SyncLog:          runtimeCfg.SyncLog,
+			StartedAt:            time.Now().UTC(),
+			ProductMode:          runtimeCfg.ProductMode,
+			ControlPlaneURL:      runtimeCfg.URL,
+			ControlPlaneDatabase: runtimeCfg.DatabaseID,
+			SessionID:            bootstrap.sessionID,
+			RedisAddr:            runtimeCfg.RedisAddr,
+			RedisDB:              runtimeCfg.RedisDB,
+			CurrentWorkspace:     bootstrap.workspace,
+			MountBackend:         mountBackendNone,
+			ReadOnly:             runtimeCfg.ReadOnly,
+			RedisKey:             bootstrap.redisKey,
+			Mode:                 modeSync,
+			SyncPID:              os.Getpid(),
+			LocalPath:            localRoot,
+			SyncLog:              runtimeCfg.SyncLog,
 		}
 		if err := saveState(st); err != nil {
 			daemon.Stop()
+			return err
+		}
+		stopSessionLifecycle, err := startManagedWorkspaceSessionLifecycle(runtimeCfg, bootstrap.workspace, bootstrap.sessionID, bootstrap.heartbeatEvery)
+		if err != nil {
+			daemon.Stop()
+			_ = os.Remove(statePath())
 			return err
 		}
 
@@ -185,6 +203,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		// Full cleanup — same as `afs down`.
 		fmt.Println()
 		stopStep := startStep("Stopping sync daemon")
+		stopSessionLifecycle()
 		cancel()
 		daemon.Stop()
 		stopStep.succeed("clean")
@@ -211,30 +230,37 @@ func startSyncServices(cfg config, foreground bool) error {
 	var daemonBootstrap *syncDaemonBootstrap
 	if productMode, _ := effectiveProductMode(cfg); productMode != productModeDirect {
 		daemonBootstrap = &syncDaemonBootstrap{
-			Config:    runtimeCfg,
-			Workspace: bootstrap.workspace,
-			RedisKey:  bootstrap.redisKey,
+			Config:                   runtimeCfg,
+			Workspace:                bootstrap.workspace,
+			RedisKey:                 bootstrap.redisKey,
+			SessionID:                bootstrap.sessionID,
+			HeartbeatIntervalSeconds: int(bootstrap.heartbeatEvery / time.Second),
 		}
 	}
 	daemonPID, err := startSyncDaemonProcess(runtimeCfg, daemonBootstrap)
 	if err != nil {
 		daemonStep.fail(err.Error())
+		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
 	daemonStep.succeed(fmt.Sprintf("pid %d", daemonPID))
 
 	st := state{
-		StartedAt:        time.Now().UTC(),
-		RedisAddr:        runtimeCfg.RedisAddr,
-		RedisDB:          runtimeCfg.RedisDB,
-		CurrentWorkspace: bootstrap.workspace,
-		MountBackend:     mountBackendNone,
-		ReadOnly:         runtimeCfg.ReadOnly,
-		RedisKey:         bootstrap.redisKey,
-		Mode:             modeSync,
-		SyncPID:          daemonPID,
-		LocalPath:        localRoot,
-		SyncLog:          runtimeCfg.SyncLog,
+		StartedAt:            time.Now().UTC(),
+		ProductMode:          runtimeCfg.ProductMode,
+		ControlPlaneURL:      runtimeCfg.URL,
+		ControlPlaneDatabase: runtimeCfg.DatabaseID,
+		SessionID:            bootstrap.sessionID,
+		RedisAddr:            runtimeCfg.RedisAddr,
+		RedisDB:              runtimeCfg.RedisDB,
+		CurrentWorkspace:     bootstrap.workspace,
+		MountBackend:         mountBackendNone,
+		ReadOnly:             runtimeCfg.ReadOnly,
+		RedisKey:             bootstrap.redisKey,
+		Mode:                 modeSync,
+		SyncPID:              daemonPID,
+		LocalPath:            localRoot,
+		SyncLog:              runtimeCfg.SyncLog,
 	}
 	if err := saveState(st); err != nil {
 		return err
@@ -303,7 +329,7 @@ func startSyncDaemonProcess(cfg config, bootstrap *syncDaemonBootstrap) (int, er
 // runSyncDaemon is the entry point for the `_sync-daemon` child process.
 // It connects to Redis, starts the sync daemon, and blocks until SIGTERM.
 func runSyncDaemon() error {
-	cfg, workspace, mountKey, err := loadSyncDaemonRuntime()
+	cfg, workspace, mountKey, sessionID, heartbeatEvery, err := loadSyncDaemonRuntime()
 	if err != nil {
 		return err
 	}
@@ -344,6 +370,11 @@ func runSyncDaemon() error {
 	if err := daemon.StartSteadyStateOnly(ctx); err != nil {
 		return err
 	}
+	stopSessionLifecycle, err := startManagedWorkspaceSessionLifecycle(cfg, workspace, sessionID, heartbeatEvery)
+	if err != nil {
+		daemon.Stop()
+		return err
+	}
 
 	fmt.Fprintf(os.Stderr, "afs sync daemon: running for workspace %s at %s (pid %d)\n", workspace, localRoot, os.Getpid())
 
@@ -353,46 +384,47 @@ func runSyncDaemon() error {
 	signal.Stop(sigCh)
 
 	fmt.Fprintf(os.Stderr, "afs sync daemon: shutting down\n")
+	stopSessionLifecycle()
 	cancel()
 	daemon.Stop()
 	return nil
 }
 
-func loadSyncDaemonRuntime() (config, string, string, error) {
+func loadSyncDaemonRuntime() (config, string, string, string, time.Duration, error) {
 	bootstrap, ok, err := loadSyncDaemonBootstrap()
 	if err != nil {
-		return config{}, "", "", err
+		return config{}, "", "", "", 0, err
 	}
 	if ok {
 		cfg := bootstrap.Config
 		if err := resolveConfigPaths(&cfg); err != nil {
-			return config{}, "", "", fmt.Errorf("resolve bootstrap config: %w", err)
+			return config{}, "", "", "", 0, fmt.Errorf("resolve bootstrap config: %w", err)
 		}
 		if strings.TrimSpace(bootstrap.Workspace) == "" {
-			return config{}, "", "", errors.New("sync bootstrap is missing workspace")
+			return config{}, "", "", "", 0, errors.New("sync bootstrap is missing workspace")
 		}
 		if strings.TrimSpace(bootstrap.RedisKey) == "" {
-			return config{}, "", "", errors.New("sync bootstrap is missing redis key")
+			return config{}, "", "", "", 0, errors.New("sync bootstrap is missing redis key")
 		}
-		return cfg, strings.TrimSpace(bootstrap.Workspace), strings.TrimSpace(bootstrap.RedisKey), nil
+		return cfg, strings.TrimSpace(bootstrap.Workspace), strings.TrimSpace(bootstrap.RedisKey), strings.TrimSpace(bootstrap.SessionID), time.Duration(bootstrap.HeartbeatIntervalSeconds) * time.Second, nil
 	}
 
 	cfg, err := loadConfig()
 	if err != nil {
-		return config{}, "", "", fmt.Errorf("load config: %w", err)
+		return config{}, "", "", "", 0, fmt.Errorf("load config: %w", err)
 	}
 	if err := resolveConfigPaths(&cfg); err != nil {
-		return config{}, "", "", fmt.Errorf("resolve config: %w", err)
+		return config{}, "", "", "", 0, fmt.Errorf("resolve config: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	bootstrapState, closeFn, err := prepareSyncBootstrap(ctx, cfg)
 	if err != nil {
-		return config{}, "", "", err
+		return config{}, "", "", "", 0, err
 	}
 	defer closeFn()
-	return bootstrapState.cfg, bootstrapState.workspace, bootstrapState.redisKey, nil
+	return bootstrapState.cfg, bootstrapState.workspace, bootstrapState.redisKey, bootstrapState.sessionID, bootstrapState.heartbeatEvery, nil
 }
 
 func writeSyncDaemonBootstrap(bootstrap syncDaemonBootstrap) (string, error) {
@@ -506,6 +538,7 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 	if workspace := strings.TrimSpace(st.CurrentWorkspace); workspace != "" {
 		_ = removeSyncState(workspace)
 	}
+	closeManagedWorkspaceSession(configFromState(st), strings.TrimSpace(st.CurrentWorkspace), strings.TrimSpace(st.SessionID))
 
 	if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return true, err

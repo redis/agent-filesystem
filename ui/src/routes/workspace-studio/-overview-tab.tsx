@@ -2,13 +2,17 @@ import styled from "styled-components";
 import { SectionCard, SectionGrid, SectionHeader, SectionTitle } from "../../components/afs-kit";
 import { formatBytes } from "../../foundation/api/afs";
 import type { AFSWorkspaceDetail } from "../../foundation/types/afs";
+import { Button } from "@redislabsdev/redis-ui-components";
+import { useNavigate } from "@tanstack/react-router";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
 };
 
 export function OverviewTab({ workspace }: Props) {
+  const navigate = useNavigate();
   const latestActivity = workspace.activity[0] ?? null;
+  const connectedAgents = workspace.agents.length;
 
   return (
     <SectionGrid>
@@ -29,6 +33,29 @@ export function OverviewTab({ workspace }: Props) {
             <StatusRow>
               <StatusLabel>Checkpoints</StatusLabel>
               <StatusValue>{workspace.checkpointCount.toLocaleString()}</StatusValue>
+            </StatusRow>
+            <StatusRow>
+              <StatusLabel>Connected agents</StatusLabel>
+              <StatusValue>
+                <AgentsCell>
+                  <span>{connectedAgents.toLocaleString()}</span>
+                  <OpenAgentsButton
+                    kind="ghost"
+                    size="small"
+                    onClick={() => {
+                      void navigate({
+                        to: "/agents",
+                        search: {
+                          workspaceId: workspace.id,
+                          databaseId: workspace.databaseId,
+                        },
+                      });
+                    }}
+                  >
+                    Open agents
+                  </OpenAgentsButton>
+                </AgentsCell>
+              </StatusValue>
             </StatusRow>
             <StatusRow>
               <StatusLabel>Size</StatusLabel>
@@ -96,4 +123,17 @@ const StatusValue = styled.td`
   font-size: 14px;
   line-height: 1.5;
   text-align: left;
+`;
+
+const AgentsCell = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+`;
+
+const OpenAgentsButton = styled(Button)`
+  && {
+    white-space: nowrap;
+  }
 `;

@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -26,8 +28,22 @@ const (
 	SourceCloudImport = sourceCloudImport
 )
 
+const (
+	workspaceSessionStateStarting = "starting"
+	workspaceSessionStateActive   = "active"
+	workspaceSessionStateStale    = "stale"
+	workspaceSessionStateClosed   = "closed"
+)
+
+const (
+	workspaceSessionHeartbeatInterval = 20 * time.Second
+	workspaceSessionLeaseTTL          = 65 * time.Second
+	workspaceSessionRecordTTL         = 24 * time.Hour
+)
+
 var ErrUnsupportedView = errors.New("control plane operation is not available for this workspace view")
 var ErrWorkspaceConflict = errors.New("control plane workspace conflict")
+var ErrAmbiguousWorkspace = errors.New("control plane workspace is ambiguous")
 
 type capabilities struct {
 	BrowseHead        bool `json:"browse_head"`
@@ -171,15 +187,45 @@ type restoreCheckpointRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 }
 
+type createWorkspaceSessionRequest struct {
+	ClientKind      string `json:"client_kind,omitempty"`
+	AFSVersion      string `json:"afs_version,omitempty"`
+	Hostname        string `json:"hostname,omitempty"`
+	OperatingSystem string `json:"os,omitempty"`
+	LocalPath       string `json:"local_path,omitempty"`
+	Readonly        bool   `json:"readonly,omitempty"`
+}
+
 type workspaceSession struct {
-	SessionID        string      `json:"session_id,omitempty"`
-	Workspace        string      `json:"workspace"`
-	DatabaseID       string      `json:"database_id,omitempty"`
-	DatabaseName     string      `json:"database_name,omitempty"`
-	RedisKey         string      `json:"redis_key"`
-	HeadCheckpointID string      `json:"head_checkpoint_id"`
-	Initialized      bool        `json:"initialized"`
-	Redis            RedisConfig `json:"redis"`
+	SessionID                string      `json:"session_id,omitempty"`
+	Workspace                string      `json:"workspace"`
+	DatabaseID               string      `json:"database_id,omitempty"`
+	DatabaseName             string      `json:"database_name,omitempty"`
+	RedisKey                 string      `json:"redis_key"`
+	HeadCheckpointID         string      `json:"head_checkpoint_id"`
+	Initialized              bool        `json:"initialized"`
+	HeartbeatIntervalSeconds int         `json:"heartbeat_interval_seconds,omitempty"`
+	LeaseExpiresAt           string      `json:"lease_expires_at,omitempty"`
+	Redis                    RedisConfig `json:"redis"`
+}
+
+type workspaceSessionInfo struct {
+	SessionID       string `json:"session_id"`
+	Workspace       string `json:"workspace"`
+	ClientKind      string `json:"client_kind,omitempty"`
+	AFSVersion      string `json:"afs_version,omitempty"`
+	Hostname        string `json:"hostname,omitempty"`
+	OperatingSystem string `json:"os,omitempty"`
+	LocalPath       string `json:"local_path,omitempty"`
+	Readonly        bool   `json:"readonly,omitempty"`
+	State           string `json:"state"`
+	StartedAt       string `json:"started_at"`
+	LastSeenAt      string `json:"last_seen_at"`
+	LeaseExpiresAt  string `json:"lease_expires_at"`
+}
+
+type workspaceSessionListResponse struct {
+	Items []workspaceSessionInfo `json:"items"`
 }
 
 type viewRef struct {
@@ -205,7 +251,10 @@ type FileContentResponse = fileContentResponse
 type SourceRef = sourceRef
 type CreateWorkspaceRequest = createWorkspaceRequest
 type UpdateWorkspaceRequest = updateWorkspaceRequest
+type CreateWorkspaceSessionRequest = createWorkspaceSessionRequest
 type WorkspaceSession = workspaceSession
+type WorkspaceSessionInfo = workspaceSessionInfo
+type WorkspaceSessionListResponse = workspaceSessionListResponse
 
 type SaveCheckpointRequest struct {
 	Workspace             string
@@ -259,18 +308,113 @@ func (s *Service) ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspa
 	return s.forkWorkspace(ctx, sourceWorkspace, newWorkspace)
 }
 
-func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string) (WorkspaceSession, error) {
+func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, input CreateWorkspaceSessionRequest) (WorkspaceSession, error) {
 	redisKey, headSavepoint, initialized, err := EnsureWorkspaceRoot(ctx, s.store, workspace)
 	if err != nil {
 		return WorkspaceSession{}, err
 	}
-	return WorkspaceSession{
+	session := WorkspaceSession{
 		Workspace:        workspace,
 		RedisKey:         redisKey,
 		HeadCheckpointID: headSavepoint,
 		Initialized:      initialized,
 		Redis:            s.cfg.RedisConfig,
-	}, nil
+	}
+	if !shouldTrackWorkspaceSession(input) {
+		return session, nil
+	}
+
+	now := time.Now().UTC()
+	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, now); err != nil {
+		return WorkspaceSession{}, err
+	}
+	sessionID, err := newWorkspaceSessionID()
+	if err != nil {
+		return WorkspaceSession{}, err
+	}
+	record := WorkspaceSessionRecord{
+		SessionID:       sessionID,
+		Workspace:       workspace,
+		ClientKind:      strings.TrimSpace(input.ClientKind),
+		AFSVersion:      strings.TrimSpace(input.AFSVersion),
+		Hostname:        strings.TrimSpace(input.Hostname),
+		OperatingSystem: strings.TrimSpace(input.OperatingSystem),
+		LocalPath:       strings.TrimSpace(input.LocalPath),
+		Readonly:        input.Readonly,
+		State:           workspaceSessionStateStarting,
+		StartedAt:       now,
+		LastSeenAt:      now,
+		LeaseExpiresAt:  now.Add(workspaceSessionLeaseTTL),
+	}
+	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
+		return WorkspaceSession{}, err
+	}
+	_ = s.store.Audit(ctx, workspace, "session_start", map[string]any{
+		"session_id":  record.SessionID,
+		"client_kind": defaultString(record.ClientKind, "sync"),
+		"hostname":    record.Hostname,
+	})
+
+	session.SessionID = record.SessionID
+	session.HeartbeatIntervalSeconds = int(workspaceSessionHeartbeatInterval / time.Second)
+	session.LeaseExpiresAt = record.LeaseExpiresAt.UTC().Format(time.RFC3339)
+	return session, nil
+}
+
+func (s *Service) ListWorkspaceSessions(ctx context.Context, workspace string) (WorkspaceSessionListResponse, error) {
+	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, time.Now().UTC()); err != nil {
+		return WorkspaceSessionListResponse{}, err
+	}
+	records, err := s.store.ListWorkspaceSessions(ctx, workspace)
+	if err != nil {
+		return WorkspaceSessionListResponse{}, err
+	}
+	items := make([]workspaceSessionInfo, 0, len(records))
+	for _, record := range records {
+		items = append(items, workspaceSessionInfoFromRecord(record))
+	}
+	return WorkspaceSessionListResponse{Items: items}, nil
+}
+
+func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (WorkspaceSessionInfo, error) {
+	record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
+	if err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	if record.State == workspaceSessionStateClosed {
+		return WorkspaceSessionInfo{}, os.ErrNotExist
+	}
+	now := time.Now().UTC()
+	record.State = workspaceSessionStateActive
+	record.LastSeenAt = now
+	record.LeaseExpiresAt = now.Add(workspaceSessionLeaseTTL)
+	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	return workspaceSessionInfoFromRecord(record), nil
+}
+
+func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
+	record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	record.State = workspaceSessionStateClosed
+	record.LastSeenAt = now
+	record.LeaseExpiresAt = now
+	if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID); err != nil {
+		return err
+	}
+	if err := s.store.PutWorkspaceSessionWithTTL(ctx, record, workspaceSessionRecordTTL); err != nil {
+		return err
+	}
+	_ = s.store.Audit(ctx, workspace, "session_close", map[string]any{
+		"session_id":  record.SessionID,
+		"client_kind": defaultString(record.ClientKind, "sync"),
+		"hostname":    record.Hostname,
+	})
+	return nil
 }
 
 func (s *Service) GetTree(ctx context.Context, workspace, rawView, rawPath string, depth int) (TreeResponse, error) {
@@ -307,6 +451,75 @@ func ManifestEquivalent(a, b Manifest) bool {
 
 func ManifestBlobRefs(m Manifest) map[string]int64 {
 	return manifestBlobRefs(m)
+}
+
+func shouldTrackWorkspaceSession(input createWorkspaceSessionRequest) bool {
+	return strings.TrimSpace(input.ClientKind) != "" ||
+		strings.TrimSpace(input.Hostname) != "" ||
+		strings.TrimSpace(input.OperatingSystem) != "" ||
+		strings.TrimSpace(input.LocalPath) != "" ||
+		strings.TrimSpace(input.AFSVersion) != ""
+}
+
+func workspaceSessionInfoFromRecord(record WorkspaceSessionRecord) workspaceSessionInfo {
+	return workspaceSessionInfo{
+		SessionID:       record.SessionID,
+		Workspace:       record.Workspace,
+		ClientKind:      record.ClientKind,
+		AFSVersion:      record.AFSVersion,
+		Hostname:        record.Hostname,
+		OperatingSystem: record.OperatingSystem,
+		LocalPath:       record.LocalPath,
+		Readonly:        record.Readonly,
+		State:           record.State,
+		StartedAt:       record.StartedAt.UTC().Format(time.RFC3339),
+		LastSeenAt:      record.LastSeenAt.UTC().Format(time.RFC3339),
+		LeaseExpiresAt:  record.LeaseExpiresAt.UTC().Format(time.RFC3339),
+	}
+}
+
+func newWorkspaceSessionID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "sess_" + hex.EncodeToString(raw[:]), nil
+}
+
+func (s *Service) reapExpiredWorkspaceSessions(ctx context.Context, workspace string, now time.Time) error {
+	expiredIDs, err := s.store.ListExpiredWorkspaceSessionIDs(ctx, workspace, now)
+	if err != nil {
+		return err
+	}
+	for _, sessionID := range expiredIDs {
+		record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				_ = s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID)
+				continue
+			}
+			return err
+		}
+		if record.State == workspaceSessionStateClosed {
+			if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID); err != nil {
+				return err
+			}
+			continue
+		}
+		record.State = workspaceSessionStateStale
+		if err := s.store.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID); err != nil {
+			return err
+		}
+		if err := s.store.PutWorkspaceSessionWithTTL(ctx, record, workspaceSessionRecordTTL); err != nil {
+			return err
+		}
+		_ = s.store.Audit(ctx, workspace, "session_stale", map[string]any{
+			"session_id":  record.SessionID,
+			"client_kind": defaultString(record.ClientKind, "sync"),
+			"hostname":    record.Hostname,
+		})
+	}
+	return nil
 }
 
 func (s *Service) listWorkspaceSummaries(ctx context.Context) (workspaceListResponse, error) {
@@ -1443,6 +1656,21 @@ func activityFromAudit(workspace string, record auditRecord) activityEvent {
 		detail = fmt.Sprintf("Process exited with code %s.", defaultString(record.Fields["exit_code"], "0"))
 		kind = "process.finished"
 		scope = "process"
+	case "session_start":
+		title = "Connected client"
+		detail = fmt.Sprintf("%s connected from %s.", defaultString(record.Fields["client_kind"], "client"), defaultString(record.Fields["hostname"], "an unknown host"))
+		kind = "session.started"
+		scope = "session"
+	case "session_close":
+		title = "Disconnected client"
+		detail = fmt.Sprintf("%s disconnected from %s.", defaultString(record.Fields["client_kind"], "client"), defaultString(record.Fields["hostname"], "an unknown host"))
+		kind = "session.closed"
+		scope = "session"
+	case "session_stale":
+		title = "Client connection expired"
+		detail = fmt.Sprintf("%s at %s stopped heartbeating and was marked stale.", defaultString(record.Fields["client_kind"], "client"), defaultString(record.Fields["hostname"], "an unknown host"))
+		kind = "session.stale"
+		scope = "session"
 	}
 
 	return activityEvent{

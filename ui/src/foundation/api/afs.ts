@@ -2,6 +2,7 @@ import { cloneInitialAFSState } from "../mocks/afs";
 import type {
   AFSDatabase,
   AFSDatabaseListResponse,
+  AFSAgentSession,
   CreateSavepointInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
@@ -36,15 +37,16 @@ type AFSClient = {
   listDatabases: () => Promise<AFSDatabase[]>;
   saveDatabase: (input: SaveDatabaseInput) => Promise<AFSDatabase>;
   deleteDatabase: (databaseId: string) => Promise<void>;
-  listWorkspaceSummaries: (databaseId: string) => Promise<AFSWorkspaceSummary[]>;
-  getWorkspace: (databaseId: string, workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
+  listWorkspaceSummaries: (databaseId?: string) => Promise<AFSWorkspaceSummary[]>;
+  getWorkspace: (databaseId: string | undefined, workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
+  listAgents: (databaseId?: string) => Promise<AFSAgentSession[]>;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<AFSWorkspaceDetail>;
   deleteWorkspace: (databaseId: string, workspaceId: string) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<AFSWorkspaceDetail | null>;
   updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<AFSWorkspaceDetail | null>;
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
-  listActivity: (databaseId: string, limit?: number) => Promise<AFSActivityEvent[]>;
+  listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
   resetDemo: () => AFSState;
@@ -138,6 +140,25 @@ type HTTPWorkspaceDetail = {
 
 type HTTPActivityList = {
   items: HTTPActivity[];
+};
+
+type HTTPWorkspaceSessionInfo = {
+  session_id: string;
+  workspace: string;
+  client_kind?: string;
+  afs_version?: string;
+  hostname?: string;
+  os?: string;
+  local_path?: string;
+  readonly?: boolean;
+  state: string;
+  started_at: string;
+  last_seen_at: string;
+  lease_expires_at: string;
+};
+
+type HTTPWorkspaceSessionList = {
+  items: HTTPWorkspaceSessionInfo[];
 };
 
 type HTTPTreeItem = {
@@ -265,10 +286,19 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
     totalBytes: savepoint.totalBytes,
     sizeLabel: savepoint.sizeLabel || bytesLabel(savepoint.filesSnapshot),
   }));
-  normalized.activity = workspace.activity.map((event) => ({
+  normalized.activity = (workspace.activity ?? []).map((event) => ({
     ...event,
     workspaceId: event.workspaceId ?? workspace.id,
     workspaceName: event.workspaceName ?? workspace.name,
+    databaseId: event.databaseId ?? workspace.databaseId,
+    databaseName: event.databaseName ?? workspace.databaseName,
+  }));
+  normalized.agents = (workspace.agents ?? []).map((agent) => ({
+    ...agent,
+    workspaceId: agent.workspaceId || workspace.id,
+    workspaceName: agent.workspaceName || workspace.name,
+    databaseId: agent.databaseId || workspace.databaseId,
+    databaseName: agent.databaseName || workspace.databaseName,
   }));
   return normalized;
 }
@@ -566,17 +596,22 @@ function treeItemsForFiles(files: AFSFile[], currentPath: string): AFSTreeItem[]
   });
 }
 
-function activityForState(state: AFSState, limit: number) {
+function allActivityForState(state: AFSState) {
   return state.workspaces
     .flatMap((workspace) =>
       normalizeWorkspace(workspace).activity.map((event) => ({
         ...event,
         workspaceId: event.workspaceId ?? workspace.id,
         workspaceName: event.workspaceName ?? workspace.name,
+        databaseId: event.databaseId ?? workspace.databaseId,
+        databaseName: event.databaseName ?? workspace.databaseName,
       })),
     )
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .slice(0, limit);
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function activityForState(state: AFSState, limit: number) {
+  return allActivityForState(state).slice(0, limit);
 }
 
 const demoAFSClient: AFSClient = {
@@ -613,23 +648,32 @@ const demoAFSClient: AFSClient = {
     saveDatabaseState(loadDatabaseState().filter((item) => item.id !== databaseId));
   },
 
-  async listWorkspaceSummaries(databaseId: string) {
+  async listWorkspaceSummaries(databaseId = "") {
     await wait();
     const state = loadState();
-    return sortWorkspaces(
-      state.workspaces
-        .map(normalizeWorkspace)
-        .filter((workspace) => workspace.databaseId === databaseId),
-    ).map(workspaceToSummary);
+    const workspaces = state.workspaces
+      .map(normalizeWorkspace)
+      .filter((workspace) => databaseId === "" || workspace.databaseId === databaseId);
+
+    return sortWorkspaces(workspaces).map(workspaceToSummary);
   },
 
-  async getWorkspace(databaseId: string, workspaceId: string) {
+  async getWorkspace(databaseId = "", workspaceId: string) {
     await wait();
     const state = loadState();
     const workspace = state.workspaces.find(
-      (item) => item.id === workspaceId && item.databaseId === databaseId,
+      (item) => item.id === workspaceId && (databaseId === "" || item.databaseId === databaseId),
     );
     return workspace == null ? null : normalizeWorkspace(workspace);
+  },
+
+  async listAgents(databaseId = "") {
+    await wait();
+    const state = loadState();
+    return sortWorkspaces(state.workspaces)
+      .filter((workspace) => databaseId === "" || workspace.databaseId === databaseId)
+      .flatMap((workspace) => normalizeWorkspace(workspace).agents)
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
   async createWorkspace(input: CreateWorkspaceInput) {
@@ -687,6 +731,7 @@ This workspace was created from the AFS Web UI.
             input.name.trim(),
           ),
         ],
+        agents: [],
         capabilities: demoCapabilities(),
         fileCount: baseFiles.length,
         folderCount: folderCount(baseFiles),
@@ -839,13 +884,12 @@ This workspace was created from the AFS Web UI.
     return normalizeWorkspace(requireWorkspace(state, input.workspaceId));
   },
 
-  async listActivity(databaseId: string, limit = 50) {
+  async listActivity(databaseId = "", limit = 50) {
     await wait();
     const state = loadState();
-    return activityForState(state, limit).filter((event) => {
-      const workspace = state.workspaces.find((item) => item.id === event.workspaceId);
-      return workspace?.databaseId === databaseId;
-    });
+    return allActivityForState(state).filter((event) =>
+      databaseId === "" || event.databaseId === databaseId,
+    ).slice(0, limit);
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
@@ -964,11 +1008,16 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
   };
 }
 
-function mapActivity(input: HTTPActivity): AFSActivityEvent {
+function mapActivity(
+  input: HTTPActivity,
+  database?: { databaseId?: string; databaseName?: string },
+): AFSActivityEvent {
   return {
     id: input.id,
     workspaceId: input.workspace_id,
     workspaceName: input.workspace_name,
+    databaseId: database?.databaseId,
+    databaseName: database?.databaseName,
     actor: input.actor,
     createdAt: input.created_at,
     detail: input.detail,
@@ -991,6 +1040,32 @@ function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
     sizeLabel: bytesLabelForValue(input.total_bytes),
     filesSnapshot: [],
     isHead: input.is_head,
+  };
+}
+
+function mapAgentSession(
+  input: HTTPWorkspaceSessionInfo,
+  workspaceId: string,
+  workspaceName: string,
+  databaseId?: string,
+  databaseName?: string,
+): AFSAgentSession {
+  return {
+    sessionId: input.session_id,
+    workspaceId,
+    workspaceName,
+    databaseId,
+    databaseName,
+    clientKind: input.client_kind ?? "",
+    afsVersion: input.afs_version ?? "",
+    hostname: input.hostname ?? "",
+    operatingSystem: input.os ?? "",
+    localPath: input.local_path ?? "",
+    readonly: input.readonly ?? false,
+    state: input.state,
+    startedAt: input.started_at,
+    lastSeenAt: input.last_seen_at,
+    leaseExpiresAt: input.lease_expires_at,
   };
 }
 
@@ -1034,7 +1109,13 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     checkpointCount: input.checkpoint_count,
     files: [],
     savepoints: input.checkpoints.map(mapCheckpoint),
-    activity: input.activity.map(mapActivity),
+    activity: input.activity.map((item) =>
+      mapActivity(item, {
+        databaseId: input.database_id,
+        databaseName: input.database_name,
+      }),
+    ),
+    agents: [],
     capabilities: mapCapabilities(input.capabilities),
   };
 }
@@ -1104,24 +1185,59 @@ const httpAFSClient: AFSClient = {
     });
   },
 
-  async listWorkspaceSummaries(databaseId: string) {
+  async listWorkspaceSummaries(databaseId = "") {
     const response = await requestJSON<{
       items: HTTPWorkspaceSummary[];
-    }>(`/databases/${databaseId}/workspaces`);
+    }>(databaseId === "" ? "/workspaces" : `/databases/${databaseId}/workspaces`);
     return response.items.map(mapWorkspaceSummary);
   },
 
-  async getWorkspace(databaseId: string, workspaceId: string) {
+  async getWorkspace(databaseId = "", workspaceId: string) {
     try {
-      return mapWorkspaceDetail(
-        await requestJSON<HTTPWorkspaceDetail>(`/databases/${databaseId}/workspaces/${workspaceId}`),
-      );
+      const basePath =
+        databaseId === ""
+          ? `/workspaces/${workspaceId}`
+          : `/databases/${databaseId}/workspaces/${workspaceId}`;
+      const [detail, sessions] = await Promise.all([
+        requestJSON<HTTPWorkspaceDetail>(basePath),
+        requestJSON<HTTPWorkspaceSessionList>(`${basePath}/sessions`),
+      ]);
+      return {
+        ...mapWorkspaceDetail(detail),
+        agents: sessions.items.map((item) =>
+          mapAgentSession(item, workspaceId, detail.name, detail.database_id, detail.database_name),
+        ),
+      };
     } catch (error) {
       if (error instanceof HTTPError && error.status === 404) {
         return null;
       }
       throw error;
     }
+  },
+
+  async listAgents(databaseId = "") {
+    const workspaces = await httpAFSClient.listWorkspaceSummaries(databaseId);
+    const sessions = await Promise.all(
+      workspaces.map(async (workspace) => {
+        const response = await requestJSON<HTTPWorkspaceSessionList>(
+          `/databases/${workspace.databaseId}/workspaces/${workspace.id}/sessions`,
+        );
+        return response.items.map((item) =>
+          mapAgentSession(
+            item,
+            workspace.id,
+            workspace.name,
+            workspace.databaseId,
+            workspace.databaseName,
+          ),
+        );
+      }),
+    );
+
+    return sessions
+      .flat()
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
   async createWorkspace(input: CreateWorkspaceInput) {
@@ -1182,9 +1298,37 @@ const httpAFSClient: AFSClient = {
     return httpAFSClient.getWorkspace(input.databaseId, input.workspaceId);
   },
 
-  async listActivity(databaseId: string, limit = 50) {
-    const response = await requestJSON<HTTPActivityList>(`/databases/${databaseId}/activity?limit=${limit}`);
-    return response.items.map(mapActivity);
+  async listActivity(databaseId = "", limit = 50) {
+    if (databaseId !== "") {
+      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
+      const response = await requestJSON<HTTPActivityList>(`/databases/${databaseId}/activity?limit=${limit}`);
+      return response.items.map((item) =>
+        mapActivity(item, {
+          databaseId,
+          databaseName: database?.name,
+        }),
+      );
+    }
+
+    const databases = await httpAFSClient.listDatabases();
+    const responses = await Promise.all(
+      databases.map(async (database) => {
+        const response = await requestJSON<HTTPActivityList>(
+          `/databases/${database.id}/activity?limit=${limit}`,
+        );
+        return response.items.map((item) =>
+          mapActivity(item, {
+            databaseId: database.id,
+            databaseName: database.name,
+          }),
+        );
+      }),
+    );
+
+    return responses
+      .flat()
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, limit);
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {

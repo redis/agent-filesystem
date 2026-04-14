@@ -1,4 +1,4 @@
-import { TableHeading, Typography } from "@redislabsdev/redis-ui-components";
+import { Typography } from "@redislabsdev/redis-ui-components";
 import { Table } from "@redislabsdev/redis-ui-table";
 import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
 import { useMemo, useState } from "react";
@@ -79,30 +79,33 @@ export function ActivityTable({
         {
           accessorKey: "createdAt",
           header: "When",
-          size: 80,
+          size: 56,
           enableSorting: true,
-          cell: ({ row }) => new Date(row.original.createdAt).toLocaleString(),
+          cell: ({ row }) => {
+            const d = new Date(row.original.createdAt);
+            const now = new Date();
+            const isToday = d.toDateString() === now.toDateString();
+            const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+            if (isToday) return time;
+            const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+            return `${date} ${time}`;
+          },
         },
         {
           accessorKey: "workspaceName",
           header: "Workspace",
-          size: 90,
+          size: 80,
           enableSorting: true,
           cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="strong">
-                {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
-              </Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                {row.original.scope}
-              </Typography.Body>
-            </S.Stack>
+            <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
+              {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
+            </S.SingleLineText>
           ),
         },
         {
           accessorKey: "title",
           header: "Activity",
-          size: 140,
+          size: 160,
           enableSorting: true,
           cell: ({ row }) => (
             <S.Stack>
@@ -116,51 +119,31 @@ export function ActivityTable({
         {
           accessorKey: "actor",
           header: "Actor",
-          size: 70,
+          size: 60,
           enableSorting: true,
         },
         {
           accessorKey: "scope",
           header: "Type",
-          size: 60,
+          size: 50,
           enableSorting: true,
           cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="span">{row.original.scope}</Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                {row.original.kind}
-              </Typography.Body>
-            </S.Stack>
-          ),
-        },
-        {
-          id: "actions",
-          header: "",
-          size: 50,
-          enableSorting: false,
-          cell: ({ row }) => (
-            <S.TextActionButton
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenActivity(row.original);
-              }}
-            >
-              Open
-            </S.TextActionButton>
+            <S.SingleLineText title={`${row.original.scope} · ${row.original.kind}`}>
+              {row.original.scope} · {row.original.kind}
+            </S.SingleLineText>
           ),
         },
       ] as ColumnDef<AFSActivityEvent>[],
-    [onOpenActivity],
+    [],
   );
 
   return (
-    <S.TableCard>
-      <S.HeadingWrap>
+    <>
+      <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search workspace, activity, actor, scope, or detail"
+          placeholder="Search activity..."
         />
       </S.HeadingWrap>
 
@@ -171,29 +154,31 @@ export function ActivityTable({
       ) : null}
 
       {!loading && !error && filteredRows.length > 0 ? (
-        <S.TableViewport>
-          <Table
-            columns={columns}
-            data={filteredRows}
-            sorting={sorting}
-            manualSorting
-            onSortingChange={(nextState) => {
-              if (nextState.length === 0) {
-                setSortBy("createdAt");
-                setSortDirection("desc");
-                return;
-              }
+        <S.TableCard>
+          <S.TableViewport>
+            <Table
+              columns={columns}
+              data={filteredRows}
+              sorting={sorting}
+              manualSorting
+              onSortingChange={(nextState) => {
+                if (nextState.length === 0) {
+                  setSortBy("createdAt");
+                  setSortDirection("desc");
+                  return;
+                }
 
-              const next = nextState[0];
-              setSortBy(next.id as ActivitySortField);
-              setSortDirection(next.desc ? "desc" : "asc");
-            }}
-            enableSorting
-            stripedRows
-            onRowClick={(rowData) => onOpenActivity(rowData)}
-          />
-        </S.TableViewport>
+                const next = nextState[0];
+                setSortBy(next.id as ActivitySortField);
+                setSortDirection(next.desc ? "desc" : "asc");
+              }}
+              enableSorting
+              stripedRows
+              onRowClick={(rowData) => onOpenActivity(rowData)}
+            />
+          </S.TableViewport>
+        </S.TableCard>
       ) : null}
-    </S.TableCard>
+    </>
   );
 }

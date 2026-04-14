@@ -76,21 +76,25 @@ This section reflects the repository as it exists today.
 - `afs up` and `afs down` now work in `self-hosted` mode for `sync`
 - `afs up` in `self-hosted` mode now asks the control plane for a workspace bootstrap/session bundle, then starts the local sync daemon from that bundle
 - setup and status now expose the local-vs-managed model more clearly
+- managed workspace sessions now persist real session records with heartbeat, disconnect, and stale-expiry handling
+- the web UI now exposes connected-agent counts per workspace plus an Agents view
+- the managed CLI path is now workspace-first for listing, selection, and `afs up`; it no longer requires `controlPlane.databaseID` for the normal self-hosted flow
+- the control plane now owns a SQLite workspace catalog for aggregate workspace listing and workspace-to-database routing
+- the web UI primary navigation is now workspace-first; the database selector has been removed and databases are now a normal management tab in the sidebar
+- workspace detail, agents, overview, and activity views now carry enough workspace/database routing context to operate without a globally selected database
 
 ### Partially completed
 
 - route-surface split exists, but there is still no auth boundary between them
-- workspace session bootstrap exists, but it is still only a startup/bootstrap mechanism
+- workspace-first routing now exists, but stable opaque workspace ids do not; the current workspace id is still effectively the workspace name
+- a control-plane-owned SQLite workspace catalog now exists for aggregate workspace listing and routing, but database registry data still lives in `afs.databases.json`
 - `self-hosted` `afs up` works only for `sync`; mount mode is still local-only
-- `afs down` still performs only local teardown; it does not yet notify the control plane
-- there is still no session registry, heartbeat, disconnect event, or connected-clients reporting
-- the web UI is control-plane-backed, but it does not yet expose the new client/session lifecycle or all newly added control-plane features
+- the web UI is now mostly workspace-first for browsing, but creation, mutation plumbing, and route identity still depend on database context in a few places because workspace ids are not yet opaque and globally stable
 
 ### Not started yet
 
 - browser login and CLI login for AFS Cloud (`afs auth login/logout/status`)
 - secure token storage and profile management
-- connected-clients presence and activity reporting
 - secret-store support for provider credentials
 - Redis Cloud managed provisioning flow
 - real `cloud` runtime mode (`cloud` remains intentionally unimplemented)
@@ -163,6 +167,7 @@ In production we should preserve the option to split them into separate deployme
 
 - account and organization management
 - browser login and API token issuance
+- global workspace catalog and workspace-to-database routing
 - workspace CRUD
 - database binding CRUD
 - managed database provisioning jobs
@@ -171,11 +176,40 @@ In production we should preserve the option to split them into separate deployme
 - client session issuance, heartbeat tracking, and presence
 - activity and audit aggregation
 
+### Control plane catalog
+
+The control plane should own a separate metadata catalog for workspace-first routing.
+
+Recommended first implementation:
+
+- SQLite file colocated with the control-plane config and database registry
+- stores workspace routing metadata and cached list summaries
+- does not store manifests, blobs, checkpoints, or live filesystem state
+
+The catalog should answer:
+
+- which database backs a workspace
+- which workspaces exist across all registered databases
+- enough cached metadata to render `GET /v1/workspaces` without per-request fan-out
+
+During migration, Redis remains the source of truth for workspace contents and per-workspace manifests/checkpoints.
+The SQLite catalog becomes the source of truth for workspace discovery and routing.
+
+Recommended follow-up shape:
+
+- introduce an opaque stable `workspace_id` distinct from display name
+- treat workspace name as user-facing metadata, not routing identity
+- store database bindings, workspace ids, and session ownership in the control-plane catalog
+- keep Redis responsible for workspace contents and per-workspace operational state
+
 ### Data plane responsibilities
 
 - Redis-backed storage for workspace metadata, manifests, blobs, checkpoints, and live roots
 - per-workspace mutation streams
 - per-workspace session and presence keys
+
+During the workspace-first migration, Redis still holds per-workspace metadata inside each backing database,
+but the global workspace catalog moves into the control plane so list/resolve operations no longer need to scan every database on each request.
 
 ### Local client responsibilities
 
@@ -610,6 +644,19 @@ In production we should preserve the ability to deploy them separately.
 - `POST /v1/databases/{database_id}/workspaces`
 - `POST /v1/databases/{database_id}/workspaces/{workspace_id}:restore`
 
+### Workspace-first routes
+
+These should become the normal CLI path in managed mode:
+
+- `GET /v1/workspaces`
+- `GET /v1/workspaces/{workspace_id}`
+- `POST /v1/workspaces/{workspace_id}/sessions`
+- `POST /v1/workspaces/{workspace_id}/sessions/{session_id}/heartbeat`
+- `DELETE /v1/workspaces/{workspace_id}/sessions/{session_id}`
+
+These routes should resolve the workspace through the control-plane catalog and then route to exactly one backing database.
+Database-scoped routes remain available for admin/debug/UI internals.
+
 ### New auth routes
 
 - `GET /v1/auth/login/start`
@@ -708,15 +755,20 @@ This keeps the existing sync and mount code mostly intact.
 
 ## UI Changes
 
-The existing UI already has the rough shape needed for cloud mode.
+The UI now has the beginnings of the target cloud shape:
 
-We should add:
-
-- sign-in state
-- organization/workspace ownership
-- workspace connection instructions
+- workspace-first navigation
+- a dedicated Databases management tab instead of a global database selector
 - workspace table with a `Connected Agents` count per workspace
-- connected clients table
+- connected clients / Agents view
+- workspace-linked drilldowns from overview and workspace detail
+
+The main UI work still to do is:
+
+- sign-in state and user/account context
+- organization/workspace ownership presentation
+- workspace connection instructions
+- stable workspace-id-based routing everywhere
 - managed database creation flow
 - external database attach flow
 - Redis Cloud connection management
@@ -853,6 +905,45 @@ Current status against exit criteria:
 - achieved for workspace/checkpoint operations and sync startup
 - not yet achieved for all direct-only commands or mount mode
 
+### Phase 2b: Control-plane catalog and workspace-first routing
+
+Status: substantially complete
+
+Scope:
+
+- add a control-plane-owned SQLite workspace catalog
+- backfill the catalog from configured backing databases on startup
+- update the catalog on control-plane workspace mutations
+- make the normal managed CLI path resolve workspaces through the catalog instead of requiring a preselected database
+- keep database-scoped routes working for admin/debug/UI internals
+
+Why here:
+
+- it removes the biggest remaining database-first assumption from the self-hosted CLI
+- it lets auth and profile work build on workspace identity instead of database selection
+- it avoids per-request multi-database fan-out for aggregate workspace listing
+
+Tests:
+
+- multi-database `afs workspace list` works with no `controlPlane.databaseID`
+- workspace-first `POST /v1/workspaces/{workspace_id}/sessions` resolves the correct backing database
+- aggregate workspace listing still works when one backing database is temporarily unavailable after catalog refresh
+- database-scoped routes continue to work unchanged
+
+Exit criteria:
+
+- the managed CLI is workspace-first for `workspace list`, `workspace use`, and `afs up`
+- `GET /v1/workspaces` is served from the control-plane catalog, not live fan-out
+- duplicate workspace names across databases fail explicitly instead of silently guessing
+
+Current status against exit criteria:
+
+- first slice is implemented with a SQLite workspace catalog backing aggregate list and workspace resolution
+- the CLI no longer requires `controlPlane.databaseID` for normal self-hosted list/use/up flows
+- the web UI no longer requires selecting a database for normal browsing; databases are now managed through a dedicated sidebar tab
+- workspace identity is still name-based today; opaque stable workspace ids are the main remaining follow-up for this phase
+- create/update/delete and some detail routing still carry database context because the catalog does not yet own globally stable workspace ids
+
 ### Phase 3: Browser login for AFS Cloud
 
 Status: not started
@@ -900,28 +991,27 @@ Exit criteria:
 
 ### Phase 5: Workspace session registry and connected clients
 
-Status: bootstrap only
+Status: substantially complete for self-hosted sync
 
 Scope:
 
 - add workspace session issuance
 - add heartbeat and disconnect routes
-- add Redis-backed presence keys
+- add session presence tracking
 - add separate activity summaries instead of deriving presence from audit logs
 - surface connected clients in the UI
 
 What is done:
 
-- the control plane can already issue a workspace bootstrap/session for `afs up --mode sync` in `self-hosted` mode
+- the control plane issues real workspace sessions for `afs up --mode sync` in `self-hosted` mode
+- session records persist with heartbeat, disconnect, and stale expiry
+- the web UI shows connected-agent counts, an Agents view, and workspace-linked connected-client drilldowns
 
 What is still missing:
 
-- persisted session records
-- heartbeat
-- disconnect notification
-- stale session expiry
-- connected-clients UI
-- activity summaries for client operations
+- mount-mode presence over managed mode
+- richer activity summaries for client operations
+- cloud-authenticated session ownership and org/user attribution
 
 Tests:
 
@@ -947,13 +1037,14 @@ Scope:
 What is done:
 
 - the self-hosted control-plane path already starts sync from a control-plane-issued bootstrap bundle
+- the self-hosted managed daemon path already heartbeats and disconnects through the control plane
 
 What is still missing:
 
 - real cloud auth
 - cloud session issuance and renewal
 - removal of long-lived Redis credentials from managed local configs
-- heartbeat/disconnect around the managed daemon lifecycle
+- attaching managed daemon lifecycle to cloud-authenticated user/org ownership and policy
 
 Why sync first:
 
@@ -1036,39 +1127,53 @@ If we want the best risk-adjusted sequence, the order should be:
 
 1. backend boundary
 2. fuller HTTP contract plus route-surface split
-3. AFS browser login and CLI auth
-4. secret-store foundation
-5. session registry and connected clients
-6. cloud-connected sync mode
-7. managed/external database UI
-8. mount mode in cloud
-9. optional Redis Cloud assisted linking
+3. control-plane catalog and workspace-first routing
+4. stable opaque workspace ids and full catalog-backed identity
+5. AFS browser login and CLI auth
+6. secret-store foundation
+7. session registry and connected clients
+8. cloud-connected sync mode
+9. managed/external database UI
+10. mount mode in cloud
+11. optional Redis Cloud assisted linking
 
 This gets user-visible value early without forcing a Redis Cloud auth decision up front.
 
 ## Recommended Next Steps
 
-The next implementation slice should build directly on what is already working in `self-hosted` sync mode.
+The next implementation slices should finish turning the catalog into the identity backbone for both CLI and UI.
 
-### Immediate next step
+### Immediate next step: opaque workspace identity
 
-Implement managed session lifecycle for the existing `self-hosted` sync path:
+Add stable opaque workspace ids and stop using workspace name as routing identity.
 
-- persist session records when `afs up` creates a workspace session
-- return a real `session_id` from the control plane and store it in local daemon/bootstrap state
-- add daemon heartbeats on a short interval
-- add explicit disconnect on `afs down` and best-effort disconnect on daemon exit
-- add stale-session expiry logic on the control plane
+Concretely:
 
-This is the highest-leverage next step because it turns today's bootstrap-only session into the foundation for connected-clients visibility.
+- add `workspace_id` as a control-plane-owned opaque identifier in the SQLite catalog
+- backfill existing workspaces into the catalog with generated ids
+- update workspace-first routes to resolve by `workspace_id` rather than name
+- preserve workspace name as display metadata and human-friendly lookup input
+- make duplicate workspace names across databases fully supported instead of an explicit error case
+- update CLI config/state so managed mode persists workspace ids, not just names
+- update the web UI to route by stable workspace id without needing hidden database-selection context
 
-### After that
+### Next after that: finish catalog ownership
 
-1. Surface active sessions in the web UI and add a connected-clients page that shows:
-   active clients, heartbeats, current workspace, last activity, and client metadata.
-   The workspace table should also show a `Connected Agents` count for each workspace.
-2. Add browser/CLI auth for AFS Cloud with browser-launched PKCE for the CLI.
+Move the remaining workspace-first metadata and routing concerns into the catalog:
+
+- decide whether the database registry should remain JSON-backed or also move into SQLite
+- define reconciliation and repair behavior for out-of-band Redis changes
+- decide whether session ownership and presence metadata should stay in per-database Redis only or also be indexed in the control-plane catalog
+- add explicit catalog repair and health visibility in the control plane
+
+### Then: cloud identity and auth
+
+Once workspace identity is stable, add the cloud-facing auth layer:
+
+1. Add browser/CLI auth for AFS Cloud with browser-launched PKCE for the CLI.
+2. Attach user/org ownership to workspaces and sessions in the control-plane catalog.
 3. Add a secret-store layer before building managed Redis Cloud provisioning.
+4. Build real cloud session issuance on top of the catalog-backed workspace identity model.
 
 ## What We Should Not Do First
 
@@ -1095,11 +1200,13 @@ This is the highest-leverage next step because it turns today's bootstrap-only s
 
 Before implementation, the next detailed spec should cover:
 
-- CLI profile and secret storage format
-- mode-aware bootstrap and route-surface split
-- auth endpoints and token lifecycle
+- opaque `workspace_id` schema and backfill strategy
+- name lookup and duplicate-name behavior once names are no longer routing identity
+- catalog schema evolution: workspaces, database bindings, and whether database registry data moves into SQLite
+- CLI managed-mode config/state changes needed to persist workspace ids
+- UI routing changes needed to use workspace ids everywhere without database-selection context
+- catalog reconciliation and repair behavior for out-of-band Redis changes
+- auth endpoints and token lifecycle after workspace identity is stable
 - browser session model and JWKS-backed token validation
 - secret-store interface and first production backend
-- workspace session bundle schema
-- presence/session Redis key schema
-- minimal API additions needed for cloud-connected sync mode
+- workspace session bundle schema and how session ownership attaches to catalog identities

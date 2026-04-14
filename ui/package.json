@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "preinstall": "node ./check-private-registry.mjs",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",

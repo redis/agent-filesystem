@@ -265,7 +265,11 @@ func TestHTTPClientWorkspaceSession(t *testing.T) {
 	server := httptest.NewServer(NewHandler(manager, "*"))
 	defer server.Close()
 
-	resp, err := http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions", "application/json", nil)
+	resp, err := http.Post(
+		server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions",
+		"application/json",
+		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
+	)
 	if err != nil {
 		t.Fatalf("POST client workspace session returned error: %v", err)
 	}
@@ -282,11 +286,103 @@ func TestHTTPClientWorkspaceSession(t *testing.T) {
 	if session.Workspace != "repo" {
 		t.Fatalf("session workspace = %q, want %q", session.Workspace, "repo")
 	}
+	if session.SessionID == "" {
+		t.Fatal("expected workspace session to include a session id")
+	}
 	if session.RedisKey != WorkspaceFSKey("repo") {
 		t.Fatalf("session redis_key = %q, want %q", session.RedisKey, WorkspaceFSKey("repo"))
 	}
 	if session.Redis.RedisAddr == "" {
 		t.Fatal("expected workspace session to include redis bootstrap info")
+	}
+	if session.HeartbeatIntervalSeconds == 0 {
+		t.Fatal("expected workspace session to include heartbeat interval")
+	}
+}
+
+func TestHTTPClientWorkspaceSessionHeartbeatAndClose(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(
+		server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions",
+		"application/json",
+		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST client workspace session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(session) returned error: %v", err)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/sessions")
+	if err != nil {
+		t.Fatalf("GET workspace sessions returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET workspace sessions status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var sessions workspaceSessionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		t.Fatalf("Decode(session list) returned error: %v", err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("len(session list) = %d, want 1", len(sessions.Items))
+	}
+
+	resp, err = http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID+"/heartbeat", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST heartbeat returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST heartbeat status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var heartbeat workspaceSessionInfo
+	if err := json.NewDecoder(resp.Body).Decode(&heartbeat); err != nil {
+		t.Fatalf("Decode(heartbeat) returned error: %v", err)
+	}
+	if heartbeat.State != workspaceSessionStateActive {
+		t.Fatalf("heartbeat state = %q, want %q", heartbeat.State, workspaceSessionStateActive)
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(DELETE session) returned error: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("DELETE session status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/sessions")
+	if err != nil {
+		t.Fatalf("GET workspace sessions after delete returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if err := json.NewDecoder(resp.Body).Decode(&sessions); err != nil {
+		t.Fatalf("Decode(session list after delete) returned error: %v", err)
+	}
+	if len(sessions.Items) != 0 {
+		t.Fatalf("len(session list after delete) = %d, want 0", len(sessions.Items))
 	}
 }
 
@@ -439,6 +535,213 @@ func TestHTTPDatabaseCRUDAndScopedWorkspaces(t *testing.T) {
 	if resp.StatusCode != http.StatusNoContent {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("DELETE /v1/databases/:id status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
+	}
+}
+
+func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	secondaryRedis := miniredis.RunT(t)
+	createDatabaseBody := fmtJSON(t, upsertDatabaseRequest{
+		Name:      "secondary",
+		RedisAddr: secondaryRedis.Addr(),
+		RedisDB:   0,
+	})
+
+	resp, err := http.Post(server.URL+"/v1/databases", "application/json", strings.NewReader(createDatabaseBody))
+	if err != nil {
+		t.Fatalf("POST /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var secondary databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&secondary); err != nil {
+		t.Fatalf("Decode(database) returned error: %v", err)
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+secondary.ID+"/workspaces",
+		"application/json",
+		strings.NewReader(`{"name":"repo-secondary","source":{"kind":"blank"}}`),
+	)
+	if err != nil {
+		t.Fatalf("POST scoped workspace create returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST scoped workspace create status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var workspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("Decode(workspaces) returned error: %v", err)
+	}
+	if len(workspaces.Items) != 2 {
+		t.Fatalf("len(workspaces.items) = %d, want 2", len(workspaces.Items))
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo-secondary")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces/:id returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var detail workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(workspace detail) returned error: %v", err)
+	}
+	if detail.DatabaseID != secondary.ID {
+		t.Fatalf("detail database_id = %q, want %q", detail.DatabaseID, secondary.ID)
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/client/workspaces/repo-secondary/sessions",
+		"application/json",
+		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo-secondary"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST workspace-first client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST workspace-first client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(session) returned error: %v", err)
+	}
+	if session.DatabaseID != secondary.ID {
+		t.Fatalf("session database_id = %q, want %q", session.DatabaseID, secondary.ID)
+	}
+	if session.Redis.RedisAddr != secondaryRedis.Addr() {
+		t.Fatalf("session redis addr = %q, want %q", session.Redis.RedisAddr, secondaryRedis.Addr())
+	}
+}
+
+func TestHTTPWorkspaceFirstListUsesCatalogWithoutPerRequestFanout(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	secondaryRedis := miniredis.RunT(t)
+	createDatabaseBody := fmtJSON(t, upsertDatabaseRequest{
+		Name:      "secondary",
+		RedisAddr: secondaryRedis.Addr(),
+		RedisDB:   0,
+	})
+
+	resp, err := http.Post(server.URL+"/v1/databases", "application/json", strings.NewReader(createDatabaseBody))
+	if err != nil {
+		t.Fatalf("POST /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var secondary databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&secondary); err != nil {
+		t.Fatalf("Decode(database) returned error: %v", err)
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+secondary.ID+"/workspaces",
+		"application/json",
+		strings.NewReader(`{"name":"repo-secondary","source":{"kind":"blank"}}`),
+	)
+	if err != nil {
+		t.Fatalf("POST scoped workspace create returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST scoped workspace create status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	secondaryRedis.Close()
+
+	resp, err = http.Get(server.URL + "/v1/workspaces")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var workspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("Decode(workspaces) returned error: %v", err)
+	}
+	if len(workspaces.Items) != 2 {
+		t.Fatalf("len(workspaces.items) = %d, want 2", len(workspaces.Items))
+	}
+}
+
+func TestHTTPWorkspaceFirstRouteRejectsAmbiguousWorkspaceNames(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	secondaryRedis := miniredis.RunT(t)
+	createDatabaseBody := fmtJSON(t, upsertDatabaseRequest{
+		Name:      "secondary",
+		RedisAddr: secondaryRedis.Addr(),
+		RedisDB:   0,
+	})
+
+	resp, err := http.Post(server.URL+"/v1/databases", "application/json", strings.NewReader(createDatabaseBody))
+	if err != nil {
+		t.Fatalf("POST /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var secondary databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&secondary); err != nil {
+		t.Fatalf("Decode(database) returned error: %v", err)
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/databases/"+secondary.ID+"/workspaces",
+		"application/json",
+		strings.NewReader(`{"name":"repo","source":{"kind":"blank"}}`),
+	)
+	if err != nil {
+		t.Fatalf("POST scoped workspace create returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces/repo returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces/repo status = %d, want %d, body=%s", resp.StatusCode, http.StatusBadRequest, body)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "multiple databases") {
+		t.Fatalf("GET /v1/workspaces/repo body = %q, want ambiguity guidance", string(body))
 	}
 }
 

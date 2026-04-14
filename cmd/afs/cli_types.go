@@ -60,6 +60,10 @@ type config struct {
 // state records the currently running AFS processes and surface state.
 type state struct {
 	StartedAt            time.Time `json:"started_at"`
+	ProductMode          string    `json:"product_mode,omitempty"`
+	ControlPlaneURL      string    `json:"control_plane_url,omitempty"`
+	ControlPlaneDatabase string    `json:"control_plane_database,omitempty"`
+	SessionID            string    `json:"session_id,omitempty"`
 	RedisAddr            string    `json:"redis_addr"`
 	RedisDB              int       `json:"redis_db"`
 	CurrentWorkspace     string    `json:"current_workspace,omitempty"`
