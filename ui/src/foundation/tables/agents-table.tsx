@@ -272,19 +272,19 @@ const ToggleGroup = styled.div`
 `;
 
 const ToggleButton = styled.button<{ $active: boolean }>`
-  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
-  border-radius: 8px;
-  padding: 6px 12px;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 14px;
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "transparent")};
-  box-shadow: ${({ $active }) => ($active ? "0 2px 6px rgba(8,6,13,0.08)" : "none")};
+  background: ${({ $active }) => ($active ? "#e4e4e7" : "transparent")};
   transition: background 160ms ease, color 160ms ease;
 
   &:hover {
     color: var(--afs-ink, #18181b);
+    background: ${({ $active }) => ($active ? "#e4e4e7" : "#f0f0f0")};
   }
 `;
 

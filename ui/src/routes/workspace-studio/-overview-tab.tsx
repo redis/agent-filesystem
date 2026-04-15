@@ -1,8 +1,8 @@
+import { Button } from "@redis-ui/components";
 import styled from "styled-components";
 import { SectionCard, SectionGrid, SectionHeader, SectionTitle } from "../../components/afs-kit";
 import { formatBytes } from "../../foundation/api/afs";
 import type { AFSWorkspaceDetail } from "../../foundation/types/afs";
-import { Button } from "@redis-ui/components";
 import { useNavigate } from "@tanstack/react-router";
 
 type Props = {
@@ -39,9 +39,9 @@ export function OverviewTab({ workspace }: Props) {
               <StatusValue>
                 <AgentsCell>
                   <span>{connectedAgents.toLocaleString()}</span>
-                  <OpenAgentsButton
-                    kind="ghost"
+                  <Button
                     size="small"
+                    variant="secondary-fill"
                     onClick={() => {
                       void navigate({
                         to: "/agents",
@@ -51,8 +51,8 @@ export function OverviewTab({ workspace }: Props) {
                       });
                     }}
                   >
-                    Open agents
-                  </OpenAgentsButton>
+                    Show Agents
+                  </Button>
                 </AgentsCell>
               </StatusValue>
             </StatusRow>
@@ -127,12 +127,8 @@ const StatusValue = styled.td`
 const AgentsCell = styled.div`
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 `;
 
-const OpenAgentsButton = styled(Button)`
-  && {
-    white-space: nowrap;
-  }
-`;

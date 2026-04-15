@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import styled from "styled-components";
 import {
   DialogActions,
   DialogBody,
@@ -224,8 +225,11 @@ function WorkspacesPage() {
   const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
+  const importLocal = useImportLocalMutation();
 
   const [importOpen, setImportOpen] = useState(false);
+  const [importPath, setImportPath] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -283,12 +287,14 @@ function WorkspacesPage() {
   const formBusy =
     createWorkspace.isPending ||
     updateWorkspace.isPending ||
+    importLocal.isPending ||
     (isEditing && editingWorkspaceQuery.isLoading);
 
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
     setFormError(null);
+    setImportPath("");
     setForm(createInitialFormState(databases[0] ?? null));
   }
 
@@ -332,6 +338,14 @@ function WorkspacesPage() {
     });
   }
 
+  function openWorkspaceTab(workspace: AFSWorkspaceSummary, tab: "overview" | "files" | "checkpoints" | "activity") {
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: workspace.id },
+      search: tab === "overview" ? {} : { tab },
+    });
+  }
+
   function deleteSelectedWorkspace(workspace: AFSWorkspaceSummary) {
     const confirmed = window.confirm(
       `Delete workspace "${workspace.name}"? This removes its registry entry from the catalog.`,
@@ -369,16 +383,12 @@ function WorkspacesPage() {
             : null
         }
         toolbarAction={(
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button size="medium" variant="secondary-fill" onClick={() => setImportOpen(true)}>
-              Import directory
-            </Button>
-            <Button size="medium" onClick={openCreateDialog}>
-              Add workspace
-            </Button>
-          </div>
+          <Button size="medium" onClick={openCreateDialog}>
+            Add workspace
+          </Button>
         )}
         onOpenWorkspace={openWorkspace}
+        onOpenWorkspaceTab={openWorkspaceTab}
         onEditWorkspace={openEditDialog}
         onDeleteWorkspace={deleteSelectedWorkspace}
       />
@@ -436,30 +446,56 @@ function WorkspacesPage() {
                   return;
                 }
 
-                createWorkspace.mutate(
-                  {
-                    databaseId: form.databaseId,
-                    name: form.name,
-                    description: form.description,
-                    cloudAccount: form.cloudAccount,
-                    databaseName: form.databaseName,
-                    region: form.region,
-                    source: "blank",
-                  },
-                  {
-                    onSuccess: () => {
-                      closeDialog();
+                if (importPath.trim() !== "") {
+                  importLocal.mutate(
+                    {
+                      databaseId: form.databaseId,
+                      name: form.name,
+                      path: importPath.trim(),
+                      description: form.description,
                     },
-                    onError: (error) => {
-                      setFormError(
-                        mutationErrorMessage(
-                          error,
-                          "Unable to create the workspace.",
-                        ),
-                      );
+                    {
+                      onSuccess: (result) => {
+                        closeDialog();
+                        void navigate({
+                          to: "/workspaces/$workspaceId",
+                          params: { workspaceId: result.workspaceId },
+                          search: { tab: "files" },
+                        });
+                      },
+                      onError: (error) => {
+                        setFormError(
+                          mutationErrorMessage(error, "Unable to import files."),
+                        );
+                      },
                     },
-                  },
-                );
+                  );
+                } else {
+                  createWorkspace.mutate(
+                    {
+                      databaseId: form.databaseId,
+                      name: form.name,
+                      description: form.description,
+                      cloudAccount: form.cloudAccount,
+                      databaseName: form.databaseName,
+                      region: form.region,
+                      source: "blank",
+                    },
+                    {
+                      onSuccess: () => {
+                        closeDialog();
+                      },
+                      onError: (error) => {
+                        setFormError(
+                          mutationErrorMessage(
+                            error,
+                            "Unable to create the workspace.",
+                          ),
+                        );
+                      },
+                    },
+                  );
+                }
               }}
             >
               <Field>
@@ -502,18 +538,50 @@ function WorkspacesPage() {
                 />
               </Field>
 
-              <Button
-                size="medium"
-                type="button"
-                variant="secondary-fill"
-                style={{ width: "100%" }}
-                onClick={() => {
-                  closeDialog();
-                  setImportOpen(true);
-                }}
-              >
-                Import from local directory instead
-              </Button>
+              {!isEditing ? (
+                <ImportFilesSection>
+                  <ImportFilesHeader>Import Files</ImportFilesHeader>
+                  <ImportFilesDescription>
+                    Optionally import files from a local directory. The contents will be scanned
+                    and stored in the workspace.
+                  </ImportFilesDescription>
+                  <Field>
+                    Local directory path
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <TextInput
+                        value={importPath}
+                        onChange={(event) => setImportPath(event.target.value)}
+                        placeholder="~/code/my-project"
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        size="medium"
+                        variant="secondary-fill"
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                      >
+                        Browse
+                      </Button>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        /* @ts-expect-error webkitdirectory is non-standard */
+                        webkitdirectory=""
+                        directory=""
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                          const files = event.target.files;
+                          if (files && files.length > 0) {
+                            // Extract the common directory path from the first file
+                            const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
+                            if (path) setImportPath(path);
+                          }
+                        }}
+                      />
+                    </div>
+                  </Field>
+                </ImportFilesSection>
+              ) : null}
 
               {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
@@ -532,9 +600,13 @@ function WorkspacesPage() {
                     ? updateWorkspace.isPending
                       ? "Saving..."
                       : "Save changes"
-                    : createWorkspace.isPending
-                      ? "Adding..."
-                      : "Add workspace"}
+                    : importLocal.isPending
+                      ? "Importing..."
+                      : createWorkspace.isPending
+                        ? "Adding..."
+                        : importPath.trim() !== ""
+                          ? "Import Files"
+                          : "Add workspace"}
                 </Button>
               </DialogActions>
             </FormGrid>
@@ -546,3 +618,26 @@ function WorkspacesPage() {
     </PageStack>
   );
 }
+
+/* ---- Import Files section styled components ---- */
+const ImportFilesSection = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 12px;
+  background: #fafafa;
+`;
+
+const ImportFilesHeader = styled.span`
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--afs-ink, #18181b);
+`;
+
+const ImportFilesDescription = styled.span`
+  font-size: 12px;
+  color: var(--afs-muted, #71717a);
+  line-height: 1.5;
+`;

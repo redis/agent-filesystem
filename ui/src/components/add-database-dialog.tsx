@@ -14,6 +14,7 @@ import {
   DialogOverlay,
   DialogTitle,
   Field,
+  FieldGroup,
   FormGrid,
   TextInput,
   TwoColumnFields,
@@ -170,7 +171,7 @@ export function AddDatabaseDialog({
             />
           </Field>
 
-          <TwoColumnFields>
+          <FieldGroup title="Connection Details">
             <Field>
               Redis address
               <TextInput
@@ -181,48 +182,56 @@ export function AddDatabaseDialog({
                 placeholder="localhost:6379"
               />
             </Field>
-            <Field>
-              Database index
-              <TextInput
-                value={form.dbIndex}
-                onChange={(event) => updateForm("dbIndex", event.target.value)}
-                placeholder="0"
-              />
-            </Field>
-          </TwoColumnFields>
 
-          <TwoColumnFields>
-            <Field>
-              Username
-              <TextInput
-                autoComplete="off"
-                value={form.username}
-                onChange={(event) => updateForm("username", event.target.value)}
-                placeholder="default"
-              />
-            </Field>
-            <Field>
-              Password
-              <TextInput
-                autoComplete="off"
-                type="password"
-                value={form.password}
-                onChange={(event) => updateForm("password", event.target.value)}
-                placeholder="••••••••"
-              />
-            </Field>
-          </TwoColumnFields>
+            <TwoColumnFields>
+              <Field>
+                Username
+                <TextInput
+                  autoComplete="off"
+                  value={form.username}
+                  onChange={(event) => updateForm("username", event.target.value)}
+                  placeholder="default"
+                />
+              </Field>
+              <Field>
+                Password
+                <TextInput
+                  autoComplete="off"
+                  type="password"
+                  value={form.password}
+                  onChange={(event) => updateForm("password", event.target.value)}
+                  placeholder="••••••••"
+                />
+              </Field>
+            </TwoColumnFields>
 
-          <CheckboxRow>
-            <label>
-              <input
-                checked={form.useTLS}
-                type="checkbox"
-                onChange={(event) => updateForm("useTLS", event.target.checked)}
-              />
-              Use TLS
-            </label>
-          </CheckboxRow>
+            <InlineRow>
+              <Field style={{ maxWidth: 100 }}>
+                DB index
+                <TextInput
+                  type="number"
+                  min="0"
+                  max="15"
+                  value={form.dbIndex}
+                  onChange={(event) => updateForm("dbIndex", event.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+              <ToggleLabel>
+                <ToggleSwitch>
+                  <input
+                    checked={form.useTLS}
+                    type="checkbox"
+                    onChange={(event) =>
+                      updateForm("useTLS", event.target.checked)
+                    }
+                  />
+                  <ToggleTrack />
+                </ToggleSwitch>
+                Use TLS
+              </ToggleLabel>
+            </InlineRow>
+          </FieldGroup>
 
           {formError ? (
             <DialogError role="alert">{formError}</DialogError>
@@ -280,16 +289,68 @@ const RemoveDatabaseButton = styled(Button)`
   }
 `;
 
-const CheckboxRow = styled.div`
+const InlineRow = styled.div`
   display: flex;
+  align-items: flex-end;
+  gap: 18px;
+`;
+
+const ToggleLabel = styled.label`
+  display: inline-flex;
   align-items: center;
   gap: 10px;
+  color: var(--afs-ink);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding-bottom: 10px;
+`;
 
-  label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--afs-ink);
-    font-size: 14px;
+const ToggleSwitch = styled.span`
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+
+  input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  input:checked + span {
+    background: var(--afs-focus, #2563eb);
+  }
+
+  input:checked + span::after {
+    transform: translateX(16px);
+  }
+
+  input:focus-visible + span {
+    box-shadow: 0 0 0 3px var(--afs-focus-soft);
+  }
+`;
+
+const ToggleTrack = styled.span`
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--afs-line-strong, #ccc);
+  transition: background 160ms ease;
+  cursor: pointer;
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    transition: transform 160ms ease;
   }
 `;

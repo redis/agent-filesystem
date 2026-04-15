@@ -119,7 +119,7 @@ export const ToggleTrack = styled.div<{ $on: boolean }>`
   width: 44px;
   height: 24px;
   border-radius: 12px;
-  background: ${({ $on }) => ($on ? "var(--afs-accent)" : "var(--afs-panel-strong)")};
+  background: ${({ $on }) => ($on ? "var(--afs-ink-soft)" : "var(--afs-panel-strong)")};
   border: 1px solid ${({ $on }) => ($on ? "transparent" : "var(--afs-line)")};
   transition: background 0.2s ease;
   display: flex;

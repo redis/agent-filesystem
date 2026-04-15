@@ -53,15 +53,17 @@ function WorkspaceStudioPage() {
   // Keeps the banner pinned to "What's Next" after the dialog is dismissed.
   const [showWhatsNext, setShowWhatsNext] = useState(false);
   const bannerStepRef = useRef<{ jumpToStep: (s: 1 | 2 | 3) => void } | null>(null);
-  const hadAgentsBefore = useRef(false);
+  // Initialize to current agent state so we only detect *new* connections,
+  // not agents that were already there when the page loaded.
+  const hadAgentsBefore = useRef<boolean | null>(null);
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "overview";
   const hasAgents = (workspace?.agents?.length ?? 0) > 0;
-  // Show the banner when: no agents yet, or the agent-connected dialog is up,
-  // or the user just dismissed the dialog and we're showing "What's Next".
+  // Show the banner only during the first-time setup flow (welcome=true in URL),
+  // or when the agent-connected dialog / "What's Next" step is active.
   const showBanner = workspace != null && !bannerDismissed &&
-    (!hasAgents || connectedAgent != null || showWhatsNext);
+    (search.welcome || connectedAgent != null || showWhatsNext);
 
   // Always poll while on this page so we detect agent connections promptly.
   useEffect(() => {
@@ -73,9 +75,17 @@ function WorkspaceStudioPage() {
   }, []);
 
   // Detect first agent connection: hasAgents transitions false → true.
+  // Wait until workspace data is loaded before seeding, so we don't
+  // mistake the loading→loaded transition for a new agent connecting.
   useEffect(() => {
+    if (workspace == null) return; // Still loading — don't seed yet.
+    if (hadAgentsBefore.current === null) {
+      // First time we have real data — seed with current state, don't trigger.
+      hadAgentsBefore.current = hasAgents;
+      return;
+    }
     if (hasAgents && !hadAgentsBefore.current) {
-      const agent = workspace?.agents?.[0] ?? null;
+      const agent = workspace.agents?.[0] ?? null;
       if (agent) {
         setConnectedAgent(agent);
       }
@@ -203,7 +213,8 @@ function WorkspaceStudioPage() {
               void navigate({ to: "/workspaces" });
             }}
           >
-            Workspaces
+            <BackArrow aria-hidden>&#8592;</BackArrow>
+            Back to Workspaces
           </BreadcrumbButton>
           <BreadcrumbSeparator>/</BreadcrumbSeparator>
           <BreadcrumbCurrent>{workspace.name}</BreadcrumbCurrent>
@@ -276,8 +287,8 @@ function WorkspaceStudioPage() {
         />
       ) : null}
 
-      {/* Danger zone */}
-      <DangerZoneCard>
+      {/* Danger zone — overview tab only */}
+      {tab === "overview" ? <DangerZoneCard>
         <DangerZoneHeader>
           <DangerZoneTitle>Danger zone</DangerZoneTitle>
           <DangerZoneDesc>
@@ -291,7 +302,7 @@ function WorkspaceStudioPage() {
         >
           {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
         </DeleteWorkspaceButton>
-      </DangerZoneCard>
+      </DangerZoneCard> : null}
 
       {/* Agent connected pop-up dialog */}
       {connectedAgent ? (
@@ -331,18 +342,27 @@ const BreadcrumbGroup = styled.div`
 `;
 
 const BreadcrumbButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: none;
   background: transparent;
   padding: 0;
-  color: var(--afs-ink);
+  color: var(--afs-muted);
   font: inherit;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 400;
   cursor: pointer;
 
   &:hover {
+    color: var(--afs-ink);
     text-decoration: underline;
   }
+`;
+
+const BackArrow = styled.span`
+  font-size: 16px;
+  line-height: 1;
 `;
 
 const BreadcrumbSeparator = styled.span`
@@ -353,7 +373,7 @@ const BreadcrumbSeparator = styled.span`
 const BreadcrumbCurrent = styled.span`
   color: var(--afs-ink);
   font-size: 14px;
-  font-weight: 400;
+  font-weight: 700;
 `;
 
 const ViewAgentsButton = styled(Button)`

@@ -1,5 +1,6 @@
 import { Menu, Typography } from "@redis-ui/components";
 import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
+import { FoldersIcon } from "@redis-ui/icons";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState, type ReactNode } from "react";
@@ -18,6 +19,10 @@ type WorkspaceSortField =
 
 type RowWorkspaceSortField = Exclude<WorkspaceSortField, "connectedAgents">;
 
+type ViewMode = "table" | "cards";
+
+type WorkspaceTab = "overview" | "files" | "checkpoints" | "activity";
+
 type Props = {
   rows: AFSWorkspaceSummary[];
   loading?: boolean;
@@ -26,6 +31,7 @@ type Props = {
   toolbarAction?: ReactNode;
   connectedAgentsByWorkspace?: Record<string, number>;
   onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: WorkspaceTab) => void;
   onEditWorkspace: (workspace: AFSWorkspaceSummary) => void;
   onDeleteWorkspace: (workspace: AFSWorkspaceSummary) => void;
   deletingWorkspaceKey?: string | null;
@@ -56,6 +62,7 @@ export function WorkspaceTable({
   toolbarAction,
   connectedAgentsByWorkspace = {},
   onOpenWorkspace,
+  onOpenWorkspaceTab,
   onEditWorkspace,
   onDeleteWorkspace,
   deletingWorkspaceKey = null,
@@ -63,6 +70,7 @@ export function WorkspaceTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [viewMode, setViewMode] = useState<ViewMode>("cards");
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -110,9 +118,11 @@ export function WorkspaceTable({
               >
                 {row.original.name}
               </S.WorkspaceNameButton>
-              <SecondaryLine color="secondary" component="span">
-                {row.original.redisKey}
-              </SecondaryLine>
+              <TruncatedId title={row.original.id}>
+                {row.original.id.length > 12
+                  ? `${row.original.id.slice(0, 12)}…`
+                  : row.original.id}
+              </TruncatedId>
             </S.Stack>
           ),
         },
@@ -215,6 +225,20 @@ export function WorkspaceTable({
           onChange={setSearch}
           placeholder="Search workspace, database, ..."
         />
+        <S.ToggleGroup>
+          <S.ToggleButton
+            $active={viewMode === "cards"}
+            onClick={() => setViewMode("cards")}
+          >
+            Cards
+          </S.ToggleButton>
+          <S.ToggleButton
+            $active={viewMode === "table"}
+            onClick={() => setViewMode("table")}
+          >
+            Table
+          </S.ToggleButton>
+        </S.ToggleGroup>
         {toolbarAction}
       </S.HeadingWrap>
 
@@ -228,7 +252,8 @@ export function WorkspaceTable({
         </S.EmptyState>
       ) : null}
 
-      {!loading && !error && filteredRows.length > 0 ? (
+      {/* ---- TABLE VIEW ---- */}
+      {!loading && !error && filteredRows.length > 0 && viewMode === "table" ? (
         <S.TableCard>
           <S.RegistryTableViewport>
             <Table
@@ -255,6 +280,96 @@ export function WorkspaceTable({
           </S.RegistryTableViewport>
         </S.TableCard>
       ) : null}
+
+      {/* ---- CARD VIEW ---- */}
+      {!loading && !error && filteredRows.length > 0 && viewMode === "cards" ? (
+        <S.WorkspaceCardGrid>
+          {filteredRows.map((ws) => {
+            const agentCount = connectedAgentsByWorkspace[workspaceRowKey(ws)] ?? 0;
+            const hasAgents = agentCount > 0;
+            return (
+              <S.WorkspaceCard
+                key={ws.id}
+                onClick={() => onOpenWorkspace(ws)}
+              >
+                <S.CardTopRow>
+                  <S.CardIconBox>
+                    <FoldersIcon size="XL" />
+                  </S.CardIconBox>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                    <S.CardName>{ws.name}</S.CardName>
+                    <S.CardDescription>
+                      {ws.cloudAccount} · {ws.region || "Local"}
+                    </S.CardDescription>
+                  </div>
+                </S.CardTopRow>
+
+                <S.CardBody>
+
+                  <S.CardDetailLines>
+                    <S.CardDetailLine>
+                      <S.CardDetailLabel>Database</S.CardDetailLabel>
+                      <S.CardDetailValue>{ws.databaseName}</S.CardDetailValue>
+                    </S.CardDetailLine>
+                    <S.CardDetailLine>
+                      <S.CardDetailLabel>ID</S.CardDetailLabel>
+                      <S.CardDetailValue>
+                        {ws.id.length > 22 ? `${ws.id.slice(0, 22)}…` : ws.id}
+                      </S.CardDetailValue>
+                    </S.CardDetailLine>
+                  </S.CardDetailLines>
+
+                  <S.CardStatsRow>
+                    <S.CardStatBox>
+                      <S.CardStatLabel>Files</S.CardStatLabel>
+                      <S.CardStatValue>{ws.fileCount}</S.CardStatValue>
+                    </S.CardStatBox>
+                    <S.CardStatBox>
+                      <S.CardStatLabel>Folders</S.CardStatLabel>
+                      <S.CardStatValue>{ws.folderCount}</S.CardStatValue>
+                    </S.CardStatBox>
+                    <S.CardStatBox>
+                      <S.CardStatLabel>Size</S.CardStatLabel>
+                      <S.CardStatValue>{formatBytes(ws.totalBytes)}</S.CardStatValue>
+                    </S.CardStatBox>
+                  </S.CardStatsRow>
+
+                  <S.CardInfoRow>
+                    <S.CardInfoBox $highlight={hasAgents}>
+                      <LiveDot $active={hasAgents} />
+                      {agentCount} Agent{agentCount !== 1 ? "s" : ""}
+                    </S.CardInfoBox>
+                    <S.CardInfoBox>
+                      {new Date(ws.updatedAt).toLocaleDateString()}
+                    </S.CardInfoBox>
+                  </S.CardInfoRow>
+                </S.CardBody>
+
+                <S.CardButtonRow>
+                  <S.CardPrimaryButton
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWorkspaceTab?.(ws, "files");
+                    }}
+                  >
+                    Browse Files
+                  </S.CardPrimaryButton>
+                  <S.CardSecondaryButton
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWorkspaceTab?.(ws, "checkpoints");
+                    }}
+                  >
+                    Checkpoints
+                  </S.CardSecondaryButton>
+                </S.CardButtonRow>
+              </S.WorkspaceCard>
+            );
+          })}
+        </S.WorkspaceCardGrid>
+      ) : null}
     </>
   );
 }
@@ -264,6 +379,14 @@ const SecondaryLine = styled(Typography.Body)`
     font-size: 12px;
     line-height: 1.4;
   }
+`;
+
+const TruncatedId = styled.span`
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--afs-muted);
+  cursor: default;
+  font-family: var(--afs-mono);
 `;
 
 const pulse = keyframes`

@@ -36,6 +36,10 @@ type httpForkWorkspaceRequest struct {
 	NewWorkspace string `json:"new_workspace"`
 }
 
+type httpSaveFromLiveRequest struct {
+	CheckpointID string `json:"checkpoint_id"`
+}
+
 type httpSaveCheckpointRequest struct {
 	ExpectedHead          string                `json:"expected_head"`
 	CheckpointID          string                `json:"checkpoint_id"`
@@ -144,6 +148,14 @@ func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input contr
 		DirCount:              input.DirCount,
 		TotalBytes:            input.TotalBytes,
 		SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+	}, &out, http.StatusCreated)
+	return out.Saved, err
+}
+
+func (c *httpControlPlaneClient) SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	var out httpSaveCheckpointResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":save-from-live", httpSaveFromLiveRequest{
+		CheckpointID: checkpointID,
 	}, &out, http.StatusCreated)
 	return out.Saved, err
 }

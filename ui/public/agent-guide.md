@@ -173,58 +173,52 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
 |---------|-------------|
 | `afs mcp` | Start the MCP server (stdio JSON-RPC) |
 
-## Redis FS.* Commands (Direct Access)
+## Redis Data Format (Direct Access)
 
-If you have direct Redis access, you can use the FS module commands:
+AFS stores workspace data using native Redis types. All keys are scoped under `afs:{workspace}:` using hash tags for cluster compatibility. Here is the key layout for a workspace called `my-project`:
 
-### Reading
+### Workspace metadata
 
-| Command | Example |
-|---------|---------|
-| `FS.CAT key path` | `FS.CAT vol /file.md` |
-| `FS.LINES key path start end` | `FS.LINES vol /file.md 10 20` |
-| `FS.HEAD key path [n]` | `FS.HEAD vol /file.md 5` |
-| `FS.TAIL key path [n]` | `FS.TAIL vol /file.md 5` |
+| Key | Type | Description |
+|-----|------|-------------|
+| `afs:{my-project}:workspace:meta` | Hash (JSON) | Workspace name, head checkpoint, timestamps, source |
+| `afs:{my-project}:workspace:savepoints` | Sorted Set | Checkpoint IDs ordered by creation time |
+| `afs:{my-project}:workspace:audit` | Stream | Activity log (create, restore, session events) |
+| `afs:{my-project}:workspace:sessions` | Sorted Set | Active agent session IDs |
 
-### Writing
+### Checkpoints
 
-| Command | Example |
-|---------|---------|
-| `FS.ECHO key path content` | `FS.ECHO vol /file.md "content"` |
-| `FS.ECHO key path content APPEND` | `FS.ECHO vol /log.txt "line" APPEND` |
-| `FS.INSERT key path line content` | `FS.INSERT vol /file.md 5 "new"` |
+| Key | Type | Description |
+|-----|------|-------------|
+| `afs:{my-project}:savepoint:{name}:meta` | Hash (JSON) | Checkpoint metadata: author, parent, file/dir counts, size |
+| `afs:{my-project}:savepoint:{name}:manifest` | Hash (JSON) | Full file tree: path → type, mode, size, inline content or blob ID |
+| `afs:{my-project}:blob:{sha256}` | String | File content for files larger than 4 KB (deduplicated by hash) |
 
-### Editing
+### Live workspace root (inode tree)
 
-| Command | Example |
-|---------|---------|
-| `FS.REPLACE key path old new [ALL]` | `FS.REPLACE vol /f.md "old" "new" ALL` |
-| `FS.DELETELINES key path start end` | `FS.DELETELINES vol /file.md 10 15` |
+The live workspace is a materialized inode tree that agents and mounts operate on:
 
-### Navigation
+| Key | Type | Description |
+|-----|------|-------------|
+| `afs:{my-project}:info` | Hash | Schema version, file/dir/symlink counts, total bytes |
+| `afs:{my-project}:inode:{id}` | Hash | Inode fields: `type`, `mode`, `size`, `mtime_ms`, `content`, `name`, `path` |
+| `afs:{my-project}:dirents:{id}` | Hash | Directory entries: child name → child inode ID |
+| `afs:{my-project}:content:{id}` | String | External file content (for files exceeding inline threshold) |
+| `afs:{my-project}:root_head_savepoint` | String | Checkpoint ID the live root was materialized from |
+| `afs:{my-project}:root_dirty` | String | `"1"` if the live root has unsaved changes |
 
-| Command | Example |
-|---------|---------|
-| `FS.LS key path [LONG]` | `FS.LS vol /notes LONG` |
-| `FS.TREE key path [DEPTH n]` | `FS.TREE vol / DEPTH 2` |
-| `FS.FIND key path pattern [TYPE f\|d]` | `FS.FIND vol / "*.md" TYPE file` |
-| `FS.STAT key path` | `FS.STAT vol /file.md` |
-| `FS.TEST key path` | `FS.TEST vol /file.md` |
+Inode `1` is always the root directory (`/`). Each inode hash contains:
 
-### Search
-
-| Command | Example |
-|---------|---------|
-| `FS.GREP key path pattern [NOCASE]` | `FS.GREP vol / "*TODO*" NOCASE` |
-
-### Organization
-
-| Command | Example |
-|---------|---------|
-| `FS.MKDIR key path [PARENTS]` | `FS.MKDIR vol /a/b/c PARENTS` |
-| `FS.RM key path [RECURSIVE]` | `FS.RM vol /old RECURSIVE` |
-| `FS.CP key src dst [RECURSIVE]` | `FS.CP vol /a /b RECURSIVE` |
-| `FS.MV key src dst` | `FS.MV vol /old.md /new.md` |
+| Field | Description |
+|-------|-------------|
+| `type` | `file`, `dir`, or `symlink` |
+| `mode` | Unix permission bits (e.g. `0644`) |
+| `size` | File size in bytes |
+| `content` | File content (inline for small files) |
+| `mtime_ms` | Last modified timestamp (milliseconds) |
+| `path` | Absolute path (e.g. `/src/main.py`) |
+| `name` | Filename (e.g. `main.py`) |
+| `parent` | Parent inode ID |
 
 ## Best Practices
 
@@ -235,5 +229,3 @@ If you have direct Redis access, you can use the FS module commands:
 - **Use MCP for agent-only workflows** — no local mount needed
 - **Fork workspaces for parallel experiments** — keeps main workspace clean
 - All file paths are **absolute** (start with `/`)
-- `FS.GREP` uses **glob patterns** (`*pattern*`), not regex
-- Parent directories are **auto-created** by `FS.ECHO`

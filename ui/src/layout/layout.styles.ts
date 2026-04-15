@@ -23,5 +23,5 @@ export const MainContainer = styled.main`
   overflow-y: auto;
   flex-direction: column;
   flex: 1;
-  background: transparent;
+  background-color: transparent;
 `;

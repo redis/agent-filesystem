@@ -129,9 +129,9 @@ function DocsPage() {
           workspaces, sync, and checkpoints.
         </DocProse>
         <CodeBlock>
-          <code>{`./afs setup          # configure Redis connection
-./afs workspace create my-project
-./afs up             # start syncing`}</code>
+          <code>{`afs setup          # configure Redis connection
+afs workspace create my-project
+afs up             # start syncing`}</code>
         </CodeBlock>
 
         <CalloutBox $tone="tip">
@@ -140,7 +140,7 @@ function DocsPage() {
             <Link to="/downloads" style={{ color: "var(--afs-accent)" }}>
               Downloads page
             </Link>{" "}
-            for detailed installation instructions for both modes.
+            to download a pre-built CLI binary.
           </DocProse>
         </CalloutBox>
       </DocSection>
@@ -172,9 +172,9 @@ docker compose up`}</code>
         <Step n={3} title="Create a workspace">
           Use the web UI to create your first workspace, or connect the CLI:
           <CodeBlock>
-            <code>{`./afs setup   # point at localhost:6379
-./afs workspace create my-project
-./afs up`}</code>
+            <code>{`afs setup   # point at localhost:6379
+afs workspace create my-project
+afs up`}</code>
           </CodeBlock>
         </Step>
 
@@ -192,30 +192,71 @@ docker compose up`}</code>
         </DocProse>
 
         <Step n={1} title="Prerequisites">
-          You need a running Redis instance (local or remote) and Go 1.22.2+ to
-          build the CLI. For the optional Redis module (FS.* commands), you also
-          need a C compiler.
-          <CodeBlock>
-            <code>{`# Start a local Redis if you don't have one
-redis-server --daemonize yes`}</code>
-          </CodeBlock>
+          <CmdTable>
+            <thead>
+              <tr>
+                <th>Requirement</th>
+                <th>Version</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Go</td>
+                <td>1.22.2+</td>
+                <td>Required for CLI and control plane</td>
+              </tr>
+              <tr>
+                <td>Node.js</td>
+                <td>20+</td>
+                <td>Only needed if building the web UI</td>
+              </tr>
+              <tr>
+                <td>Redis</td>
+                <td>7+</td>
+                <td>Running instance (local or remote)</td>
+              </tr>
+              <tr>
+                <td>C compiler</td>
+                <td>gcc or clang</td>
+                <td>Only needed for the optional Redis module</td>
+              </tr>
+            </tbody>
+          </CmdTable>
         </Step>
 
         <Step n={2} title="Build AFS">
-          Clone the repo and build. This produces the{" "}
-          <InlineCode>afs</InlineCode> binary.
           <CodeBlock>
             <code>{`git clone <repo-url>
 cd agent-filesystem
-make afs`}</code>
+
+# CLI only (no UI):
+make afs
+
+# CLI + control plane with embedded UI:
+make commands
+
+# Everything (CLI, control plane, Redis module):
+make all`}</code>
           </CodeBlock>
         </Step>
 
-        <Step n={3} title="Run setup">
+        <Step n={3} title="Install to PATH">
+          <CodeBlock>
+            <code>{`make install`}</code>
+          </CodeBlock>
+          <DocProse>
+            Installs <InlineCode>afs</InlineCode> to{" "}
+            <InlineCode>/usr/local/bin</InlineCode> so you can run it from
+            anywhere.
+          </DocProse>
+        </Step>
+
+        <Step n={4} title="Run setup">
           The interactive setup wizard configures your Redis connection and local
           sync directory.
           <CodeBlock>
-            <code>{`./afs setup`}</code>
+            <code>{`afs setup`}</code>
           </CodeBlock>
           <CalloutBox $tone="tip">
             <DocProse>
@@ -225,10 +266,10 @@ make afs`}</code>
           </CalloutBox>
         </Step>
 
-        <Step n={4} title="Create a workspace and start syncing">
+        <Step n={5} title="Create a workspace and start syncing">
           <CodeBlock>
-            <code>{`./afs workspace create my-project
-./afs up`}</code>
+            <code>{`afs workspace create my-project
+afs up`}</code>
           </CodeBlock>
           <DocProse>
             Your workspace is now at{" "}
@@ -237,10 +278,10 @@ make afs`}</code>
           </DocProse>
         </Step>
 
-        <Step n={5} title="Create checkpoints">
+        <Step n={6} title="Create checkpoints">
           Save a named snapshot. You can restore to any checkpoint later.
           <CodeBlock>
-            <code>{`./afs checkpoint create before-refactor`}</code>
+            <code>{`afs checkpoint create before-refactor`}</code>
           </CodeBlock>
         </Step>
       </DocSection>

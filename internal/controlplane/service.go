@@ -317,6 +317,63 @@ func (s *Service) SaveCheckpoint(ctx context.Context, input SaveCheckpointReques
 	return s.saveCheckpoint(ctx, input)
 }
 
+// SaveCheckpointFromLive builds a manifest from the live workspace root in
+// Redis and saves it as a new checkpoint. This encapsulates the full server-
+// side flow so that remote clients (self-hosted mode) can create checkpoints
+// without direct Redis access.
+func (s *Service) SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	if err := ValidateName("workspace", workspace); err != nil {
+		return false, fmt.Errorf("save-from-live validate: %w", err)
+	}
+	if err := ValidateName("checkpoint", checkpointID); err != nil {
+		return false, fmt.Errorf("save-from-live validate checkpoint: %w", err)
+	}
+
+	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return false, fmt.Errorf("save-from-live get workspace meta %q: %w", workspace, err)
+	}
+
+	// Check dirty state — if the workspace root is known-clean, skip.
+	if dirty, known, err := WorkspaceRootDirtyState(ctx, s.store, workspace); err != nil {
+		return false, fmt.Errorf("save-from-live dirty state: %w", err)
+	} else if known && !dirty {
+		return false, nil
+	}
+
+	// Ensure workspace root is materialized.
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return false, fmt.Errorf("save-from-live ensure workspace root %q (head=%q): %w", workspace, meta.HeadSavepoint, err)
+	}
+
+	// Build manifest from the live workspace root.
+	manifest, blobs, fileCount, dirCount, totalBytes, err := BuildManifestFromWorkspaceRoot(ctx, s.store.rdb, workspace, checkpointID)
+	if err != nil {
+		return false, fmt.Errorf("save-from-live build manifest: %w", err)
+	}
+
+	saved, err := s.saveCheckpoint(ctx, SaveCheckpointRequest{
+		Workspace:             workspace,
+		ExpectedHead:          meta.HeadSavepoint,
+		CheckpointID:          checkpointID,
+		Manifest:              manifest,
+		Blobs:                 blobs,
+		FileCount:             fileCount,
+		DirCount:              dirCount,
+		TotalBytes:            totalBytes,
+		SkipWorkspaceRootSync: true,
+	})
+	if err != nil {
+		return false, fmt.Errorf("save-from-live save checkpoint: %w", err)
+	}
+	if !saved {
+		if err := MarkWorkspaceRootClean(ctx, s.store, workspace, meta.HeadSavepoint); err != nil {
+			return false, fmt.Errorf("save-from-live mark clean: %w", err)
+		}
+	}
+	return saved, nil
+}
+
 func (s *Service) ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error {
 	return s.forkWorkspace(ctx, sourceWorkspace, newWorkspace)
 }

@@ -1014,7 +1014,14 @@ func newTestManager(t *testing.T) (*DatabaseManager, string) {
 	}
 	t.Cleanup(manager.Close)
 
-	databaseID, _ := activeDatabaseIdentity(cfg)
+	databaseID, databaseName := activeDatabaseIdentity(cfg)
+	if _, err := manager.UpsertDatabase(ctx, databaseID, upsertDatabaseRequest{
+		Name:      databaseName,
+		RedisAddr: cfg.RedisAddr,
+		RedisDB:   cfg.RedisDB,
+	}); err != nil {
+		t.Fatalf("UpsertDatabase() returned error: %v", err)
+	}
 	return manager, databaseID
 }
 

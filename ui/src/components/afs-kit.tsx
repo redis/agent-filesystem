@@ -182,7 +182,7 @@ const toneStyles = {
   `,
   "git-import": css`
     background: var(--afs-accent-soft);
-    color: var(--afs-accent);
+    color: #2563eb;
   `,
   "cloud-import": css`
     background: var(--afs-bg-soft);
@@ -209,6 +209,37 @@ export const FormGrid = styled.form`
   display: grid;
   gap: 14px;
 `;
+
+const FieldGroupBox = styled.fieldset`
+  border: 1px solid var(--afs-line);
+  border-radius: 16px;
+  padding: 18px 18px 14px;
+  margin: 0;
+  background: var(--afs-panel);
+`;
+
+const FieldGroupLegend = styled.legend`
+  padding: 0 8px;
+  color: var(--afs-ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+`;
+
+const FieldGroupContent = styled.div`
+  display: grid;
+  gap: 14px;
+`;
+
+export function FieldGroup(props: { title: string; children: React.ReactNode }) {
+  return (
+    <FieldGroupBox>
+      <FieldGroupLegend>{props.title}</FieldGroupLegend>
+      <FieldGroupContent>{props.children}</FieldGroupContent>
+    </FieldGroupBox>
+  );
+}
 
 export const TwoColumnFields = styled.div`
   display: grid;
@@ -247,8 +278,8 @@ const fieldBase = css`
   }
 
   &:focus {
-    border-color: var(--afs-accent);
-    box-shadow: 0 0 0 3px var(--afs-accent-soft);
+    border-color: var(--afs-focus);
+    box-shadow: 0 0 0 3px var(--afs-focus-soft);
     transform: translateY(-1px);
   }
 `;
@@ -312,13 +343,13 @@ export const Tabs = styled.div`
 `;
 
 export const TabButton = styled.button<{ $active?: boolean }>`
-  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-line-strong)" : "transparent")};
   border-radius: 999px;
   padding: 10px 15px;
   cursor: pointer;
   font-weight: 700;
   color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-muted)")};
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "transparent")};
+  background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "transparent")};
   box-shadow: ${({ $active }) =>
     $active ? "0 4px 10px rgba(8, 6, 13, 0.08)" : "none"};
   transition:
@@ -327,7 +358,7 @@ export const TabButton = styled.button<{ $active?: boolean }>`
     transform 160ms ease;
 
   &:hover {
-    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel)")};
+    background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "var(--afs-panel)")};
     transform: translateY(-1px);
   }
 `;
@@ -353,9 +384,9 @@ export const FileButton = styled.button<{ $active?: boolean }>`
   gap: 6px;
   width: 100%;
   border: 1px solid
-    ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line)")};
+    ${({ $active }) => ($active ? "var(--afs-line-strong)" : "var(--afs-line)")};
   background: ${({ $active }) =>
-    $active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)"};
+    $active ? "var(--afs-panel)" : "var(--afs-panel-strong)"};
   border-radius: 18px;
   padding: 13px 14px;
   text-align: left;
@@ -394,9 +425,17 @@ export const SavepointGrid = styled.div`
 export const SavepointRow = styled.div`
   ${insetSurface}
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding: 18px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--afs-panel);
+    border-color: var(--afs-ink-soft);
+  }
 
   @media (max-width: 760px) {
     flex-direction: column;
@@ -425,6 +464,13 @@ const TitleBody = styled.p`
   color: var(--afs-muted);
   font-size: 15px;
   line-height: 1.65;
+`;
+
+export const PageDescription = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.5;
 `;
 
 export function SectionTitle(props: { title: string; body?: string }) {

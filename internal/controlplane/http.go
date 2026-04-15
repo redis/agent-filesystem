@@ -25,6 +25,10 @@ type forkWorkspaceRequest struct {
 	NewWorkspace string `json:"new_workspace"`
 }
 
+type saveFromLiveRequest struct {
+	CheckpointID string `json:"checkpoint_id"`
+}
+
 type saveCheckpointRequest struct {
 	ExpectedHead          string            `json:"expected_head"`
 	CheckpointID          string            `json:"checkpoint_id"`
@@ -483,6 +487,23 @@ func handleWorkspaceRoute(
 	workspacePath string,
 ) {
 	switch {
+	case strings.HasSuffix(workspacePath, ":save-from-live"):
+		workspace := strings.TrimSuffix(workspacePath, ":save-from-live")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input saveFromLiveRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		saved, err := manager.SaveCheckpointFromLive(r.Context(), databaseID, workspace, input.CheckpointID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
 	case strings.HasSuffix(workspacePath, ":fork"):
 		workspace := strings.TrimSuffix(workspacePath, ":fork")
 		if r.Method != http.MethodPost {
@@ -667,6 +688,23 @@ func handleResolvedWorkspaceRoute(
 	workspacePath string,
 ) {
 	switch {
+	case strings.HasSuffix(workspacePath, ":save-from-live"):
+		workspace := strings.TrimSuffix(workspacePath, ":save-from-live")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input saveFromLiveRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		saved, err := manager.SaveResolvedCheckpointFromLive(r.Context(), workspace, input.CheckpointID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
 	case strings.HasSuffix(workspacePath, ":fork"):
 		workspace := strings.TrimSuffix(workspacePath, ":fork")
 		if r.Method != http.MethodPost {
@@ -882,7 +920,11 @@ func handleCLIDownload(w http.ResponseWriter, r *http.Request) {
 		defer cleanupSign()
 	}
 
-	info, err := os.Stat(servePath)
+	// Read the entire binary into memory before responding. The caller may
+	// download to the same path the server is serving from (e.g. ./afs in the
+	// repo root during local development), which truncates the file mid-read
+	// when http.ServeFile streams directly from disk.
+	data, err := os.ReadFile(servePath)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "CLI binary not available",
@@ -892,8 +934,8 @@ func handleCLIDownload(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, target.Filename))
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
-	http.ServeFile(w, r, servePath)
+	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(data)), 10))
+	w.Write(data)
 }
 
 // findCLIBinary looks for the afs binary next to the running control plane binary,

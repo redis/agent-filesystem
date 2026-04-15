@@ -2,19 +2,15 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
-
-const databaseRegistryVersion = 1
 
 type databaseProfile struct {
 	ID            string `json:"id"`
@@ -63,11 +59,6 @@ type upsertDatabaseRequest struct {
 	RedisTLS      bool   `json:"redis_tls"`
 }
 
-type databaseRegistryFile struct {
-	Version   int               `json:"version"`
-	Databases []databaseProfile `json:"databases"`
-}
-
 type databaseRuntime struct {
 	cfg     Config
 	store   *Store
@@ -79,48 +70,30 @@ type DatabaseListResponse = databaseListResponse
 type UpsertDatabaseRequest = upsertDatabaseRequest
 
 type DatabaseManager struct {
-	mu           sync.Mutex
-	registryPath string
-	catalog      *workspaceCatalog
-	profiles     map[string]databaseProfile
-	order        []string
-	runtimes     map[string]*databaseRuntime
+	mu       sync.Mutex
+	catalog  *workspaceCatalog
+	profiles map[string]databaseProfile
+	order    []string
+	runtimes map[string]*databaseRuntime
 }
 
 func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
-	seedCfg, seedPresent, err := LoadConfigWithPresence(configPathOverride)
-	if err != nil {
-		return nil, err
-	}
-
 	catalog, err := openWorkspaceCatalog(configPathOverride)
 	if err != nil {
 		return nil, err
 	}
 
-	registryPath := databaseRegistryPath(configPathOverride)
 	loadedProfiles, err := catalog.ListDatabaseProfiles(context.Background())
 	if err != nil {
 		_ = catalog.Close()
 		return nil, err
 	}
-	if len(loadedProfiles) == 0 {
-		loadedProfiles, err = loadDatabaseProfiles(registryPath)
-		if err != nil {
-			_ = catalog.Close()
-			return nil, err
-		}
-	}
-	if len(loadedProfiles) == 0 && seedPresent {
-		loadedProfiles = []databaseProfile{seedDatabaseProfile(seedCfg)}
-	}
 
 	manager := &DatabaseManager{
-		registryPath: registryPath,
-		catalog:      catalog,
-		profiles:     make(map[string]databaseProfile, len(loadedProfiles)),
-		order:        make([]string, 0, len(loadedProfiles)),
-		runtimes:     make(map[string]*databaseRuntime),
+		catalog:  catalog,
+		profiles: make(map[string]databaseProfile, len(loadedProfiles)),
+		order:    make([]string, 0, len(loadedProfiles)),
+		runtimes: make(map[string]*databaseRuntime),
 	}
 	for _, profile := range loadedProfiles {
 		if err := validateDatabaseProfile(profile); err != nil {
@@ -557,6 +530,40 @@ func (m *DatabaseManager) SaveResolvedCheckpoint(ctx context.Context, workspace 
 	}
 	input.Workspace = route.Name
 	saved, err := service.SaveCheckpoint(ctx, input)
+	if err != nil {
+		return false, err
+	}
+	if saved {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+			return false, err
+		}
+	}
+	return saved, nil
+}
+
+func (m *DatabaseManager) SaveResolvedCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return false, fmt.Errorf("resolve workspace %q: %w", workspace, err)
+	}
+	saved, err := service.SaveCheckpointFromLive(ctx, route.Name, checkpointID)
+	if err != nil {
+		return false, err
+	}
+	if saved {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+			return false, err
+		}
+	}
+	return saved, nil
+}
+
+func (m *DatabaseManager) SaveCheckpointFromLive(ctx context.Context, databaseID, workspace, checkpointID string) (bool, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return false, fmt.Errorf("resolve workspace %q in database %q: %w", workspace, databaseID, err)
+	}
+	saved, err := service.SaveCheckpointFromLive(ctx, route.Name, checkpointID)
 	if err != nil {
 		return false, err
 	}
@@ -1114,40 +1121,6 @@ func openDatabaseRuntime(ctx context.Context, profile databaseProfile) (*databas
 		store:   store,
 		closeFn: closeFn,
 	}, nil
-}
-
-func loadDatabaseProfiles(registryPath string) ([]databaseProfile, error) {
-	data, err := os.ReadFile(registryPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-
-	var payload databaseRegistryFile
-	if err := json.Unmarshal(data, &payload); err != nil {
-		return nil, err
-	}
-	return payload.Databases, nil
-}
-
-func databaseRegistryPath(configPathOverride string) string {
-	cfgPath := configPath(configPathOverride)
-	return filepath.Join(filepath.Dir(cfgPath), "afs.databases.json")
-}
-
-func seedDatabaseProfile(cfg Config) databaseProfile {
-	id, name := activeDatabaseIdentity(cfg)
-	return databaseProfile{
-		ID:            id,
-		Name:          name,
-		RedisAddr:     strings.TrimSpace(cfg.RedisAddr),
-		RedisUsername: strings.TrimSpace(cfg.RedisUsername),
-		RedisPassword: cfg.RedisPassword,
-		RedisDB:       cfg.RedisDB,
-		RedisTLS:      cfg.RedisTLS,
-	}
 }
 
 func profileToConfig(profile databaseProfile) Config {

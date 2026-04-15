@@ -1,350 +1,247 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-  DocPage,
-  DocHero,
-  DocHeroTitle,
-  DocHeroSub,
-  DocSection,
-  DocHeading,
-  DocSubheading,
-  DocProse,
-  CodeBlock,
-  InlineCode,
-  CalloutBox,
-  RawFileLink,
-  CmdTable,
-  CrossLinkCard,
-  CrossLinkText,
-  CrossLinkTitle,
-  CrossLinkDesc,
-  CrossLinkArrow,
-} from "../components/doc-kit";
+import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import styled from "styled-components";
 
 export const Route = createFileRoute("/agent-guide")({
   component: AgentGuidePage,
 });
 
 function AgentGuidePage() {
+  const [md, setMd] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch("/agent-guide.md")
+      .then((r) => r.text())
+      .then(setMd)
+      .catch(() => setMd("_Failed to load agent-guide.md_"));
+  }, []);
+
   return (
-    <DocPage>
-      {/* ── Hero ── */}
-      <DocHero>
-        <DocHeroTitle>Agent Guide</DocHeroTitle>
-        <DocHeroSub>
-          Everything an AI agent needs to start using Agent Filesystem.
-          Configure MCP, create workspaces, read and write files, and manage
-          checkpoints.
-        </DocHeroSub>
-        <div style={{ marginTop: 16, display: "flex", flexWrap: "wrap", gap: 12 }}>
-          <RawFileLink href="/agent-guide.md" target="_blank">
-            &#128196; View raw Markdown
-          </RawFileLink>
-        </div>
-      </DocHero>
-
-      {/* ── Quick start ── */}
-      <DocSection>
-        <DocHeading>Quick Start for Agents</DocHeading>
-        <DocProse>
-          To get an agent working with AFS, point it at the raw guide and tell
-          it what to do:
-        </DocProse>
-
-        <CalloutBox $tone="tip">
-          <DocProse>
-            <strong>Tell your agent:</strong>
-          </DocProse>
-          <CodeBlock>
-            <code>{`Read the Agent Filesystem guide at <your-host>/agent-guide.md
+    <Wrapper>
+      <QuickStart>
+        <strong>Quick start for agents:</strong> Point your agent at the raw
+        guide and tell it what to do:
+        <Pre>{`Read the Agent Filesystem guide at
+https://github.com/redis/agent-filesystem/blob/main/ui/public/agent-guide.md
 and set up a workspace called "my-project". Use the AFS MCP
 server to create files, organize the project, and create a
-checkpoint when you're done.`}</code>
-          </CodeBlock>
-        </CalloutBox>
+checkpoint when you're done.`}</Pre>
+      </QuickStart>
 
-        <DocProse>
-          The agent will read the guide, understand the available tools, and
-          start working with AFS workspaces autonomously.
-        </DocProse>
-      </DocSection>
-
-      {/* ── MCP setup ── */}
-      <DocSection>
-        <DocHeading>MCP Server Configuration</DocHeading>
-        <DocProse>
-          AFS exposes workspace tools through the Model Context Protocol (MCP).
-          Add the following to your agent's MCP configuration (e.g.{" "}
-          <InlineCode>claude_desktop_config.json</InlineCode> or{" "}
-          <InlineCode>.claude/settings.json</InlineCode>):
-        </DocProse>
-
-        <CodeBlock>
-          <code>{`{
-  "mcpServers": {
-    "agent-filesystem": {
-      "command": "/absolute/path/to/afs",
-      "args": ["mcp"]
-    }
-  }
-}`}</code>
-        </CodeBlock>
-
-        <CalloutBox $tone="warn">
-          <DocProse>
-            The <InlineCode>command</InlineCode> path must be{" "}
-            <strong>absolute</strong>. Relative paths like{" "}
-            <InlineCode>./afs</InlineCode> will not resolve correctly in most
-            MCP hosts.
-          </DocProse>
-        </CalloutBox>
-
-        <DocSubheading>How it works</DocSubheading>
-        <DocProse>
-          Running <InlineCode>afs mcp</InlineCode> starts a stdio-based MCP
-          server that exposes workspace management tools. The agent communicates
-          via JSON-RPC over stdin/stdout. The MCP server reads its configuration
-          from <InlineCode>afs.config.json</InlineCode> (next to the binary).
-        </DocProse>
-      </DocSection>
-
-      {/* ── Available tools ── */}
-      <DocSection>
-        <DocHeading>Available Workspace Tools</DocHeading>
-        <DocProse>
-          When connected via MCP, the agent has access to the following
-          categories of tools:
-        </DocProse>
-
-        <CmdTable>
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>What the agent can do</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><strong>Workspace management</strong></td>
-              <td>
-                Create, list, select, fork, and delete workspaces
-              </td>
-            </tr>
-            <tr>
-              <td><strong>File operations</strong></td>
-              <td>
-                Read, write, edit, delete, copy, move, and search files within a
-                workspace
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Navigation</strong></td>
-              <td>
-                List directories, tree view, find files by pattern, check
-                existence
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Search</strong></td>
-              <td>
-                Grep across workspace files directly in Redis (fast, no local
-                mount needed)
-              </td>
-            </tr>
-            <tr>
-              <td><strong>Checkpoints</strong></td>
-              <td>
-                Create named snapshots, list history, restore to any checkpoint
-              </td>
-            </tr>
-          </tbody>
-        </CmdTable>
-
-        <CalloutBox $tone="info">
-          <DocProse>
-            The MCP server is <strong>workspace-first</strong>: file edits are
-            automatically tracked and can be checkpointed. The agent does not
-            need to manage sync or mounts.
-          </DocProse>
-        </CalloutBox>
-      </DocSection>
-
-      {/* ── Common workflows ── */}
-      <DocSection>
-        <DocHeading>Common Agent Workflows</DocHeading>
-
-        <DocSubheading>Create a workspace and add files</DocSubheading>
-        <DocProse>
-          Agents typically start by creating a workspace, then writing files
-          into it:
-        </DocProse>
-        <CodeBlock>
-          <code>{`# Via CLI (if agent has shell access)
-./afs workspace create my-project
-./afs workspace use my-project
-./afs up
-
-# Then work in ~/afs/my-project/ with normal file tools
-echo "# README" > ~/afs/my-project/README.md`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Import an existing directory</DocSubheading>
-        <DocProse>
-          To bring an existing project into AFS:
-        </DocProse>
-        <CodeBlock>
-          <code>{`./afs workspace import my-project /path/to/existing/directory`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Checkpoint before risky changes</DocSubheading>
-        <DocProse>
-          Always checkpoint before making large or risky modifications. This
-          gives the agent a clean rollback point.
-        </DocProse>
-        <CodeBlock>
-          <code>{`./afs checkpoint create before-refactor
-
-# ... make changes ...
-
-# If something goes wrong:
-./afs checkpoint restore before-refactor`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Search without mounting</DocSubheading>
-        <DocProse>
-          Agents can search workspace contents directly in Redis without needing
-          a local mount:
-        </DocProse>
-        <CodeBlock>
-          <code>{`./afs grep "TODO" --workspace my-project
-./afs grep --workspace my-project --path /src -E "function|class"`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Fork a workspace for parallel work</DocSubheading>
-        <DocProse>
-          Multiple agents can work in parallel by forking a workspace:
-        </DocProse>
-        <CodeBlock>
-          <code>{`./afs workspace fork my-project my-project-experiment`}</code>
-        </CodeBlock>
-      </DocSection>
-
-      {/* ── Configuration ── */}
-      <DocSection>
-        <DocHeading>Configuration Reference</DocHeading>
-        <DocProse>
-          AFS reads its configuration from{" "}
-          <InlineCode>afs.config.json</InlineCode>, located next to the{" "}
-          <InlineCode>afs</InlineCode> binary. Key fields:
-        </DocProse>
-        <CodeBlock>
-          <code>{`{
-  "redis": {
-    "addr": "localhost:6379",
-    "username": "",
-    "password": "",
-    "db": 0,
-    "tls": false
-  },
-  "mode": "sync",
-  "currentWorkspace": "my-project",
-  "localPath": "~/afs"
-}`}</code>
-        </CodeBlock>
-        <CmdTable>
-          <thead>
-            <tr>
-              <th>Field</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td><InlineCode>redis.addr</InlineCode></td>
-              <td>Redis host:port</td>
-            </tr>
-            <tr>
-              <td><InlineCode>redis.password</InlineCode></td>
-              <td>Redis auth password (empty for no auth)</td>
-            </tr>
-            <tr>
-              <td><InlineCode>redis.tls</InlineCode></td>
-              <td>Enable TLS connection</td>
-            </tr>
-            <tr>
-              <td><InlineCode>mode</InlineCode></td>
-              <td>
-                <InlineCode>sync</InlineCode> (recommended),{" "}
-                <InlineCode>mount</InlineCode>, or{" "}
-                <InlineCode>none</InlineCode>
-              </td>
-            </tr>
-            <tr>
-              <td><InlineCode>currentWorkspace</InlineCode></td>
-              <td>Default workspace name</td>
-            </tr>
-            <tr>
-              <td><InlineCode>localPath</InlineCode></td>
-              <td>Local directory for sync/mount</td>
-            </tr>
-          </tbody>
-        </CmdTable>
-      </DocSection>
-
-      {/* ── Best practices ── */}
-      <DocSection>
-        <DocHeading>Best Practices</DocHeading>
-        <CmdTable>
-          <thead>
-            <tr>
-              <th>Practice</th>
-              <th>Why</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Checkpoint before risky operations</td>
-              <td>Gives you an instant rollback point</td>
-            </tr>
-            <tr>
-              <td>Use descriptive workspace names</td>
-              <td>Makes it easy to identify workspaces in the UI and CLI</td>
-            </tr>
-            <tr>
-              <td>Use sync mode (not mount) for most workflows</td>
-              <td>Better compatibility with local tools and IDEs</td>
-            </tr>
-            <tr>
-              <td>
-                Add <InlineCode>.afsignore</InlineCode> for imports
-              </td>
-              <td>
-                Exclude <InlineCode>node_modules/</InlineCode>,{" "}
-                <InlineCode>.venv/</InlineCode>, build artifacts
-              </td>
-            </tr>
-            <tr>
-              <td>Use MCP for agent-only workflows</td>
-              <td>No local mount needed; tools work directly with Redis</td>
-            </tr>
-            <tr>
-              <td>Fork workspaces for parallel experiments</td>
-              <td>Keeps the main workspace clean while agents explore</td>
-            </tr>
-          </tbody>
-        </CmdTable>
-      </DocSection>
-
-      {/* ── Cross-link to Docs ── */}
-      <CrossLinkCard as={Link} to="/docs">
-        <CrossLinkText>
-          <CrossLinkTitle>New to AFS?</CrossLinkTitle>
-          <CrossLinkDesc>
-            Read the full getting-started guide for installation, setup, and
-            core concepts.
-          </CrossLinkDesc>
-        </CrossLinkText>
-        <CrossLinkArrow>&rarr;</CrossLinkArrow>
-      </CrossLinkCard>
-    </DocPage>
+      {md === null ? (
+        <Loading>Loading guide…</Loading>
+      ) : (
+        <MarkdownBody dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }} />
+      )}
+    </Wrapper>
   );
 }
+
+/* ── Minimal markdown → HTML ── */
+
+function renderMarkdown(src: string): string {
+  // Remove HTML comments
+  const lines = src.split("\n").filter((l) => !l.trim().startsWith("<!--"));
+  let html = lines.join("\n");
+
+  // 1. Extract fenced code blocks into placeholders (protects contents from
+  //    further markdown processing like # headings inside code).
+  const codeBlocks: string[] = [];
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
+    const idx = codeBlocks.length;
+    codeBlocks.push(
+      `<pre><code>${esc(code.trimEnd())}</code></pre>`,
+    );
+    return `\n%%CODEBLOCK_${idx}%%\n`;
+  });
+
+  // 2. Inline code
+  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+  // 3. Tables
+  html = html.replace(
+    /^(\|.+\|)\n(\|[-| :]+\|)\n((?:\|.+\|\n?)*)/gm,
+    (_m, header: string, _sep: string, body: string) => {
+      const hCells = header
+        .split("|")
+        .slice(1, -1)
+        .map((c: string) => `<th>${c.trim()}</th>`)
+        .join("");
+      const rows = body
+        .trim()
+        .split("\n")
+        .map((row: string) => {
+          const cells = row
+            .split("|")
+            .slice(1, -1)
+            .map((c: string) => `<td>${c.trim()}</td>`)
+            .join("");
+          return `<tr>${cells}</tr>`;
+        })
+        .join("\n");
+      return `<table><thead><tr>${hCells}</tr></thead><tbody>${rows}</tbody></table>`;
+    },
+  );
+
+  // 4. Headings
+  html = html.replace(/^#### (.+)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+  html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+  html = html.replace(/^# (.+)$/gm, "<h1>$1</h1>");
+
+  // 5. Bold / italic
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  // 6. Unordered lists
+  html = html.replace(/^- (.+)$/gm, "<li>$1</li>");
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+
+  // 7. Paragraphs — wrap non-tag, non-placeholder lines
+  html = html.replace(
+    /^(?!<[a-z/])(?!%%CODEBLOCK_)((?:.+\n?)+)/gm,
+    (block) => `<p>${block.trim()}</p>`,
+  );
+
+  // 8. Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, "");
+
+  // 9. Re-insert code blocks
+  html = html.replace(/%%CODEBLOCK_(\d+)%%/g, (_m, idx) => codeBlocks[+idx]);
+
+  return html;
+}
+
+function esc(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/* ── Styles ── */
+
+const Wrapper = styled.div`
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+`;
+
+const QuickStart = styled.div`
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 32px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--afs-ink);
+`;
+
+const Pre = styled.pre`
+  margin: 12px 0 0;
+  padding: 14px 16px;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border-radius: 6px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre-wrap;
+`;
+
+const Loading = styled.p`
+  color: var(--afs-muted);
+  font-size: 14px;
+`;
+
+const MarkdownBody = styled.div`
+  color: var(--afs-ink);
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 13.5px;
+  line-height: 1.7;
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 40px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--afs-line);
+  }
+
+  h2 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 32px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--afs-line);
+  }
+
+  h3 {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 24px 0 8px;
+  }
+
+  h4 {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 20px 0 6px;
+  }
+
+  p {
+    margin: 8px 0;
+  }
+
+  code {
+    background: var(--afs-line);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12.5px;
+  }
+
+  pre {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    padding: 14px 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 12px 0;
+
+    code {
+      background: none;
+      padding: 0;
+      font-size: 12.5px;
+    }
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 12.5px;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 6px 10px;
+    border: 1px solid var(--afs-line);
+  }
+
+  th {
+    background: color-mix(in srgb, var(--afs-line) 50%, transparent);
+    font-weight: 700;
+  }
+
+  ul {
+    margin: 8px 0;
+    padding-left: 20px;
+  }
+
+  li {
+    margin: 4px 0;
+  }
+
+  strong {
+    font-weight: 700;
+  }
+`;

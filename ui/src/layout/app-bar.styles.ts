@@ -44,6 +44,20 @@ export const HeaderActions = styled.div`
   }
 `;
 
+export const TitleStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+export const Subtitle = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+`;
+
 export const TitleSection = styled.span`
   color: var(--afs-muted);
 `;
@@ -72,7 +86,7 @@ export const DatabaseTrigger = styled.button`
   }
 
   &:focus-visible {
-    outline: 2px solid var(--afs-accent);
+    outline: 2px solid var(--afs-focus);
     outline-offset: 4px;
   }
 

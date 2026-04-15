@@ -12,6 +12,10 @@ export const TableViewport = styled.div`
   max-height: 720px;
   overflow: auto;
 
+  table {
+    width: 100% !important;
+  }
+
   thead th {
     position: sticky;
     top: 0;
@@ -170,8 +174,8 @@ export const MoreActionsTrigger = styled.button`
 
   &:focus-visible {
     outline: none;
-    border-color: var(--afs-accent);
-    box-shadow: 0 0 0 3px var(--afs-accent-soft);
+    border-color: var(--afs-focus);
+    box-shadow: 0 0 0 3px var(--afs-focus-soft);
   }
 `;
 
@@ -199,4 +203,234 @@ export const HeadingWrap = styled.div`
 
 export const SearchOnlyHeadingWrap = styled(HeadingWrap)`
   justify-content: flex-start;
+`;
+
+/* ---- View toggle ---- */
+export const ToggleGroup = styled.div`
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
+`;
+
+export const ToggleButton = styled.button<{ $active: boolean }>`
+  border: none;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
+  background: ${({ $active }) => ($active ? "#e4e4e7" : "transparent")};
+  transition: background 160ms ease, color 160ms ease;
+
+  &:hover {
+    color: var(--afs-ink, #18181b);
+    background: ${({ $active }) => ($active ? "#e4e4e7" : "#f0f0f0")};
+  }
+`;
+
+/* ================================================================== */
+/*  Workspace cards                                                    */
+/* ================================================================== */
+
+export const WorkspaceCardGrid = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  justify-content: center;
+  padding: 16px 0;
+`;
+
+export const WorkspaceCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  width: 320px;
+  border-radius: 16px;
+  background: var(--afs-panel-strong);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  cursor: pointer;
+  transition: box-shadow 200ms ease, transform 200ms ease;
+
+  &:hover {
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.12);
+    transform: translateY(-2px);
+  }
+`;
+
+/* ---- Top row: icon box + name ---- */
+export const CardTopRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 16px 0;
+`;
+
+export const CardIconBox = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  border-radius: 13px;
+  background: #f0f0f0;
+  color: var(--afs-ink-soft, #52525b);
+
+  svg {
+    width: 28px;
+    height: 28px;
+  }
+`;
+
+/* ---- Card body ---- */
+export const CardBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px 14px;
+`;
+
+/* ---- Name + description ---- */
+export const CardName = styled.span`
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--afs-ink, #18181b);
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+export const CardDescription = styled.span`
+  font-size: 11px;
+  color: var(--afs-muted, #71717a);
+  line-height: 1.4;
+`;
+
+/* ---- Detail lines (Database, ID) ---- */
+export const CardDetailLines = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+export const CardDetailLine = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+`;
+
+export const CardDetailLabel = styled.span`
+  font-weight: 700;
+  color: var(--afs-ink, #18181b);
+  white-space: nowrap;
+`;
+
+export const CardDetailValue = styled.span`
+  color: var(--afs-muted, #71717a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+`;
+
+/* ---- Stat boxes row ---- */
+export const CardStatsRow = styled.div`
+  display: flex;
+  gap: 6px;
+`;
+
+export const CardStatBox = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 8px 4px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 10px;
+  background: #fafafa;
+`;
+
+export const CardStatLabel = styled.span`
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--afs-muted, #71717a);
+  text-transform: capitalize;
+  white-space: nowrap;
+`;
+
+export const CardStatValue = styled.span`
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--afs-ink, #18181b);
+  line-height: 1.2;
+`;
+
+/* ---- Info boxes (agents + updated) ---- */
+export const CardInfoRow = styled.div`
+  display: flex;
+  gap: 6px;
+`;
+
+export const CardInfoBox = styled.div<{ $highlight?: boolean }>`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 10px;
+  background: #fafafa;
+  font-size: 11px;
+  font-weight: 700;
+  color: ${({ $highlight }) => ($highlight ? "#16a34a" : "var(--afs-muted, #71717a)")};
+`;
+
+/* ---- Action buttons row ---- */
+export const CardButtonRow = styled.div`
+  display: flex;
+  gap: 8px;
+  padding: 0 16px 16px;
+`;
+
+export const CardPrimaryButton = styled.button`
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 11px;
+  background: #78716c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease;
+
+  &:hover {
+    background: #57534e;
+  }
+`;
+
+export const CardSecondaryButton = styled.button`
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 11px;
+  background: #e7e5e4;
+  color: #57534e;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 180ms ease;
+
+  &:hover {
+    background: #d6d3d1;
+  }
 `;

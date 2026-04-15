@@ -10,16 +10,19 @@ export function AppBar() {
   return (
     <S.HeaderContainer>
       <S.HeaderTitleGroup>
-        <Typography.Heading component="h1" size="M">
-          {title.section ? (
-            <>
-              <S.TitleSection>{title.section}</S.TitleSection>
-              <S.TitlePage>{` / ${title.page}`}</S.TitlePage>
-            </>
-          ) : (
-            title.page
-          )}
-        </Typography.Heading>
+        <S.TitleStack>
+          <Typography.Heading component="h1" size="M">
+            {title.section ? (
+              <>
+                <S.TitleSection>{title.section}</S.TitleSection>
+                <S.TitlePage>{` / ${title.page}`}</S.TitlePage>
+              </>
+            ) : (
+              title.page
+            )}
+          </Typography.Heading>
+          {title.subtitle ? <S.Subtitle>{title.subtitle}</S.Subtitle> : null}
+        </S.TitleStack>
       </S.HeaderTitleGroup>
     </S.HeaderContainer>
   );

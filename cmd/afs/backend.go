@@ -103,6 +103,7 @@ type afsControlPlane interface {
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)
+	SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error)
 	ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error
 }
 

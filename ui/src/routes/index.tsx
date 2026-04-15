@@ -38,14 +38,16 @@ function OverviewPage() {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  if (databases.length === 0) {
-    return <GettingStartedView saveDatabase={saveDatabase} />;
+  const hasDatabase = databases.length > 0;
+
+  if (!hasDatabase) {
+    return <GettingStartedView saveDatabase={saveDatabase} hasDatabase={false} />;
   }
 
   const workspaces = workspacesQuery.data;
 
   if (workspaces.length === 0) {
-    return <EmptyWorkspacesView />;
+    return <GettingStartedView saveDatabase={saveDatabase} hasDatabase={true} />;
   }
 
   /* ── Dashboard ── */
@@ -56,55 +58,6 @@ function OverviewPage() {
   const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
   return <DashboardView databases={databases} workspaces={workspaces} agents={agentsQuery.data} checkpointCount={checkpointCount} checkpointCoverage={checkpointCoverage} totalBytes={totalBytes} />;
-}
-
-function EmptyWorkspacesView() {
-  const navigate = useNavigate();
-  const quickstartMutation = useQuickstartMutation();
-
-  const handleQuickstart = async () => {
-    try {
-      const result = await quickstartMutation.mutateAsync({});
-      navigate({
-        to: "/workspaces/$workspaceId",
-        params: { workspaceId: result.workspaceId },
-        search: { tab: "overview", welcome: true },
-      });
-    } catch {
-      // Error is stored in quickstartMutation.error
-    }
-  };
-
-  return (
-    <PageStack>
-      <EmptyStateLayout>
-        <EmptyStateContent>
-          <Headline>No workspaces yet</Headline>
-          <Description>
-            Create your first workspace with sample files to explore, or add an empty one
-            from the Workspaces page.
-          </Description>
-          <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
-            <CTAButton
-              size="large"
-              onClick={handleQuickstart}
-              disabled={quickstartMutation.isPending}
-            >
-              {quickstartMutation.isPending ? "Setting up..." : "Create sample workspace"}
-            </CTAButton>
-            <Link to="/workspaces">
-              <SecondaryButton size="large">Add workspace</SecondaryButton>
-            </Link>
-          </div>
-          {quickstartMutation.isError && (
-            <QuickstartError>
-              {quickstartMutation.error?.message ?? "Something went wrong."}
-            </QuickstartError>
-          )}
-        </EmptyStateContent>
-      </EmptyStateLayout>
-    </PageStack>
-  );
 }
 
 function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
@@ -167,7 +120,7 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 import type { SaveDatabaseInput } from "../foundation/types/afs";
 import { useQuickstartMutation } from "../foundation/hooks/use-afs";
 
-function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDatabaseInput) => Promise<void> }) {
+function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (input: SaveDatabaseInput) => Promise<void>; hasDatabase: boolean }) {
   const [showAddDb, setShowAddDb] = useState(false);
   const navigate = useNavigate();
   const quickstartMutation = useQuickstartMutation();
@@ -192,15 +145,18 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
         <EmptyStateContent>
           <ProductName>Agent Filesystem</ProductName>
           <Headline>
-            Fast, durable filesystem workspaces for AI agents, backed by Redis
+            {hasDatabase
+              ? "Create your first workspace"
+              : "Fast, durable filesystem workspaces for AI agents, backed by Redis"}
           </Headline>
           <Description>
-            Give every AI agent a persistent, checkpointed workspace.
-            Browse files, create recovery points, and track activity — all from one UI.
+            {hasDatabase
+              ? "Your database is connected. Now create a workspace — an isolated file tree an agent can read, write, and checkpoint."
+              : "Give every AI agent a persistent, checkpointed workspace. Browse files, create recovery points, and track activity — all from one UI."}
           </Description>
         </EmptyStateContent>
 
-        {/* ── Two-path onboarding ── */}
+        {/* ── Onboarding paths ── */}
         <OnboardingPaths>
           <OnboardingCard $primary>
             <OnboardingCardIcon>
@@ -208,10 +164,11 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
             </OnboardingCardIcon>
-            <OnboardingCardTitle>Quick Start</OnboardingCardTitle>
+            <OnboardingCardTitle>{hasDatabase ? "Create a workspace" : "Quick Start"}</OnboardingCardTitle>
             <OnboardingCardDesc>
-              Connect to local Redis, create a workspace with sample files, and start
-              exploring — all in one click.
+              {hasDatabase
+                ? "Create a workspace with sample files and start exploring — all in one click."
+                : "Connect to local Redis, create a workspace with sample files, and start exploring — all in one click."}
             </OnboardingCardDesc>
             <CTAButton
               size="large"
@@ -227,34 +184,45 @@ function GettingStartedView({ saveDatabase }: { saveDatabase: (input: SaveDataba
                   : quickstartMutation.error?.message ?? "Something went wrong."}
               </QuickstartError>
             )}
-            <OnboardingCardHint>
-              Requires Redis running on localhost:6379
-            </OnboardingCardHint>
+            {hasDatabase && (
+              <Link to="/workspaces">
+                <SecondaryButton size="large">Add empty workspace</SecondaryButton>
+              </Link>
+            )}
+            {!hasDatabase && (
+              <OnboardingCardHint>
+                Requires Redis running on localhost:6379
+              </OnboardingCardHint>
+            )}
           </OnboardingCard>
 
-          <OnboardingDivider>
-            <OnboardingDividerLine />
-            <OnboardingDividerLabel>or</OnboardingDividerLabel>
-            <OnboardingDividerLine />
-          </OnboardingDivider>
+          {!hasDatabase && (
+            <>
+              <OnboardingDivider>
+                <OnboardingDividerLine />
+                <OnboardingDividerLabel>or</OnboardingDividerLabel>
+                <OnboardingDividerLine />
+              </OnboardingDivider>
 
-          <OnboardingCard>
-            <OnboardingCardIcon>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <ellipse cx="12" cy="5" rx="9" ry="3" />
-                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-              </svg>
-            </OnboardingCardIcon>
-            <OnboardingCardTitle>Connect a remote database</OnboardingCardTitle>
-            <OnboardingCardDesc>
-              Point AFS at any Redis instance — local, hosted, or Redis Cloud.
-              You'll create workspaces manually after connecting.
-            </OnboardingCardDesc>
-            <SecondaryButton size="large" onClick={() => setShowAddDb(true)}>
-              Add database manually
-            </SecondaryButton>
-          </OnboardingCard>
+              <OnboardingCard>
+                <OnboardingCardIcon>
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                  </svg>
+                </OnboardingCardIcon>
+                <OnboardingCardTitle>Connect a remote database</OnboardingCardTitle>
+                <OnboardingCardDesc>
+                  Point AFS at any Redis instance — local, hosted, or Redis Cloud.
+                  You'll create workspaces manually after connecting.
+                </OnboardingCardDesc>
+                <SecondaryButton size="large" onClick={() => setShowAddDb(true)}>
+                  Add database manually
+                </SecondaryButton>
+              </OnboardingCard>
+            </>
+          )}
         </OnboardingPaths>
 
         {/* ── Steps ── */}
@@ -385,7 +353,7 @@ const ClickableStatCardWrap = styled.div`
   }
 
   &:hover > * {
-    border-color: var(--afs-accent, #D82C20);
+    border-color: var(--afs-accent, #2563eb);
   }
 `;
 
@@ -473,7 +441,7 @@ const OnboardingCard = styled.div<{ $primary?: boolean }>`
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  border: 1.5px solid ${(p) => (p.$primary ? "var(--afs-accent, #D82C20)" : "var(--afs-line)")};
+  border: 1.5px solid ${(p) => (p.$primary ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
   border-radius: 20px;
   padding: 32px 28px 28px;
   background: var(--afs-panel);
@@ -485,7 +453,7 @@ const OnboardingCard = styled.div<{ $primary?: boolean }>`
   ${(p) =>
     p.$primary &&
     `
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #D82C20) 12%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent);
   `}
 `;
 
@@ -497,7 +465,7 @@ const OnboardingCardIcon = styled.div`
   height: 48px;
   border-radius: 14px;
   background: var(--afs-accent-soft, #fef2f1);
-  color: var(--afs-accent, #D82C20);
+  color: var(--afs-accent, #2563eb);
 `;
 
 const OnboardingCardTitle = styled.div`
@@ -538,8 +506,8 @@ const SecondaryButton = styled(Button)`
     color: var(--afs-ink);
 
     &:hover {
-      border-color: var(--afs-accent, #D82C20);
-      color: var(--afs-accent, #D82C20);
+      border-color: var(--afs-accent, #2563eb);
+      color: var(--afs-accent, #2563eb);
     }
   }
 `;

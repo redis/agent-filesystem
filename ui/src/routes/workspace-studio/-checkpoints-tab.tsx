@@ -1,4 +1,5 @@
 import { Button, Typography } from "@redis-ui/components";
+import { SaveIcon } from "@redis-ui/icons/monochrome";
 import { useState } from "react";
 import {
   Field,
@@ -102,8 +103,19 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
               </Typography.Body>
             ) : null}
             {workspace.savepoints.map((savepoint) => (
-              <SavepointRow key={savepoint.id}>
-                <div>
+              <SavepointRow
+                key={savepoint.id}
+                onClick={() => {
+                  onBrowserViewChange(
+                    savepoint.id === workspace.headSavepointId
+                      ? "head"
+                      : `checkpoint:${savepoint.id}`,
+                  );
+                  onTabChange("files");
+                }}
+              >
+                <SaveIcon style={{ flexShrink: 0, marginTop: 2, color: "#22c55e", width: 20, height: 20 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <Typography.Body component="strong">{savepoint.name}</Typography.Body>
                   <Typography.Body color="secondary" component="p">
                     {savepoint.note || "No note provided."}
@@ -113,14 +125,17 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
                     <Tag>{savepoint.folderCount} folders</Tag>
                     <Tag>{savepoint.sizeLabel}</Tag>
                     <Tag>{new Date(savepoint.createdAt).toLocaleString()}</Tag>
-                    {savepoint.id === workspace.headSavepointId ? <Tag>Current head</Tag> : null}
+                    {savepoint.id === workspace.headSavepointId ? (
+                      <Tag style={{ background: "#22c55e", color: "#fff", borderColor: "#22c55e" }}>Current head</Tag>
+                    ) : null}
                   </MetaRow>
                 </div>
                 <InlineActions>
                   <Button
                     size="medium"
                     variant="secondary-fill"
-                    onClick={() => {
+                    onClick={(e) => {
+                      e.stopPropagation();
                       onBrowserViewChange(
                         savepoint.id === workspace.headSavepointId
                           ? "head"
@@ -139,12 +154,13 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
                       restoreSavepoint.isPending ||
                       savepoint.id === workspace.headSavepointId
                     }
-                    onClick={() =>
+                    onClick={(e) => {
+                      e.stopPropagation();
                       restoreSavepoint.mutate({
                         workspaceId: workspace.id,
                         savepointId: savepoint.id,
-                      })
-                    }
+                      });
+                    }}
                   >
                     Restore
                   </Button>

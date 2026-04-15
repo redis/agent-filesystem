@@ -1,5 +1,6 @@
 import { createRootRoute, Outlet } from "@tanstack/react-router";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
+import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
 import {
@@ -10,15 +11,17 @@ import {
 
 function RootLayout() {
   return (
-    <FlexRow>
-      <AppSidebar />
-      <FlexColItem>
-        <AppBar />
-        <MainContainer>
-          <Outlet />
-        </MainContainer>
-      </FlexColItem>
-    </FlexRow>
+    <BackgroundPatternProvider>
+      <FlexRow>
+        <AppSidebar />
+        <FlexColItem>
+          <AppBar />
+          <MainContainer>
+            <Outlet />
+          </MainContainer>
+        </FlexColItem>
+      </FlexRow>
+    </BackgroundPatternProvider>
   );
 }
 

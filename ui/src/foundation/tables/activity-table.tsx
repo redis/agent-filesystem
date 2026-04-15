@@ -92,17 +92,6 @@ export function ActivityTable({
           },
         },
         {
-          accessorKey: "workspaceName",
-          header: "Workspace",
-          size: 80,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
-              {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
-            </S.SingleLineText>
-          ),
-        },
-        {
           accessorKey: "title",
           header: "Activity",
           size: 160,
@@ -114,6 +103,17 @@ export function ActivityTable({
                 {row.original.detail}
               </Typography.Body>
             </S.Stack>
+          ),
+        },
+        {
+          accessorKey: "workspaceName",
+          header: "Workspace",
+          size: 80,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
+              {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
+            </S.SingleLineText>
           ),
         },
         {

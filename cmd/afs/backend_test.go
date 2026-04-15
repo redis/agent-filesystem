@@ -238,15 +238,16 @@ func newSelfHostedControlPlaneServer(t *testing.T) *httptest.Server {
 	}
 	t.Cleanup(manager.Close)
 
-	databases, err := manager.ListDatabases(context.Background())
+	primaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
+		Name:      "primary",
+		RedisAddr: mr.Addr(),
+		RedisDB:   0,
+	})
 	if err != nil {
-		t.Fatalf("ListDatabases() returned error: %v", err)
-	}
-	if len(databases.Items) != 1 {
-		t.Fatalf("len(databases.items) = %d, want 1", len(databases.Items))
+		t.Fatalf("UpsertDatabase(primary) returned error: %v", err)
 	}
 
-	if _, err := manager.CreateWorkspace(context.Background(), databases.Items[0].ID, controlplane.CreateWorkspaceRequest{
+	if _, err := manager.CreateWorkspace(context.Background(), primaryRecord.ID, controlplane.CreateWorkspaceRequest{
 		Name: "repo",
 		Source: controlplane.SourceRef{
 			Kind: controlplane.SourceBlank,
@@ -276,14 +277,15 @@ func newMultiDatabaseSelfHostedControlPlaneServer(t *testing.T) (*httptest.Serve
 	}
 	t.Cleanup(manager.Close)
 
-	databases, err := manager.ListDatabases(context.Background())
+	primaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
+		Name:      "primary",
+		RedisAddr: primary.Addr(),
+		RedisDB:   0,
+	})
 	if err != nil {
-		t.Fatalf("ListDatabases() returned error: %v", err)
+		t.Fatalf("UpsertDatabase(primary) returned error: %v", err)
 	}
-	if len(databases.Items) != 1 {
-		t.Fatalf("len(databases.items) = %d, want 1", len(databases.Items))
-	}
-	primaryID := databases.Items[0].ID
+	primaryID := primaryRecord.ID
 
 	secondaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
 		Name:      "secondary",
@@ -334,11 +336,15 @@ func newDuplicateNameSelfHostedControlPlaneServer(t *testing.T) (*httptest.Serve
 	}
 	t.Cleanup(manager.Close)
 
-	databases, err := manager.ListDatabases(context.Background())
+	primaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
+		Name:      "primary",
+		RedisAddr: primary.Addr(),
+		RedisDB:   0,
+	})
 	if err != nil {
-		t.Fatalf("ListDatabases() returned error: %v", err)
+		t.Fatalf("UpsertDatabase(primary) returned error: %v", err)
 	}
-	primaryID := databases.Items[0].ID
+	primaryID := primaryRecord.ID
 
 	secondaryRecord, err := manager.UpsertDatabase(context.Background(), "", controlplane.UpsertDatabaseRequest{
 		Name:      "secondary",

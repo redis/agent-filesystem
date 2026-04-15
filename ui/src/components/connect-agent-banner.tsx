@@ -240,11 +240,11 @@ const fadeIn = keyframes`
 
 const Banner = styled.div`
   animation: ${fadeIn} 300ms ease;
-  border: 1.5px solid var(--afs-accent, #D82C20);
+  border: 1.5px solid var(--afs-accent, #2563eb);
   border-radius: 16px;
   background: var(--afs-panel);
   overflow: hidden;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #D82C20) 8%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #2563eb) 8%, transparent);
 `;
 
 const BannerHeader = styled.div`
@@ -320,9 +320,9 @@ const StepNavButton = styled.button<{ $active?: boolean }>`
   border: none;
   background: ${(p) =>
     p.$active
-      ? "color-mix(in srgb, var(--afs-accent, #D82C20) 6%, transparent)"
+      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent)"
       : "transparent"};
-  color: ${(p) => (p.$active ? "var(--afs-accent, #D82C20)" : "var(--afs-muted)")};
+  color: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted)")};
   font-size: 13px;
   font-weight: 600;
   padding: 12px 16px;
@@ -335,8 +335,8 @@ const StepNavButton = styled.button<{ $active?: boolean }>`
   }
 
   &:hover {
-    background: color-mix(in srgb, var(--afs-accent, #D82C20) 6%, transparent);
-    color: var(--afs-accent, #D82C20);
+    background: color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent);
+    color: var(--afs-accent, #2563eb);
   }
 `;
 
@@ -350,7 +350,7 @@ const StepNavNumber = styled.span<{ $active?: boolean }>`
   font-size: 11px;
   font-weight: 800;
   background: ${(p) =>
-    p.$active ? "var(--afs-accent, #D82C20)" : "var(--afs-line)"};
+    p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)"};
   color: ${(p) => (p.$active ? "#fff" : "var(--afs-muted)")};
   transition: background 120ms ease, color 120ms ease;
 `;
@@ -476,8 +476,8 @@ const NextStepIcon = styled.div`
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  background: var(--afs-accent-soft, #fef2f1);
-  color: var(--afs-accent, #D82C20);
+  background: var(--afs-accent-soft, rgba(37, 99, 235, 0.1));
+  color: var(--afs-accent, #2563eb);
 `;
 
 const NextStepTitle = styled.div`
@@ -508,7 +508,7 @@ const LearnMoreRow = styled.div`
 `;
 
 const LearnMoreLink = styled.a`
-  color: var(--afs-accent, #D82C20);
+  color: var(--afs-accent, #2563eb);
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;

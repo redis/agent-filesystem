@@ -23,10 +23,7 @@ function ActivityPage() {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const events = activityQuery.data.map((event) => ({
-    ...event,
-    title: event.workspaceName ? `${event.workspaceName}: ${event.title}` : event.title,
-  }));
+  const events = activityQuery.data;
 
   function openActivity(event: AFSActivityEvent) {
     if (event.workspaceId == null) {

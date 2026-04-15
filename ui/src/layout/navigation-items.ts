@@ -32,13 +32,14 @@ export type NavigationItem = NavigationRouteItem | NavigationPanelItem;
 export type NavigationTitleParts = {
   section?: string;
   page: string;
+  subtitle?: string;
 };
 
 export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Overview", path: "/", icon: DashboardIcon },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: FoldersIcon },
-  { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   { kind: "route", label: "Agents", path: "/agents", icon: RedisCopilotIcon },
+  { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
     label: "Activity",
@@ -48,8 +49,8 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
 ];
 
 export const bottomNavigationItems: ReadonlyArray<NavigationRouteItem> = [
-  { kind: "route", label: "Downloads", path: "/downloads", icon: CloudDownloadIcon, title: "Downloads" },
   { kind: "route", label: "Docs", path: "/docs", icon: DocumentationIcon, title: "Documentation" },
+  { kind: "route", label: "Downloads", path: "/downloads", icon: CloudDownloadIcon, title: "Downloads" },
   { kind: "route", label: "Agent Guide", path: "/agent-guide", icon: SupportIcon, title: "Agent Guide" },
 ];
 
@@ -91,22 +92,26 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/databases")) {
-    return { page: "Databases" };
+    return { page: "Databases", subtitle: "Manage the databases where workspaces are hosted." };
   }
 
-  if (pathname.startsWith("/workspaces/")) {
-    return {
-      section: "Workspaces",
-      page: "Studio",
-    };
+  if (pathname.startsWith("/workspaces")) {
+    return { page: "Workspaces", subtitle: "Manage workspaces. These are the filesystems your agents can access." };
   }
 
   if (pathname.startsWith("/agents")) {
-    return { page: "Agents" };
+    return { page: "Agents", subtitle: "View and manage connected agents." };
+  }
+
+  if (pathname.startsWith("/activity")) {
+    return { page: "Activity", subtitle: "Track workspace changes, agent actions, and system events." };
   }
 
   for (const item of navigationItems) {
     if (item.kind === "route" && isPathMatch(pathname, item.path)) {
+      if (item.path === "/") {
+        return { page: item.title ?? item.label, subtitle: "Dashboard overview of workspaces, agents, and storage." };
+      }
       return { page: item.title ?? item.label };
     }
 

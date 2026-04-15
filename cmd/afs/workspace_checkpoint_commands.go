@@ -753,11 +753,11 @@ func cmdCheckpointCreate(args []string) error {
 		return fmt.Errorf("%s", checkpointCreateUsageText(filepath.Base(os.Args[0])))
 	}
 
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeFn, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
-	defer closeStore()
+	defer closeFn()
 
 	workspace := ""
 	checkpointID := generatedSavepointName()
@@ -772,11 +772,8 @@ func cmdCheckpointCreate(args []string) error {
 			workspace = args[2]
 		}
 	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
 	if err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 	if err := validateAFSName("checkpoint", checkpointID); err != nil {
@@ -784,7 +781,7 @@ func cmdCheckpointCreate(args []string) error {
 	}
 
 	step := startStep("Saving checkpoint")
-	saved, err := saveAFSWorkspaceOrLiveRoot(context.Background(), cfg, store, workspace, checkpointID, false)
+	saved, err := service.SaveCheckpointFromLive(context.Background(), selection.Name, checkpointID)
 	if err != nil {
 		step.fail(err.Error())
 		return err
@@ -792,7 +789,7 @@ func cmdCheckpointCreate(args []string) error {
 	if !saved {
 		step.succeed("no changes")
 		printBox(clr(ansiBold, "checkpoint unchanged"), []boxRow{
-			{Label: "workspace", Value: workspace},
+			{Label: "workspace", Value: selection.Name},
 			{Label: "database", Value: configRemoteLabel(cfg)},
 			{Label: "result", Value: "no changes"},
 		})
@@ -801,7 +798,7 @@ func cmdCheckpointCreate(args []string) error {
 	step.succeed(checkpointID)
 
 	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint created"), []boxRow{
-		{Label: "workspace", Value: workspace},
+		{Label: "workspace", Value: selection.Name},
 		{Label: "checkpoint", Value: checkpointID},
 		{Label: "database", Value: configRemoteLabel(cfg)},
 	})
@@ -816,11 +813,11 @@ func cmdCheckpointRestore(args []string) error {
 	if len(args) != 3 && len(args) != 4 {
 		return fmt.Errorf("%s", checkpointRestoreUsageText(filepath.Base(os.Args[0])))
 	}
-	cfg, store, closeStore, err := openAFSStore(context.Background())
+	cfg, service, closeFn, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
 	}
-	defer closeStore()
+	defer closeFn()
 
 	workspace := ""
 	checkpointID := ""
@@ -830,18 +827,15 @@ func cmdCheckpointRestore(args []string) error {
 	} else {
 		checkpointID = args[2]
 	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
 	if err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 	if err := validateAFSName("checkpoint", checkpointID); err != nil {
 		return err
 	}
 
-	return restoreCheckpoint(context.Background(), workspace, checkpointID)
+	return restoreCheckpoint(context.Background(), selection.Name, checkpointID)
 }
 
 func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {

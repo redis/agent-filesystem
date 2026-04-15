@@ -2,8 +2,8 @@ import { Menu, Typography } from "@redis-ui/components";
 import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef } from "@redis-ui/table";
-import { useMemo } from "react";
-import styled from "styled-components";
+import { useMemo, useState } from "react";
+import styled, { css, keyframes } from "styled-components";
 import type { AFSDatabaseScopeRecord } from "../database-scope";
 import * as S from "./workspace-table.styles";
 
@@ -34,7 +34,23 @@ export function DatabaseTable({
   errorMessage = "Unable to load databases. Please retry.",
   onEditDatabase,
   onRemoveDatabase,
-}: Props) {
+  toolbarAction,
+}: Props & { toolbarAction?: React.ReactNode }) {
+  const [search, setSearch] = useState("");
+
+  const filteredRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (query === "") return rows;
+    return rows.filter((row) =>
+      [
+        row.displayName ?? "",
+        row.databaseName ?? "",
+        row.description ?? "",
+        row.endpointLabel ?? "",
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [rows, search]);
+
   const columns = useMemo(
     () =>
       [
@@ -45,7 +61,14 @@ export function DatabaseTable({
           enableSorting: false,
           cell: ({ row }) => (
             <S.Stack>
-              <PlainText>{row.original.displayName || row.original.databaseName}</PlainText>
+              <S.WorkspaceNameButton
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onEditDatabase(row.original.id);
+                }}
+              >
+                {row.original.displayName || row.original.databaseName}
+              </S.WorkspaceNameButton>
               {row.original.description ? (
                 <SecondaryLine color="secondary" component="span">
                   {row.original.description}
@@ -61,7 +84,7 @@ export function DatabaseTable({
           enableSorting: false,
           cell: ({ row }) => (
             <StatusCell>
-              <StatusDot $healthy={row.original.isHealthy} />
+              <LiveDot $active={row.original.isHealthy} />
               <S.Stack>
                 <PlainText>{row.original.isHealthy ? "Connected" : "Unavailable"}</PlainText>
                 {!row.original.isHealthy && row.original.connectionError ? (
@@ -103,9 +126,9 @@ export function DatabaseTable({
         },
         {
           id: "actions",
-          header: "",
-          size: 10,
-          maxSize: 10,
+          header: "Actions",
+          size: 72,
+          maxSize: 72,
           enableSorting: false,
           cell: ({ row }) => (
             <Menu>
@@ -119,13 +142,13 @@ export function DatabaseTable({
                   <MoreactionsIcon size="S" />
                 </S.MoreActionsTrigger>
               </Menu.Trigger>
-              <Menu.Content align="end">
+              <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <Menu.Content.Item
                   text="Edit database"
                   onClick={() => onEditDatabase(row.original.id)}
                 />
                 <Menu.Content.Item
-                  text="Remove database"
+                  text="Delete database"
                   onClick={() => onRemoveDatabase(row.original.id)}
                 />
               </Menu.Content>
@@ -137,25 +160,40 @@ export function DatabaseTable({
   );
 
   return (
-    <S.TableCard>
+    <>
+      <S.HeadingWrap style={{ padding: 0 }}>
+        <S.SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search databases..."
+        />
+        {toolbarAction ?? null}
+      </S.HeadingWrap>
+
       {loading ? <S.EmptyState>Loading databases...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
-      {!loading && !error && rows.length === 0 ? (
-        <S.EmptyState>No databases have been configured yet.</S.EmptyState>
+      {!loading && !error && filteredRows.length === 0 ? (
+        <S.EmptyState>
+          {rows.length === 0
+            ? "No databases have been configured yet."
+            : "No databases match the current filter."}
+        </S.EmptyState>
       ) : null}
 
-      {!loading && !error && rows.length > 0 ? (
-        <ClickableTableViewport>
-          <Table
-            columns={columns}
-            data={rows}
-            getRowId={(row) => row.id}
-            stripedRows
-            onRowClick={(rowData) => onEditDatabase(rowData.id)}
-          />
-        </ClickableTableViewport>
+      {!loading && !error && filteredRows.length > 0 ? (
+        <S.TableCard>
+          <ClickableTableViewport>
+            <Table
+              columns={columns}
+              data={filteredRows}
+              getRowId={(row) => row.id}
+              stripedRows
+              onRowClick={(rowData) => onEditDatabase(rowData.id)}
+            />
+          </ClickableTableViewport>
+        </S.TableCard>
       ) : null}
-    </S.TableCard>
+    </>
   );
 }
 
@@ -178,18 +216,30 @@ const StatusCell = styled.div`
   gap: 10px;
 `;
 
-const StatusDot = styled.span<{ $healthy: boolean }>`
-  display: inline-flex;
-  width: 10px;
-  height: 10px;
-  margin-top: 4px;
-  border-radius: 999px;
-  background: ${({ $healthy }) => ($healthy ? "#22c55e" : "#dc2626")};
-  box-shadow: ${({ $healthy }) =>
-    $healthy
-      ? "0 0 0 4px rgba(34, 197, 94, 0.12)"
-      : "0 0 0 4px rgba(239, 68, 68, 0.12)"};
+const pulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+`;
+
+const LiveDot = styled.span<{ $active: boolean }>`
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background: ${({ $active }) => ($active ? "#22c55e" : "#dc2626")};
+  ${({ $active }) =>
+    $active &&
+    css`
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+      animation: ${pulse} 2s ease-in-out infinite;
+    `}
+  ${({ $active }) =>
+    !$active &&
+    css`
+      box-shadow: 0 0 6px rgba(220, 38, 38, 0.5);
+    `}
 `;
 
 const ClickableTableViewport = styled(S.TableViewport)`

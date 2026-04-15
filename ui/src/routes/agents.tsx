@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
+import { useEffect, useState } from "react";
 import { z } from "zod";
 import styled from "styled-components";
 import {
@@ -10,7 +11,6 @@ import {
   NoticeTitle,
 } from "../components/afs-kit";
 import {
-  CodeBlock,
   InlineCode,
   CrossLinkCard,
   CrossLinkText,
@@ -18,6 +18,7 @@ import {
   CrossLinkDesc,
   CrossLinkArrow,
 } from "../components/doc-kit";
+import { getControlPlaneURL } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents } from "../foundation/database-scope";
 import { AgentsTable } from "../foundation/tables/agents-table";
 import type { AFSAgentSession } from "../foundation/types/afs";
@@ -40,11 +41,22 @@ function AgentsPage() {
   const workspaceId = search.workspaceId;
   const databaseId = search.databaseId;
 
+  const allAgents = agentsQuery.data ?? [];
+
+  // Poll so the table updates live when agents connect / disconnect.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      void agentsQuery.refetch();
+    }, 5000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   if (agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const rows = agentsQuery.data.filter((agent) => {
+  const rows = allAgents.filter((agent) => {
     if (workspaceId != null && agent.workspaceId !== workspaceId) {
       return false;
     }
@@ -68,6 +80,7 @@ function AgentsPage() {
   if (rows.length === 0 && !isFiltered && !agentsQuery.isError) {
     return (
       <PageStack>
+
         {unavailableDatabases.length > 0 ? (
           <NoticeCard $tone="warning" role="status">
             <NoticeTitle>Some databases are unavailable</NoticeTitle>
@@ -119,15 +132,41 @@ function AgentsPage() {
 /* ── Empty state ── */
 
 function AgentsEmptyState() {
+  const [copied, setCopied] = useState<string | null>(null);
+  const controlPlaneUrl = getControlPlaneURL();
+  const cliPath = `./afs`;
+  const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
+  const configCmd = `${cliPath} config --control-plane-url "${controlPlaneUrl}"`;
+
+  const mcpConfig = JSON.stringify(
+    {
+      mcpServers: {
+        "agent-filesystem": {
+          command: "afs",
+          args: ["mcp"],
+        },
+      },
+    },
+    null,
+    2,
+  );
+
+  function copyToClipboard(text: string, label: string) {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(label);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  }
+
   return (
     <EmptyLayout>
       <EmptyHeader>
         <EmptyIcon>
           <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-            <rect width="48" height="48" rx="14" fill="var(--afs-accent-soft, rgba(216,44,32,0.1))" />
+            <rect width="48" height="48" rx="14" fill="var(--afs-accent-soft, rgba(37,99,235,0.1))" />
             <path
               d="M24 14v4m0 12v4m-10-10h4m12 0h4m-14.24-7.07 2.83 2.83m9.65 9.65 2.83 2.83m0-15.31-2.83 2.83m-9.65 9.65-2.83 2.83"
-              stroke="var(--afs-accent, #D82C20)"
+              stroke="var(--afs-accent, #2563eb)"
               strokeWidth="2"
               strokeLinecap="round"
             />
@@ -149,20 +188,49 @@ function AgentsEmptyState() {
           local directory. The agent reads and writes files normally — AFS syncs
           everything to Redis in the background.
         </SetupDesc>
-        <CodeBlock>
-          <code>{`# configure Redis connection (first time only)
-afs setup
 
-# select a workspace and start syncing
-afs workspace use my-project
-afs up
+        <StepLabel>Step 1 — Download the CLI</StepLabel>
+        <SetupDesc>
+          Download the latest compatible <InlineCode>afs</InlineCode> binary for
+          your machine. The command auto-detects OS and CPU architecture.
+        </SetupDesc>
+        <CodeContainer>
+          <CodePre>{downloadCmd}</CodePre>
+          <CopyButton type="button" onClick={() => copyToClipboard(downloadCmd, "download")}>
+            {copied === "download" ? "Copied!" : "Copy"}
+          </CopyButton>
+        </CodeContainer>
 
-# the agent works in ~/afs/my-project/ with normal file I/O`}</code>
-        </CodeBlock>
-        <SetupDesc style={{ marginTop: 8 }}>
+        <StepDivider />
+
+        <StepLabel>Step 2 — Configure the connection</StepLabel>
+        <SetupDesc>
+          Point the CLI at this control plane server. You only need to do this once per machine.
+        </SetupDesc>
+        <CodeContainer>
+          <CodePre>{configCmd}</CodePre>
+          <CopyButton type="button" onClick={() => copyToClipboard(configCmd, "config")}>
+            {copied === "config" ? "Copied!" : "Copy"}
+          </CopyButton>
+        </CodeContainer>
+
+        <StepDivider />
+
+        <StepLabel>Step 3 — Select a workspace and start syncing</StepLabel>
+        <SetupDesc>
+          Pick an existing workspace (or create one) and start the sync agent.
+        </SetupDesc>
+        <CodeContainer>
+          <CodePre>{`# select a workspace and start syncing
+${cliPath} workspace use my-project
+${cliPath} up
+
+# the agent works in ~/afs/my-project/ with normal file I/O`}</CodePre>
+        </CodeContainer>
+        <SetupHint>
           Once <InlineCode>afs up</InlineCode> is running, the agent appears on
           this page with a live status indicator.
-        </SetupDesc>
+        </SetupHint>
       </SetupCard>
 
       {/* ── MCP setup ── */}
@@ -178,23 +246,19 @@ afs up
           <InlineCode>claude_desktop_config.json</InlineCode> or{" "}
           <InlineCode>.claude/settings.json</InlineCode>):
         </SetupDesc>
-        <CodeBlock>
-          <code>{`{
-  "mcpServers": {
-    "agent-filesystem": {
-      "command": "/absolute/path/to/afs",
-      "args": ["mcp"]
-    }
-  }
-}`}</code>
-        </CodeBlock>
+        <CodeContainer>
+          <CodePre>{mcpConfig}</CodePre>
+          <CopyButton type="button" onClick={() => copyToClipboard(mcpConfig, "mcp")}>
+            {copied === "mcp" ? "Copied!" : "Copy"}
+          </CopyButton>
+        </CodeContainer>
       </SetupCard>
 
       {/* ── Cross-links ── */}
       <LinksRow>
-        <CrossLinkCard as={Link} to="/downloads" style={{ flex: 1 }}>
+        <CrossLinkCard as={Link} to="/docs" style={{ flex: 1 }}>
           <CrossLinkText>
-            <CrossLinkTitle>Download &amp; Install</CrossLinkTitle>
+            <CrossLinkTitle>Getting Started</CrossLinkTitle>
             <CrossLinkDesc>
               Docker quickstart, build from source, and platform support.
             </CrossLinkDesc>
@@ -284,10 +348,68 @@ const SetupTitle = styled.h4`
 `;
 
 const SetupDesc = styled.p`
-  margin: 0 0 4px;
+  margin: 0 0 12px;
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.65;
+`;
+
+const StepLabel = styled.div`
+  color: var(--afs-ink);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+`;
+
+const StepDivider = styled.div`
+  height: 1px;
+  background: var(--afs-line);
+  margin: 20px 0;
+`;
+
+const SetupHint = styled.p`
+  margin: 12px 0 0;
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.5;
+`;
+
+const CodeContainer = styled.div`
+  background: #1e1e2e;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+`;
+
+const CodePre = styled.pre`
+  margin: 0;
+  padding: 16px 20px 12px;
+  color: #cdd6f4;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+`;
+
+const CopyButton = styled.button`
+  align-self: flex-end;
+  margin: 0 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #cdd6f4;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 120ms ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.16);
+  }
 `;
 
 const LinksRow = styled.div`
