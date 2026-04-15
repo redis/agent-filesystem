@@ -223,12 +223,12 @@ export const ToggleButton = styled.button<{ $active: boolean }>`
   font-weight: 700;
   cursor: pointer;
   color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "#e4e4e7" : "transparent")};
+  background: ${({ $active }) => ($active ? "var(--afs-line, #d4d4d8)" : "transparent")};
   transition: background 160ms ease, color 160ms ease;
 
   &:hover {
     color: var(--afs-ink, #18181b);
-    background: ${({ $active }) => ($active ? "#e4e4e7" : "#f0f0f0")};
+    background: ${({ $active }) => ($active ? "var(--afs-line, #d4d4d8)" : "var(--afs-focus-soft, #f0f0f0)")};
   }
 `;
 
@@ -277,7 +277,7 @@ export const CardIconBox = styled.div`
   height: 52px;
   flex-shrink: 0;
   border-radius: 13px;
-  background: #f0f0f0;
+  background: var(--afs-bg-soft, #f0f0f0);
   color: var(--afs-ink-soft, #52525b);
 
   svg {
@@ -355,7 +355,7 @@ export const CardStatBox = styled.div`
   padding: 8px 4px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
-  background: #fafafa;
+  background: var(--afs-panel, #fafafa);
 `;
 
 export const CardStatLabel = styled.span`
@@ -388,7 +388,7 @@ export const CardInfoBox = styled.div<{ $highlight?: boolean }>`
   padding: 8px 6px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
-  background: #fafafa;
+  background: var(--afs-panel, #fafafa);
   font-size: 11px;
   font-weight: 700;
   color: ${({ $highlight }) => ($highlight ? "#16a34a" : "var(--afs-muted, #71717a)")};
@@ -423,14 +423,14 @@ export const CardSecondaryButton = styled.button`
   padding: 10px 0;
   border: none;
   border-radius: 11px;
-  background: #e7e5e4;
-  color: #57534e;
+  background: var(--afs-line, #e7e5e4);
+  color: var(--afs-ink, #57534e);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
   transition: background 180ms ease;
 
   &:hover {
-    background: #d6d3d1;
+    background: var(--afs-line-strong, #d6d3d1);
   }
 `;

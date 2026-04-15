@@ -627,7 +627,7 @@ const ImportFilesSection = styled.div`
   padding: 16px;
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 12px;
-  background: #fafafa;
+  background: var(--afs-panel, #fafafa);
 `;
 
 const ImportFilesHeader = styled.span`
