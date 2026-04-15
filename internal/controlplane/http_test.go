@@ -17,6 +17,54 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+func TestNormalizeCLITargetAliases(t *testing.T) {
+	t.Helper()
+
+	target, err := normalizeCLITarget("macos", "x86_64")
+	if err != nil {
+		t.Fatalf("normalizeCLITarget() returned error: %v", err)
+	}
+	if target.GOOS != "darwin" || target.GOARCH != "amd64" || target.Filename != "afs" {
+		t.Fatalf("normalizeCLITarget() = %+v, want darwin/amd64/afs", target)
+	}
+}
+
+func TestHandleCLIDownloadServesRequestedPrebuiltArtifact(t *testing.T) {
+	t.Helper()
+
+	artifactDir := t.TempDir()
+	targetDir := filepath.Join(artifactDir, "darwin-arm64")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() returned error: %v", err)
+	}
+	want := []byte("fake-cli")
+	if err := os.WriteFile(filepath.Join(targetDir, "afs"), want, 0o755); err != nil {
+		t.Fatalf("WriteFile() returned error: %v", err)
+	}
+	t.Setenv("AFS_CLI_ARTIFACT_DIR", artifactDir)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/cli?os=darwin&arch=arm64", nil)
+	rec := httptest.NewRecorder()
+	handleCLIDownload(rec, req)
+
+	resp := rec.Result()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/cli status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() returned error: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("GET /v1/cli body = %q, want %q", got, want)
+	}
+	if disp := resp.Header.Get("Content-Disposition"); !strings.Contains(disp, `filename="afs"`) {
+		t.Fatalf("Content-Disposition = %q, want afs filename", disp)
+	}
+}
+
 func TestHTTPBrowseAndRestore(t *testing.T) {
 	t.Helper()
 

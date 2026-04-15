@@ -1,4 +1,4 @@
-import { Card, Typography } from "@redislabsdev/redis-ui-components";
+import { Card, Typography } from "@redis-ui/components";
 import styled, { css } from "styled-components";
 import type {
   AFSActivityEvent,

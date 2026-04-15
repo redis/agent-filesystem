@@ -1,5 +1,5 @@
 # Redis server with fs.so module
-FROM redis:7-bookworm
+FROM redis:8-bookworm
 
 # Install build tools
 RUN apt-get update && apt-get install -y \
@@ -16,4 +16,3 @@ RUN make clean && make
 
 # Configure Redis to load the module
 CMD ["redis-server", "--loadmodule", "/app/fs.so"]
-

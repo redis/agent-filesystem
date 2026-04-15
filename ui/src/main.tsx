@@ -3,10 +3,10 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider, createRouter } from "@tanstack/react-router";
 import { RouteErrorBoundary } from "./error-boundaries/route-error-boundary";
 import { ThemeProvider } from "styled-components";
-import { themesRebrand, CommonStyles } from "@redislabsdev/redis-ui-styles";
+import { themesRebrand, CommonStyles } from "@redis-ui/styles";
 import "modern-normalize/modern-normalize.css";
-import "@redislabsdev/redis-ui-styles/normalized-styles.css";
-import "@redislabsdev/redis-ui-styles/fonts.css";
+import "@redis-ui/styles/normalized-styles.css";
+import "@redis-ui/styles/fonts.css";
 import "./index.css";
 
 // Import the generated route tree

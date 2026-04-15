@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Button } from "@redislabsdev/redis-ui-components";
+import { Button } from "@redis-ui/components";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
 import {
@@ -93,7 +93,8 @@ function DatabasesPage() {
           loading={isLoading}
           error={errorMessage != null}
           errorMessage={errorMessage ?? undefined}
-          onOpenDatabase={openEditDialog}
+          onEditDatabase={openEditDialog}
+          onRemoveDatabase={deleteDatabase}
         />
       </PageSection>
 

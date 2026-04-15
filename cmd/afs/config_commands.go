@@ -72,6 +72,7 @@ type configOverrides struct {
 type upOptions struct {
 	foreground  bool
 	mode        optionalString
+	overrides   configOverrides
 	positionals []string
 }
 
@@ -188,11 +189,15 @@ func cmdConfigSet(args []string) error {
 }
 
 func loadConfigForUp(args []string) (config, error) {
-	return loadConfigForUpWithMode(args, optionalString{})
+	return loadConfigForUpWithOverridesAndMode(args, configOverrides{}, optionalString{})
 }
 
 func loadConfigForUpWithMode(args []string, mode optionalString) (config, error) {
-	return loadConfigForUpWithIOAndMode(args, mode, bufio.NewReader(os.Stdin), os.Stdout, isInteractiveTerminal())
+	return loadConfigForUpWithOverridesAndMode(args, configOverrides{}, mode)
+}
+
+func loadConfigForUpWithOverridesAndMode(args []string, overrides configOverrides, mode optionalString) (config, error) {
+	return loadConfigForUpWithIOAndOverridesAndMode(args, overrides, mode, bufio.NewReader(os.Stdin), os.Stdout, isInteractiveTerminal())
 }
 
 type upConfigPresence struct {
@@ -202,21 +207,30 @@ type upConfigPresence struct {
 }
 
 func loadConfigForUpWithIO(args []string, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
-	return loadConfigForUpWithIOAndMode(args, optionalString{}, r, out, allowPrompt)
+	return loadConfigForUpWithIOAndOverridesAndMode(args, configOverrides{}, optionalString{}, r, out, allowPrompt)
 }
 
 func loadConfigForUpWithIOAndMode(args []string, mode optionalString, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
+	return loadConfigForUpWithIOAndOverridesAndMode(args, configOverrides{}, mode, r, out, allowPrompt)
+}
+
+func loadConfigForUpWithIOAndOverridesAndMode(args []string, overrides configOverrides, mode optionalString, r *bufio.Reader, out io.Writer, allowPrompt bool) (config, error) {
 	cfg, presence, err := loadConfigWithUpPresence()
 	if err != nil {
 		return cfg, err
 	}
-	if !presence.filePresent {
+	if !presence.filePresent && !upHasExplicitInputs(args, overrides, mode) {
 		return cfg, fmt.Errorf("no configuration found\nRun '%s setup' to get started", filepath.Base(os.Args[0]))
 	}
 
 	if err := validateUpModeOverride(mode); err != nil {
 		return cfg, err
 	}
+	if err := applyConfigOverrides(&cfg, overrides); err != nil {
+		return cfg, err
+	}
+	presence = upPresenceWithOverrides(presence, overrides)
+
 	changed := mode.set
 	if mode.set {
 		cfg.Mode = strings.TrimSpace(mode.value)
@@ -250,7 +264,7 @@ func loadConfigForUpWithIOAndMode(args []string, mode optionalString, r *bufio.R
 	if err := validateUpModeSelection(cfg); err != nil {
 		return cfg, err
 	}
-	if changed {
+	if changed && !hasConfigOverrides(overrides) {
 		if err := persistConfigForUp(&cfg); err != nil {
 			return cfg, err
 		}
@@ -317,6 +331,7 @@ func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) er
 	}
 
 	cfg.CurrentWorkspace = workspace
+	cfg.CurrentWorkspaceID = ""
 	cfg.LocalPath = mountpoint
 	return nil
 }
@@ -384,17 +399,48 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 	return cfg, presence, nil
 }
 
+func upHasExplicitInputs(args []string, overrides configOverrides, mode optionalString) bool {
+	return len(args) > 0 || mode.set || hasConfigOverrides(overrides)
+}
+
+func hasConfigOverrides(overrides configOverrides) bool {
+	return overrides.redisURL.set ||
+		overrides.connection.set ||
+		overrides.controlPlaneURL.set ||
+		overrides.controlPlaneDatabase.set ||
+		overrides.mountBackend.set ||
+		overrides.mountpoint.set ||
+		overrides.readonly.set
+}
+
+func upPresenceWithOverrides(presence upConfigPresence, overrides configOverrides) upConfigPresence {
+	if hasConfigOverrides(overrides) {
+		presence.filePresent = true
+	}
+	if overrides.redisURL.set {
+		presence.redisDBPresent = true
+	}
+	if overrides.mountpoint.set {
+		presence.localPathPresent = true
+	}
+	return presence
+}
+
 func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.Reader, out io.Writer, allowPrompt bool) (bool, error) {
 	if cfg == nil {
 		return false, fmt.Errorf("missing config")
 	}
 
+	productMode, err := effectiveProductMode(*cfg)
+	if err != nil {
+		return false, err
+	}
 	mode, err := effectiveMode(*cfg)
 	if err != nil {
 		return false, err
 	}
 
-	missingDatabase := !presence.filePresent || !presence.redisDBPresent
+	missingDatabase := productMode == productModeDirect && (!presence.filePresent || !presence.redisDBPresent)
 	missingWorkspace := mode != modeNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
 	missingLocalPath := mode != modeNone && (!presence.filePresent || !presence.localPathPresent || strings.TrimSpace(cfg.LocalPath) == "")
 	if !missingDatabase && !missingWorkspace && !missingLocalPath {
@@ -586,6 +632,83 @@ func parseUpOptions(args []string) (upOptions, error) {
 		case strings.HasPrefix(arg, "--mode="):
 			opts.mode.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
 			opts.mode.set = true
+		case arg == "--redis-url":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.redisURL.value = strings.TrimSpace(args[i])
+			opts.overrides.redisURL.set = true
+		case strings.HasPrefix(arg, "--redis-url="):
+			opts.overrides.redisURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--redis-url="))
+			opts.overrides.redisURL.set = true
+		case arg == "--config-source" || arg == "--control" || arg == "--connection" || arg == "--product-mode":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.connection.value = strings.TrimSpace(args[i])
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--config-source="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--config-source="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--control="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--connection="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--connection="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--product-mode="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--product-mode="))
+			opts.overrides.connection.set = true
+		case arg == "--control-plane-url":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.controlPlaneURL.value = strings.TrimSpace(args[i])
+			opts.overrides.controlPlaneURL.set = true
+		case strings.HasPrefix(arg, "--control-plane-url="):
+			opts.overrides.controlPlaneURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-url="))
+			opts.overrides.controlPlaneURL.set = true
+		case arg == "--control-plane-database":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(args[i])
+			opts.overrides.controlPlaneDatabase.set = true
+		case strings.HasPrefix(arg, "--control-plane-database="):
+			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-database="))
+			opts.overrides.controlPlaneDatabase.set = true
+		case arg == "--mount-backend":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.mountBackend.value = strings.TrimSpace(args[i])
+			opts.overrides.mountBackend.set = true
+		case strings.HasPrefix(arg, "--mount-backend="):
+			opts.overrides.mountBackend.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mount-backend="))
+			opts.overrides.mountBackend.set = true
+		case arg == "--mountpoint":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.mountpoint.value = args[i]
+			opts.overrides.mountpoint.set = true
+		case strings.HasPrefix(arg, "--mountpoint="):
+			opts.overrides.mountpoint.value = strings.TrimPrefix(arg, "--mountpoint=")
+			opts.overrides.mountpoint.set = true
+		case arg == "--readonly":
+			opts.overrides.readonly.value = true
+			opts.overrides.readonly.set = true
+		case strings.HasPrefix(arg, "--readonly="):
+			opts.overrides.readonly.set = true
+			if err := opts.overrides.readonly.Set(strings.TrimPrefix(arg, "--readonly=")); err != nil {
+				return opts, configUsageError("up")
+			}
 		case strings.HasPrefix(arg, "-"):
 			return opts, configUsageError("up")
 		default:
@@ -691,11 +814,21 @@ to ~/afs/<workspace> when omitted. Both are persisted so future runs reuse them.
 Flags:
   --mode <sync|mount>
                       Persist a mode override before starting.
+  --control-plane-url <http://...|https://...>
+                      One-shot self-hosted control plane URL override.
+  --control-plane-database <database-id>
+                      One-shot database override for self-hosted mode.
+  --redis-url <redis://...|rediss://...>
+                      One-shot Redis override for local mode.
+  --mount-backend <auto|none|fuse|nfs>
+  --mountpoint <path>
+  --readonly[=true|false]
+                      One-shot local surface overrides for this run.
   --interactive, -i   Run the sync daemon in the foreground with live logs.
                       Ctrl-C stops the daemon. Useful for debugging.
 
 Notes:
-  Redis connection, mount backend, and readonly mode come from config.
+  Saved config is the default, but explicit 'up' flags override it for this run.
   Current workspace must already be selected with '%s workspace use <workspace>'
   unless you pass <workspace> positionally.
   If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.
@@ -704,9 +837,10 @@ Notes:
 Examples:
   %s up
   %s up --mode sync
+  %s up --control-plane-url http://127.0.0.1:8091 getting-started
   %s up --interactive
   %s up claude-code ~/.claude
-`, bin, bin, compactDisplayPath(configPath()), bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {
@@ -717,6 +851,10 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 	}
 	if overrides.connection.set {
 		cfg.ProductMode = strings.TrimSpace(overrides.connection.value)
+		if cfg.ProductMode == productModeDirect {
+			cfg.DatabaseID = ""
+			cfg.CurrentWorkspaceID = ""
+		}
 	}
 	if overrides.controlPlaneURL.set {
 		cfg.URL = strings.TrimSpace(overrides.controlPlaneURL.value)
@@ -724,9 +862,14 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		if !overrides.connection.set {
 			cfg.ProductMode = productModeSelfHosted
 		}
+		if !overrides.controlPlaneDatabase.set {
+			cfg.DatabaseID = ""
+		}
+		cfg.CurrentWorkspaceID = ""
 	}
 	if overrides.controlPlaneDatabase.set {
 		cfg.DatabaseID = strings.TrimSpace(overrides.controlPlaneDatabase.value)
+		cfg.CurrentWorkspaceID = ""
 	}
 
 	if overrides.mountBackend.set {

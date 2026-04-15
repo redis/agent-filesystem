@@ -1,5 +1,5 @@
 import styled, { keyframes, css } from "styled-components";
-import { RedisLogoDarkMinIcon } from "@redislabsdev/redis-ui-icons/multicolor";
+import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 
 /* ------------------------------------------------------------------ */
 /*  Animated hero: agents <-> Redis hub <-> filesystem workspaces      */

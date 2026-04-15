@@ -1,6 +1,7 @@
-import { Typography } from "@redislabsdev/redis-ui-components";
-import { Table } from "@redislabsdev/redis-ui-table";
-import type { ColumnDef } from "@redislabsdev/redis-ui-table";
+import { Menu, Typography } from "@redis-ui/components";
+import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
+import { Table } from "@redis-ui/table";
+import type { ColumnDef } from "@redis-ui/table";
 import { useMemo } from "react";
 import styled from "styled-components";
 import type { AFSDatabaseScopeRecord } from "../database-scope";
@@ -11,7 +12,8 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
-  onOpenDatabase: (databaseId: string) => void;
+  onEditDatabase: (databaseId: string) => void;
+  onRemoveDatabase: (databaseId: string) => void;
 };
 
 function formatCatalogTimestamp(value?: string) {
@@ -30,7 +32,8 @@ export function DatabaseTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load databases. Please retry.",
-  onOpenDatabase,
+  onEditDatabase,
+  onRemoveDatabase,
 }: Props) {
   const columns = useMemo(
     () =>
@@ -99,26 +102,38 @@ export function DatabaseTable({
           enableSorting: false,
         },
         {
-          accessorKey: "activeSessionCount",
-          header: "Sessions",
-          size: 72,
+          id: "actions",
+          header: "",
+          size: 10,
+          maxSize: 10,
           enableSorting: false,
           cell: ({ row }) => (
-            <S.Stack>
-              <PlainText>{row.original.activeSessionCount}</PlainText>
-              <SecondaryLine color="secondary" component="span">
-                Reconcile: {formatCatalogTimestamp(row.original.lastSessionReconcileAt)}
-              </SecondaryLine>
-              {row.original.lastSessionReconcileError ? (
-                <SecondaryLine color="secondary" component="span">
-                  {row.original.lastSessionReconcileError}
-                </SecondaryLine>
-              ) : null}
-            </S.Stack>
+            <Menu>
+              <Menu.Trigger withButton={false}>
+                <S.MoreActionsTrigger
+                  aria-label={`More actions for ${row.original.displayName || row.original.databaseName}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                >
+                  <MoreactionsIcon size="S" />
+                </S.MoreActionsTrigger>
+              </Menu.Trigger>
+              <Menu.Content align="end">
+                <Menu.Content.Item
+                  text="Edit database"
+                  onClick={() => onEditDatabase(row.original.id)}
+                />
+                <Menu.Content.Item
+                  text="Remove database"
+                  onClick={() => onRemoveDatabase(row.original.id)}
+                />
+              </Menu.Content>
+            </Menu>
           ),
         },
       ] as ColumnDef<AFSDatabaseScopeRecord>[],
-    [],
+    [onEditDatabase, onRemoveDatabase],
   );
 
   return (
@@ -136,7 +151,7 @@ export function DatabaseTable({
             data={rows}
             getRowId={(row) => row.id}
             stripedRows
-            onRowClick={(rowData) => onOpenDatabase(rowData.id)}
+            onRowClick={(rowData) => onEditDatabase(rowData.id)}
           />
         </ClickableTableViewport>
       ) : null}
@@ -169,7 +184,7 @@ const StatusDot = styled.span<{ $healthy: boolean }>`
   height: 10px;
   margin-top: 4px;
   border-radius: 999px;
-  background: ${({ $healthy }) => ($healthy ? "#16a34a" : "#dc2626")};
+  background: ${({ $healthy }) => ($healthy ? "#22c55e" : "#dc2626")};
   box-shadow: ${({ $healthy }) =>
     $healthy
       ? "0 0 0 4px rgba(34, 197, 94, 0.12)"

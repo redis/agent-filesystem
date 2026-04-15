@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
-import { SideBar } from "@redislabsdev/redis-ui-components";
+import { SideBar } from "@redis-ui/components";
 import {
   DoubleChevronLeftIcon,
   DoubleChevronRightIcon,
-} from "@redislabsdev/redis-ui-icons";
+} from "@redis-ui/icons";
 import {
   RedisLogoDarkFullIcon,
   RedisLogoDarkMinIcon,
-} from "@redislabsdev/redis-ui-icons/multicolor";
+} from "@redis-ui/icons/multicolor";
 import * as S from "./sidebar.styles";
 import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";

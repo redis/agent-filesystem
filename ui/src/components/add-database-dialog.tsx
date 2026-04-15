@@ -1,4 +1,4 @@
-import { Button } from "@redislabsdev/redis-ui-components";
+import { Button } from "@redis-ui/components";
 import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import styled from "styled-components";

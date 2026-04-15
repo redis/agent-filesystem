@@ -1,4 +1,4 @@
-import { Button } from "@redislabsdev/redis-ui-components";
+import { Button } from "@redis-ui/components";
 import styled from "styled-components";
 import type { AFSAgentSession } from "../foundation/types/afs";
 import {

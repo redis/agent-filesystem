@@ -1,4 +1,4 @@
-import { SideBar } from "@redislabsdev/redis-ui-components";
+import { SideBar } from "@redis-ui/components";
 import styled from "styled-components";
 
 export const SidebarContainer = styled.div`

@@ -1,5 +1,5 @@
 import { useLocation } from "@tanstack/react-router";
-import { Typography } from "@redislabsdev/redis-ui-components";
+import { Typography } from "@redis-ui/components";
 import * as S from "./app-bar.styles";
 import { resolveNavigationTitleParts } from "./navigation-items";
 

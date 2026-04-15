@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { Button, Loader } from "@redislabsdev/redis-ui-components";
+import { Button, Loader } from "@redis-ui/components";
 import styled from "styled-components";
 import {
   PageStack,

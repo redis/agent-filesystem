@@ -142,6 +142,99 @@ func TestCmdConfigSetPersistsSelfHostedControlPlaneSettings(t *testing.T) {
 	}
 }
 
+func TestCmdConfigSetControlPlaneURLClearsStaleScopedSelection(t *testing.T) {
+	t.Helper()
+
+	base := defaultConfig()
+	base.ProductMode = productModeSelfHosted
+	base.URL = "http://old.example:8091"
+	base.DatabaseID = "redis-cloud"
+	base.CurrentWorkspace = "codex"
+	base.CurrentWorkspaceID = "ws_old"
+	saveTempConfig(t, base)
+
+	err := cmdConfig([]string{
+		"config", "set",
+		"--control-plane-url", "http://127.0.0.1:8091/",
+	})
+	if err != nil {
+		t.Fatalf("cmdConfig(set --control-plane-url) returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.URL != "http://127.0.0.1:8091" {
+		t.Fatalf("controlPlane.url = %q, want %q", cfg.URL, "http://127.0.0.1:8091")
+	}
+	if cfg.DatabaseID != "" {
+		t.Fatalf("controlPlane.databaseID = %q, want empty for auto-selection", cfg.DatabaseID)
+	}
+	if cfg.CurrentWorkspace != "codex" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "codex")
+	}
+	if cfg.CurrentWorkspaceID != "" {
+		t.Fatalf("CurrentWorkspaceID = %q, want cleared when switching control planes", cfg.CurrentWorkspaceID)
+	}
+}
+
+func TestLoadConfigForUpWithOverridesDoesNotRequireSavedConfig(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	overrides := configOverrides{}
+	overrides.controlPlaneURL = optionalString{value: "http://127.0.0.1:8091", set: true}
+
+	cfg, err := loadConfigForUpWithIOAndOverridesAndMode(
+		[]string{"getting-started"},
+		overrides,
+		optionalString{},
+		bufio.NewReader(bytes.NewBuffer(nil)),
+		&bytes.Buffer{},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("loadConfigForUpWithIOAndOverridesAndMode() returned error: %v", err)
+	}
+	if cfg.ProductMode != productModeSelfHosted {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeSelfHosted)
+	}
+	if cfg.URL != "http://127.0.0.1:8091" {
+		t.Fatalf("controlPlane.url = %q, want %q", cfg.URL, "http://127.0.0.1:8091")
+	}
+	if cfg.DatabaseID != "" {
+		t.Fatalf("controlPlane.databaseID = %q, want empty so the control plane can resolve the workspace database", cfg.DatabaseID)
+	}
+	if cfg.CurrentWorkspace != "getting-started" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "getting-started")
+	}
+	if cfg.CurrentWorkspaceID != "" {
+		t.Fatalf("CurrentWorkspaceID = %q, want empty for explicit up workspace", cfg.CurrentWorkspaceID)
+	}
+	if !strings.HasSuffix(cfg.LocalPath, filepath.Join("afs", "getting-started")) {
+		t.Fatalf("LocalPath = %q, want suffix %q", cfg.LocalPath, filepath.Join("afs", "getting-started"))
+	}
+	if _, err := os.Stat(configFile); !os.IsNotExist(err) {
+		t.Fatalf("config file stat error = %v, want ErrNotExist because one-shot up overrides should not write config", err)
+	}
+}
+
 func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T) {
 	t.Helper()
 
@@ -447,6 +540,10 @@ func TestLoadConfigForUpAcceptsSinglePositionalArgument(t *testing.T) {
 
 	cfg := defaultConfig()
 	cfg.Mode = modeSync
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://127.0.0.1:8091"
+	cfg.DatabaseID = "local-development"
+	cfg.CurrentWorkspaceID = "ws_old"
 	saveTempConfig(t, cfg)
 
 	result, err := loadConfigForUp([]string{"my-workspace"})
@@ -459,6 +556,9 @@ func TestLoadConfigForUpAcceptsSinglePositionalArgument(t *testing.T) {
 	// The mountpoint should be auto-derived under ~/afs/<workspace>.
 	if !strings.HasSuffix(result.LocalPath, filepath.Join("afs", "my-workspace")) {
 		t.Fatalf("LocalPath = %q, want suffix %q", result.LocalPath, filepath.Join("afs", "my-workspace"))
+	}
+	if result.CurrentWorkspaceID != "" {
+		t.Fatalf("CurrentWorkspaceID = %q, want cleared for positional workspace override", result.CurrentWorkspaceID)
 	}
 }
 

@@ -1,5 +1,5 @@
 import styled from "styled-components";
-import { TableHeading } from "@redislabsdev/redis-ui-components";
+import { TableHeading } from "@redis-ui/components";
 
 export const TableCard = styled.div`
   border: 1px solid var(--afs-line);

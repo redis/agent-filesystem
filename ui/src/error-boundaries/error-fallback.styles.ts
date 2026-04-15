@@ -1,4 +1,4 @@
-import { Card } from "@redislabsdev/redis-ui-components";
+import { Card } from "@redis-ui/components";
 import styled from "styled-components";
 
 export const CenteredLayout = styled.div<{ $fullPage?: boolean }>`

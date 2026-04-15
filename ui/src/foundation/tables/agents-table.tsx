@@ -1,6 +1,6 @@
-import { Typography } from "@redislabsdev/redis-ui-components";
-import { Table } from "@redislabsdev/redis-ui-table";
-import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
+import { Typography } from "@redis-ui/components";
+import { Table } from "@redis-ui/table";
+import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
@@ -71,11 +71,11 @@ const ActiveDot = styled.span<{ $active: boolean }>`
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line-strong)")};
+  background: ${({ $active }) => ($active ? "#22c55e" : "#d1d5db")};
   ${({ $active }) =>
     $active &&
     css`
-      box-shadow: 0 0 8px var(--afs-accent-soft);
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
       animation: ${pulse} 2s ease-in-out infinite;
     `}
 `;
@@ -147,7 +147,7 @@ const AgentCard = styled.button<{ $active: boolean }>`
   ${({ $active }) =>
     $active &&
     css`
-      border-color: var(--afs-line-strong);
+      border-color: rgba(34, 197, 94, 0.25);
     `}
 `;
 
@@ -181,8 +181,8 @@ const CardStatusBadge = styled.span<{ $active: boolean }>`
   padding: 3px 10px;
   border-radius: 999px;
   flex-shrink: 0;
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel)")};
-  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-muted)")};
+  background: ${({ $active }) => ($active ? "rgba(34,197,94,0.12)" : "rgba(161,161,170,0.12)")};
+  color: ${({ $active }) => ($active ? "#16a34a" : "#71717a")};
 `;
 
 const CardWorkspace = styled.span`
@@ -234,7 +234,7 @@ const ClockWrap = styled.div<{ $active: boolean }>`
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-muted, #71717a)")};
+  color: ${({ $active }) => ($active ? "#16a34a" : "var(--afs-muted, #71717a)")};
 `;
 
 const ClockIcon = styled.span<{ $spinning: boolean }>`

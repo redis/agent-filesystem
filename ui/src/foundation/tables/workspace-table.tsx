@@ -1,7 +1,7 @@
-import { Menu, Typography } from "@redislabsdev/redis-ui-components";
-import { MoreactionsIcon } from "@redislabsdev/redis-ui-icons/monochrome";
-import { Table } from "@redislabsdev/redis-ui-table";
-import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
+import { Menu, Typography } from "@redis-ui/components";
+import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
+import { Table } from "@redis-ui/table";
+import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState, type ReactNode } from "react";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
@@ -277,11 +277,11 @@ const LiveDot = styled.span<{ $active: boolean }>`
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line-strong)")};
+  background: ${({ $active }) => ($active ? "#22c55e" : "#d1d5db")};
   ${({ $active }) =>
     $active &&
     css`
-      box-shadow: 0 0 8px var(--afs-accent-soft);
+      box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
       animation: ${pulse} 2s ease-in-out infinite;
     `}
 `;

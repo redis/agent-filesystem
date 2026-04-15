@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { Button } from "@redislabsdev/redis-ui-components";
+import { Button } from "@redis-ui/components";
 import { Link } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
 import { getControlPlaneURL } from "../foundation/api/afs";
@@ -24,10 +24,10 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
 
   const controlPlaneUrl = getControlPlaneURL();
   const mountPath = `~/afs/${workspaceName}`;
+  const cliPath = `./afs`;
+  const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
 
-  const installCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli" -o /tmp/afs && mv /tmp/afs /usr/local/bin/afs && chmod +x /usr/local/bin/afs`;
-
-  const cliSetup = `afs config set --control-plane-url "${controlPlaneUrl}" && afs up ${workspaceName}`;
+  const cliSetup = `"${cliPath}" up --control-plane-url "${controlPlaneUrl}" "${workspaceName}"`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -91,27 +91,30 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
         <StepContent>
           <SubStepLabel>Step 1 — Download the CLI</SubStepLabel>
           <StepDescription>
-            Install the <code>afs</code> binary directly from this server.
+            Download the latest compatible <code>afs</code> CLI for the machine
+            you run this command on. The command auto-detects OS and CPU
+            architecture.
           </StepDescription>
           <CodeContainer>
-            <CodePre>{installCmd}</CodePre>
+            <CodePre>{downloadCmd}</CodePre>
             <CopyButton
               type="button"
-              onClick={() => copyToClipboard(installCmd, "install")}
+              onClick={() => copyToClipboard(downloadCmd, "download")}
             >
-              {copied === "install" ? "Copied!" : "Copy"}
+              {copied === "download" ? "Copied!" : "Copy"}
             </CopyButton>
           </CodeContainer>
           <StepHint>
-            Requires write access to <code>/usr/local/bin</code>. Prefix
-            with <code>sudo</code> if needed, or change the path.
+            This downloads <code>afs</code> into your current directory, so you
+            can run it immediately as <code>./afs</code>. If you already have a
+            file named <code>afs</code> there, it will be replaced.
           </StepHint>
 
           <SubStepDivider />
 
           <SubStepLabel>Step 2 — Connect and mount the workspace</SubStepLabel>
           <StepDescription>
-            Point the CLI at this server and sync the workspace to a local directory.
+            Connect to this server and sync the workspace to a local directory.
           </StepDescription>
           <CodeContainer>
             <CodePre>{cliSetup}</CodePre>

@@ -8,7 +8,7 @@
 
 services:
   redis:
-    image: redis:7
+    image: redis:8
     ports:
       - "6379:6379"
     volumes:
@@ -22,8 +22,6 @@ services:
   afs:
     build:
       context: .
-      args:
-        NPM_AUTH_TOKEN: ${NPM_AUTH_TOKEN:-}
     ports:
       - "8091:8091"
     environment:

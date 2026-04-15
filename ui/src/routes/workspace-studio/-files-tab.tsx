@@ -1,4 +1,4 @@
-import { Button, Typography } from "@redislabsdev/redis-ui-components";
+import { Button, Typography } from "@redis-ui/components";
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
 import {

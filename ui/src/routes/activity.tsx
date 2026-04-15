@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Loader } from "@redislabsdev/redis-ui-components";
+import { Loader } from "@redis-ui/components";
 import {
   NoticeBody,
   NoticeCard,

@@ -1,7 +1,7 @@
 import {
   Banner,
   Typography,
-} from "@redislabsdev/redis-ui-components";
+} from "@redis-ui/components";
 import {
   CenteredLayout,
   FallbackCard,

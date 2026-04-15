@@ -39,7 +39,7 @@ func cmdUpArgs(args []string) error {
 		}
 	}
 
-	cfg, err := loadConfigForUpWithMode(opts.positionals, opts.mode)
+	cfg, err := loadConfigForUpWithOverridesAndMode(opts.positionals, opts.overrides, opts.mode)
 	if err != nil {
 		return err
 	}

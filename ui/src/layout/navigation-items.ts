@@ -1,4 +1,4 @@
-import type { IconType } from "@redislabsdev/redis-ui-icons";
+import type { IconType } from "@redis-ui/icons";
 import {
   CloudDownloadIcon,
   DashboardIcon,
@@ -8,7 +8,7 @@ import {
   NotificationsIcon,
   RedisCopilotIcon,
   SupportIcon,
-} from "@redislabsdev/redis-ui-icons";
+} from "@redis-ui/icons";
 
 export type SidebarPanelId = "root" | "workspaces";
 

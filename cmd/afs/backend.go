@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -54,6 +55,41 @@ func normalizeControlPlaneURL(raw string) (string, error) {
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String(), nil
+}
+
+// rewriteManagedRedisAddrForLocalhost maps Docker-internal Redis hostnames like
+// "redis:6379" to "localhost:6379" when the control plane itself is being
+// reached through localhost from the host machine. This keeps the Docker
+// Compose quickstart usable from the host CLI without changing the control
+// plane's own internal Redis connection.
+func rewriteManagedRedisAddrForLocalhost(controlPlaneURL, redisAddr string) string {
+	parsed, err := url.Parse(strings.TrimSpace(controlPlaneURL))
+	if err != nil {
+		return redisAddr
+	}
+
+	switch parsed.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+	default:
+		return redisAddr
+	}
+
+	host, port, err := splitAddr(strings.TrimSpace(redisAddr))
+	if err != nil {
+		return redisAddr
+	}
+	host = strings.TrimSpace(host)
+	switch host {
+	case "", "localhost", "127.0.0.1", "::1":
+		return redisAddr
+	}
+	if net.ParseIP(host) != nil {
+		return redisAddr
+	}
+	if strings.Contains(host, ".") {
+		return redisAddr
+	}
+	return fmt.Sprintf("localhost:%d", port)
 }
 
 type afsControlPlane interface {

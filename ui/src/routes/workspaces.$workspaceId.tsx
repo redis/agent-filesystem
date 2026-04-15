@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button, Loader } from "@redislabsdev/redis-ui-components";
+import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";

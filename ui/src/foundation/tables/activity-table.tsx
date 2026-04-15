@@ -1,6 +1,6 @@
-import { Typography } from "@redislabsdev/redis-ui-components";
-import { Table } from "@redislabsdev/redis-ui-table";
-import type { ColumnDef, SortingState } from "@redislabsdev/redis-ui-table";
+import { Typography } from "@redis-ui/components";
+import { Table } from "@redis-ui/table";
+import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
 import type { AFSActivityEvent } from "../types/afs";
 import * as S from "./workspace-table.styles";

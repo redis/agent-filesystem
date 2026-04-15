@@ -1,6 +1,6 @@
 import { useMemo, useRef, useLayoutEffect, useState, useCallback } from "react";
 import styled, { keyframes } from "styled-components";
-import { RedisLogoDarkMinIcon } from "@redislabsdev/redis-ui-icons/multicolor";
+import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
 
 /* ------------------------------------------------------------------ */

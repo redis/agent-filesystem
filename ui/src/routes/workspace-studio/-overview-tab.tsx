@@ -2,7 +2,7 @@ import styled from "styled-components";
 import { SectionCard, SectionGrid, SectionHeader, SectionTitle } from "../../components/afs-kit";
 import { formatBytes } from "../../foundation/api/afs";
 import type { AFSWorkspaceDetail } from "../../foundation/types/afs";
-import { Button } from "@redislabsdev/redis-ui-components";
+import { Button } from "@redis-ui/components";
 import { useNavigate } from "@tanstack/react-router";
 
 type Props = {

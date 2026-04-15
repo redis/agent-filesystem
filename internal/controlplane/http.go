@@ -852,23 +852,34 @@ func handleCLIDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	binaryPath, err := findCLIBinary()
+	target, err := normalizeCLITarget(r.URL.Query().Get("os"), r.URL.Query().Get("arch"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "invalid CLI target: " + err.Error(),
+		})
+		return
+	}
+
+	binaryPath, cleanupBuild, err := resolveCLIBinaryForTarget(target)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{
 			"error": "CLI binary not found: " + err.Error(),
 		})
 		return
 	}
+	if cleanupBuild != nil {
+		defer cleanupBuild()
+	}
 
-	servePath, cleanup, err := ensureCodeSigned(binaryPath)
+	servePath, cleanupSign, err := ensureCodeSigned(binaryPath)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "failed to prepare CLI binary: " + err.Error(),
 		})
 		return
 	}
-	if cleanup != nil {
-		defer cleanup()
+	if cleanupSign != nil {
+		defer cleanupSign()
 	}
 
 	info, err := os.Stat(servePath)
@@ -880,7 +891,7 @@ func handleCLIDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", `attachment; filename="afs"`)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, target.Filename))
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	http.ServeFile(w, r, servePath)
 }

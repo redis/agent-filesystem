@@ -63,6 +63,32 @@ func TestOpenAFSStoreRejectsUnsupportedProductMode(t *testing.T) {
 	}
 }
 
+func TestRewriteManagedRedisAddrForLocalhostDockerService(t *testing.T) {
+	t.Helper()
+
+	got := rewriteManagedRedisAddrForLocalhost("http://127.0.0.1:8091", "redis:6379")
+	if got != "localhost:6379" {
+		t.Fatalf("rewriteManagedRedisAddrForLocalhost() = %q, want %q", got, "localhost:6379")
+	}
+}
+
+func TestRewriteManagedRedisAddrForLocalhostLeavesReachableHostsAlone(t *testing.T) {
+	t.Helper()
+
+	cases := []string{
+		"localhost:6379",
+		"127.0.0.1:6379",
+		"cache.example.com:6379",
+		"10.0.0.8:6379",
+	}
+
+	for _, addr := range cases {
+		if got := rewriteManagedRedisAddrForLocalhost("http://127.0.0.1:8091", addr); got != addr {
+			t.Fatalf("rewriteManagedRedisAddrForLocalhost(%q) = %q, want unchanged", addr, got)
+		}
+	}
+}
+
 func TestOpenAFSControlPlaneSelfHostedSingleDatabaseStillWorksWithoutConfiguredDatabase(t *testing.T) {
 	t.Helper()
 
