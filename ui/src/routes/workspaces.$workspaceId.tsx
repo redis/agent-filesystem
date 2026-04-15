@@ -9,8 +9,6 @@ import {
   NoticeCard,
   NoticeTitle,
   PageStack,
-  SectionCard,
-  SectionGrid,
   TabButton,
   Tabs,
 } from "../components/afs-kit";
@@ -22,15 +20,15 @@ import {
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
 import type { AFSAgentSession, AFSWorkspaceView } from "../foundation/types/afs";
-import { OverviewTab } from "./workspace-studio/-overview-tab";
-import { FilesTab } from "./workspace-studio/-files-tab";
+import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
+import { SettingsTab } from "./workspace-studio/-settings-tab";
 
-type StudioTab = "overview" | "files" | "checkpoints" | "activity";
+type StudioTab = "browse" | "checkpoints" | "activity" | "settings";
 
 const workspaceStudioSearchSchema = z.object({
-  tab: z.enum(["overview", "files", "checkpoints", "activity"]).optional(),
+  tab: z.enum(["browse", "checkpoints", "activity", "settings"]).optional(),
   welcome: z.boolean().optional(),
 });
 
@@ -58,7 +56,7 @@ function WorkspaceStudioPage() {
   const hadAgentsBefore = useRef<boolean | null>(null);
 
   const workspace = workspaceQuery.data;
-  const tab = search.tab ?? "overview";
+  const tab = search.tab ?? "browse";
   const hasAgents = (workspace?.agents?.length ?? 0) > 0;
   // Show the banner only during the first-time setup flow (welcome=true in URL),
   // or when the agent-connected dialog / "What's Next" step is active.
@@ -107,7 +105,7 @@ function WorkspaceStudioPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId },
-      search: nextTab === "overview"
+      search: nextTab === "browse"
         ? {}
         : { tab: nextTab },
       replace: true,
@@ -197,7 +195,7 @@ function WorkspaceStudioPage() {
               void navigate({
                 to: "/workspaces/$workspaceId",
                 params: { workspaceId },
-                search: tab === "overview" ? {} : { tab },
+                search: tab === "browse" ? {} : { tab },
                 replace: true,
               });
             }
@@ -248,11 +246,8 @@ function WorkspaceStudioPage() {
       </StudioNavRow>
 
       <Tabs>
-        <TabButton $active={tab === "overview"} onClick={() => setStudioTab("overview")}>
-          Overview
-        </TabButton>
-        <TabButton $active={tab === "files"} onClick={() => setStudioTab("files")}>
-          Files
+        <TabButton $active={tab === "browse"} onClick={() => setStudioTab("browse")}>
+          Browse
         </TabButton>
         <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
           Checkpoints
@@ -260,12 +255,13 @@ function WorkspaceStudioPage() {
         <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
           Activity
         </TabButton>
+        <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
+          Settings
+        </TabButton>
       </Tabs>
 
-      {tab === "overview" ? <OverviewTab workspace={workspace} /> : null}
-
-      {tab === "files" ? (
-        <FilesTab
+      {tab === "browse" ? (
+        <BrowseTab
           workspace={workspace}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
@@ -283,26 +279,18 @@ function WorkspaceStudioPage() {
       {tab === "activity" ? (
         <ActivityTab
           activity={workspace.activity}
+          updatedAt={workspace.updatedAt}
           onTabChange={setStudioTab}
         />
       ) : null}
 
-      {/* Danger zone — overview tab only */}
-      {tab === "overview" ? <DangerZoneCard>
-        <DangerZoneHeader>
-          <DangerZoneTitle>Danger zone</DangerZoneTitle>
-          <DangerZoneDesc>
-            Permanently delete this workspace and remove it from the registry.
-          </DangerZoneDesc>
-        </DangerZoneHeader>
-        <DeleteWorkspaceButton
-          size="large"
-          disabled={deleteWorkspace.isPending}
-          onClick={deleteCurrentWorkspace}
-        >
-          {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
-        </DeleteWorkspaceButton>
-      </DangerZoneCard> : null}
+      {tab === "settings" ? (
+        <SettingsTab
+          workspace={workspace}
+          onDelete={deleteCurrentWorkspace}
+          isDeleting={deleteWorkspace.isPending}
+        />
+      ) : null}
 
       {/* Agent connected pop-up dialog */}
       {connectedAgent ? (
@@ -390,55 +378,3 @@ const ConnectAgentButton = styled(Button)`
   }
 `;
 
-const DangerZoneCard = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  margin-top: 24px;
-  padding: 20px 24px;
-  border: 1px solid rgba(220, 38, 38, 0.2);
-  border-radius: 16px;
-  background: rgba(220, 38, 38, 0.03);
-
-  @media (max-width: 720px) {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-`;
-
-const DangerZoneHeader = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const DangerZoneTitle = styled.h3`
-  margin: 0;
-  color: #dc2626;
-  font-size: 15px;
-  font-weight: 700;
-`;
-
-const DangerZoneDesc = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.5;
-`;
-
-const DeleteWorkspaceButton = styled(Button)`
-  && {
-    white-space: nowrap;
-    background: ${({ theme }) => theme.semantic.color.background.danger500};
-    color: ${({ theme }) => theme.semantic.color.text.inverse};
-    box-shadow: none;
-  }
-
-  &&:hover:not(:disabled),
-  &&:focus-visible:not(:disabled) {
-    background: ${({ theme }) => theme.semantic.color.background.danger600};
-    color: ${({ theme }) => theme.semantic.color.text.inverse};
-    box-shadow: none;
-  }
-`;

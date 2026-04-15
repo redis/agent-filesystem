@@ -2,29 +2,45 @@
 
 ## 1. Problem Statement
 
-You want a hosted AFS control plane with two deployment modes:
+You want AFS to support three product experiences without forking the architecture:
 
-1. **Built-in database (quick start):** AFS provisions and manages a Redis instance for the customer so they can create a workspace immediately.
-2. **Bring your own database (BYODB):** Customer points AFS to their own Redis where workspace file/content data lives.
+1. **Self-hosted:** the current entirely local experience remains available.
+2. **Cloud quick start:** AFS provisions and manages a Redis instance for the customer so they can create a workspace immediately.
+3. **Cloud + customer database:** customer points AFS Cloud at their own Redis where workspace file/content data lives.
 
-A hard requirement for BYODB is that the customer's Redis can remain **fully private** (on laptop, inside a VPC, or in an on-prem network) and **not reachable from the cloud control plane**.
+The cloud-attached customer database mode has two different rollout shapes:
 
-That requirement implies a split architecture: cloud components cannot assume direct Redis access for core control-plane operations.
+- **Phase 1: External reachable database**
+  - Customer attaches a Redis instance that the cloud control plane can reach.
+  - This enables a fast first hosted release with full cloud UI behavior.
+- **Phase 2: External hybrid database**
+  - Customer keeps Redis fully private (laptop, VPC, or on-prem).
+  - Cloud cannot assume direct Redis reachability and must rely on a customer-side connector.
+
+The hard end-state requirement is that BYODB must support the **fully private** hybrid case without sacrificing the usefulness of the cloud UI for workspace lifecycle operations.
 
 ---
 
 ## 2. Core Architecture Decision
 
-Adopt a **split-plane model**:
+Adopt a **split-plane model** with one control plane and multiple data-plane binding types:
 
 - **Control Plane (Cloud):** identity, organizations, workspaces, policy, orchestration, metadata index, audit, billing, API, UI.
-- **Data Plane (Customer side):** Redis module data, mount process, optional local connector/agent.
+- **Data Plane (Managed or Customer side):** Redis module data, mount process, and optionally a customer-side connector/agent.
 
-The key design rule:
+The implementation rule is:
 
-> The cloud control plane never directly depends on customer Redis reachability.
+> The control plane depends on a `DataPlaneProvider` contract, not on raw Redis access everywhere in the codebase.
 
-Instead, it communicates with a **customer-side connector** (or client-desktop runtime) over outbound-initiated secure channels, and stores only minimal cloud metadata needed for orchestration.
+That allows AFS to ship in stages:
+
+- `managed`: AFS-managed Redis for quick start.
+- `external_reachable`: customer Redis, but directly reachable from cloud.
+- `external_hybrid`: customer Redis remains private; cloud reaches it only through a connector.
+
+For the final hybrid design rule:
+
+> The cloud control plane never directly depends on Redis reachability for `external_hybrid` bindings.
 
 ---
 
@@ -59,11 +75,25 @@ Instead, it communicates with a **customer-side connector** (or client-desktop r
   - Can talk directly to customer Redis for local workspace operations.
   - Also talks to cloud APIs for identity, workspace discovery, and policy.
 
-## 3.3 Built-in Database Mode
+## 3.3 Data-Plane Binding Types
 
-- A managed Redis (or Redis-compatible service) deployed per tenant/project by AFS.
-- Same logical model and APIs as BYODB, but connector may be provider-managed or optional.
-- This avoids feature divergence: “built-in” and BYODB share orchestration contracts.
+- **Managed**
+  - A managed Redis (or Redis-compatible service) deployed per tenant/project by AFS.
+  - Best for cloud quick start and lowest-friction onboarding.
+- **External reachable**
+  - Customer Redis is attached to AFS Cloud and reachable from the cloud control plane.
+  - This is the recommended first hosted external-database release because it preserves full cloud UI behavior without requiring the connector on day one.
+- **External hybrid**
+  - Customer Redis is attached to AFS Cloud but remains private to the customer environment.
+  - Control-plane operations execute through the customer connector over an outbound control channel.
+
+All three binding types share one logical workspace model and one control-plane API surface.
+
+## 3.4 Self-Hosted Mode
+
+- Self-hosted remains a supported product mode.
+- It can reuse core workspace/data structures, but it does not need to route through the hosted control plane.
+- The hosted architecture should not regress or replace the current local-first experience.
 
 ---
 
@@ -73,7 +103,7 @@ Instead, it communicates with a **customer-side connector** (or client-desktop r
 
 - Tenants/orgs/users/roles
 - Workspace registry (workspace IDs, names, owner, region, status)
-- Data-plane binding records (mode = built-in or BYODB, connector ID, last-seen)
+- Data-plane binding records (mode = `managed|external_reachable|external_hybrid`, connector ID, last-seen)
 - Policy objects (retention policy, backup schedule intent, allowed operations)
 - Checkpoint catalog metadata (checkpoint ID, timestamps, labels, size estimate, storage class)
 - Event logs and audit records
@@ -91,7 +121,20 @@ For UX speed, cloud may keep a derived, stale-tolerant index (e.g., recent works
 
 ---
 
-## 5. Connectivity Model (No Inbound Requirement)
+## 5. Connectivity Models
+
+## 5.1 External Reachable Database
+
+For the first hosted external-database release:
+
+1. Customer registers an external Redis endpoint with AFS Cloud.
+2. Control plane validates connectivity and capabilities directly.
+3. Cloud executes workspace lifecycle operations directly against Redis via the provider contract.
+4. AFS clients receive session bundles that let them talk to the Redis data plane directly.
+
+This mode is simpler to ship first, but it is not sufficient for customers who require a private/on-prem data plane.
+
+## 5.2 External Hybrid Database (No Inbound Requirement)
 
 For strict private-network BYODB, use an **agent-initiated outbound control channel**:
 
@@ -112,25 +155,27 @@ This is the same pattern used by many hybrid-cloud systems and avoids requiring 
 1. User calls cloud API `CreateWorkspace`.
 2. Cloud writes workspace metadata with `state = PROVISIONING`.
 3. Orchestrator dispatches `WorkspaceInitJob` to target binding:
-   - Built-in mode: provider-managed connector/service executes.
-   - BYODB mode: customer connector executes.
-4. Connector creates root structures in Redis and returns success/failure.
+   - `managed` / `external_reachable`: provider executes directly.
+   - `external_hybrid`: customer connector executes.
+4. Provider creates root structures in Redis and returns success/failure.
 5. Cloud updates state to `READY` and emits audit event.
 
 ## 6.2 Mount on Desktop
 
 1. Desktop resolves workspace via cloud metadata.
 2. Desktop learns connection profile:
-   - Built-in: managed endpoint + credentials brokered by cloud.
-   - BYODB: local/org profile (may be local hostname, private DNS, unix socket tunnel, etc.).
+   - `managed`: managed endpoint + credentials brokered by cloud.
+   - `external_reachable` / `external_hybrid`: local/org profile (may be local hostname, private DNS, unix socket tunnel, etc.).
 3. Mount process interacts with Redis data plane directly when possible.
 4. Cloud receives session telemetry, not file payload.
 
 ## 6.3 Checkpoint / Restore
 
 - API writes intent in cloud.
-- Connector performs operation in customer Redis.
-- Connector emits immutable result record with checksum/size/time.
+- Provider executes operation:
+  - `managed` / `external_reachable`: directly
+  - `external_hybrid`: through connector
+- Connector emits immutable result record with checksum/size/time when hybrid mode is in use.
 - Cloud updates checkpoint catalog metadata.
 
 ---
@@ -177,17 +222,21 @@ This is the same pattern used by many hybrid-cloud systems and avoids requiring 
 
 ## 9. Built-in DB vs BYODB: Keep One Contract
 
-Avoid two product architectures by using one abstract interface:
+Avoid three divergent product architectures by using one abstract interface:
 
 - `DataPlaneProvider` interface
+  - `ValidateBinding`
   - `InitWorkspace`
   - `DeleteWorkspace`
   - `CreateCheckpoint`
   - `RestoreCheckpoint`
+  - `IssueClientSession`
+  - `ReadWorkspaceTree`
+  - `ReadFileContent`
   - `GetWorkspaceStats`
   - `Health`
 
-Built-in database implementation is just another provider behind the same contract.
+`managed`, `external_reachable`, and `external_hybrid` are implementations behind the same contract.
 
 Benefits:
 
@@ -204,14 +253,20 @@ Benefits:
 - Customer signs up -> workspace ready in minutes.
 - No infra setup.
 
-## 10.2 Upgrade to BYODB
+## 10.2 Attach External Reachable Database
+
+- Customer registers a Redis instance reachable from AFS Cloud.
+- Cloud validates the database and enables full workspace lifecycle operations immediately.
+- Optional data migration job from built-in to external reachable.
+
+## 10.3 Upgrade to External Hybrid
 
 - Install connector in target environment.
-- Register BYODB binding.
-- Optional data migration job from built-in to BYODB.
+- Register hybrid binding and enroll connector.
+- Optional data migration job from built-in or external reachable to hybrid.
 - Switch workspace binding atomically.
 
-## 10.3 BYODB Air-gapped-ish Setup
+## 10.4 BYODB Air-gapped-ish Setup
 
 - Connector in customer network with egress-only HTTPS to cloud.
 - Redis stays private; cloud never accesses it directly.
@@ -221,7 +276,8 @@ Benefits:
 ## 11. Suggested API Shape
 
 - `POST /workspaces` (includes `dataPlaneBindingId`)
-- `POST /dataplanes/bindings` (type: `BUILT_IN|BYODB`)
+- `POST /dataplanes/bindings` (type: `MANAGED|EXTERNAL_REACHABLE|EXTERNAL_HYBRID`)
+- `POST /dataplanes/bindings/{id}:validate`
 - `POST /connectors/enroll`
 - `POST /workspaces/{id}/checkpoints`
 - `POST /workspaces/{id}/restore`
@@ -242,13 +298,14 @@ Job/event topics (logical):
 ## 12. Operational Recommendations
 
 1. **Use Postgres for cloud metadata** (not Redis) to decouple control-plane durability and query patterns from customer data store topology.
-2. **Ship connector as first-class product** with auto-update, version skew policy, and strong observability.
-3. **Define SLOs separately**:
+2. **Ship `external_reachable` first, but do it behind the provider contract** so the hybrid connector can slot in later without rewriting the product.
+3. **Ship connector as first-class product** with auto-update, version skew policy, and strong observability.
+4. **Define SLOs separately**:
    - Cloud API availability
    - Connector online rate
    - Workspace operation latency by mode
-4. **Document trust boundaries clearly** for enterprise security reviews.
-5. **Implement graceful degradation**:
+5. **Document trust boundaries clearly** for enterprise security reviews.
+6. **Implement graceful degradation**:
    - If connector offline, cloud UI still shows metadata and last known state.
 
 ---
@@ -257,6 +314,9 @@ Job/event topics (logical):
 
 - **Risk: Connector offline blocks BYODB operations.**
   - Mitigation: queued intents, retries, clear UX status, optional HA connectors.
+
+- **Risk: Phase-1 external database users assume private/on-prem support immediately.**
+  - Mitigation: label the first release clearly as `external reachable` until hybrid connector support exists.
 
 - **Risk: Metadata/content divergence.**
   - Mitigation: reconciliation jobs + periodic signed inventory snapshots.
@@ -271,18 +331,23 @@ Job/event topics (logical):
 
 ## 14. Proposed Phased Delivery
 
-### Phase 1: Metadata Split + Built-in DB
+### Phase 1: Metadata Split + Managed DB
 - Introduce cloud Postgres metadata schema.
 - Keep built-in Redis path working end-to-end.
 - Abstract operations behind `DataPlaneProvider`.
 
-### Phase 2: BYODB Connector (Outbound)
+### Phase 2: External Reachable Database
+- Add external database bindings that cloud can validate and reach directly.
+- Keep the cloud UI fully functional for create/delete/checkpoint/browser flows.
+- Reuse the same provider contract that hybrid mode will later use.
+
+### Phase 3: BYODB Connector (Outbound)
 - Connector enrollment + mTLS channel.
 - Workspace init/checkpoint operations via job dispatch.
 - Health and heartbeat surfaces in UI/API.
 
-### Phase 3: Migration + Enterprise Hardening
-- Built-in <-> BYODB migration tooling.
+### Phase 4: Migration + Enterprise Hardening
+- Built-in <-> external reachable <-> hybrid migration tooling.
 - Advanced policy controls, audit exports, private connectivity options.
 - HA connector deployments and DR guidance.
 
@@ -290,10 +355,11 @@ Job/event topics (logical):
 
 ## 15. Bottom Line
 
-Yes—this can cleanly support both "works out of the box" and "customer-owned private Redis" if you treat Redis as **data-plane storage**, move control-plane truth to a dedicated cloud metadata store, and rely on an outbound customer connector for BYODB orchestration.
+Yes—this can cleanly support quick-start cloud, reachable external databases, fully private hybrid BYODB, and the existing self-hosted mode if you treat Redis as **data-plane storage**, move control-plane truth to a dedicated cloud metadata store, and keep every binding behind one provider contract.
 
 That gives:
 
 - Fast onboarding via built-in managed Redis.
+- A practical first hosted external-database release before the connector exists.
 - Strict network/data-boundary compliance for enterprises.
 - A single product model instead of two divergent architectures.

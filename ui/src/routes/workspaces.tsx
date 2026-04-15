@@ -121,7 +121,7 @@ function ImportDialog({
                   void navigate({
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId: result.workspaceId },
-                    search: { tab: "files" },
+                    search: { tab: "browse" },
                   });
                 },
                 onError: (err) => {
@@ -338,11 +338,11 @@ function WorkspacesPage() {
     });
   }
 
-  function openWorkspaceTab(workspace: AFSWorkspaceSummary, tab: "overview" | "files" | "checkpoints" | "activity") {
+  function openWorkspaceTab(workspace: AFSWorkspaceSummary, tab: "browse" | "checkpoints" | "activity" | "settings") {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: workspace.id },
-      search: tab === "overview" ? {} : { tab },
+      search: tab === "browse" ? {} : { tab },
     });
   }
 
@@ -460,7 +460,7 @@ function WorkspacesPage() {
                         void navigate({
                           to: "/workspaces/$workspaceId",
                           params: { workspaceId: result.workspaceId },
-                          search: { tab: "files" },
+                          search: { tab: "browse" },
                         });
                       },
                       onError: (error) => {

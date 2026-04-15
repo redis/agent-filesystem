@@ -22,7 +22,7 @@ import {
 } from "../../foundation/hooks/use-afs";
 import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../../foundation/types/afs";
 
-type StudioTab = "overview" | "files" | "checkpoints" | "activity";
+type StudioTab = "browse" | "checkpoints" | "activity" | "settings";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
@@ -111,7 +111,7 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
                       ? "head"
                       : `checkpoint:${savepoint.id}`,
                   );
-                  onTabChange("files");
+                  onTabChange("browse");
                 }}
               >
                 <SaveIcon style={{ flexShrink: 0, marginTop: 2, color: "#22c55e", width: 20, height: 20 }} />
@@ -141,7 +141,7 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
                           ? "head"
                           : `checkpoint:${savepoint.id}`,
                       );
-                      onTabChange("files");
+                      onTabChange("browse");
                     }}
                   >
                     Browse

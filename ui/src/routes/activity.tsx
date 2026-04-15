@@ -37,7 +37,7 @@ function ActivityPage() {
         event.scope === "savepoint"
           ? { tab: "checkpoints" }
           : event.scope === "file"
-            ? { tab: "files" }
+            ? { tab: "browse" }
             : event.scope === "workspace"
               ? {}
               : { tab: "activity" },

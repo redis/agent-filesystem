@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	afsclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -269,6 +270,12 @@ type SaveCheckpointRequest struct {
 	DirCount              int
 	TotalBytes            int64
 	SkipWorkspaceRootSync bool
+}
+
+type workspaceUsageStats struct {
+	FileCount   int
+	FolderCount int
+	TotalBytes  int64
 }
 
 func NewService(cfg Config, store *Store) *Service {
@@ -746,6 +753,7 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return workspaceDetail{}, err
 	}
+	stats := s.currentWorkspaceStats(ctx, workspace, headMeta)
 	activity, err := s.listWorkspaceActivity(ctx, workspace, 25)
 	if err != nil {
 		return workspaceDetail{}, err
@@ -767,9 +775,9 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		DraftState:       draftState(meta),
 		HeadCheckpointID: meta.HeadSavepoint,
 		Tags:             append([]string(nil), meta.Tags...),
-		FileCount:        headMeta.FileCount,
-		FolderCount:      headMeta.DirCount,
-		TotalBytes:       headMeta.TotalBytes,
+		FileCount:        stats.FileCount,
+		FolderCount:      stats.FolderCount,
+		TotalBytes:       stats.TotalBytes,
 		CheckpointCount:  len(checkpoints),
 		Checkpoints:      make([]checkpointSummary, 0, len(checkpoints)),
 		Activity:         activity.Items,
@@ -1185,6 +1193,9 @@ func (s *Service) getTree(ctx context.Context, workspace, rawView, rawPath strin
 	if err != nil {
 		return treeResponse{}, err
 	}
+	if view.Kind == "working-copy" {
+		return s.getWorkingCopyTree(ctx, workspace, normalizedPath, depth)
+	}
 	_, checkpoint, manifestValue, err := s.resolveManifestForView(ctx, workspace, view)
 	if err != nil {
 		return treeResponse{}, err
@@ -1248,6 +1259,9 @@ func (s *Service) getFileContent(ctx context.Context, workspace, rawView, rawPat
 	if err != nil {
 		return fileContentResponse{}, err
 	}
+	if view.Kind == "working-copy" {
+		return s.getWorkingCopyFileContent(ctx, workspace, normalizedPath)
+	}
 	_, checkpoint, manifestValue, err := s.resolveManifestForView(ctx, workspace, view)
 	if err != nil {
 		return fileContentResponse{}, err
@@ -1295,6 +1309,134 @@ func (s *Service) getFileContent(ctx context.Context, workspace, rawView, rawPat
 	default:
 		return fileContentResponse{}, fmt.Errorf("unsupported manifest entry type %q", entry.Type)
 	}
+}
+
+func (s *Service) getWorkingCopyTree(ctx context.Context, workspace, normalizedPath string, depth int) (treeResponse, error) {
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return treeResponse{}, err
+	}
+	fsClient := afsclient.New(s.store.rdb, WorkspaceFSKey(workspace))
+	stat, err := fsClient.Stat(ctx, normalizedPath)
+	if err != nil {
+		return treeResponse{}, err
+	}
+	if stat == nil {
+		return treeResponse{}, os.ErrNotExist
+	}
+	if stat.Type != "dir" {
+		return treeResponse{}, fmt.Errorf("path %q is not a directory", normalizedPath)
+	}
+
+	items := make([]treeItem, 0)
+	if err := appendWorkingCopyTreeItems(ctx, fsClient, normalizedPath, depth, &items); err != nil {
+		return treeResponse{}, err
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Kind != items[j].Kind {
+			if items[i].Kind == "dir" {
+				return true
+			}
+			if items[j].Kind == "dir" {
+				return false
+			}
+		}
+		return items[i].Path < items[j].Path
+	})
+
+	return treeResponse{
+		WorkspaceID: workspace,
+		View:        "working-copy",
+		Path:        normalizedPath,
+		Items:       items,
+	}, nil
+}
+
+func (s *Service) getWorkingCopyFileContent(ctx context.Context, workspace, normalizedPath string) (fileContentResponse, error) {
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return fileContentResponse{}, err
+	}
+	fsClient := afsclient.New(s.store.rdb, WorkspaceFSKey(workspace))
+	stat, err := fsClient.Stat(ctx, normalizedPath)
+	if err != nil {
+		return fileContentResponse{}, err
+	}
+	if stat == nil {
+		return fileContentResponse{}, os.ErrNotExist
+	}
+	if stat.Type == "dir" {
+		return fileContentResponse{}, fmt.Errorf("path %q is a directory", normalizedPath)
+	}
+
+	response := fileContentResponse{
+		WorkspaceID: workspace,
+		View:        "working-copy",
+		Path:        normalizedPath,
+		Kind:        stat.Type,
+		Revision:    workingCopyRevision(stat, normalizedPath),
+		Language:    language(normalizedPath),
+		Encoding:    "utf-8",
+		ContentType: contentType(normalizedPath, stat.Type),
+		Size:        stat.Size,
+		ModifiedAt:  workingCopyTimestamp(stat.Mtime),
+	}
+
+	switch stat.Type {
+	case "symlink":
+		target, err := fsClient.Readlink(ctx, normalizedPath)
+		if err != nil {
+			return fileContentResponse{}, err
+		}
+		response.Target = target
+		response.Content = target
+		return response, nil
+	case "file":
+		data, err := fsClient.Cat(ctx, normalizedPath)
+		if err != nil {
+			return fileContentResponse{}, err
+		}
+		if isBinary(data) {
+			response.Binary = true
+			response.Encoding = ""
+			return response, nil
+		}
+		response.Content = string(data)
+		return response, nil
+	default:
+		return fileContentResponse{}, fmt.Errorf("unsupported working-copy entry type %q", stat.Type)
+	}
+}
+
+func appendWorkingCopyTreeItems(ctx context.Context, fsClient afsclient.Client, currentPath string, depth int, out *[]treeItem) error {
+	entries, err := fsClient.LsLong(ctx, currentPath)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		childPath := path.Join(currentPath, entry.Name)
+		item := treeItem{
+			Path:       childPath,
+			Name:       entry.Name,
+			Kind:       entry.Type,
+			Size:       entry.Size,
+			ModifiedAt: workingCopyTimestamp(entry.Mtime),
+		}
+		if entry.Type == "symlink" {
+			target, err := fsClient.Readlink(ctx, childPath)
+			if err != nil {
+				return err
+			}
+			item.Target = target
+		}
+		*out = append(*out, item)
+
+		if depth > 1 && entry.Type == "dir" {
+			if err := appendWorkingCopyTreeItems(ctx, fsClient, childPath, depth-1, out); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) listWorkspaceActivity(ctx context.Context, workspace string, limit int) (activityListResponse, error) {
@@ -1351,6 +1493,7 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return workspaceSummary{}, err
 	}
+	stats := s.currentWorkspaceStats(ctx, meta.Name, headMeta)
 	lastCheckpointAt := meta.UpdatedAt.UTC().Format(time.RFC3339)
 	if len(checkpoints) > 0 {
 		lastCheckpointAt = checkpoints[0].CreatedAt.UTC().Format(time.RFC3339)
@@ -1363,9 +1506,9 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 		DatabaseName:     meta.DatabaseName,
 		RedisKey:         WorkspaceFSKey(meta.Name),
 		Status:           workspaceStatus(meta),
-		FileCount:        headMeta.FileCount,
-		FolderCount:      headMeta.DirCount,
-		TotalBytes:       headMeta.TotalBytes,
+		FileCount:        stats.FileCount,
+		FolderCount:      stats.FolderCount,
+		TotalBytes:       stats.TotalBytes,
 		CheckpointCount:  len(checkpoints),
 		DraftState:       draftState(meta),
 		LastCheckpointAt: lastCheckpointAt,
@@ -1373,6 +1516,35 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 		Region:           meta.Region,
 		Source:           workspaceSource(meta),
 	}, nil
+}
+
+func (s *Service) currentWorkspaceStats(ctx context.Context, workspace string, fallback SavepointMeta) workspaceUsageStats {
+	stats := workspaceUsageStats{
+		FileCount:   fallback.FileCount,
+		FolderCount: fallback.DirCount,
+		TotalBytes:  fallback.TotalBytes,
+	}
+	if s == nil || s.store == nil || s.store.rdb == nil {
+		return stats
+	}
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return stats
+	}
+
+	info, err := afsclient.New(s.store.rdb, WorkspaceFSKey(workspace)).Info(ctx)
+	if err != nil || info == nil {
+		return stats
+	}
+
+	folderCount := int(info.Directories)
+	if folderCount > 0 {
+		folderCount--
+	}
+	return workspaceUsageStats{
+		FileCount:   int(info.Files),
+		FolderCount: folderCount,
+		TotalBytes:  info.TotalDataBytes,
+	}
 }
 
 func (s *Service) resolveManifestForView(ctx context.Context, workspace string, view viewRef) (WorkspaceMeta, SavepointMeta, Manifest, error) {
@@ -1563,7 +1735,7 @@ func defaultCapabilities() capabilities {
 	return capabilities{
 		BrowseHead:        true,
 		BrowseCheckpoints: true,
-		BrowseWorkingCopy: false,
+		BrowseWorkingCopy: true,
 		EditWorkingCopy:   false,
 		CreateCheckpoint:  false,
 		RestoreCheckpoint: true,
@@ -1789,6 +1961,20 @@ func isBinary(data []byte) bool {
 		}
 	}
 	return false
+}
+
+func workingCopyTimestamp(ms int64) string {
+	if ms <= 0 {
+		return ""
+	}
+	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+}
+
+func workingCopyRevision(stat *afsclient.StatResult, normalizedPath string) string {
+	if stat == nil {
+		return "working-copy:" + normalizedPath
+	}
+	return fmt.Sprintf("working-copy:%d:%d:%d:%s", stat.Ctime, stat.Mtime, stat.Size, normalizedPath)
 }
 
 func slugify(value string) string {

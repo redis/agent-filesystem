@@ -131,7 +131,7 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
       navigate({
         to: "/workspaces/$workspaceId",
         params: { workspaceId: result.workspaceId },
-        search: { tab: "overview", welcome: true },
+        search: { welcome: true },
       });
     } catch {
       // Error is stored in quickstartMutation.error

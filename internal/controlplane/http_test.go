@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	mountclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -111,8 +112,8 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	if detail.CheckpointCount != 2 {
 		t.Fatalf("detail checkpoint_count = %d, want 2", detail.CheckpointCount)
 	}
-	if detail.Capabilities.BrowseWorkingCopy {
-		t.Fatal("detail capabilities unexpectedly expose working-copy browsing")
+	if !detail.Capabilities.BrowseWorkingCopy {
+		t.Fatal("detail capabilities should expose working-copy browsing")
 	}
 	if detail.DatabaseID != databaseID {
 		t.Fatalf("detail database_id = %q, want %q", detail.DatabaseID, databaseID)
@@ -177,22 +178,131 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	}
 }
 
-func TestHTTPRejectsUnsupportedWorkingCopyView(t *testing.T) {
+func TestHTTPBrowseWorkingCopyView(t *testing.T) {
 	t.Helper()
 
 	manager, databaseID := newTestManager(t)
+	ctx := context.Background()
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("manager.serviceFor() returned error: %v", err)
+	}
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, service.store, "repo"); err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+
+	fsClient := mountclient.New(service.store.rdb, WorkspaceFSKey("repo"))
+	if err := fsClient.Echo(ctx, "/drafts/notes.txt", []byte("working copy\n")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	if err := MarkWorkspaceRootDirty(ctx, service.store, "repo"); err != nil {
+		t.Fatalf("MarkWorkspaceRootDirty() returned error: %v", err)
+	}
+	expectedBytes := int64(len("# demo\n") + len("package main\n") + len("working copy\n"))
+
 	server := httptest.NewServer(NewHandler(manager, "*"))
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=working-copy&path=/&depth=1")
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces")
+	if err != nil {
+		t.Fatalf("GET scoped workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET scoped workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var summaries workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&summaries); err != nil {
+		t.Fatalf("Decode(workspaces) returned error: %v", err)
+	}
+	if len(summaries.Items) != 1 {
+		t.Fatalf("len(workspaces.items) = %d, want 1", len(summaries.Items))
+	}
+	if summaries.Items[0].FileCount != 3 {
+		t.Fatalf("summary file_count = %d, want 3", summaries.Items[0].FileCount)
+	}
+	if summaries.Items[0].FolderCount != 2 {
+		t.Fatalf("summary folder_count = %d, want 2", summaries.Items[0].FolderCount)
+	}
+	if summaries.Items[0].TotalBytes != expectedBytes {
+		t.Fatalf("summary total_bytes = %d, want %d", summaries.Items[0].TotalBytes, expectedBytes)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo")
+	if err != nil {
+		t.Fatalf("GET scoped workspace detail returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET scoped workspace detail status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var detail workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(workspace detail) returned error: %v", err)
+	}
+	if detail.FileCount != 3 {
+		t.Fatalf("detail file_count = %d, want 3", detail.FileCount)
+	}
+	if detail.FolderCount != 2 {
+		t.Fatalf("detail folder_count = %d, want 2", detail.FolderCount)
+	}
+	if detail.TotalBytes != expectedBytes {
+		t.Fatalf("detail total_bytes = %d, want %d", detail.TotalBytes, expectedBytes)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=working-copy&path=/&depth=2")
 	if err != nil {
 		t.Fatalf("GET working-copy tree returned error: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusNotImplemented {
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("GET working-copy tree status = %d, want %d, body=%s", resp.StatusCode, http.StatusNotImplemented, body)
+		t.Fatalf("GET working-copy tree status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var tree treeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&tree); err != nil {
+		t.Fatalf("Decode(working-copy tree) returned error: %v", err)
+	}
+	if tree.View != "working-copy" {
+		t.Fatalf("working-copy tree view = %q, want %q", tree.View, "working-copy")
+	}
+
+	paths := make(map[string]treeItem, len(tree.Items))
+	for _, item := range tree.Items {
+		paths[item.Path] = item
+	}
+	for _, want := range []string{"/README.md", "/src", "/src/main.go", "/drafts", "/drafts/notes.txt"} {
+		if _, ok := paths[want]; !ok {
+			t.Fatalf("working-copy tree missing %q: %#v", want, tree.Items)
+		}
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/files/content?view=working-copy&path=/drafts/notes.txt")
+	if err != nil {
+		t.Fatalf("GET working-copy file content returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET working-copy file content status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var file fileContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&file); err != nil {
+		t.Fatalf("Decode(working-copy file content) returned error: %v", err)
+	}
+	if file.View != "working-copy" {
+		t.Fatalf("working-copy file view = %q, want %q", file.View, "working-copy")
+	}
+	if file.Content != "working copy\n" {
+		t.Fatalf("working-copy file content = %q, want %q", file.Content, "working copy\n")
 	}
 }
 
