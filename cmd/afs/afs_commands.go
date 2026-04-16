@@ -94,6 +94,27 @@ func cmdImport(args []string) error {
 	}
 
 	ctx := context.Background()
+	cfg, err := loadAFSConfig()
+	if err != nil {
+		return err
+	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return err
+	}
+
+	switch productMode {
+	case productModeLocal:
+		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force)
+	case productModeSelfHosted:
+		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force)
+	default:
+		_, _, _, err := openAFSControlPlaneForConfig(ctx, cfg)
+		return err
+	}
+}
+
+func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool) error {
 	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
@@ -104,7 +125,7 @@ func cmdImport(args []string) error {
 	if err != nil {
 		return err
 	}
-	if exists && !parsed.force {
+	if exists && !replaceExisting {
 		return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
 	}
 
@@ -122,7 +143,7 @@ func cmdImport(args []string) error {
 	}()
 
 	const initialSavepoint = "initial"
-	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, parsed.force)
+	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, replaceExisting)
 	if err != nil {
 		if errors.Is(err, errImportCancelled) {
 			fmt.Println()
@@ -133,7 +154,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 
-	if parsed.force {
+	if replaceExisting {
 		step := startStep("Replacing existing workspace")
 		if err := store.deleteWorkspace(ctx, workspace); err != nil {
 			step.fail(err.Error())
@@ -258,6 +279,100 @@ func cmdImport(args []string) error {
 		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
 		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
+	})
+	return nil
+}
+
+func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool) error {
+	cfg, service, closeControlPlane, err := openAFSControlPlaneForConfig(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer closeControlPlane()
+
+	exists := false
+	_, err = service.GetWorkspace(ctx, workspace)
+	switch {
+	case err == nil:
+		exists = true
+		if !replaceExisting {
+			return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
+		}
+	case errors.Is(err, os.ErrNotExist):
+		// Importing a new workspace is fine.
+	default:
+		return err
+	}
+
+	const initialSavepoint = "initial"
+	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, replaceExisting)
+	if err != nil {
+		if errors.Is(err, errImportCancelled) {
+			fmt.Println()
+			fmt.Println("  Import cancelled.")
+			fmt.Println()
+			return nil
+		}
+		return err
+	}
+
+	if replaceExisting && exists {
+		step := startStep("Replacing existing workspace")
+		if err := service.DeleteWorkspace(ctx, workspace); err != nil && !errors.Is(err, os.ErrNotExist) {
+			step.fail(err.Error())
+			return err
+		}
+		if err := removeLocalWorkspace(cfg, workspace); err != nil {
+			step.fail(err.Error())
+			return err
+		}
+		step.succeed(workspace)
+	}
+
+	step := startStep("Building manifest")
+	manifest, blobs, stats, err := buildManifestFromDirectoryWithOptions(sourceDir, workspace, initialSavepoint, ignorer, func(progress importStats) {
+		step.update(formatAFSImportProgressLabel("Building manifest", progress, total, step.elapsed()))
+	})
+	if err != nil {
+		step.fail(err.Error())
+		return err
+	}
+	buildDuration := step.elapsed()
+	if blobCount := len(blobs); blobCount == 0 {
+		step.succeed(formatAFSImportSummary(total) + " · all files inlined")
+	} else {
+		step.succeed(fmt.Sprintf("%s · %d blobs prepared", formatAFSImportSummary(total), blobCount))
+	}
+
+	step = startStep("Uploading workspace")
+	response, err := service.ImportWorkspace(ctx, controlplane.ImportWorkspaceRequest{
+		Name:        workspace,
+		Description: fmt.Sprintf("Imported from %s.", sourceDir),
+		Manifest:    controlPlaneManifestFromAFS(manifest),
+		Blobs:       blobs,
+		FileCount:   stats.FileCount,
+		DirCount:    stats.DirCount,
+		TotalBytes:  stats.TotalBytes,
+	})
+	if err != nil {
+		step.fail(err.Error())
+		return err
+	}
+	uploadDuration := step.elapsed()
+	step.succeed(response.Workspace.HeadCheckpointID)
+
+	printBox(markerSuccess+" "+clr(ansiBold, "workspace imported"), []boxRow{
+		{Label: "workspace", Value: workspace},
+		{Label: "checkpoint", Value: response.Workspace.HeadCheckpointID},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
+		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
+		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
+		{Label: "ignored", Value: strconv.Itoa(total.Ignored)},
+		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
+		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
+		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + uploadDuration)},
 		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
 	})
 	return nil

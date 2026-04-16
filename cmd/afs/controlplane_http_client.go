@@ -22,6 +22,7 @@ type httpControlPlaneClient struct {
 	baseURL    string
 	databaseID string
 	client     *http.Client
+	importer   *http.Client
 }
 
 type httpErrorResponse struct {
@@ -68,6 +69,9 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		importer: &http.Client{
+			Timeout: 15 * time.Minute,
+		},
 	}
 	return client, client.databaseID, nil
 }
@@ -96,6 +100,16 @@ func (c *httpControlPlaneClient) CreateWorkspace(ctx context.Context, input cont
 		return out, err
 	}
 	err = c.doJSON(ctx, http.MethodPost, c.scopedPathFor(databaseID, "workspaces"), input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) ImportWorkspace(ctx context.Context, input controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error) {
+	var out controlplane.ImportWorkspaceResponse
+	databaseID, err := c.requireDatabaseID(ctx)
+	if err != nil {
+		return out, err
+	}
+	err = c.doJSONWithClient(ctx, c.importer, http.MethodPost, c.scopedPathFor(databaseID, "workspaces:import"), input, &out, http.StatusCreated)
 	return out, err
 }
 
@@ -244,6 +258,10 @@ func (c *httpControlPlaneClient) requireDatabaseID(ctx context.Context) (string,
 }
 
 func (c *httpControlPlaneClient) doJSON(ctx context.Context, method, rel string, requestBody any, out any, okStatuses ...int) error {
+	return c.doJSONWithClient(ctx, c.client, method, rel, requestBody, out, okStatuses...)
+}
+
+func (c *httpControlPlaneClient) doJSONWithClient(ctx context.Context, httpClient *http.Client, method, rel string, requestBody any, out any, okStatuses ...int) error {
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -261,7 +279,10 @@ func (c *httpControlPlaneClient) doJSON(ctx context.Context, method, rel string,
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	resp, err := c.client.Do(req)
+	if httpClient == nil {
+		httpClient = c.client
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

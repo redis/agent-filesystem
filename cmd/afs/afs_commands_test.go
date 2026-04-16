@@ -31,6 +31,10 @@ func (s stubAFSControlPlane) CreateWorkspace(context.Context, controlplane.Creat
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected CreateWorkspace call")
 }
 
+func (s stubAFSControlPlane) ImportWorkspace(context.Context, controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error) {
+	return controlplane.ImportWorkspaceResponse{}, fmt.Errorf("unexpected ImportWorkspace call")
+}
+
 func (s stubAFSControlPlane) DeleteWorkspace(context.Context, string) error {
 	return fmt.Errorf("unexpected DeleteWorkspace call")
 }
@@ -464,6 +468,47 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	}
 	if err := cmdCheckpoint([]string{"checkpoint", "list", "repo"}); err != nil {
 		t.Fatalf("cmdCheckpoint(list) returned error: %v", err)
+	}
+}
+
+func TestCmdImportSelfHostedCreatesWorkspace(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+	writeTestFile(t, filepath.Join(sourceDir, "docs", "notes.md"), "hello\n")
+
+	if err := cmdImport([]string{"import", "codex", sourceDir}); err != nil {
+		t.Fatalf("cmdImport() returned error: %v", err)
+	}
+
+	_, service, closeFn, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSControlPlane() returned error: %v", err)
+	}
+	defer closeFn()
+
+	detail, err := service.GetWorkspace(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetWorkspace(codex) returned error: %v", err)
+	}
+	if detail.HeadCheckpointID != "initial" {
+		t.Fatalf("HeadCheckpointID = %q, want %q", detail.HeadCheckpointID, "initial")
+	}
+	if detail.FileCount != 2 {
+		t.Fatalf("FileCount = %d, want %d", detail.FileCount, 2)
+	}
+	if detail.FolderCount != 1 {
+		t.Fatalf("FolderCount = %d, want %d", detail.FolderCount, 1)
 	}
 }
 

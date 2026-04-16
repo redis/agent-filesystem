@@ -309,6 +309,22 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 				return
 			}
 			writeJSON(w, http.StatusCreated, response)
+		case rest == "workspaces:import":
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			var input ImportWorkspaceRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.ImportWorkspace(r.Context(), databaseID, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
 		case strings.HasPrefix(rest, "workspaces/"):
 			workspacePath := strings.TrimPrefix(rest, "workspaces/")
 			workspacePath = strings.Trim(workspacePath, "/")

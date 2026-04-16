@@ -96,6 +96,7 @@ type afsControlPlane interface {
 	ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error)
 	GetWorkspace(ctx context.Context, workspace string) (controlplane.WorkspaceDetail, error)
 	CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error)
+	ImportWorkspace(ctx context.Context, input controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error)
 	DeleteWorkspace(ctx context.Context, workspace string) error
 	CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error)
 	HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error)
