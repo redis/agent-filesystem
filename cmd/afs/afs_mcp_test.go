@@ -274,6 +274,56 @@ func TestAFSMCPFileGrepUsesCurrentWorkspace(t *testing.T) {
 	}
 }
 
+func TestAFSMCPStatusAndWorkspaceCurrentPreferActiveSyncWorkspace(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if err := createEmptyWorkspace(context.Background(), server.cfg, server.store, "beta"); err != nil {
+		t.Fatalf("createEmptyWorkspace(beta) returned error: %v", err)
+	}
+
+	if err := saveState(state{
+		StartedAt:        time.Now().UTC(),
+		ProductMode:      productModeLocal,
+		RedisAddr:        server.cfg.RedisAddr,
+		RedisDB:          server.cfg.RedisDB,
+		CurrentWorkspace: "beta",
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	status, err := server.toolAFSStatus()
+	if err != nil {
+		t.Fatalf("toolAFSStatus() returned error: %v", err)
+	}
+	statusMap, ok := status.(map[string]any)
+	if !ok {
+		t.Fatalf("toolAFSStatus() = %#v, want map", status)
+	}
+	if got := statusMap["current_workspace"]; got != "beta" {
+		t.Fatalf("afs_status current_workspace = %#v, want %q", got, "beta")
+	}
+
+	current, err := server.toolWorkspaceCurrent(context.Background())
+	if err != nil {
+		t.Fatalf("toolWorkspaceCurrent() returned error: %v", err)
+	}
+	currentMap, ok := current.(map[string]any)
+	if !ok {
+		t.Fatalf("toolWorkspaceCurrent() = %#v, want map", current)
+	}
+	if got := currentMap["workspace"]; got != "beta" {
+		t.Fatalf("workspace_current workspace = %#v, want %q", got, "beta")
+	}
+	if got := currentMap["exists"]; got != true {
+		t.Fatalf("workspace_current exists = %#v, want true", got)
+	}
+}
+
 func setupAFSMCPTestServer(t *testing.T) (*afsMCPServer, func()) {
 	t.Helper()
 

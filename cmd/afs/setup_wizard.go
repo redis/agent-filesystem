@@ -867,20 +867,15 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	}
 
 	if connection == productModeSelfHosted {
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(currently required) — local sync from a self-hosted control plane"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — local-first sync from a self-hosted control plane"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount using the control plane's live workspace root")
 		fmt.Fprintln(out)
-		cfg.Mode = modeSync
-		if strings.TrimSpace(cfg.LocalPath) == "" {
-			cfg.LocalPath = suggestedWorkspaceLocalPath(cfg.CurrentWorkspace)
-			fmt.Fprintln(out, "  "+clr(ansiDim, "Self-hosted currently uses sync mode; local path defaulted to ")+clr(ansiBold, cfg.LocalPath))
-			fmt.Fprintln(out)
-		}
-		return nil
 	}
-
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — Dropbox-style local-first sync to a real folder"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount backed directly by Redis")
-	fmt.Fprintln(out)
+	if connection != productModeSelfHosted {
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — Dropbox-style local-first sync to a real folder"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount backed directly by Redis")
+		fmt.Fprintln(out)
+	}
 
 	def := "1"
 	if current == modeMount {

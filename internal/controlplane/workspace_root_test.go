@@ -131,6 +131,24 @@ func TestSyncWorkspaceRootMaterializesLiveWorkspaceFS(t *testing.T) {
 	if grepGrams != searchindex.BuildFileFields(mainGo).GrepGramsCI {
 		t.Fatalf("grep_grams_ci = %q, want %q", grepGrams, searchindex.BuildFileFields(mainGo).GrepGramsCI)
 	}
+	contentRef, err := rdb.HGet(ctx, workspaceFSInodeKey("repo", strconv.FormatUint(mainStat.Inode, 10)), "content_ref").Result()
+	if err != nil {
+		t.Fatalf("HGet(content_ref) returned error: %v", err)
+	}
+	if contentRef != "ext" {
+		t.Fatalf("content_ref = %q, want %q", contentRef, "ext")
+	}
+	contentKey := workspaceFSContentKey("repo", strconv.FormatUint(mainStat.Inode, 10))
+	content, err := rdb.Get(ctx, contentKey).Bytes()
+	if err != nil {
+		t.Fatalf("Get(content key) returned error: %v", err)
+	}
+	if !bytes.Equal(content, mainGo) {
+		t.Fatalf("content key = %q, want %q", string(content), string(mainGo))
+	}
+	if _, err := rdb.HGet(ctx, workspaceFSInodeKey("repo", strconv.FormatUint(mainStat.Inode, 10)), "content").Result(); !errors.Is(err, redis.Nil) {
+		t.Fatalf("legacy inline content field should be absent, got error %v", err)
+	}
 
 	rootHead, err := rdb.Get(ctx, workspaceRootHeadKey("repo")).Result()
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
+	"github.com/redis/go-redis/v9"
 )
 
 func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
@@ -558,6 +559,63 @@ func TestCheckpointCreateUsesActiveMountedWorkspaceWhenConfigUnset(t *testing.T)
 	}
 	if workspaceMeta.HeadSavepoint != "active-state-save" {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "active-state-save")
+	}
+}
+
+func TestCheckpointCreatePrefersActiveSyncWorkspaceOverStaleConfigInSelfHostedMode(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+
+	server, secondaryWorkspace, secondaryRedisAddr, secondaryDatabaseID := newMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.CurrentWorkspace = "repo"
+	saveTempConfig(t, cfg)
+
+	rdb := redis.NewClient(&redis.Options{Addr: secondaryRedisAddr})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+	store := newAFSStore(rdb)
+
+	rootKey, _, _, err := seedWorkspaceMountKey(context.Background(), store, secondaryWorkspace)
+	if err != nil {
+		t.Fatalf("seedWorkspaceMountKey() returned error: %v", err)
+	}
+	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/sync-only.txt", []byte("from active sync state\n")); err != nil {
+		t.Fatalf("Echo(/sync-only.txt) returned error: %v", err)
+	}
+
+	if err := saveState(state{
+		StartedAt:            time.Now().UTC(),
+		ProductMode:          productModeSelfHosted,
+		ControlPlaneURL:      server.URL,
+		ControlPlaneDatabase: secondaryDatabaseID,
+		CurrentWorkspace:     secondaryWorkspace,
+		Mode:                 modeSync,
+		SyncPID:              os.Getpid(),
+		RedisAddr:            secondaryRedisAddr,
+		RedisDB:              0,
+		RedisKey:             workspaceRedisKey(secondaryWorkspace),
+		LocalPath:            filepath.Join(t.TempDir(), secondaryWorkspace),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	if err := cmdCheckpoint([]string{"checkpoint", "create", "sync-state-save"}); err != nil {
+		t.Fatalf("cmdCheckpoint(create sync-state-save) returned error: %v", err)
+	}
+
+	secondaryMeta, err := store.getWorkspaceMeta(context.Background(), secondaryWorkspace)
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta(%s) returned error: %v", secondaryWorkspace, err)
+	}
+	if secondaryMeta.HeadSavepoint != "sync-state-save" {
+		t.Fatalf("secondary HeadSavepoint = %q, want %q", secondaryMeta.HeadSavepoint, "sync-state-save")
 	}
 }
 

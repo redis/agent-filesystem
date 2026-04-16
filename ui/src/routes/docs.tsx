@@ -237,7 +237,7 @@ make afs
 make commands
 
 # Everything (CLI, control plane, Redis module):
-make all`}</code>
+make`}</code>
           </CodeBlock>
         </Step>
 

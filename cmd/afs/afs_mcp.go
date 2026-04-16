@@ -579,7 +579,7 @@ func (s *afsMCPServer) toolAFSStatus() (any, error) {
 	return map[string]any{
 		"redis_addr":        s.cfg.RedisAddr,
 		"redis_db":          s.cfg.RedisDB,
-		"current_workspace": strings.TrimSpace(s.cfg.CurrentWorkspace),
+		"current_workspace": selectedWorkspaceName(s.cfg),
 		"mount_backend":     s.cfg.MountBackend,
 		"local_path":        s.cfg.LocalPath,
 	}, nil
@@ -590,7 +590,7 @@ func (s *afsMCPServer) toolWorkspaceList(ctx context.Context) (any, error) {
 }
 
 func (s *afsMCPServer) toolWorkspaceCurrent(ctx context.Context) (any, error) {
-	workspace := strings.TrimSpace(s.cfg.CurrentWorkspace)
+	workspace := selectedWorkspaceName(s.cfg)
 	exists := false
 	if workspace != "" {
 		var err error

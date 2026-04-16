@@ -241,7 +241,7 @@ func cmdWorkspaceUse(args []string) error {
 	if err != nil {
 		return err
 	}
-	if active, err := activeMountedWorkspaceState(); err != nil {
+	if active, err := activeMountedWorkspaceState(cfg); err != nil {
 		return err
 	} else if active.workspace != "" && active.workspace != selection.Name {
 		if active.mountpoint != "" {
@@ -273,7 +273,7 @@ type mountedWorkspaceState struct {
 	mountpoint string
 }
 
-func activeMountedWorkspaceState() (mountedWorkspaceState, error) {
+func activeMountedWorkspaceState(cfg config) (mountedWorkspaceState, error) {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -287,7 +287,7 @@ func activeMountedWorkspaceState() (mountedWorkspaceState, error) {
 		backendName = mountBackendNone
 	}
 	workspace := strings.TrimSpace(st.CurrentWorkspace)
-	if backendName == mountBackendNone || workspace == "" {
+	if backendName == mountBackendNone || workspace == "" || !runtimeStateMatchesConfig(cfg, st) {
 		return mountedWorkspaceState{}, nil
 	}
 	if st.MountPID > 0 && processAlive(st.MountPID) {

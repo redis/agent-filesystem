@@ -13,14 +13,9 @@ const pulseGlow = keyframes`
   50%      { box-shadow: 0 0 20px 4px rgba(220, 38, 38, 0.15); }
 `;
 
-const floatY = keyframes`
-  0%, 100% { transform: translateY(0); }
-  50%      { transform: translateY(-3px); }
-`;
-
-const fadeInUp = keyframes`
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+const fadeIn = keyframes`
+  from { opacity: 0; }
+  to   { opacity: 1; }
 `;
 
 const marchLeft = keyframes`
@@ -98,9 +93,8 @@ const AgentNode = styled.div<{ $i: number }>`
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
-  animation: ${fadeInUp} 0.4s ease forwards,
-    ${floatY} ${({ $i }) => 3 + $i * 0.4}s ease-in-out infinite;
-  animation-delay: ${({ $i }) => $i * 0.1}s, ${({ $i }) => $i * 0.25}s;
+  animation: ${fadeIn} 0.24s ease forwards;
+  animation-delay: ${({ $i }) => $i * 0.06}s;
   opacity: 0;
 `;
 
@@ -182,10 +176,8 @@ const WorkspaceNode = styled.div<{ $i: number }>`
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
-  animation: ${fadeInUp} 0.4s ease forwards,
-    ${floatY} ${({ $i }) => 3.2 + $i * 0.5}s ease-in-out infinite;
-  animation-delay: ${({ $i }) => 0.25 + $i * 0.1}s,
-    ${({ $i }) => 0.4 + $i * 0.3}s;
+  animation: ${fadeIn} 0.24s ease forwards;
+  animation-delay: ${({ $i }) => 0.18 + $i * 0.06}s;
   opacity: 0;
 `;
 
@@ -296,7 +288,7 @@ function agentVisual(clientKind: string): { icon: string; hue: number } {
     hash = lower.charCodeAt(i) + ((hash << 5) - hash);
   }
   const hue = ((hash % 360) + 360) % 360;
-  return { icon: lower[0]?.toUpperCase() ?? "A", hue };
+  return { icon: lower === "" ? "A" : lower[0].toUpperCase(), hue };
 }
 
 /* ------------------------------------------------------------------ */
@@ -313,6 +305,7 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
   const agentRefs = useRef<(HTMLDivElement | null)[]>([]);
   const wsRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hubRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const [lines, setLines] = useState<
     {
       x1: number;
@@ -353,6 +346,11 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     const hub = hubRef.current;
     if (!container || !hub) return;
 
+    if (connections.length === 0) {
+      setLines([]);
+      return;
+    }
+
     const cRect = container.getBoundingClientRect();
     const hRect = hub.getBoundingClientRect();
     const hubCx = hRect.left + hRect.width / 2 - cRect.left;
@@ -360,76 +358,75 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
 
     const newLines: typeof lines = [];
 
-    if (connections.length > 0) {
-      // Draw specific agent -> workspace connections through hub
-      connections.forEach(({ agentIdx, wsIdx }) => {
-        const aEl = agentRefs.current[agentIdx];
-        const wEl = wsRefs.current[wsIdx];
-        if (!aEl || !wEl) return;
+    // Draw only explicit agent -> workspace connections through the hub.
+    connections.forEach(({ agentIdx, wsIdx }) => {
+      const aEl = agentRefs.current[agentIdx];
+      const wEl = wsRefs.current[wsIdx];
+      if (!aEl || !wEl) return;
 
-        const aRect = aEl.getBoundingClientRect();
-        const wRect = wEl.getBoundingClientRect();
+      const aRect = aEl.getBoundingClientRect();
+      const wRect = wEl.getBoundingClientRect();
 
-        newLines.push({
-          x1: aRect.right - cRect.left,
-          y1: aRect.top + aRect.height / 2 - cRect.top,
-          x2: hubCx,
-          y2: hubCy,
-          agentIdx,
-          wsIdx,
-        });
-        newLines.push({
-          x1: hubCx,
-          y1: hubCy,
-          x2: wRect.left - cRect.left,
-          y2: wRect.top + wRect.height / 2 - cRect.top,
-          agentIdx,
-          wsIdx,
-        });
+      newLines.push({
+        x1: aRect.right - cRect.left,
+        y1: aRect.top + aRect.height / 2 - cRect.top,
+        x2: hubCx,
+        y2: hubCy,
+        agentIdx,
+        wsIdx,
       });
-    } else {
-      // No specific connections - draw fan lines from all agents to hub and hub to all workspaces
-      agents.forEach((_, aIdx) => {
-        const aEl = agentRefs.current[aIdx];
-        if (!aEl) return;
-        const aRect = aEl.getBoundingClientRect();
-        newLines.push({
-          x1: aRect.right - cRect.left,
-          y1: aRect.top + aRect.height / 2 - cRect.top,
-          x2: hubCx,
-          y2: hubCy,
-          agentIdx: aIdx,
-          wsIdx: -1,
-        });
+      newLines.push({
+        x1: hubCx,
+        y1: hubCy,
+        x2: wRect.left - cRect.left,
+        y2: wRect.top + wRect.height / 2 - cRect.top,
+        agentIdx,
+        wsIdx,
       });
-      workspaces.forEach((_, wIdx) => {
-        const wEl = wsRefs.current[wIdx];
-        if (!wEl) return;
-        const wRect = wEl.getBoundingClientRect();
-        newLines.push({
-          x1: hubCx,
-          y1: hubCy,
-          x2: wRect.left - cRect.left,
-          y2: wRect.top + wRect.height / 2 - cRect.top,
-          agentIdx: -1,
-          wsIdx: wIdx,
-        });
-      });
-    }
+    });
 
     setLines(newLines);
-  }, [agents, workspaces, connections]);
+  }, [connections]);
+
+  const scheduleLineCompute = useCallback(() => {
+    if (animationFrameRef.current != null) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    animationFrameRef.current = requestAnimationFrame(() => {
+      animationFrameRef.current = null;
+      computeLines();
+    });
+  }, [computeLines]);
 
   useLayoutEffect(() => {
-    computeLines();
-    window.addEventListener("resize", computeLines);
-    // Recompute after animations settle
-    const timer = setTimeout(computeLines, 500);
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleLineCompute();
+          });
+
+    const observedElements = [
+      topologyRef.current,
+      hubRef.current,
+      ...agentRefs.current.slice(0, agents.length),
+      ...wsRefs.current.slice(0, workspaces.length),
+    ].filter((element): element is HTMLDivElement => element != null);
+
+    observedElements.forEach((element) => resizeObserver?.observe(element));
+
+    scheduleLineCompute();
+    window.addEventListener("resize", scheduleLineCompute);
+
     return () => {
-      window.removeEventListener("resize", computeLines);
-      clearTimeout(timer);
+      window.removeEventListener("resize", scheduleLineCompute);
+      resizeObserver?.disconnect();
+      if (animationFrameRef.current != null) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
     };
-  }, [computeLines]);
+  }, [agents.length, workspaces.length, scheduleLineCompute]);
 
   const activeAgents = agents.filter((a) => a.state === "active").length;
 

@@ -11,6 +11,8 @@ AFS_WEB_CLIENT_MODE ?=
 AFS_WEB_UI_HOST ?= 127.0.0.1
 AFS_WEB_UI_PORT ?= 5173
 
+.DEFAULT_GOAL := all
+
 .PHONY: help all module mount commands afs afs-control-plane clean test install uninstall install-skill install-skill-local uninstall-skill-local web-install web-build embed-ui web-server web-ui web-dev
 
 help: ## Show repo-specific make targets and common variables.

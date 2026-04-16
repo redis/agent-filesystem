@@ -313,6 +313,7 @@ func TestRunSetupWizardSupportsSelfHostedConnection(t *testing.T) {
 		"2",        // connection: self-hosted
 		server.URL, // control plane URL
 		"repo",     // existing workspace
+		"",         // keep default mode: sync
 		"",         // keep default sync local path
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -336,6 +337,54 @@ func TestRunSetupWizardSupportsSelfHostedConnection(t *testing.T) {
 	}
 	if got.Mode != modeSync {
 		t.Fatalf("Mode = %q, want %q", got.Mode, modeSync)
+	}
+}
+
+func TestRunSetupWizardSupportsSelfHostedLiveMountMode(t *testing.T) {
+	t.Helper()
+
+	homeDir := t.TempDir()
+	origHome := os.Getenv("HOME")
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", origHome)
+	})
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	input := stringsJoinLines(
+		"2",        // connection: self-hosted
+		server.URL, // control plane URL
+		"repo",     // existing workspace
+		"2",        // mode: live mount
+		"",         // keep default mountpoint
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+
+	got, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.ProductMode != productModeSelfHosted {
+		t.Fatalf("ProductMode = %q, want %q", got.ProductMode, productModeSelfHosted)
+	}
+	if got.URL != server.URL {
+		t.Fatalf("controlPlane.url = %q, want %q", got.URL, server.URL)
+	}
+	if got.CurrentWorkspace != "repo" {
+		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "repo")
+	}
+	wantLocalPath := filepath.Join(homeDir, "repo")
+	if got.LocalPath != wantLocalPath {
+		t.Fatalf("LocalPath = %q, want %q", got.LocalPath, wantLocalPath)
+	}
+	if got.Mode != modeMount {
+		t.Fatalf("Mode = %q, want %q", got.Mode, modeMount)
+	}
+	if got.MountBackend != defaultMountBackend() {
+		t.Fatalf("MountBackend = %q, want %q", got.MountBackend, defaultMountBackend())
 	}
 }
 

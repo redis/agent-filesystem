@@ -23,6 +23,9 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 	if off < 0 {
 		return nil, errors.New("invalid offset")
 	}
+	if size <= 0 {
+		return []byte{}, nil
+	}
 	data, err := c.loadInodeByID(ctx, strconv.FormatUint(inode, 10))
 	if err != nil {
 		return nil, err
@@ -33,59 +36,30 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 	if data.Type != "file" {
 		return nil, errors.New("not a file")
 	}
-	content, err := c.loadContentExternal(ctx, data.ID, data.ContentRef)
-	if err != nil {
-		return nil, err
-	}
-	if off >= int64(len(content)) {
+	if off >= data.Size {
 		return []byte{}, nil
 	}
-	end := off + int64(size)
-	if end > int64(len(content)) {
-		end = int64(len(content))
+	if data.ContentRef != "ext" {
+		content, err := c.loadContentExternal(ctx, data.ID, data.ContentRef)
+		if err != nil {
+			return nil, err
+		}
+		end := off + int64(size)
+		if end > int64(len(content)) {
+			end = int64(len(content))
+		}
+		return []byte(content[off:end]), nil
 	}
-	return []byte(content[off:end]), nil
-}
 
-// inodeWithContentFields is inodeMetaFields + "content". Used for legacy
-// inline inodes where content is still in the HASH.
-var inodeWithContentFields = append(append([]string{}, inodeMetaFields...), "content")
-
-// loadInodeWithContentByID fetches the full inode metadata and file content.
-// For external content (content_ref="ext") it pipelines the metadata HMGET
-// with a GET on the content key. For legacy inline inodes it reads both from
-// the HASH in one HMGET.
-func (c *nativeClient) loadInodeWithContentByID(ctx context.Context, id string) (*inodeData, error) {
-	// First fetch metadata (including content_ref) to determine storage mode.
-	// For the common external case, pipeline metadata + content GET together.
-	pipe := c.rdb.Pipeline()
-	metaCmd := pipe.HMGet(ctx, c.keys.inode(id), inodeMetaFields...)
-	contentCmd := pipe.Get(ctx, c.keys.content(id))
-	// Also try legacy inline content in case this is an old inode.
-	inlineCmd := pipe.HGet(ctx, c.keys.inode(id), "content")
-	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+	end := off + int64(size) - 1
+	if end >= data.Size {
+		end = data.Size - 1
+	}
+	chunk, err := c.rdb.GetRange(ctx, c.keys.content(data.ID), off, end).Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
 	}
-
-	vals, err := metaCmd.Result()
-	if err != nil {
-		return nil, err
-	}
-	inode := inodeFromValues(id, vals)
-	if inode == nil {
-		return nil, nil
-	}
-
-	if inode.ContentRef == "ext" {
-		if v, err := contentCmd.Result(); err == nil {
-			inode.Content = v
-		}
-	} else {
-		if v, err := inlineCmd.Result(); err == nil {
-			inode.Content = v
-		}
-	}
-	return inode, nil
+	return []byte(chunk), nil
 }
 
 // WriteInodeAt is the legacy entry point; callers that do not know the path
@@ -99,21 +73,18 @@ func (c *nativeClient) WriteInodeAt(ctx context.Context, inode uint64, payload [
 // inode. When `path` is non-empty, the updated metadata is cached under that
 // path and the entire path cache is preserved (no prefix invalidation).
 //
-// The read-modify-write cycle is compressed to two Redis round trips:
-//  1. one HMGET to load metadata + content together, and
-//  2. one pipeline containing HSET (new metadata + content) + HINCRBY
-//     (total_data_bytes) + SET (root dirty marker).
-//
-// Previously this function did 5 sequential Redis round trips and wiped the
-// entire attribute cache on every write, which was the dominant cost for
-// Claude Code's jsonl append pattern.
+// External-content files now stay on the byte-range path: we use GETRANGE /
+// SETRANGE against afs:{fs}:content:{inode} and only touch inode metadata in
+// the HASH. Small files still refresh search fields from the updated content;
+// large files flip to the "large" search state without reloading the whole
+// object into Go.
 func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path string, payload []byte, off int64) error {
 	if off < 0 {
 		return errors.New("invalid offset")
 	}
 
 	id := strconv.FormatUint(inode, 10)
-	data, err := c.loadInodeWithContentByID(ctx, id)
+	data, err := c.loadInodeByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -123,61 +94,68 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	if data.Type != "file" {
 		return errors.New("not a file")
 	}
-
-	buf := []byte(data.Content)
-	end := off + int64(len(payload))
-	if end > int64(len(buf)) {
-		grown := make([]byte, end)
-		copy(grown, buf)
-		buf = grown
-	}
-	copy(buf[off:end], payload)
-
-	delta := int64(len(buf)) - data.Size
-	data.Content = string(buf)
-	data.Size = int64(len(buf))
-	now := nowMs()
-	data.MtimeMs = now
-	data.AtimeMs = now
-	if data.ContentRef == "" {
-		data.ContentRef = "ext"
-	}
-
-	// For external content, write content to STRING key and metadata to
-	// HASH. includeContent=false because content_ref="ext" skips the
-	// content field in inodeFields.
-	var fields map[string]interface{}
-	if path != "" {
-		fields = c.inodeFieldsAtPath(data, path, false)
-	} else {
-		fields = c.inodeFields(data, false)
-	}
-
-	pipe := c.rdb.Pipeline()
-	pipe.Set(ctx, c.keys.content(data.ID), data.Content, 0)
-	pipe.HSet(ctx, c.keys.inode(data.ID), fields)
-	if delta != 0 {
-		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
-	}
-	pipe.Set(ctx, c.keys.rootDirty(), "1", 0)
-	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
 		return err
 	}
 
-	if path != "" {
-		// Known path: update the cache entry in place so subsequent stat/read
-		// traffic stays warm. macOS NFS tends to burst GETATTR/LOOKUP
-		// immediately after a WRITE, so this matters a lot.
-		c.cachePath(path, data)
-		// Peers still need their copies (path entry + kernel page cache)
-		// dropped — broadcast a content-op for the path.
-		c.publishInvalidate(ctx, InvalidateOpContent, path)
-	} else {
-		// Unknown path (legacy caller): fall back to the old defensive
-		// invalidation to avoid serving stale sizes from cached entries.
-		c.invalidatePrefix(ctx, "/")
+	oldSize := data.Size
+	newSize := oldSize
+	if len(payload) > 0 {
+		end := off + int64(len(payload))
+		if end > newSize {
+			newSize = end
+		}
 	}
-	return nil
+	delta := newSize - oldSize
+	now := nowMs()
+	data.Size = newSize
+	data.MtimeMs = now
+	data.AtimeMs = now
+	data.ContentRef = "ext"
+
+	fields := c.inodeFields(data, false)
+	if path != "" {
+		fields = c.inodeFieldsAtPath(data, path, false)
+	}
+
+	if len(payload) == 0 {
+		return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), delta)
+	}
+
+	var searchFields map[string]interface{}
+	if newSize <= fileSearchMaxIndexedBytes {
+		before := ""
+		if oldSize > 0 {
+			pipe := c.rdb.Pipeline()
+			beforeCmd := pipe.GetRange(ctx, c.keys.content(data.ID), 0, oldSize-1)
+			pipe.SetRange(ctx, c.keys.content(data.ID), off, string(payload))
+			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+				return err
+			}
+			before = beforeCmd.Val()
+		} else if err := c.rdb.SetRange(ctx, c.keys.content(data.ID), off, string(payload)).Err(); err != nil {
+			return err
+		}
+		searchFields = fileSearchIndexFields(applyRangeWrite(before, payload, off))
+	} else {
+		searchFields = map[string]interface{}{
+			"search_state":  fileSearchStateLarge,
+			"grep_grams_ci": "",
+		}
+		pipe := c.rdb.Pipeline()
+		pipe.SetRange(ctx, c.keys.content(data.ID), off, string(payload))
+		pipe.HSet(ctx, c.keys.inode(data.ID), mergeFieldMaps(fields, searchFields))
+		if delta != 0 {
+			pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
+		}
+		pipe.Set(ctx, c.keys.rootDirty(), "1", 0)
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		return c.finishRangeWriteCache(ctx, data, path)
+	}
+
+	return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta)
 }
 
 // TruncateInode is the legacy entry point. Prefer TruncateInodeAtPath from
@@ -186,15 +164,15 @@ func (c *nativeClient) TruncateInode(ctx context.Context, inode uint64, size int
 	return c.TruncateInodeAtPath(ctx, inode, "", size)
 }
 
-// TruncateInodeAtPath truncates a file to `size` bytes using the same
-// two-round-trip / in-place cache update pattern as WriteInodeAtPath.
+// TruncateInodeAtPath updates the external content key in-place when the file
+// grows, and rewrites only the kept prefix when it shrinks.
 func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, path string, size int64) error {
 	if size < 0 {
 		return errors.New("invalid size")
 	}
 
 	id := strconv.FormatUint(inode, 10)
-	data, err := c.loadInodeWithContentByID(ctx, id)
+	data, err := c.loadInodeByID(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -204,35 +182,130 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	if data.Type != "file" {
 		return errors.New("not a file")
 	}
-
-	buf := []byte(data.Content)
-	if int64(len(buf)) > size {
-		buf = buf[:size]
-	} else if int64(len(buf)) < size {
-		grown := make([]byte, size)
-		copy(grown, buf)
-		buf = grown
+	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
+		return err
 	}
 
-	delta := int64(len(buf)) - data.Size
-	data.Content = string(buf)
-	data.Size = int64(len(buf))
+	delta := size - data.Size
+	oldSize := data.Size
+	data.Size = size
 	now := nowMs()
 	data.MtimeMs = now
 	data.AtimeMs = now
-	if data.ContentRef == "" {
-		data.ContentRef = "ext"
-	}
+	data.ContentRef = "ext"
 
-	var fields map[string]interface{}
+	fields := c.inodeFields(data, false)
 	if path != "" {
 		fields = c.inodeFieldsAtPath(data, path, false)
-	} else {
-		fields = c.inodeFields(data, false)
 	}
 
+	if delta == 0 {
+		return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), 0)
+	}
+
+	var searchFields map[string]interface{}
+	switch {
+	case size < oldSize:
+		truncated := ""
+		if size > 0 {
+			var err error
+			truncated, err = c.rdb.GetRange(ctx, c.keys.content(data.ID), 0, size-1).Result()
+			if err != nil && !errors.Is(err, redis.Nil) {
+				return err
+			}
+		}
+		if err := c.rdb.Set(ctx, c.keys.content(data.ID), truncated, 0).Err(); err != nil {
+			return err
+		}
+		if size <= fileSearchMaxIndexedBytes {
+			searchFields = fileSearchIndexFields(truncated)
+		} else {
+			searchFields = map[string]interface{}{
+				"search_state":  fileSearchStateLarge,
+				"grep_grams_ci": "",
+			}
+		}
+	case size <= fileSearchMaxIndexedBytes:
+		before := ""
+		if oldSize > 0 {
+			pipe := c.rdb.Pipeline()
+			beforeCmd := pipe.GetRange(ctx, c.keys.content(data.ID), 0, oldSize-1)
+			pipe.SetRange(ctx, c.keys.content(data.ID), size-1, "\x00")
+			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+				return err
+			}
+			before = beforeCmd.Val()
+		} else if err := c.rdb.SetRange(ctx, c.keys.content(data.ID), size-1, "\x00").Err(); err != nil {
+			return err
+		}
+		searchFields = fileSearchIndexFields(resizeRangeContent(before, size))
+	default:
+		pipe := c.rdb.Pipeline()
+		pipe.SetRange(ctx, c.keys.content(data.ID), size-1, "\x00")
+		pipe.HSet(ctx, c.keys.inode(data.ID), mergeFieldMaps(fields, map[string]interface{}{
+			"search_state":  fileSearchStateLarge,
+			"grep_grams_ci": "",
+		}))
+		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
+		pipe.Set(ctx, c.keys.rootDirty(), "1", 0)
+		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		return c.finishRangeWriteCache(ctx, data, path)
+	}
+
+	return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta)
+}
+
+func (c *nativeClient) ensureExternalContentForRangeIO(ctx context.Context, inode *inodeData) error {
+	if inode == nil || inode.Type != "file" || inode.ContentRef == "ext" {
+		return nil
+	}
+	content, err := c.rdb.HGet(ctx, c.keys.inode(inode.ID), "content").Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
 	pipe := c.rdb.Pipeline()
-	pipe.Set(ctx, c.keys.content(data.ID), data.Content, 0)
+	pipe.Set(ctx, c.keys.content(inode.ID), content, 0)
+	pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(map[string]interface{}{
+		"content_ref": "ext",
+	}, fileSearchIndexFields(content)))
+	pipe.HDel(ctx, c.keys.inode(inode.ID), "content")
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+	inode.ContentRef = "ext"
+	return nil
+}
+
+func applyRangeWrite(existing string, payload []byte, off int64) string {
+	end := off + int64(len(payload))
+	buf := []byte(existing)
+	if end > int64(len(buf)) {
+		grown := make([]byte, end)
+		copy(grown, buf)
+		buf = grown
+	}
+	copy(buf[off:end], payload)
+	return string(buf)
+}
+
+func resizeRangeContent(existing string, size int64) string {
+	buf := []byte(existing)
+	switch {
+	case int64(len(buf)) > size:
+		return string(buf[:size])
+	case int64(len(buf)) < size:
+		grown := make([]byte, size)
+		copy(grown, buf)
+		return string(grown)
+	default:
+		return existing
+	}
+}
+
+func (c *nativeClient) finishRangeWrite(ctx context.Context, data *inodeData, path string, fields map[string]interface{}, delta int64) error {
+	pipe := c.rdb.Pipeline()
 	pipe.HSet(ctx, c.keys.inode(data.ID), fields)
 	if delta != 0 {
 		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
@@ -241,12 +314,15 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
+	return c.finishRangeWriteCache(ctx, data, path)
+}
 
+func (c *nativeClient) finishRangeWriteCache(ctx context.Context, data *inodeData, path string) error {
 	if path != "" {
 		c.cachePath(path, data)
 		c.publishInvalidate(ctx, InvalidateOpContent, path)
-	} else {
-		c.invalidatePrefix(ctx, "/")
+		return nil
 	}
+	c.invalidatePrefix(ctx, "/")
 	return nil
 }

@@ -162,6 +162,7 @@ func workspaceRootExists(ctx context.Context, rdb *redis.Client, workspace, head
 func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey string) error {
 	patterns := []string{
 		"afs:{" + fsKey + "}:inode:*",
+		"afs:{" + fsKey + "}:content:*",
 		"afs:{" + fsKey + "}:dirents:*",
 		"afs:{" + fsKey + "}:locks:*",
 	}
@@ -293,7 +294,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	}
 
 	for _, node := range nodes {
-		fields, size, err := workspaceFSNodeFields(ctx, store, workspace, node, opts)
+		fields, content, size, err := workspaceFSNodeFields(ctx, store, workspace, node, opts)
 		if err != nil {
 			return fmt.Errorf("materialize %s: %w", node.Path, err)
 		}
@@ -311,6 +312,9 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 
 		if err := queueCapacity(workspaceFSNodeWeight(node, size)); err != nil {
 			return err
+		}
+		if node.Entry.Type == "file" {
+			pipe.Set(ctx, workspaceFSContentKey(fsKey, node.ID), content, 0)
 		}
 		pipe.HSet(ctx, workspaceFSInodeKey(fsKey, node.ID), fields)
 		if node.ParentID != "" {
@@ -332,7 +336,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	return flush()
 }
 
-func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode, opts SyncOptions) (map[string]interface{}, int64, error) {
+func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode, opts SyncOptions) (map[string]interface{}, []byte, int64, error) {
 	fields := map[string]interface{}{
 		"type":           node.Entry.Type,
 		"mode":           manifestEntryModeForWorkspaceFS(node.Entry),
@@ -350,7 +354,7 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 	switch node.Entry.Type {
 	case "dir":
 		fields["size"] = 0
-		return fields, 0, nil
+		return fields, nil, 0, nil
 	case "file":
 		data, err := ManifestEntryData(node.Entry, func(blobID string) ([]byte, error) {
 			if opts.BlobProvider != nil {
@@ -361,14 +365,14 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 			return store.GetBlob(ctx, workspace, blobID)
 		})
 		if err != nil {
-			return nil, 0, err
+			return nil, nil, 0, err
 		}
 		fields["size"] = int64(len(data))
-		fields["content"] = string(data)
+		fields["content_ref"] = "ext"
 		indexFields := searchindex.BuildFileFields(data)
 		fields["search_state"] = indexFields.SearchState
 		fields["grep_grams_ci"] = indexFields.GrepGramsCI
-		return fields, int64(len(data)), nil
+		return fields, data, int64(len(data)), nil
 	case "symlink":
 		size := node.Entry.Size
 		if size == 0 && node.Entry.Target != "" {
@@ -376,9 +380,9 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 		}
 		fields["size"] = size
 		fields["target"] = node.Entry.Target
-		return fields, 0, nil
+		return fields, nil, 0, nil
 	default:
-		return nil, 0, fmt.Errorf("unsupported manifest entry type %q", node.Entry.Type)
+		return nil, nil, 0, fmt.Errorf("unsupported manifest entry type %q", node.Entry.Type)
 	}
 }
 

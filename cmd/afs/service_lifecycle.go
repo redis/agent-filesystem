@@ -16,6 +16,16 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type mountBootstrap struct {
+	cfg             config
+	workspace       string
+	redisKey        string
+	headCheckpoint  string
+	initializedRoot bool
+	sessionID       string
+	heartbeatEvery  time.Duration
+}
+
 // cmdUp loads config, applies one-shot overrides, and starts the selected
 // local surface.
 func cmdUp() error {
@@ -55,10 +65,16 @@ func cmdUpArgs(args []string) error {
 	case productModeDirect:
 		// Direct mode supports the existing sync/mount behavior below.
 	case productModeSelfHosted:
-		if mode != modeSync {
-			return fmt.Errorf("'afs up' in %s mode currently supports sync mode only\nRun '%s up --mode sync' or update config first", productMode, filepath.Base(os.Args[0]))
+		if mode == modeSync {
+			return startSyncServices(cfg, opts.foreground)
 		}
-		return startSyncServices(cfg, opts.foreground)
+		if mode == modeMount {
+			if err := cleanupStaleMount(cfg); err != nil {
+				return err
+			}
+			return startServices(cfg)
+		}
+		return fmt.Errorf("'afs up' in %s mode currently supports sync or mount only\nRun '%s up --mode sync', '%s up --mode mount', or update config first", productMode, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	default:
 		return fmt.Errorf("'afs up' is not supported yet in %s mode\nUse workspace/checkpoint commands through the control plane for now", productMode)
 	}
@@ -170,6 +186,8 @@ func cmdDown() error {
 		}
 	}
 
+	closeManagedWorkspaceSession(configFromState(st), strings.TrimSpace(st.CurrentWorkspace), strings.TrimSpace(st.SessionID))
+
 	if shouldCleanLegacyMountCache(st) && !backend.IsMounted(st.LocalPath) {
 		redisCfg := cfg
 		redisCfg.RedisAddr = st.RedisAddr
@@ -222,68 +240,134 @@ func cmdDown() error {
 func startServices(cfg config) error {
 	ctx := context.Background()
 
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return err
+	}
+
+	runtimeCfg := cfg
+	workspace := strings.TrimSpace(cfg.CurrentWorkspace)
+	mountKey := ""
+	mountedHeadSavepoint := ""
+	managedSessionClose := func() {}
+	managedSessionActive := false
+	managedSessionID := ""
+	managedHeartbeatEvery := time.Duration(0)
+
+	if productMode == productModeSelfHosted {
+		prepareStep := startStep("Opening workspace session")
+		bootstrap, closeFn, err := prepareMountBootstrap(ctx, cfg)
+		if err != nil {
+			prepareStep.fail(err.Error())
+			return err
+		}
+		defer closeFn()
+
+		runtimeCfg = bootstrap.cfg
+		workspace = bootstrap.workspace
+		mountKey = bootstrap.redisKey
+		mountedHeadSavepoint = bootstrap.headCheckpoint
+		managedSessionID = strings.TrimSpace(bootstrap.sessionID)
+		managedHeartbeatEvery = bootstrap.heartbeatEvery
+		if managedSessionID != "" {
+			managedSessionActive = true
+			managedSessionClose = func() {
+				closeManagedWorkspaceSession(runtimeCfg, workspace, managedSessionID)
+			}
+		}
+		if bootstrap.initializedRoot {
+			prepareStep.succeed(workspace + " (initialized)")
+		} else {
+			prepareStep.succeed(workspace)
+		}
+	}
+	defer func() {
+		if managedSessionActive {
+			managedSessionClose()
+		}
+	}()
+
 	s := startStep("Connecting to Redis")
-	rdb := redis.NewClient(buildRedisOptions(cfg, 4))
+	rdb := redis.NewClient(buildRedisOptions(runtimeCfg, 4))
 	defer rdb.Close()
 
 	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		s.fail(fmt.Sprintf("cannot reach %s", cfg.RedisAddr))
-		return fmt.Errorf("cannot connect to Redis at %s: %w", cfg.RedisAddr, err)
+		s.fail(fmt.Sprintf("cannot reach %s", runtimeCfg.RedisAddr))
+		return fmt.Errorf("cannot connect to Redis at %s: %w", runtimeCfg.RedisAddr, err)
 	}
-	s.succeed(cfg.RedisAddr)
+	s.succeed(runtimeCfg.RedisAddr)
 
-	backend, backendName, err := backendForConfig(cfg)
+	backend, backendName, err := backendForConfig(runtimeCfg)
 	if err != nil {
 		return err
 	}
 	if backendName == mountBackendNone {
+		if managedSessionActive {
+			managedSessionClose()
+			managedSessionActive = false
+			managedSessionID = ""
+		}
 		st := state{
-			StartedAt:        time.Now().UTC(),
-			RedisAddr:        cfg.RedisAddr,
-			RedisDB:          cfg.RedisDB,
-			CurrentWorkspace: cfg.CurrentWorkspace,
-			MountBackend:     backendName,
-			ReadOnly:         cfg.ReadOnly,
-			MountLog:         cfg.MountLog,
-			MountBin:         cfg.MountBin,
+			StartedAt:            time.Now().UTC(),
+			ProductMode:          runtimeCfg.ProductMode,
+			ControlPlaneURL:      runtimeCfg.URL,
+			ControlPlaneDatabase: runtimeCfg.DatabaseID,
+			SessionID:            managedSessionID,
+			RedisAddr:            runtimeCfg.RedisAddr,
+			RedisDB:              runtimeCfg.RedisDB,
+			CurrentWorkspace:     workspace,
+			CurrentWorkspaceID:   runtimeCfg.CurrentWorkspaceID,
+			MountedHeadSavepoint: mountedHeadSavepoint,
+			MountBackend:         backendName,
+			ReadOnly:             runtimeCfg.ReadOnly,
+			MountLog:             runtimeCfg.MountLog,
+			MountBin:             runtimeCfg.MountBin,
 		}
 		if err := saveState(st); err != nil {
 			return err
 		}
-		printReadyBox(cfg, backendName, "")
+		runtimeCfg.CurrentWorkspace = workspace
+		printReadyBox(runtimeCfg, backendName, "")
 		return nil
 	}
 
 	store := newAFSStore(rdb)
-	workspaceStep := startStep("Ensuring current workspace")
-	workspace, err := ensureMountWorkspace(ctx, cfg, store)
-	if err != nil {
-		workspaceStep.fail(err.Error())
-		return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
-	}
-	workspaceStep.succeed(workspace)
-	if err := store.checkImportLock(ctx, workspace); err != nil {
-		return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
-	}
-	prepareStep := startStep("Opening live workspace")
-	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
-	if err != nil {
-		prepareStep.fail(err.Error())
-		return err
-	}
-	if initialized {
-		prepareStep.succeed(workspace + " (initialized)")
+	if productMode == productModeDirect {
+		workspaceStep := startStep("Ensuring current workspace")
+		workspace, err = ensureMountWorkspace(ctx, runtimeCfg, store)
+		if err != nil {
+			workspaceStep.fail(err.Error())
+			return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
+		}
+		workspaceStep.succeed(workspace)
+		if err := store.checkImportLock(ctx, workspace); err != nil {
+			return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
+		}
+		prepareStep := startStep("Opening live workspace")
+		seededKey, headSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
+		if err != nil {
+			prepareStep.fail(err.Error())
+			return err
+		}
+		mountKey = seededKey
+		mountedHeadSavepoint = headSavepoint
+		if initialized {
+			prepareStep.succeed(workspace + " (initialized)")
+		} else {
+			prepareStep.succeed(workspace)
+		}
 	} else {
-		prepareStep.succeed(workspace)
+		if err := store.checkImportLock(ctx, workspace); err != nil {
+			return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
+		}
 	}
 
-	mountCfg := cfg
+	mountCfg := runtimeCfg
 	mountCfg.RedisKey = mountKey
 	mountCfg, err = prepareRuntimeMountConfig(mountCfg, backendName)
 	if err != nil {
-		prepareStep.fail(err.Error())
 		return err
 	}
 
@@ -313,28 +397,91 @@ func startServices(cfg config) error {
 
 	st := state{
 		StartedAt:            time.Now().UTC(),
-		RedisAddr:            cfg.RedisAddr,
-		RedisDB:              cfg.RedisDB,
+		ProductMode:          runtimeCfg.ProductMode,
+		ControlPlaneURL:      runtimeCfg.URL,
+		ControlPlaneDatabase: runtimeCfg.DatabaseID,
+		SessionID:            managedSessionID,
+		RedisAddr:            runtimeCfg.RedisAddr,
+		RedisDB:              runtimeCfg.RedisDB,
 		CurrentWorkspace:     workspace,
+		CurrentWorkspaceID:   runtimeCfg.CurrentWorkspaceID,
 		MountedHeadSavepoint: mountedHeadSavepoint,
 		MountPID:             started.PID,
 		MountBackend:         backendName,
-		ReadOnly:             cfg.ReadOnly,
+		ReadOnly:             runtimeCfg.ReadOnly,
 		MountEndpoint:        started.Endpoint,
 		LocalPath:            mountCfg.LocalPath,
 		CreatedLocalPath:     createdLocalPath,
 		Mode:                 modeMount,
 		RedisKey:             mountCfg.RedisKey,
-		MountLog:             cfg.MountLog,
-		MountBin:             cfg.MountBin,
+		MountLog:             runtimeCfg.MountLog,
+		MountBin:             runtimeCfg.MountBin,
 	}
 	if err := saveState(st); err != nil {
 		return err
 	}
 
-	cfg.CurrentWorkspace = workspace
-	printReadyBox(cfg, backendName, started.Endpoint)
+	if managedSessionID != "" && managedHeartbeatEvery > 0 && started.PID > 0 {
+		sessionStep := startStep("Starting mount session helper")
+		helperPID, err := startMountSessionProcess(runtimeCfg, mountSessionBootstrap{
+			Config:                   runtimeCfg,
+			Workspace:                workspace,
+			SessionID:                managedSessionID,
+			HeartbeatIntervalSeconds: int(managedHeartbeatEvery / time.Second),
+			MountPID:                 started.PID,
+		})
+		if err != nil {
+			sessionStep.fail(err.Error())
+		} else {
+			sessionStep.succeed(fmt.Sprintf("pid %d", helperPID))
+		}
+	}
+
+	managedSessionActive = false
+
+	runtimeCfg.CurrentWorkspace = workspace
+	printReadyBox(runtimeCfg, backendName, started.Endpoint)
 	return nil
+}
+
+func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, func(), error) {
+	resolvedCfg, service, closeFn, err := openAFSControlPlaneForConfig(ctx, cfg)
+	if err != nil {
+		return mountBootstrap{}, func() {}, err
+	}
+
+	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
+	if err != nil {
+		closeFn()
+		return mountBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
+	}
+
+	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
+	session, err := service.CreateWorkspaceSession(ctx, selection.ID, sessionInput)
+	if err != nil {
+		closeFn()
+		return mountBootstrap{}, func() {}, err
+	}
+
+	runtimeCfg := resolvedCfg
+	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.CurrentWorkspaceID = selection.ID
+	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
+	runtimeCfg.RedisAddr = rewriteManagedRedisAddrForLocalhost(runtimeCfg.URL, session.Redis.RedisAddr)
+	runtimeCfg.RedisUsername = session.Redis.RedisUsername
+	runtimeCfg.RedisPassword = session.Redis.RedisPassword
+	runtimeCfg.RedisDB = session.Redis.RedisDB
+	runtimeCfg.RedisTLS = session.Redis.RedisTLS
+
+	return mountBootstrap{
+		cfg:             runtimeCfg,
+		workspace:       session.Workspace,
+		redisKey:        session.RedisKey,
+		headCheckpoint:  session.HeadCheckpointID,
+		initializedRoot: session.Initialized,
+		sessionID:       strings.TrimSpace(session.SessionID),
+		heartbeatEvery:  time.Duration(session.HeartbeatIntervalSeconds) * time.Second,
+	}, closeFn, nil
 }
 
 func shouldCleanLegacyMountCache(st state) bool {

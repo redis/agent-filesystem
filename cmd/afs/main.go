@@ -74,6 +74,10 @@ func main() {
 		if err := runSyncDaemon(); err != nil {
 			fatal(err)
 		}
+	case "_mount-session":
+		if err := runMountSessionDaemon(); err != nil {
+			fatal(err)
+		}
 	case "help", "--help", "-h":
 		printUsage()
 	default:

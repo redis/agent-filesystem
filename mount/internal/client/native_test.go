@@ -803,6 +803,27 @@ func TestInodeRangeIO(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
+	inodeKey := "afs:{range-io}:inode:" + strconv.FormatUint(st.Inode, 10)
+	assertSearchFields := func(wantContent string) {
+		t.Helper()
+
+		want := buildFileSearchFields(wantContent)
+		searchState, err := rdb.HGet(ctx, inodeKey, "search_state").Result()
+		if err != nil {
+			t.Fatalf("HGet(search_state) returned error: %v", err)
+		}
+		if searchState != want.SearchState {
+			t.Fatalf("search_state = %q, want %q", searchState, want.SearchState)
+		}
+
+		grepGrams, err := rdb.HGet(ctx, inodeKey, "grep_grams_ci").Result()
+		if err != nil {
+			t.Fatalf("HGet(grep_grams_ci) returned error: %v", err)
+		}
+		if grepGrams != want.GrepGramsCI {
+			t.Fatalf("grep_grams_ci = %q, want %q", grepGrams, want.GrepGramsCI)
+		}
+	}
 
 	chunk, err := c.ReadInodeAt(ctx, st.Inode, 1, 3)
 	if err != nil {
@@ -822,6 +843,7 @@ func TestInodeRangeIO(t *testing.T) {
 	if string(data) != "hyllo" {
 		t.Fatalf("content after write = %q", string(data))
 	}
+	assertSearchFields("hyllo")
 
 	if err := c.TruncateInode(ctx, st.Inode, 3); err != nil {
 		t.Fatalf("truncate inode: %v", err)
@@ -833,6 +855,7 @@ func TestInodeRangeIO(t *testing.T) {
 	if string(data) != "hyl" {
 		t.Fatalf("content after truncate = %q", string(data))
 	}
+	assertSearchFields("hyl")
 }
 
 func TestInodeWriteRefreshesPathCacheBeforeMetadataUpdate(t *testing.T) {

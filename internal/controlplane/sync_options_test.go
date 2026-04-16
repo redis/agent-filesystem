@@ -46,10 +46,17 @@ func TestSyncWorkspaceRootWithOptionsUsesBlobProvider(t *testing.T) {
 		t.Fatalf("expected provider to be called at least once")
 	}
 
-	// Confirm materialized content reads from the hash, not Redis blob key.
-	content, err := rdb.HGet(ctx, workspaceFSInodeKey("demo", "2"), "content").Bytes()
+	// Confirm materialized content uses the canonical external-content layout.
+	contentRef, err := rdb.HGet(ctx, workspaceFSInodeKey("demo", "2"), "content_ref").Result()
 	if err != nil {
-		t.Fatalf("hget content: %v", err)
+		t.Fatalf("hget content_ref: %v", err)
+	}
+	if contentRef != "ext" {
+		t.Fatalf("content_ref = %q, want %q", contentRef, "ext")
+	}
+	content, err := rdb.Get(ctx, workspaceFSContentKey("demo", "2")).Bytes()
+	if err != nil {
+		t.Fatalf("get content key: %v", err)
 	}
 	if !bytes.Equal(content, large) {
 		t.Fatalf("materialized content mismatch")
@@ -73,6 +80,9 @@ func TestSyncWorkspaceRootWithOptionsSkipsNamespaceReset(t *testing.T) {
 	if err := rdb.HSet(ctx, "afs:{demo}:dirents:99", "stale", "yes").Err(); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
+	if err := rdb.Set(ctx, "afs:{demo}:content:99", "stale", 0).Err(); err != nil {
+		t.Fatalf("seed content: %v", err)
+	}
 
 	m := Manifest{
 		Version:   formatVersion,
@@ -90,6 +100,9 @@ func TestSyncWorkspaceRootWithOptionsSkipsNamespaceReset(t *testing.T) {
 	if val, _ := rdb.HGet(ctx, "afs:{demo}:dirents:99", "stale").Result(); val != "yes" {
 		t.Fatalf("namespace reset should have been skipped, but stale key was removed")
 	}
+	if val, _ := rdb.Get(ctx, "afs:{demo}:content:99").Result(); val != "stale" {
+		t.Fatalf("namespace reset should have been skipped, but stale content key was removed")
+	}
 
 	// With reset enabled, the stale key goes away.
 	if err := SyncWorkspaceRootWithOptions(ctx, store, "demo", m, SyncOptions{}); err != nil {
@@ -97,5 +110,8 @@ func TestSyncWorkspaceRootWithOptionsSkipsNamespaceReset(t *testing.T) {
 	}
 	if exists, _ := rdb.Exists(ctx, "afs:{demo}:dirents:99").Result(); exists != 0 {
 		t.Fatalf("namespace reset should have cleared stale key")
+	}
+	if exists, _ := rdb.Exists(ctx, "afs:{demo}:content:99").Result(); exists != 0 {
+		t.Fatalf("namespace reset should have cleared stale content key")
 	}
 }

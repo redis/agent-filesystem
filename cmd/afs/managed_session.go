@@ -22,8 +22,12 @@ func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSess
 	if err != nil {
 		hostname = ""
 	}
+	clientKind := "sync"
+	if mode, err := effectiveMode(cfg); err == nil && mode == modeMount {
+		clientKind = "mount"
+	}
 	return controlplane.CreateWorkspaceSessionRequest{
-		ClientKind:      "sync",
+		ClientKind:      clientKind,
 		AFSVersion:      "dev",
 		Hostname:        strings.TrimSpace(hostname),
 		OperatingSystem: runtime.GOOS,

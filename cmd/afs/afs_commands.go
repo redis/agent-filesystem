@@ -532,10 +532,20 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 	}
 
 	ref := strings.TrimSpace(requested)
+	displayName := selectedWorkspaceName(cfg)
 	if ref == "" {
-		ref = selectedWorkspaceReference(cfg)
+		// In managed modes, an explicitly configured workspace ID should win
+		// over any inherited runtime state so duplicate-name routing stays
+		// stable across bootstrap and reconnect flows.
+		if configuredID := strings.TrimSpace(cfg.CurrentWorkspaceID); configuredID != "" {
+			ref = configuredID
+			if configuredName := strings.TrimSpace(cfg.CurrentWorkspace); configuredName != "" {
+				displayName = configuredName
+			}
+		} else {
+			ref = selectedWorkspaceReference(cfg)
+		}
 	}
-	displayName := strings.TrimSpace(cfg.CurrentWorkspace)
 	if ref == "" {
 		return workspaceSelection{}, fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 	}
@@ -557,37 +567,97 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 }
 
 func selectedWorkspaceName(cfg config) string {
-	if st, err := loadState(); err == nil {
-		backendName := strings.TrimSpace(st.MountBackend)
-		if backendName == "" {
-			backendName = mountBackendNone
-		}
-		if backendName != mountBackendNone && strings.TrimSpace(st.CurrentWorkspace) != "" {
-			return strings.TrimSpace(st.CurrentWorkspace)
-		}
+	if active := activeWorkspaceFromState(cfg); active.Name != "" {
+		return active.Name
 	}
 	return strings.TrimSpace(cfg.CurrentWorkspace)
 }
 
 func selectedWorkspaceReference(cfg config) string {
-	if st, err := loadState(); err == nil {
-		backendName := strings.TrimSpace(st.MountBackend)
-		if backendName == "" {
-			backendName = mountBackendNone
+	if active := activeWorkspaceFromState(cfg); active.ID != "" || active.Name != "" {
+		if active.ID != "" {
+			return active.ID
 		}
-		if backendName != mountBackendNone {
-			if strings.TrimSpace(st.CurrentWorkspaceID) != "" {
-				return strings.TrimSpace(st.CurrentWorkspaceID)
-			}
-			if strings.TrimSpace(st.CurrentWorkspace) != "" {
-				return strings.TrimSpace(st.CurrentWorkspace)
-			}
-		}
+		return active.Name
 	}
 	if strings.TrimSpace(cfg.CurrentWorkspaceID) != "" {
 		return strings.TrimSpace(cfg.CurrentWorkspaceID)
 	}
 	return strings.TrimSpace(cfg.CurrentWorkspace)
+}
+
+func activeWorkspaceFromState(cfg config) workspaceSelection {
+	st, err := loadState()
+	if err != nil {
+		return workspaceSelection{}
+	}
+
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+
+	mountActive := backendName != mountBackendNone || st.MountPID > 0
+	if mountActive {
+		if !runtimeStateMatchesConfig(cfg, st) {
+			return workspaceSelection{}
+		}
+		return workspaceSelection{
+			ID:   strings.TrimSpace(st.CurrentWorkspaceID),
+			Name: strings.TrimSpace(st.CurrentWorkspace),
+		}
+	}
+
+	syncActive := strings.TrimSpace(st.Mode) == modeSync || st.SyncPID > 0
+	if !syncActive || !runtimeStateMatchesConfig(cfg, st) {
+		return workspaceSelection{}
+	}
+
+	return workspaceSelection{
+		ID:   strings.TrimSpace(st.CurrentWorkspaceID),
+		Name: strings.TrimSpace(st.CurrentWorkspace),
+	}
+}
+
+func runtimeStateMatchesConfig(cfg config, st state) bool {
+	cfgMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return false
+	}
+
+	stateMode := strings.TrimSpace(st.ProductMode)
+	switch stateMode {
+	case "":
+		if strings.TrimSpace(st.ControlPlaneURL) != "" {
+			stateMode = productModeSelfHosted
+		} else {
+			stateMode = productModeLocal
+		}
+	case legacyProductModeDirect:
+		stateMode = productModeLocal
+	}
+	if stateMode != cfgMode {
+		return false
+	}
+
+	switch cfgMode {
+	case productModeLocal:
+		stateAddr := strings.TrimSpace(st.RedisAddr)
+		cfgAddr := strings.TrimSpace(cfg.RedisAddr)
+		if stateAddr == "" || cfgAddr == "" {
+			return true
+		}
+		return stateAddr == cfgAddr && st.RedisDB == cfg.RedisDB
+	case productModeSelfHosted, productModeCloud:
+		stateURL := strings.TrimSpace(st.ControlPlaneURL)
+		cfgURL := strings.TrimSpace(cfg.URL)
+		if stateURL == "" || cfgURL == "" {
+			return stateURL == cfgURL
+		}
+		return stateURL == cfgURL
+	default:
+		return false
+	}
 }
 
 func matchWorkspaceSelection(ref, displayName string, workspaces []workspaceSummary) (workspaceSelection, bool, error) {

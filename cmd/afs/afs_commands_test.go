@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,8 +11,61 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/go-redis/v9"
 )
+
+type stubAFSControlPlane struct {
+	workspaces controlplane.WorkspaceListResponse
+}
+
+func (s stubAFSControlPlane) ListWorkspaceSummaries(context.Context) (controlplane.WorkspaceListResponse, error) {
+	return s.workspaces, nil
+}
+
+func (s stubAFSControlPlane) GetWorkspace(context.Context, string) (controlplane.WorkspaceDetail, error) {
+	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected GetWorkspace call")
+}
+
+func (s stubAFSControlPlane) CreateWorkspace(context.Context, controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
+	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected CreateWorkspace call")
+}
+
+func (s stubAFSControlPlane) DeleteWorkspace(context.Context, string) error {
+	return fmt.Errorf("unexpected DeleteWorkspace call")
+}
+
+func (s stubAFSControlPlane) CreateWorkspaceSession(context.Context, string, controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error) {
+	return controlplane.WorkspaceSession{}, fmt.Errorf("unexpected CreateWorkspaceSession call")
+}
+
+func (s stubAFSControlPlane) HeartbeatWorkspaceSession(context.Context, string, string) (controlplane.WorkspaceSessionInfo, error) {
+	return controlplane.WorkspaceSessionInfo{}, fmt.Errorf("unexpected HeartbeatWorkspaceSession call")
+}
+
+func (s stubAFSControlPlane) CloseWorkspaceSession(context.Context, string, string) error {
+	return fmt.Errorf("unexpected CloseWorkspaceSession call")
+}
+
+func (s stubAFSControlPlane) ListCheckpoints(context.Context, string, int) ([]controlplane.CheckpointSummary, error) {
+	return nil, fmt.Errorf("unexpected ListCheckpoints call")
+}
+
+func (s stubAFSControlPlane) RestoreCheckpoint(context.Context, string, string) error {
+	return fmt.Errorf("unexpected RestoreCheckpoint call")
+}
+
+func (s stubAFSControlPlane) SaveCheckpoint(context.Context, controlplane.SaveCheckpointRequest) (bool, error) {
+	return false, fmt.Errorf("unexpected SaveCheckpoint call")
+}
+
+func (s stubAFSControlPlane) SaveCheckpointFromLive(context.Context, string, string) (bool, error) {
+	return false, fmt.Errorf("unexpected SaveCheckpointFromLive call")
+}
+
+func (s stubAFSControlPlane) ForkWorkspace(context.Context, string, string) error {
+	return fmt.Errorf("unexpected ForkWorkspace call")
+}
 
 func TestMaterializeWorkspaceWritesTreeAndState(t *testing.T) {
 	t.Helper()
@@ -162,6 +216,7 @@ func TestCurrentWorkspaceNamePrefersActiveMountedWorkspace(t *testing.T) {
 	})
 
 	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
 	cfg.WorkRoot = t.TempDir()
 	cfg.CurrentWorkspace = "alpha"
 	store := newAFSStore(rdb)
@@ -189,6 +244,95 @@ func TestCurrentWorkspaceNamePrefersActiveMountedWorkspace(t *testing.T) {
 	}
 	if got != "beta" {
 		t.Fatalf("currentWorkspaceName() = %q, want %q", got, "beta")
+	}
+}
+
+func TestCurrentWorkspaceNamePrefersActiveSyncWorkspace(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "alpha"
+	store := newAFSStore(rdb)
+
+	ctx := context.Background()
+	if err := createEmptyWorkspace(ctx, cfg, store, "alpha"); err != nil {
+		t.Fatalf("createEmptyWorkspace(alpha) returned error: %v", err)
+	}
+	if err := createEmptyWorkspace(ctx, cfg, store, "beta"); err != nil {
+		t.Fatalf("createEmptyWorkspace(beta) returned error: %v", err)
+	}
+
+	if err := saveState(state{
+		StartedAt:          time.Now().UTC(),
+		ProductMode:        productModeLocal,
+		RedisAddr:          mr.Addr(),
+		RedisDB:            0,
+		CurrentWorkspace:   "beta",
+		CurrentWorkspaceID: "ws_beta",
+		Mode:               modeSync,
+		SyncPID:            os.Getpid(),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	got, err := currentWorkspaceName(ctx, cfg, store)
+	if err != nil {
+		t.Fatalf("currentWorkspaceName() returned error: %v", err)
+	}
+	if got != "beta" {
+		t.Fatalf("currentWorkspaceName() = %q, want %q", got, "beta")
+	}
+	if gotRef := selectedWorkspaceReference(cfg); gotRef != "ws_beta" {
+		t.Fatalf("selectedWorkspaceReference() = %q, want %q", gotRef, "ws_beta")
+	}
+}
+
+func TestResolveWorkspaceSelectionFromControlPlanePrefersConfiguredWorkspaceID(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+
+	if err := saveState(state{
+		StartedAt:          time.Now().UTC(),
+		ProductMode:        productModeSelfHosted,
+		ControlPlaneURL:    "http://afs.test",
+		CurrentWorkspace:   "codex",
+		CurrentWorkspaceID: "ws_codex",
+		Mode:               modeSync,
+		SyncPID:            os.Getpid(),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+	cfg.CurrentWorkspace = "repo"
+	cfg.CurrentWorkspaceID = "ws_repo"
+
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_repo", Name: "repo"},
+				{ID: "ws_codex", Name: "codex"},
+			},
+		},
+	}, "")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceSelectionFromControlPlane() returned error: %v", err)
+	}
+	if selection.ID != "ws_repo" || selection.Name != "repo" {
+		t.Fatalf("selection = %+v, want ws_repo/repo", selection)
 	}
 }
 

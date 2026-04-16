@@ -204,6 +204,47 @@ func TestPrepareSyncBootstrapSelfHostedUsesWorkspaceIDForDuplicateNames(t *testi
 	}
 }
 
+func TestPrepareMountBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testing.T) {
+	t.Helper()
+
+	server, secondaryWorkspace, secondaryRedisAddr, secondaryDatabaseID := newMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.CurrentWorkspace = secondaryWorkspace
+	cfg.LocalPath = filepath.Join(t.TempDir(), secondaryWorkspace)
+
+	bootstrap, closeFn, err := prepareMountBootstrap(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("prepareMountBootstrap() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if bootstrap.workspace != secondaryWorkspace {
+		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, secondaryWorkspace)
+	}
+	if bootstrap.redisKey != workspaceRedisKey(secondaryWorkspace) {
+		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(secondaryWorkspace))
+	}
+	if bootstrap.cfg.RedisAddr != secondaryRedisAddr {
+		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, secondaryRedisAddr)
+	}
+	if bootstrap.cfg.DatabaseID != secondaryDatabaseID {
+		t.Fatalf("bootstrap DatabaseID = %q, want %q", bootstrap.cfg.DatabaseID, secondaryDatabaseID)
+	}
+	if bootstrap.cfg.CurrentWorkspaceID == "" {
+		t.Fatal("expected bootstrap CurrentWorkspaceID to be populated")
+	}
+	if strings.TrimSpace(bootstrap.sessionID) == "" {
+		t.Fatal("expected mount bootstrap session to include a session id")
+	}
+	if bootstrap.heartbeatEvery <= 0 {
+		t.Fatalf("bootstrap heartbeatEvery = %v, want > 0", bootstrap.heartbeatEvery)
+	}
+}
+
 func TestOpenAFSStoreRejectsSelfHostedModeForDirectStoreCommands(t *testing.T) {
 	t.Helper()
 
