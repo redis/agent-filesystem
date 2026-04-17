@@ -27,6 +27,7 @@ import type {
   UpdateWorkspaceFileInput,
   QuickstartInput,
   QuickstartResponse,
+  OnboardingTokenResponse,
   ImportLocalInput,
   ImportLocalResponse,
 } from "../types/afs";
@@ -57,6 +58,7 @@ type AFSClient = {
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
+  createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   resetDemo: () => AFSState;
 };
@@ -225,6 +227,14 @@ type HTTPFileContent = {
   binary: boolean;
   content?: string;
   target?: string;
+};
+
+type HTTPOnboardingTokenResponse = {
+  token: string;
+  database_id: string;
+  workspace_id: string;
+  workspace_name: string;
+  expires_at: string;
 };
 
 class HTTPError extends Error {
@@ -1034,6 +1044,10 @@ This workspace was created from the AFS Web UI.
     throw new Error("Quickstart is not available in demo mode.");
   },
 
+  async createOnboardingToken(_databaseId: string | undefined, _workspaceId: string) {
+    throw new Error("Onboarding tokens are not available in demo mode.");
+  },
+
   async importLocal() {
     throw new Error("Import is not available in demo mode.");
   },
@@ -1525,6 +1539,20 @@ const httpAFSClient: AFSClient = {
       workspaceId: response.workspace_id,
       workspace: mapWorkspaceDetail(response.workspace),
     } as QuickstartResponse;
+  },
+
+  async createOnboardingToken(databaseId: string | undefined, workspaceId: string) {
+    const response = await requestJSON<HTTPOnboardingTokenResponse>(
+      `${workspaceBasePath(databaseId, workspaceId)}/onboarding-token`,
+      { method: "POST" },
+    );
+    return {
+      token: response.token,
+      databaseId: response.database_id,
+      workspaceId: response.workspace_id,
+      workspaceName: response.workspace_name,
+      expiresAt: response.expires_at,
+    };
   },
 
   async importLocal(input: ImportLocalInput) {

@@ -62,7 +62,7 @@ func (c *workspaceCatalog) UpsertSession(ctx context.Context, item sessionCatalo
 		readonly = 1
 	}
 
-	_, err := c.db.ExecContext(
+	_, err := c.execContext(
 		ctx,
 		sessionCatalogUpsertSQL,
 		strings.TrimSpace(item.SessionID),
@@ -90,7 +90,7 @@ func (c *workspaceCatalog) ListSessionsForWorkspace(ctx context.Context, workspa
 	if c == nil || c.db == nil {
 		return nil, nil
 	}
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT
 			session_id,
@@ -190,7 +190,7 @@ func (c *workspaceCatalog) ListSessions(ctx context.Context, databaseID string) 
 	}
 	query += ` ORDER BY last_seen_at DESC, session_id`
 
-	rows, err := c.db.QueryContext(ctx, query, args...)
+	rows, err := c.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (c *workspaceCatalog) GetSession(ctx context.Context, sessionID string) (se
 	if c == nil || c.db == nil {
 		return sessionCatalogRecord{}, os.ErrNotExist
 	}
-	row := c.db.QueryRowContext(
+	row := c.queryRowContext(
 		ctx,
 		`SELECT
 			session_id,

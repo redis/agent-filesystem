@@ -93,8 +93,8 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 		fmt.Fprintln(out, "  What would you like to change?")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change mode "+clr(ansiDim, "("+setupModeLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
 		if showRedisConnection {
 			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
 			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
@@ -121,6 +121,10 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 				return cfg, err
 			}
 		case "2":
+			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
+				return cfg, err
+			}
+		case "3":
 			mode, err := effectiveMode(cfg)
 			if err != nil {
 				return cfg, err
@@ -133,10 +137,6 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 				if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
 					return cfg, err
 				}
-			}
-		case "3":
-			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
-				return cfg, err
 			}
 		case "4":
 			if showRedisConnection {
@@ -237,20 +237,18 @@ func setupConnectionLabel(cfg config) string {
 	if err != nil {
 		return "unknown"
 	}
-	if connection == productModeLocal {
-		return "local"
-	}
-	return "managed (" + connection + ")"
+	return productModeDisplayLabel(connection)
 }
 
 func promptConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "How AFS Is Configured"))
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  AFS can run in a local-only mode with afs.config.json on this machine,")
-	fmt.Fprintln(out, "  or in a managed mode where a remote system provides its configuration.")
+	fmt.Fprintln(out, "  AFS can run entirely on this machine, against your own hosted control plane,")
+	fmt.Fprintln(out, "  or against the hosted AFS Cloud control plane.")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Local")+" "+clr(ansiDim, "   — local-only mode using afs.config.json on this machine"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Managed")+" "+clr(ansiDim, " — configuration comes from a remote system (currently self-hosted control plane)"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self Managed")+" "+clr(ansiDim, " — configuration comes from your own control plane"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  "+clr(ansiBold, "Cloud Managed")+" "+clr(ansiDim, " — sign in through the hosted AFS Cloud service"))
 	fmt.Fprintln(out)
 
 	current, err := effectiveProductMode(*cfg)
@@ -258,8 +256,11 @@ func promptConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 		current = productModeLocal
 	}
 	def := "1"
-	if current == productModeSelfHosted {
+	switch current {
+	case productModeSelfHosted:
 		def = "2"
+	case productModeCloud:
+		def = "3"
 	}
 
 	choice, err := promptString(r, out, "  Choose", def)
@@ -271,10 +272,10 @@ func promptConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	switch strings.TrimSpace(strings.ToLower(choice)) {
 	case "1", "", productModeLocal, legacyProductModeDirect:
 		cfg.ProductMode = productModeLocal
-	case "2", "managed", productModeSelfHosted, "selfhosted", "self hosted":
+	case "2", "managed", "selfmanaged", "self managed", "self-managed", productModeSelfHosted, "selfhosted", "self hosted":
 		cfg.ProductMode = productModeSelfHosted
 		cfg.Mode = modeSync
-	case productModeCloud:
+	case "3", "cloudmanaged", "cloud managed", "cloud-managed", productModeCloud:
 		cfg.ProductMode = productModeCloud
 		cfg.Mode = modeSync
 	default:
@@ -411,7 +412,7 @@ func promptBackendSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	case productModeSelfHosted:
 		return promptControlPlaneSetup(r, out, cfg)
 	case productModeCloud:
-		return fmt.Errorf("cloud connection is not implemented yet")
+		return promptCloudManagedSetup(r, out, cfg)
 	default:
 		return fmt.Errorf("unknown connection %q", connection)
 	}
@@ -463,6 +464,34 @@ func promptControlPlaneSetup(r *bufio.Reader, out io.Writer, cfg *config) error 
 		return err
 	}
 	applySuggestedWorkspaceLocalPath(cfg)
+	return nil
+}
+
+func promptCloudManagedSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "AFS Cloud"))
+	fmt.Fprintln(out)
+
+	defaultURL := strings.TrimSpace(cfg.URL)
+	entered, err := promptString(r, out,
+		"  AFS Cloud URL\n"+
+			"  "+clr(ansiDim, "Example: https://agentfilesystem.vercel.app"), defaultURL)
+	if err != nil {
+		return err
+	}
+	normalized, err := normalizeControlPlaneURL(entered)
+	if err != nil {
+		return err
+	}
+
+	cfg.URL = normalized
+	cfg.DatabaseID = ""
+	cfg.CurrentWorkspace = ""
+	cfg.CurrentWorkspaceID = ""
+
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Next: run browser login, then choose a workspace in AFS Cloud."))
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Example: ")+clr(ansiBold, filepath.Base(os.Args[0])+" auth login --control-plane-url \""+cfg.URL+"\""))
+	fmt.Fprintln(out)
 	return nil
 }
 

@@ -67,8 +67,8 @@ func TestConfigStatusRowSelfHostedUsesControlPlaneURL(t *testing.T) {
 	if row.Label != "config" {
 		t.Fatalf("configStatusRow(self-hosted).Label = %q, want %q", row.Label, "config")
 	}
-	if row.Value != "managed: http://127.0.0.1:8091" {
-		t.Fatalf("configStatusRow(self-hosted).Value = %q, want %q", row.Value, "managed: http://127.0.0.1:8091")
+	if row.Value != "self managed: http://127.0.0.1:8091" {
+		t.Fatalf("configStatusRow(self-hosted).Value = %q, want %q", row.Value, "self managed: http://127.0.0.1:8091")
 	}
 }
 
@@ -228,8 +228,8 @@ func TestCmdStatusNotRunningShowsSelfHostedConfigURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdStatusNotRunning() returned error: %v", err)
 	}
-	if !strings.Contains(out, "config") || !strings.Contains(out, "managed: http://127.0.0.1:8091") {
-		t.Fatalf("cmdStatusNotRunning() output = %q, want managed config row", out)
+	if !strings.Contains(out, "config") || !strings.Contains(out, "self managed: http://127.0.0.1:8091") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want self managed config row", out)
 	}
 	if !strings.Contains(out, "http://127.0.0.1:8091") {
 		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane url", out)

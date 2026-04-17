@@ -178,6 +178,138 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	}
 }
 
+func TestHTTPOnboardingTokenExchange(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/databases/"+databaseID+"/workspaces/repo/onboarding-token", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST onboarding token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST onboarding token status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var token onboardingTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(onboarding token) returned error: %v", err)
+	}
+	if token.Token == "" {
+		t.Fatal("expected onboarding token to be populated")
+	}
+	if token.DatabaseID != databaseID {
+		t.Fatalf("token database_id = %q, want %q", token.DatabaseID, databaseID)
+	}
+	if token.WorkspaceName != "repo" {
+		t.Fatalf("token workspace_name = %q, want %q", token.WorkspaceName, "repo")
+	}
+
+	body := strings.NewReader(fmtJSON(t, onboardingExchangeRequest{Token: token.Token}))
+	resp, err = http.Post(server.URL+"/v1/auth/exchange", "application/json", body)
+	if err != nil {
+		t.Fatalf("POST auth exchange returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST auth exchange status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, payload)
+	}
+
+	var exchange onboardingExchangeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&exchange); err != nil {
+		t.Fatalf("Decode(onboarding exchange) returned error: %v", err)
+	}
+	if exchange.DatabaseID != databaseID {
+		t.Fatalf("exchange database_id = %q, want %q", exchange.DatabaseID, databaseID)
+	}
+	if exchange.WorkspaceName != "repo" {
+		t.Fatalf("exchange workspace_name = %q, want %q", exchange.WorkspaceName, "repo")
+	}
+
+	resp, err = http.Post(server.URL+"/v1/auth/exchange", "application/json", strings.NewReader(fmtJSON(t, onboardingExchangeRequest{Token: token.Token})))
+	if err != nil {
+		t.Fatalf("POST auth exchange second call returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST auth exchange second status = %d, want %d, body=%s", resp.StatusCode, http.StatusUnauthorized, payload)
+	}
+}
+
+func TestHTTPResolvedOnboardingTokenExchange(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/workspaces/repo/onboarding-token", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST resolved onboarding token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST resolved onboarding token status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var token onboardingTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(resolved onboarding token) returned error: %v", err)
+	}
+	if token.Token == "" {
+		t.Fatal("expected resolved onboarding token to be populated")
+	}
+	if token.DatabaseID != databaseID {
+		t.Fatalf("resolved token database_id = %q, want %q", token.DatabaseID, databaseID)
+	}
+	if token.WorkspaceName != "repo" {
+		t.Fatalf("resolved token workspace_name = %q, want %q", token.WorkspaceName, "repo")
+	}
+
+	resp, err = http.Post(server.URL+"/v1/auth/exchange", "application/json", strings.NewReader(fmtJSON(t, onboardingExchangeRequest{Token: token.Token})))
+	if err != nil {
+		t.Fatalf("POST resolved auth exchange returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST resolved auth exchange status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, payload)
+	}
+}
+
+func TestHTTPOnboardingTokenExchangeRejectsUnknownToken(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/auth/exchange", "application/json", strings.NewReader(fmtJSON(t, onboardingExchangeRequest{Token: "afs_otk_missing"})))
+	if err != nil {
+		t.Fatalf("POST auth exchange for unknown token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		payload, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST auth exchange unknown token status = %d, want %d, body=%s", resp.StatusCode, http.StatusUnauthorized, payload)
+	}
+
+	var payload map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode(unknown token response) returned error: %v", err)
+	}
+	if payload["error"] != ErrOnboardingTokenInvalid.Error() {
+		t.Fatalf("unknown token error = %q, want %q", payload["error"], ErrOnboardingTokenInvalid.Error())
+	}
+}
+
 func TestHTTPBrowseWorkingCopyView(t *testing.T) {
 	t.Helper()
 

@@ -189,6 +189,7 @@ function WorkspaceStudioPage() {
       {showBanner ? (
         <ConnectAgentBanner
           ref={bannerStepRef}
+          workspaceId={workspaceId}
           workspaceName={workspace.name}
           onDismiss={() => {
             setBannerDismissed(true);

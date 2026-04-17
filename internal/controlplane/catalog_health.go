@@ -33,14 +33,13 @@ func (c *workspaceCatalog) RecordWorkspaceRefresh(ctx context.Context, databaseI
 	} else {
 		refreshError = strings.TrimSpace(refreshErr.Error())
 	}
-	_, err := c.db.ExecContext(
+	_, err := c.execContext(
 		ctx,
 		databaseWorkspaceHealthUpsertSQL,
 		strings.TrimSpace(databaseID),
 		strings.TrimSpace(databaseName),
 		refreshAt,
 		refreshError,
-		now,
 		now,
 	)
 	return err
@@ -58,14 +57,13 @@ func (c *workspaceCatalog) RecordSessionReconcile(ctx context.Context, databaseI
 	} else {
 		reconcileError = strings.TrimSpace(reconcileErr.Error())
 	}
-	_, err := c.db.ExecContext(
+	_, err := c.execContext(
 		ctx,
 		databaseSessionHealthUpsertSQL,
 		strings.TrimSpace(databaseID),
 		strings.TrimSpace(databaseName),
 		reconcileAt,
 		reconcileError,
-		now,
 		now,
 	)
 	return err
@@ -75,7 +73,7 @@ func (c *workspaceCatalog) ListDatabaseHealth(ctx context.Context) (map[string]d
 	if c == nil || c.db == nil {
 		return map[string]databaseCatalogHealth{}, nil
 	}
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT
 			database_id,
@@ -115,7 +113,7 @@ func (c *workspaceCatalog) CountActiveSessionsByDatabase(ctx context.Context) (m
 	if c == nil || c.db == nil {
 		return map[string]int{}, nil
 	}
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT database_id, COUNT(*)
 		 FROM session_catalog
@@ -145,7 +143,7 @@ func (c *workspaceCatalog) ListSessionReconcileTargets(ctx context.Context) ([]s
 	if c == nil || c.db == nil {
 		return nil, nil
 	}
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT DISTINCT database_id, workspace_name
 		 FROM session_catalog

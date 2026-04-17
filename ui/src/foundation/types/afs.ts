@@ -274,6 +274,14 @@ export type QuickstartResponse = {
   workspace: AFSWorkspaceDetail;
 };
 
+export type OnboardingTokenResponse = {
+  token: string;
+  databaseId: string;
+  workspaceId: string;
+  workspaceName: string;
+  expiresAt: string;
+};
+
 export type ImportLocalInput = {
   databaseId?: string;
   name: string;

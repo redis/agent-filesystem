@@ -5,6 +5,7 @@ import styled, { keyframes } from "styled-components";
 import { getControlPlaneURL } from "../foundation/api/afs";
 
 type Props = {
+  workspaceId: string;
   workspaceName: string;
   onDismiss: () => void;
 };
@@ -14,7 +15,7 @@ export type ConnectAgentBannerHandle = {
 };
 
 export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
-  function ConnectAgentBanner({ workspaceName, onDismiss }, ref) {
+  function ConnectAgentBanner({ workspaceId, workspaceName, onDismiss }, ref) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   useImperativeHandle(ref, () => ({
@@ -26,8 +27,8 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
   const mountPath = `~/afs/${workspaceName}`;
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
-
-  const cliSetup = `"${cliPath}" up --control-plane-url "${controlPlaneUrl}" "${workspaceName}"`;
+  const loginCmd = `${cliPath} auth login --control-plane-url "${controlPlaneUrl}" --workspace "${workspaceId}"`;
+  const cliSetup = `${cliPath} up`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -112,9 +113,36 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
 
           <SubStepDivider />
 
-          <SubStepLabel>Step 2 — Connect and mount the workspace</SubStepLabel>
+          <SubStepLabel>Step 2 — Sign in the CLI</SubStepLabel>
           <StepDescription>
-            Connect to this server and sync the workspace to a local directory.
+            Open the browser login flow and connect this workspace to the CLI.
+          </StepDescription>
+          <CodeContainer>
+            <CodePre>{loginCmd}</CodePre>
+            <CopyButton
+              type="button"
+              onClick={() => copyToClipboard(loginCmd, "login")}
+            >
+              {copied === "login" ? "Copied!" : "Copy"}
+            </CopyButton>
+          </CodeContainer>
+          <StepHint>
+            This opens AFS Cloud in your browser, finishes the login there, and stores the hosted workspace locally.
+          </StepHint>
+
+          <NextButtonRow>
+            <NextButton type="button" onClick={() => setStep(2)}>
+              Next &rarr;
+            </NextButton>
+          </NextButtonRow>
+        </StepContent>
+      )}
+
+      {step === 2 && (
+        <StepContent>
+          <SubStepLabel>Step 3 — Start syncing the workspace</SubStepLabel>
+          <StepDescription>
+            Once you are logged in, sync the workspace to a local directory.
           </StepDescription>
           <CodeContainer>
             <CodePre>{cliSetup}</CodePre>
@@ -129,16 +157,8 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
             The workspace will appear at <code>{mountPath}/</code> on your machine.
           </StepHint>
 
-          <NextButtonRow>
-            <NextButton type="button" onClick={() => setStep(2)}>
-              Next &rarr;
-            </NextButton>
-          </NextButtonRow>
-        </StepContent>
-      )}
+          <SubStepDivider />
 
-      {step === 2 && (
-        <StepContent>
           <StepDescription>
             Add this to your agent's MCP configuration (Claude Desktop, Cursor, Windsurf, etc.).
             The agent gets tools to read, write, checkpoint, and restore workspace files.

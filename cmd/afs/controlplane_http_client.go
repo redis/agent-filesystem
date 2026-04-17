@@ -76,6 +76,22 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 	return client, client.databaseID, nil
 }
 
+func newAnonymousHTTPControlPlaneClient(baseURL string) (*httpControlPlaneClient, error) {
+	normalized, err := normalizeControlPlaneURL(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &httpControlPlaneClient{
+		baseURL: normalized,
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		importer: &http.Client{
+			Timeout: 15 * time.Minute,
+		},
+	}, nil
+}
+
 func (c *httpControlPlaneClient) ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error) {
 	var out controlplane.WorkspaceListResponse
 	err := c.doJSON(ctx, http.MethodGet, "/v1/workspaces", nil, &out, http.StatusOK)
@@ -179,6 +195,14 @@ func (c *httpControlPlaneClient) ForkWorkspace(ctx context.Context, sourceWorksp
 func (c *httpControlPlaneClient) listDatabases(ctx context.Context) (controlplane.DatabaseListResponse, error) {
 	var out controlplane.DatabaseListResponse
 	err := c.doJSON(ctx, http.MethodGet, "/v1/databases", nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) exchangeOnboardingToken(ctx context.Context, token string) (authExchangeResponse, error) {
+	var out authExchangeResponse
+	err := c.doJSON(ctx, http.MethodPost, "/v1/auth/exchange", map[string]string{
+		"token": strings.TrimSpace(token),
+	}, &out, http.StatusOK)
 	return out, err
 }
 

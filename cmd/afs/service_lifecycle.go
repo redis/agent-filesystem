@@ -64,7 +64,7 @@ func cmdUpArgs(args []string) error {
 	switch productMode {
 	case productModeDirect:
 		// Direct mode supports the existing sync/mount behavior below.
-	case productModeSelfHosted:
+	case productModeSelfHosted, productModeCloud:
 		if mode == modeSync {
 			return startSyncServices(cfg, opts.foreground)
 		}
@@ -254,7 +254,7 @@ func startServices(cfg config) error {
 	managedSessionID := ""
 	managedHeartbeatEvery := time.Duration(0)
 
-	if productMode == productModeSelfHosted {
+	if productMode == productModeSelfHosted || productMode == productModeCloud {
 		prepareStep := startStep("Opening workspace session")
 		bootstrap, closeFn, err := prepareMountBootstrap(ctx, cfg)
 		if err != nil {

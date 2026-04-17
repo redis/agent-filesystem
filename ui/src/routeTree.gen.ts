@@ -13,6 +13,7 @@ import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as DatabasesRouteImport } from './routes/databases'
+import { Route as ConnectCliRouteImport } from './routes/connect-cli'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentGuideRouteImport } from './routes/agent-guide'
 import { Route as ActivityRouteImport } from './routes/activity'
@@ -37,6 +38,11 @@ const DocsRoute = DocsRouteImport.update({
 const DatabasesRoute = DatabasesRouteImport.update({
   id: '/databases',
   path: '/databases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConnectCliRoute = ConnectCliRouteImport.update({
+  id: '/connect-cli',
+  path: '/connect-cli',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsRoute = AgentsRouteImport.update({
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/activity': typeof ActivityRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/activity': typeof ActivityRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/activity': typeof ActivityRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
+  '/connect-cli': typeof ConnectCliRoute
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/agent-guide'
     | '/agents'
+    | '/connect-cli'
     | '/databases'
     | '/docs'
     | '/downloads'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/agent-guide'
     | '/agents'
+    | '/connect-cli'
     | '/databases'
     | '/docs'
     | '/downloads'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/activity'
     | '/agent-guide'
     | '/agents'
+    | '/connect-cli'
     | '/databases'
     | '/docs'
     | '/downloads'
@@ -140,6 +152,7 @@ export interface RootRouteChildren {
   ActivityRoute: typeof ActivityRoute
   AgentGuideRoute: typeof AgentGuideRoute
   AgentsRoute: typeof AgentsRoute
+  ConnectCliRoute: typeof ConnectCliRoute
   DatabasesRoute: typeof DatabasesRoute
   DocsRoute: typeof DocsRoute
   DownloadsRoute: typeof DownloadsRoute
@@ -174,6 +187,13 @@ declare module '@tanstack/react-router' {
       path: '/databases'
       fullPath: '/databases'
       preLoaderRoute: typeof DatabasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/connect-cli': {
+      id: '/connect-cli'
+      path: '/connect-cli'
+      fullPath: '/connect-cli'
+      preLoaderRoute: typeof ConnectCliRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents': {
@@ -231,6 +251,7 @@ const rootRouteChildren: RootRouteChildren = {
   ActivityRoute: ActivityRoute,
   AgentGuideRoute: AgentGuideRoute,
   AgentsRoute: AgentsRoute,
+  ConnectCliRoute: ConnectCliRoute,
   DatabasesRoute: DatabasesRoute,
   DocsRoute: DocsRoute,
   DownloadsRoute: DownloadsRoute,

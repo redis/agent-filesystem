@@ -191,6 +191,26 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		writeJSON(w, http.StatusCreated, response)
 	})
 
+	mux.HandleFunc("/v1/auth/exchange", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input onboardingExchangeRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.ExchangeOnboardingToken(r.Context(), input.Token)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -765,6 +785,18 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/onboarding-token"):
+		workspace := strings.TrimSuffix(workspacePath, "/onboarding-token")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.CreateOnboardingToken(r.Context(), databaseID, workspace)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	default:
 		workspace := workspacePath
 		switch r.Method {
@@ -964,6 +996,18 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/onboarding-token"):
+		workspace := strings.TrimSuffix(workspacePath, "/onboarding-token")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.CreateResolvedOnboardingToken(r.Context(), workspace)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	default:
 		workspace := workspacePath
 		switch r.Method {
@@ -1182,6 +1226,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case errors.Is(err, ErrUnsupportedView):
 		status = http.StatusNotImplemented
+	case errors.Is(err, ErrOnboardingTokenInvalid):
+		status = http.StatusUnauthorized
 	case strings.Contains(strings.ToLower(err.Error()), "already exists"):
 		status = http.StatusConflict
 	case strings.Contains(strings.ToLower(err.Error()), "invalid"),

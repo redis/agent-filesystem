@@ -11,9 +11,9 @@ import (
 )
 
 func main() {
-	listenAddr := flag.String("listen", "127.0.0.1:8091", "bind address")
+	listenAddr := flag.String("listen", defaultListenAddr(), "bind address")
 	allowOrigin := flag.String("allow-origin", "*", "Access-Control-Allow-Origin value")
-	configPath := flag.String("config", "", "path to afs.config.json")
+	configPath := flag.String("config", defaultConfigPath(), "path to afs.config.json")
 	flag.Parse()
 
 	manager, err := controlplane.OpenDatabaseManager(*configPath)

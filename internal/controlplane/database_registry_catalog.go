@@ -9,7 +9,7 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 	if c == nil || c.db == nil {
 		return nil, nil
 	}
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT
 			id,
@@ -70,7 +70,7 @@ func (c *workspaceCatalog) ReplaceDatabaseProfiles(ctx context.Context, profiles
 		return err
 	}
 
-	statement, err := tx.PrepareContext(ctx, databaseRegistryUpsertSQL)
+	statement, err := tx.PrepareContext(ctx, c.rebind(databaseRegistryUpsertSQL))
 	if err != nil {
 		return err
 	}

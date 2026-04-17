@@ -388,6 +388,32 @@ func TestRunSetupWizardSupportsSelfHostedLiveMountMode(t *testing.T) {
 	}
 }
 
+func TestRunSetupWizardSupportsCloudManagedBootstrapConfig(t *testing.T) {
+	t.Helper()
+
+	input := stringsJoinLines(
+		"3", // connection: cloud managed
+		"https://afs.example.com",
+		"", // mode: sync default
+		"", // local path default
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+
+	got, err := runSetupWizard(reader, ioDiscard{}, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if got.ProductMode != productModeCloud {
+		t.Fatalf("ProductMode = %q, want %q", got.ProductMode, productModeCloud)
+	}
+	if got.URL != "https://afs.example.com" {
+		t.Fatalf("URL = %q, want %q", got.URL, "https://afs.example.com")
+	}
+	if got.CurrentWorkspace != "" || got.CurrentWorkspaceID != "" {
+		t.Fatalf("cloud setup should not preselect a workspace: %#v", got)
+	}
+}
+
 func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	t.Helper()
 
@@ -398,11 +424,11 @@ func TestRunSetupWizardExistingConfigShowsCurrentSettings(t *testing.T) {
 	existing.MountBackend = mountBackendNone
 	existing.LocalPath = ""
 
-	// Menu (edit mode, local): 1=mode, 2=local path/filesystem mount,
-	// 3=workspace, 4=redis connection, 5=configuration source, 6=save.
-	// Pick option 2 (filesystem mount) → keep as none → back to menu → pick 6 to save.
+	// Menu (edit mode, local): 1=mode, 2=workspace, 3=local path/filesystem
+	// mount, 4=redis connection, 5=configuration source, 6=save.
+	// Pick option 3 (filesystem mount) → keep as none → back to menu → pick 6 to save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"2",
+		"3",
 		"",
 		"6",
 	)))
@@ -450,9 +476,9 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
 	}
 
-	// Edit-menu items (local): 3 = current workspace, 6 = save.
+	// Edit-menu items (local): 2 = current workspace, 6 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"3",
+		"2",
 		"repo-two",
 		"6",
 	)))
@@ -546,9 +572,9 @@ func TestRunSetupWizardAllowsCreatingWorkspaceFromCurrentWorkspaceMenu(t *testin
 		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
 	}
 
-	// Edit-menu items (local): 3 = current workspace, 6 = save.
+	// Edit-menu items (local): 2 = current workspace, 6 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
-		"3",
+		"2",
 		"2",
 		"repo-three",
 		"6",
@@ -594,9 +620,9 @@ func TestRunSetupWizardAutoSelectsMountBackendAndUsesCurrentWorkspace(t *testing
 	existing.LocalPath = ""
 	existing.NFSPort = busyAddr.Port
 
-	// Edit-menu items (local): 2 = filesystem mount, 6 = save and exit.
+	// Edit-menu items (local): 3 = filesystem mount, 6 = save and exit.
 	input := stringsJoinLines(
-		"2", // filesystem mount
+		"3", // filesystem mount
 		"/tmp/afs-mount",
 		"6", // save and exit
 	)
@@ -643,11 +669,11 @@ func TestRunSetupWizardEditModeLoopsUntilSaveAndExit(t *testing.T) {
 		t.Fatalf("createEmptyWorkspace(repo-two) returned error: %v", err)
 	}
 
-	// Edit-menu items (local): 3 = current workspace, 6 = save. Exercise the loop
+	// Edit-menu items (local): 2 = current workspace, 6 = save. Exercise the loop
 	// by picking workspace twice, then saving.
 	input := stringsJoinLines(
-		"3", "repo-two",
-		"3", "demo",
+		"2", "repo-two",
+		"2", "demo",
 		"6",
 	)
 	reader := bufio.NewReader(bytes.NewBufferString(input))
@@ -778,9 +804,9 @@ func TestRunSetupWizardMountWithoutCurrentWorkspacePromptsForWorkspace(t *testin
 	existing.Mode = modeMount // edit-mode test, staying on live mount
 	existing.MountBackend = mountBackendNone
 
-	// Edit-menu items (local): 2 = filesystem mount, 6 = save.
+	// Edit-menu items (local): 3 = filesystem mount, 6 = save.
 	input := stringsJoinLines(
-		"2",        // filesystem mount
+		"3",        // filesystem mount
 		"/tmp/afs", // requested mountpoint
 		"newfiles", // workspace name to create/use
 		"6",        // save and exit

@@ -48,3 +48,83 @@ func TestBuildRedisOptionsIncludesReadTimeoutAndTLS(t *testing.T) {
 		t.Fatalf("TLS min version = %d, want %d", opts.TLSConfig.MinVersion, tls.VersionTLS12)
 	}
 }
+
+func TestRedisConfigFromURLParsesTLSUsernamePasswordAndDB(t *testing.T) {
+	cfg, ok := redisConfigFromURL("rediss://default:secret@cache.example.com:16379/5")
+	if !ok {
+		t.Fatal("redisConfigFromURL() = false, want true")
+	}
+	if cfg.RedisAddr != "cache.example.com:16379" {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, "cache.example.com:16379")
+	}
+	if cfg.RedisUsername != "default" {
+		t.Fatalf("RedisUsername = %q, want %q", cfg.RedisUsername, "default")
+	}
+	if cfg.RedisPassword != "secret" {
+		t.Fatalf("RedisPassword = %q, want %q", cfg.RedisPassword, "secret")
+	}
+	if cfg.RedisDB != 5 {
+		t.Fatalf("RedisDB = %d, want %d", cfg.RedisDB, 5)
+	}
+	if !cfg.RedisTLS {
+		t.Fatal("RedisTLS = false, want true")
+	}
+}
+
+func TestApplyEnvOverridesFallsBackToRedisURL(t *testing.T) {
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "rediss://default:secret@cache.example.com:16379/9")
+
+	cfg := Config{}
+	if ok := applyEnvOverrides(&cfg); !ok {
+		t.Fatal("applyEnvOverrides() = false, want true with REDIS_URL")
+	}
+	if cfg.RedisAddr != "cache.example.com:16379" {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, "cache.example.com:16379")
+	}
+	if cfg.RedisUsername != "default" {
+		t.Fatalf("RedisUsername = %q, want %q", cfg.RedisUsername, "default")
+	}
+	if cfg.RedisPassword != "secret" {
+		t.Fatalf("RedisPassword = %q, want %q", cfg.RedisPassword, "secret")
+	}
+	if cfg.RedisDB != 9 {
+		t.Fatalf("RedisDB = %d, want %d", cfg.RedisDB, 9)
+	}
+	if !cfg.RedisTLS {
+		t.Fatal("RedisTLS = false, want true")
+	}
+}
+
+func TestApplyEnvOverridesPrefersExplicitAFSRedisEnv(t *testing.T) {
+	t.Setenv("AFS_REDIS_ADDR", "manual.redis.example.com:6379")
+	t.Setenv("AFS_REDIS_USERNAME", "alice")
+	t.Setenv("AFS_REDIS_PASSWORD", "manual-secret")
+	t.Setenv("AFS_REDIS_DB", "2")
+	t.Setenv("AFS_REDIS_TLS", "false")
+	t.Setenv("REDIS_URL", "rediss://default:secret@cache.example.com:16379/9")
+
+	cfg := Config{}
+	if ok := applyEnvOverrides(&cfg); !ok {
+		t.Fatal("applyEnvOverrides() = false, want true")
+	}
+	if cfg.RedisAddr != "manual.redis.example.com:6379" {
+		t.Fatalf("RedisAddr = %q, want explicit AFS_REDIS_ADDR", cfg.RedisAddr)
+	}
+	if cfg.RedisUsername != "alice" {
+		t.Fatalf("RedisUsername = %q, want explicit username", cfg.RedisUsername)
+	}
+	if cfg.RedisPassword != "manual-secret" {
+		t.Fatalf("RedisPassword = %q, want explicit password", cfg.RedisPassword)
+	}
+	if cfg.RedisDB != 2 {
+		t.Fatalf("RedisDB = %d, want %d", cfg.RedisDB, 2)
+	}
+	if cfg.RedisTLS {
+		t.Fatal("RedisTLS = true, want explicit false")
+	}
+}

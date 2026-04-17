@@ -243,7 +243,7 @@ type viewRef struct {
 type Service struct {
 	cfg                 Config
 	store               *Store
-	catalog             *workspaceCatalog
+	catalog             catalogStore
 	catalogDatabaseID   string
 	catalogDatabaseName string
 }
@@ -288,7 +288,7 @@ func NewService(cfg Config, store *Store) *Service {
 	return &Service{cfg: cfg, store: store}
 }
 
-func NewServiceWithCatalog(cfg Config, store *Store, catalog *workspaceCatalog, databaseID, databaseName string) *Service {
+func NewServiceWithCatalog(cfg Config, store *Store, catalog catalogStore, databaseID, databaseName string) *Service {
 	return &Service{
 		cfg:                 cfg,
 		store:               store,

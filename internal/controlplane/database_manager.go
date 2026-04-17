@@ -84,7 +84,7 @@ type UpsertDatabaseRequest = upsertDatabaseRequest
 
 type DatabaseManager struct {
 	mu       sync.Mutex
-	catalog  *workspaceCatalog
+	catalog  catalogStore
 	profiles map[string]databaseProfile
 	order    []string
 	runtimes map[string]*databaseRuntime
@@ -106,7 +106,7 @@ type DatabaseManager struct {
 const redisStatsPollInterval = 30 * time.Second
 
 func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
-	catalog, err := openWorkspaceCatalog(configPathOverride)
+	catalog, err := openCatalogStore(configPathOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +272,10 @@ func (m *DatabaseManager) Close() {
 }
 
 func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListResponse, error) {
+	if err := m.ensureBootstrapDatabase(); err != nil {
+		return databaseListResponse{}, err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -345,6 +349,37 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
 	return databaseListResponse{Items: items}, nil
+}
+
+func (m *DatabaseManager) ensureBootstrapDatabase() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.ensureBootstrapDatabaseLocked()
+}
+
+func (m *DatabaseManager) ensureBootstrapDatabaseLocked() error {
+	if len(m.order) > 0 {
+		return nil
+	}
+
+	profile, ok := bootstrapDatabaseProfileFromEnv()
+	if !ok {
+		return nil
+	}
+	if err := validateDatabaseProfile(profile); err != nil {
+		return err
+	}
+
+	m.profiles[profile.ID] = profile
+	m.order = append(m.order, profile.ID)
+	m.ensureDefaultDatabaseLocked()
+
+	if err := m.saveRegistryLocked(); err != nil {
+		delete(m.profiles, profile.ID)
+		m.order = withoutValue(m.order, profile.ID)
+		return err
+	}
+	return nil
 }
 
 func (m *DatabaseManager) CatalogHealth(ctx context.Context) (catalogHealthResponse, error) {

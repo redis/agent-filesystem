@@ -42,6 +42,14 @@ func main() {
 		if err := cmdConfig(args); err != nil {
 			fatal(err)
 		}
+	case "auth", "au":
+		if err := cmdAuth(args); err != nil {
+			fatal(err)
+		}
+	case "login", "lo":
+		if err := cmdAuthLogin(args[1:]); err != nil {
+			fatal(err)
+		}
 	case "up", "u":
 		if err := cmdUpArgs(args[1:]); err != nil {
 			fatal(err)
@@ -100,6 +108,8 @@ func printUsage() {
 Commands:
   setup                Interactive setup
   config ...           Show or change basic Redis and local surface settings
+  auth ...             Log into or out of a hosted control plane
+  login                Open the browser and log into AFS Cloud
   up [flags]           Start AFS services with optional one-shot overrides
   down                 Stop and unmount
   status               Show current status

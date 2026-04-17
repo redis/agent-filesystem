@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -13,13 +14,15 @@ const (
 	quickstartWorkspaceName = "getting-started"
 	quickstartCheckpoint    = "initial"
 	quickstartSource        = "quickstart"
+	quickstartLocalDBName   = "Local Development"
+	quickstartCloudDBName   = "AFS Cloud"
 )
 
 // QuickstartRequest contains optional overrides for the quickstart flow.
 type QuickstartRequest struct {
 	RedisAddr     string `json:"redis_addr"`
 	RedisPassword string `json:"redis_password"`
-	RedisUsername  string `json:"redis_username"`
+	RedisUsername string `json:"redis_username"`
 	RedisDB       int    `json:"redis_db"`
 	RedisTLS      bool   `json:"redis_tls"`
 }
@@ -34,6 +37,10 @@ type QuickstartResponse struct {
 // Quickstart creates a database connection and a workspace pre-populated with
 // sample content in a single call. It is designed for first-time onboarding.
 func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartRequest) (QuickstartResponse, error) {
+	if err := m.ensureBootstrapDatabase(); err != nil {
+		return QuickstartResponse{}, err
+	}
+
 	// Step 1: If a database already exists, reuse it instead of creating a new
 	// one. This handles the Docker case where the control plane starts with
 	// AFS_REDIS_ADDR=redis:6379 and auto-seeds a database profile.
@@ -55,26 +62,9 @@ func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartReques
 		}
 	}
 
-	// Step 2: No usable database — create one. Use the Redis address from
-	// the request, fall back to AFS_REDIS_ADDR env var, then to localhost:6379.
-	redisAddr := strings.TrimSpace(input.RedisAddr)
-	if redisAddr == "" {
-		if envAddr := strings.TrimSpace(os.Getenv("AFS_REDIS_ADDR")); envAddr != "" {
-			redisAddr = envAddr
-		} else {
-			redisAddr = "localhost:6379"
-		}
-	}
-
-	dbReq := UpsertDatabaseRequest{
-		Name:          "Local Development",
-		Description:   "Auto-created by quickstart.",
-		RedisAddr:     redisAddr,
-		RedisUsername: input.RedisUsername,
-		RedisPassword: input.RedisPassword,
-		RedisDB:       input.RedisDB,
-		RedisTLS:      input.RedisTLS,
-	}
+	// Step 2: No usable database — create one from explicit input, AFS_REDIS_*,
+	// REDIS_URL, or finally localhost.
+	dbReq := quickstartDatabaseRequest(input)
 
 	dbRecord, err := m.UpsertDatabase(ctx, existingDBID, dbReq)
 	if err != nil {
@@ -82,6 +72,108 @@ func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartReques
 	}
 
 	return m.quickstartWithDatabase(ctx, dbRecord.ID)
+}
+
+func quickstartDatabaseRequest(input QuickstartRequest) UpsertDatabaseRequest {
+	redisCfg := quickstartRedisConfig(input)
+	name := quickstartLocalDBName
+	description := "Auto-created by quickstart."
+
+	if strings.TrimSpace(input.RedisAddr) == "" {
+		if seeded, ok := bootstrapDatabaseProfileFromEnv(); ok {
+			name = seeded.Name
+			description = seeded.Description
+		}
+	}
+
+	return UpsertDatabaseRequest{
+		Name:          name,
+		Description:   description,
+		RedisAddr:     redisCfg.RedisAddr,
+		RedisUsername: redisCfg.RedisUsername,
+		RedisPassword: redisCfg.RedisPassword,
+		RedisDB:       redisCfg.RedisDB,
+		RedisTLS:      redisCfg.RedisTLS,
+	}
+}
+
+func quickstartRedisConfig(input QuickstartRequest) RedisConfig {
+	cfg := RedisConfig{
+		RedisAddr:     strings.TrimSpace(input.RedisAddr),
+		RedisUsername: strings.TrimSpace(input.RedisUsername),
+		RedisPassword: input.RedisPassword,
+		RedisDB:       input.RedisDB,
+		RedisTLS:      input.RedisTLS,
+	}
+	if cfg.RedisAddr != "" {
+		return cfg
+	}
+
+	if envCfg, ok := redisConfigFromAFSEnv(); ok {
+		cfg = envCfg
+		return cfg
+	}
+
+	if parsed, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
+		return parsed
+	}
+
+	cfg.RedisAddr = "localhost:6379"
+	return cfg
+}
+
+func redisConfigFromAFSEnv() (RedisConfig, bool) {
+	envAddr := strings.TrimSpace(os.Getenv("AFS_REDIS_ADDR"))
+	if envAddr == "" {
+		return RedisConfig{}, false
+	}
+
+	cfg := RedisConfig{
+		RedisAddr:     envAddr,
+		RedisUsername: strings.TrimSpace(os.Getenv("AFS_REDIS_USERNAME")),
+		RedisPassword: os.Getenv("AFS_REDIS_PASSWORD"),
+	}
+	if envDB := strings.TrimSpace(os.Getenv("AFS_REDIS_DB")); envDB != "" {
+		if parsedDB, err := strconv.Atoi(envDB); err == nil {
+			cfg.RedisDB = parsedDB
+		}
+	}
+	if envTLS := strings.TrimSpace(os.Getenv("AFS_REDIS_TLS")); envTLS != "" {
+		cfg.RedisTLS = envTLS == "1" || strings.EqualFold(envTLS, "true")
+	}
+	return cfg, true
+}
+
+func bootstrapDatabaseProfileFromEnv() (databaseProfile, bool) {
+	if cfg, ok := redisConfigFromAFSEnv(); ok {
+		return databaseProfile{
+			ID:            "local-development",
+			Name:          quickstartLocalDBName,
+			Description:   "Configured from AFS_REDIS_* environment variables.",
+			RedisAddr:     cfg.RedisAddr,
+			RedisUsername: cfg.RedisUsername,
+			RedisPassword: cfg.RedisPassword,
+			RedisDB:       cfg.RedisDB,
+			RedisTLS:      cfg.RedisTLS,
+			IsDefault:     true,
+		}, true
+	}
+
+	if cfg, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
+		return databaseProfile{
+			ID:            "afs-cloud",
+			Name:          quickstartCloudDBName,
+			Description:   "Managed Redis Cloud data plane for hosted Agent Filesystem.",
+			RedisAddr:     cfg.RedisAddr,
+			RedisUsername: cfg.RedisUsername,
+			RedisPassword: cfg.RedisPassword,
+			RedisDB:       cfg.RedisDB,
+			RedisTLS:      cfg.RedisTLS,
+			IsDefault:     true,
+		}, true
+	}
+
+	return databaseProfile{}, false
 }
 
 // quickstartWithDatabase creates the getting-started workspace on an existing database.
@@ -150,7 +242,7 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 		Description:      "Sample workspace with example files to explore AFS features.",
 		DatabaseID:       profile.ID,
 		DatabaseName:     profile.Name,
-		CloudAccount:     "Direct Redis",
+		CloudAccount:     quickstartCloudAccount(profile),
 		Source:           quickstartSource,
 		Tags:             []string{"Quickstart"},
 		CreatedAt:        now,
@@ -195,17 +287,25 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 	return service.getWorkspace(ctx, workspace)
 }
 
+func quickstartCloudAccount(profile databaseProfile) string {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" || strings.EqualFold(name, quickstartLocalDBName) {
+		return "Direct Redis"
+	}
+	return name
+}
+
 // buildSeedManifest constructs a Manifest containing the quickstart sample files.
 func buildSeedManifest(workspace string, now time.Time) (Manifest, int, int, int64) {
 	ms := now.UnixMilli()
 
 	files := map[string]string{
-		"/README.md":               seedReadme,
-		"/docs/quickstart.md":      seedQuickstart,
-		"/docs/architecture.md":    seedArchitecture,
-		"/examples/hello.py":       seedHelloPy,
-		"/examples/config.json":    seedConfigJSON,
-		"/tests/test_hello.py":     seedTestHelloPy,
+		"/README.md":            seedReadme,
+		"/docs/quickstart.md":   seedQuickstart,
+		"/docs/architecture.md": seedArchitecture,
+		"/examples/hello.py":    seedHelloPy,
+		"/examples/config.json": seedConfigJSON,
+		"/tests/test_hello.py":  seedTestHelloPy,
 	}
 
 	dirs := []string{"/", "/docs", "/examples", "/tests"}

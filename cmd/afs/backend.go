@@ -21,6 +21,32 @@ const (
 	productModeCloud        = "cloud"
 )
 
+func productModeDisplayLabel(mode string) string {
+	switch mode {
+	case productModeLocal:
+		return "Local"
+	case productModeSelfHosted:
+		return "Self Managed"
+	case productModeCloud:
+		return "Cloud Managed"
+	default:
+		return mode
+	}
+}
+
+func productModeStatusLabel(mode string) string {
+	switch mode {
+	case productModeLocal:
+		return "local"
+	case productModeSelfHosted:
+		return "self managed"
+	case productModeCloud:
+		return "cloud managed"
+	default:
+		return mode
+	}
+}
+
 func effectiveProductMode(cfg config) (string, error) {
 	mode := strings.TrimSpace(cfg.ProductMode)
 	switch mode {
@@ -173,10 +199,8 @@ func productBackendForConfig(cfg config) (afsBackend, error) {
 	switch productMode {
 	case productModeLocal:
 		return directBackend{}, nil
-	case productModeSelfHosted:
+	case productModeSelfHosted, productModeCloud:
 		return selfHostedBackend{}, nil
-	case productModeCloud:
-		return nil, fmt.Errorf("%s mode is not implemented yet in this CLI build\nRun '%s setup' for local mode", productMode, filepath.Base(os.Args[0]))
 	default:
 		return nil, fmt.Errorf("unknown connection %q", productMode)
 	}

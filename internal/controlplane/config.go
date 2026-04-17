@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -66,29 +67,94 @@ func LoadConfigWithPresence(configPathOverride string) (Config, bool, error) {
 // on top of the current config. Returns true if any env var was set.
 func applyEnvOverrides(cfg *Config) bool {
 	set := false
+	addrSet := false
+	usernameSet := false
+	passwordSet := false
+	dbSet := false
+	tlsSet := false
 	if v := os.Getenv("AFS_REDIS_ADDR"); v != "" {
 		cfg.RedisAddr = v
 		set = true
+		addrSet = true
 	}
 	if v := os.Getenv("AFS_REDIS_USERNAME"); v != "" {
 		cfg.RedisUsername = v
 		set = true
+		usernameSet = true
 	}
 	if v := os.Getenv("AFS_REDIS_PASSWORD"); v != "" {
 		cfg.RedisPassword = v
 		set = true
+		passwordSet = true
 	}
 	if v := os.Getenv("AFS_REDIS_DB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.RedisDB = n
 			set = true
+			dbSet = true
 		}
 	}
 	if v := os.Getenv("AFS_REDIS_TLS"); v != "" {
 		cfg.RedisTLS = v == "1" || v == "true"
 		set = true
+		tlsSet = true
+	}
+	if parsed, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
+		if !addrSet {
+			cfg.RedisAddr = parsed.RedisAddr
+		}
+		if !usernameSet {
+			cfg.RedisUsername = parsed.RedisUsername
+		}
+		if !passwordSet {
+			cfg.RedisPassword = parsed.RedisPassword
+		}
+		if !dbSet {
+			cfg.RedisDB = parsed.RedisDB
+		}
+		if !tlsSet {
+			cfg.RedisTLS = parsed.RedisTLS
+		}
+		set = true
 	}
 	return set
+}
+
+func redisConfigFromURL(raw string) (RedisConfig, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return RedisConfig{}, false
+	}
+
+	u, err := url.Parse(raw)
+	if err != nil {
+		return RedisConfig{}, false
+	}
+	if u.Host == "" {
+		return RedisConfig{}, false
+	}
+
+	cfg := RedisConfig{
+		RedisAddr: u.Host,
+		RedisTLS:  strings.EqualFold(u.Scheme, "rediss"),
+	}
+	if u.User != nil {
+		cfg.RedisUsername = u.User.Username()
+		if password, ok := u.User.Password(); ok {
+			cfg.RedisPassword = password
+		}
+	}
+	if path := strings.Trim(strings.TrimSpace(u.Path), "/"); path != "" {
+		if db, err := strconv.Atoi(path); err == nil {
+			cfg.RedisDB = db
+		}
+	}
+	if dbParam := strings.TrimSpace(u.Query().Get("db")); dbParam != "" {
+		if db, err := strconv.Atoi(dbParam); err == nil {
+			cfg.RedisDB = db
+		}
+	}
+	return cfg, true
 }
 
 func OpenStore(ctx context.Context, cfg Config) (*Store, func(), error) {

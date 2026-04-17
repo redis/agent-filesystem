@@ -60,14 +60,14 @@ func configStatusRow(cfg config) boxRow {
 	}
 
 	if productMode == productModeLocal {
-		return boxRow{Label: "config", Value: "local: " + configPathLabel()}
+		return boxRow{Label: "config", Value: productModeStatusLabel(productMode) + ": " + configPathLabel()}
 	}
 
 	value := strings.TrimSpace(cfg.URL)
 	if value == "" {
 		value = "<control plane url not configured>"
 	}
-	return boxRow{Label: "config", Value: "managed: " + value}
+	return boxRow{Label: "config", Value: productModeStatusLabel(productMode) + ": " + value}
 }
 
 func commandContextRows(cfg config, workspace string) []boxRow {

@@ -14,7 +14,8 @@ import (
 )
 
 type workspaceCatalog struct {
-	db *sql.DB
+	db      *sql.DB
+	dialect catalogSQLDialect
 }
 
 type workspaceCatalogRoute struct {
@@ -24,7 +25,7 @@ type workspaceCatalogRoute struct {
 }
 
 func openWorkspaceCatalog(configPathOverride string) (*workspaceCatalog, error) {
-	path := workspaceCatalogPath(configPathOverride)
+	path := catalogStorePath(configPathOverride)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -34,7 +35,7 @@ func openWorkspaceCatalog(configPathOverride string) (*workspaceCatalog, error) 
 		return nil, err
 	}
 
-	catalog := &workspaceCatalog{db: db}
+	catalog := &workspaceCatalog{db: db, dialect: catalogSQLDialectSQLite}
 	if err := catalog.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -118,13 +119,27 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			order_index INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_database_registry_order ON database_registry(order_index ASC)`,
+		`CREATE TABLE IF NOT EXISTS onboarding_tokens (
+			token TEXT PRIMARY KEY,
+			database_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			workspace_name TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL,
+			consumed_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_expires_at ON onboarding_tokens(expires_at)`,
 	}
 	for _, statement := range statements {
-		if _, err := c.db.ExecContext(ctx, statement); err != nil {
+		if _, err := c.execContext(ctx, statement); err != nil {
 			return err
 		}
 	}
-	if _, err := c.db.ExecContext(ctx, `ALTER TABLE database_registry ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+	if c.dialect == catalogSQLDialectPostgres {
+		_, err := c.execContext(ctx, `ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0`)
+		return err
+	}
+	if _, err := c.execContext(ctx, `ALTER TABLE database_registry ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 		return err
 	}
 	return nil
@@ -139,13 +154,13 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 		_ = tx.Rollback()
 	}()
 
-	statement, err := tx.PrepareContext(ctx, workspaceCatalogUpsertSQL)
+	statement, err := tx.PrepareContext(ctx, c.rebind(workspaceCatalogUpsertSQL))
 	if err != nil {
 		return nil, err
 	}
 	defer statement.Close()
 
-	existingByName, err := catalogRoutesByName(ctx, tx, databaseID)
+	existingByName, err := catalogRoutesByName(ctx, tx, c.rebind, databaseID)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +168,7 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 	synced := make([]workspaceSummary, 0, len(items))
 	for _, item := range items {
 		item.DatabaseID = strings.TrimSpace(databaseID)
-		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, existingByName, item)
+		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, c.rebind, existingByName, item)
 		if err != nil {
 			return nil, err
 		}
@@ -161,7 +176,7 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 		synced = append(synced, item)
 	}
 
-	if err := deleteCatalogDatabaseRowsNotInNames(ctx, tx, databaseID, keepNames); err != nil {
+	if err := deleteCatalogDatabaseRowsNotInNames(ctx, tx, c.rebind, databaseID, keepNames); err != nil {
 		return nil, err
 	}
 
@@ -172,37 +187,37 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 }
 
 func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSummary) (workspaceSummary, error) {
-	statement, err := c.db.PrepareContext(ctx, workspaceCatalogUpsertSQL)
+	statement, err := c.prepareContext(ctx, workspaceCatalogUpsertSQL)
 	if err != nil {
 		return workspaceSummary{}, err
 	}
 	defer statement.Close()
 
-	existingByName, err := catalogRoutesByName(ctx, c.db, item.DatabaseID)
+	existingByName, err := catalogRoutesByName(ctx, c.db, c.rebind, item.DatabaseID)
 	if err != nil {
 		return workspaceSummary{}, err
 	}
-	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, existingByName, item)
+	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, c.rebind, existingByName, item)
 }
 
 func (c *workspaceCatalog) DeleteWorkspace(ctx context.Context, databaseID, workspaceID string) error {
-	_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(workspaceID))
+	_, err := c.execContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(workspaceID))
 	return err
 }
 
 func (c *workspaceCatalog) DeleteWorkspaceByName(ctx context.Context, databaseID, name string) error {
-	_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND name = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(name))
+	_, err := c.execContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND name = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(name))
 	return err
 }
 
 func (c *workspaceCatalog) DeleteDatabaseWorkspaces(ctx context.Context, databaseID string) error {
-	_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ?`, strings.TrimSpace(databaseID))
+	_, err := c.execContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ?`, strings.TrimSpace(databaseID))
 	return err
 }
 
 func (c *workspaceCatalog) PruneDatabases(ctx context.Context, keep []string) error {
 	if len(keep) == 0 {
-		_, err := c.db.ExecContext(ctx, `DELETE FROM workspace_catalog`)
+		_, err := c.execContext(ctx, `DELETE FROM workspace_catalog`)
 		return err
 	}
 
@@ -214,12 +229,12 @@ func (c *workspaceCatalog) PruneDatabases(ctx context.Context, keep []string) er
 	}
 
 	query := `DELETE FROM workspace_catalog WHERE database_id NOT IN (` + strings.Join(placeholders, ", ") + `)`
-	_, err := c.db.ExecContext(ctx, query, args...)
+	_, err := c.execContext(ctx, query, args...)
 	return err
 }
 
 func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSummary, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT
+	rows, err := c.queryContext(ctx, `SELECT
 			workspace_id,
 			name,
 			cloud_account,
@@ -272,7 +287,7 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 }
 
 func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace string) ([]workspaceCatalogRoute, error) {
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT database_id, workspace_id, name
 		 FROM workspace_catalog
@@ -298,7 +313,7 @@ func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace strin
 }
 
 func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, databaseID, workspace string) (workspaceCatalogRoute, error) {
-	rows, err := c.db.QueryContext(
+	rows, err := c.queryContext(
 		ctx,
 		`SELECT database_id, workspace_id, name
 		 FROM workspace_catalog
@@ -336,12 +351,12 @@ func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, datab
 
 func catalogRoutesByName(ctx context.Context, queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, databaseID string) (map[string]workspaceCatalogRoute, error) {
+}, rebind func(string) string, databaseID string) (map[string]workspaceCatalogRoute, error) {
 	rows, err := queryer.QueryContext(
 		ctx,
-		`SELECT database_id, workspace_id, name
+		rebind(`SELECT database_id, workspace_id, name
 		 FROM workspace_catalog
-		 WHERE database_id = ?`,
+		 WHERE database_id = ?`),
 		strings.TrimSpace(databaseID),
 	)
 	if err != nil {
@@ -368,6 +383,7 @@ func upsertCatalogWorkspaceSummary(
 	statement interface {
 		ExecContext(context.Context, ...any) (sql.Result, error)
 	},
+	rebind func(string) string,
 	existingByName map[string]workspaceCatalogRoute,
 	item workspaceSummary,
 ) (workspaceSummary, error) {
@@ -395,7 +411,7 @@ func upsertCatalogWorkspaceSummary(
 	if existing, ok := existingByName[item.Name]; ok && strings.TrimSpace(existing.WorkspaceID) != assignedID {
 		if _, err := execer.ExecContext(
 			ctx,
-			`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`,
+			rebind(`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`),
 			item.DatabaseID,
 			strings.TrimSpace(existing.WorkspaceID),
 		); err != nil {
@@ -433,12 +449,13 @@ func deleteCatalogDatabaseRowsNotInNames(
 	execer interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	},
+	rebind func(string) string,
 	databaseID string,
 	keepNames map[string]struct{},
 ) error {
 	databaseID = strings.TrimSpace(databaseID)
 	if len(keepNames) == 0 {
-		_, err := execer.ExecContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ?`, databaseID)
+		_, err := execer.ExecContext(ctx, rebind(`DELETE FROM workspace_catalog WHERE database_id = ?`), databaseID)
 		return err
 	}
 
@@ -450,7 +467,7 @@ func deleteCatalogDatabaseRowsNotInNames(
 		args = append(args, name)
 	}
 	query := `DELETE FROM workspace_catalog WHERE database_id = ? AND name NOT IN (` + strings.Join(placeholders, ", ") + `)`
-	_, err := execer.ExecContext(ctx, query, args...)
+	_, err := execer.ExecContext(ctx, rebind(query), args...)
 	return err
 }
 
@@ -463,8 +480,7 @@ func newOpaqueWorkspaceID() (string, error) {
 }
 
 func workspaceCatalogPath(configPathOverride string) string {
-	cfgPath := configPath(configPathOverride)
-	return filepath.Join(filepath.Dir(cfgPath), "afs.catalog.sqlite")
+	return catalogStorePath(configPathOverride)
 }
 
 func workspaceSummaryFromDetail(detail workspaceDetail) workspaceSummary {

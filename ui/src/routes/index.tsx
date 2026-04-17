@@ -162,12 +162,12 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
           <ProductName>Agent Filesystem</ProductName>
           <Headline>
             {hasDatabase
-              ? "Create your first workspace"
+              ? "Start with getting-started"
               : "Fast, durable filesystem workspaces for AI agents, backed by Redis"}
           </Headline>
           <Description>
             {hasDatabase
-              ? "Your database is connected. Now create a workspace — an isolated file tree an agent can read, write, and checkpoint."
+              ? "Your hosted database is connected. Create a starter workspace with sample files so you can explore AFS immediately."
               : "Give every AI agent a persistent, checkpointed workspace. Browse files, create recovery points, and track activity — all from one UI."}
           </Description>
         </EmptyStateContent>
@@ -183,7 +183,7 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
             <OnboardingCardTitle>{hasDatabase ? "Create a workspace" : "Quick Start"}</OnboardingCardTitle>
             <OnboardingCardDesc>
               {hasDatabase
-                ? "Create a workspace with sample files and start exploring — all in one click."
+                ? "Create the getting-started workspace with sample files and start exploring in one click."
                 : "Connect to local Redis, create a workspace with sample files, and start exploring — all in one click."}
             </OnboardingCardDesc>
             <CTAButton
@@ -191,7 +191,7 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
               onClick={handleQuickstart}
               disabled={quickstartMutation.isPending}
             >
-              {quickstartMutation.isPending ? "Setting up..." : "Create my first workspace"}
+              {quickstartMutation.isPending ? "Setting up..." : hasDatabase ? "Create getting-started" : "Create my first workspace"}
             </CTAButton>
             {quickstartMutation.isError && (
               <QuickstartError>
@@ -202,7 +202,7 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
             )}
             {hasDatabase && (
               <Link to="/workspaces">
-                <SecondaryButton size="large">Add empty workspace</SecondaryButton>
+                <SecondaryButton size="large">Create empty workspace instead</SecondaryButton>
               </Link>
             )}
             {!hasDatabase && (
