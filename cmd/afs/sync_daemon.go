@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -146,6 +148,10 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 	d.cancel = cancel
 
 	if !skipReconcile {
+		if err := d.validateInitialSyncSafety(dctx); err != nil {
+			cancel()
+			return err
+		}
 		if err := d.full.run(dctx, onProgress); err != nil {
 			cancel()
 			return fmt.Errorf("initial reconcile: %w", err)
@@ -263,4 +269,83 @@ func (d *syncDaemon) Run(ctx context.Context) error {
 	<-ctx.Done()
 	d.Stop()
 	return ctx.Err()
+}
+
+// validateInitialSyncSafety blocks the "merge a populated local folder into an
+// already-populated remote workspace" footgun on the very first sync, before we
+// have any persisted state to disambiguate intent.
+func (d *syncDaemon) validateInitialSyncSafety(ctx context.Context) error {
+	if d == nil || d.stateWriter == nil {
+		return nil
+	}
+	if snap := d.stateWriter.snapshot(); snap != nil && len(snap.Entries) > 0 {
+		return nil
+	}
+
+	localHasEntries, err := d.hasSyncableLocalEntries()
+	if err != nil {
+		return fmt.Errorf("check local sync root: %w", err)
+	}
+	if !localHasEntries {
+		return nil
+	}
+
+	remoteHasEntries, err := d.hasSyncableRemoteEntries(ctx)
+	if err != nil {
+		return fmt.Errorf("check remote workspace: %w", err)
+	}
+	if !remoteHasEntries {
+		return nil
+	}
+
+	return fmt.Errorf(
+		"refusing first sync for workspace %q: local path %q is already populated and the remote workspace is not empty\nUse an empty directory for `afs up`, or use `afs workspace clone %s <directory>` to download the existing workspace first",
+		d.cfg.Workspace,
+		d.cfg.LocalRoot,
+		d.cfg.Workspace,
+	)
+}
+
+func (d *syncDaemon) hasSyncableLocalEntries() (bool, error) {
+	entries, err := os.ReadDir(d.cfg.LocalRoot)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if d.ignoreEntry(entry.Name(), entry) {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (d *syncDaemon) hasSyncableRemoteEntries(ctx context.Context) (bool, error) {
+	entries, err := d.cfg.FS.LsLong(ctx, "/")
+	if err != nil {
+		if isClientNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if d.ignore == nil {
+			return true, nil
+		}
+		if d.ignore.shouldIgnore(entry.Name, entry.Type == "dir") {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (d *syncDaemon) ignoreEntry(name string, entry fs.DirEntry) bool {
+	if d.ignore == nil {
+		return false
+	}
+	return d.ignore.shouldIgnore(strings.TrimPrefix(filepath.ToSlash(name), "/"), entry.IsDir())
 }

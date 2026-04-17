@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/redis/agent-filesystem/mount/client"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -44,6 +47,35 @@ func TestSyncStartupDownload(t *testing.T) {
 	})
 	if got := env.readLocalFile(t, "remote.md"); got != "# remote" {
 		t.Fatalf("local content = %q, want %q", got, "# remote")
+	}
+}
+
+// Scenario 1c: the very first sync should refuse to merge a populated local
+// directory into an already-populated remote workspace with no saved sync
+// state. This catches accidental sync roots like ~/.codex.
+func TestSyncStartupRejectsAmbiguousMerge(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeLocalFile(t, "local-only.txt", "hello")
+	env.writeRemoteFile(t, "remote-only.txt", "world")
+
+	daemonClient := client.New(env.rdb, env.mountKey)
+	cfg := syncDaemonConfig{
+		Workspace:       env.workspace,
+		LocalRoot:       env.localRoot,
+		FS:              daemonClient,
+		Store:           env.store,
+		MaxFileBytes:    16 * 1024 * 1024,
+		WatcherDebounce: 20 * time.Millisecond,
+	}
+	d, err := newSyncDaemon(cfg)
+	if err != nil {
+		t.Fatalf("newSyncDaemon: %v", err)
+	}
+	if err := d.Start(context.Background()); err == nil {
+		t.Fatal("Start() unexpectedly succeeded for ambiguous first sync")
+	} else if !strings.Contains(err.Error(), "refusing first sync") {
+		t.Fatalf("Start() error = %q, want ambiguous first sync rejection", err)
 	}
 }
 
