@@ -94,6 +94,8 @@ type activityEvent struct {
 	ID            string `json:"id"`
 	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	DatabaseName  string `json:"database_name,omitempty"`
 	Actor         string `json:"actor"`
 	CreatedAt     string `json:"created_at"`
 	Detail        string `json:"detail"`
@@ -213,6 +215,10 @@ type workspaceSession struct {
 type workspaceSessionInfo struct {
 	SessionID       string `json:"session_id"`
 	Workspace       string `json:"workspace"`
+	WorkspaceID     string `json:"workspace_id,omitempty"`
+	WorkspaceName   string `json:"workspace_name,omitempty"`
+	DatabaseID      string `json:"database_id,omitempty"`
+	DatabaseName    string `json:"database_name,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`
 	Hostname        string `json:"hostname,omitempty"`

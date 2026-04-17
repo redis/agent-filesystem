@@ -7,10 +7,17 @@ import {
   PageStack,
 } from "../components/afs-kit";
 import { useDatabaseScope, useScopedActivity } from "../foundation/database-scope";
+import { activityQueryOptions } from "../foundation/hooks/use-afs";
+import { queryClient } from "../foundation/query-client";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import type { AFSActivityEvent } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/activity")({
+  loader: () =>
+    queryClient.ensureQueryData({
+      ...activityQueryOptions(null, 50),
+      revalidateIfStale: true,
+    }),
   component: ActivityPage,
 });
 

@@ -20,6 +20,8 @@ import {
 } from "../components/doc-kit";
 import { getControlPlaneURL } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents } from "../foundation/database-scope";
+import { agentsQueryOptions } from "../foundation/hooks/use-afs";
+import { queryClient } from "../foundation/query-client";
 import { AgentsTable } from "../foundation/tables/agents-table";
 import type { AFSAgentSession } from "../foundation/types/afs";
 
@@ -30,6 +32,8 @@ const agentsSearchSchema = z.object({
 
 export const Route = createFileRoute("/agents")({
   validateSearch: agentsSearchSchema,
+  loader: () =>
+    queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
   component: AgentsPage,
 });
 

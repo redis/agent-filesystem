@@ -3,6 +3,7 @@ import { getDemoAFSClientForTesting } from "./afs";
 
 describe("afsApi", () => {
   const paymentsDatabaseId = "db-payments-portal";
+  const paymentsDatabaseName = "payments-portal-us-east-1";
   const afsApi = getDemoAFSClientForTesting();
 
   beforeEach(() => {
@@ -14,16 +15,16 @@ describe("afsApi", () => {
     const workspace = await afsApi.createWorkspace({
       name: "demo-space",
       description: "Testing workspace creation",
-      databaseId: "redis-agentfs-tests-us-test-1-0",
+      databaseId: paymentsDatabaseId,
       cloudAccount: "Redis Cloud / Tests",
-      databaseName: "agentfs-tests-us-test-1",
-      region: "us-test-1",
+      databaseName: paymentsDatabaseName,
+      region: "us-east-1",
       source: "blank",
     });
 
     expect(workspace.name).toBe("demo-space");
-    expect(workspace.databaseId).toBe("redis-agentfs-tests-us-test-1-0");
-    expect(workspace.databaseName).toBe("agentfs-tests-us-test-1");
+    expect(workspace.databaseId).toBe(paymentsDatabaseId);
+    expect(workspace.databaseName).toBe(paymentsDatabaseName);
     expect(workspace.savepoints).toHaveLength(1);
     expect(workspace.savepoints[0]?.name).toBe("initial");
   });

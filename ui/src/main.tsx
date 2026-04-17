@@ -11,25 +11,20 @@ import "./index.css";
 
 // Import the generated route tree
 import { routeTree } from "./routeTree.gen";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { AppErrorBoundary } from "./error-boundaries/app-error-boundary";
 import { DatabaseScopeProvider } from "./foundation/database-scope";
 import { ColorModeProvider } from "./foundation/theme-context";
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      refetchOnWindowFocus: false,
-      refetchIntervalInBackground: true,
-    },
-  },
-});
+import { queryClient } from "./foundation/query-client";
 
 // Create a new router instance
 const router = createRouter({
   routeTree,
   defaultErrorComponent: RouteErrorBoundary,
+  defaultPreload: "intent",
+  defaultPreloadDelay: 35,
+  defaultStaleTime: 15_000,
+  defaultPreloadStaleTime: 30_000,
   defaultOnCatch: (error, errorInfo) => {
     console.error("Unhandled route error", error, errorInfo);
   },

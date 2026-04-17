@@ -112,6 +112,8 @@ type HTTPActivity = {
   id: string;
   workspace_id?: string;
   workspace_name?: string;
+  database_id?: string;
+  database_name?: string;
   actor: string;
   created_at: string;
   detail: string;
@@ -159,6 +161,10 @@ type HTTPActivityList = {
 type HTTPWorkspaceSessionInfo = {
   session_id: string;
   workspace: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  database_id?: string;
+  database_name?: string;
   client_kind?: string;
   afs_version?: string;
   hostname?: string;
@@ -1140,8 +1146,8 @@ function mapActivity(
     id: input.id,
     workspaceId: input.workspace_id,
     workspaceName: input.workspace_name,
-    databaseId: database?.databaseId,
-    databaseName: database?.databaseName,
+    databaseId: input.database_id ?? database?.databaseId,
+    databaseName: input.database_name ?? database?.databaseName,
     actor: input.actor,
     createdAt: input.created_at,
     detail: input.detail,
@@ -1176,10 +1182,10 @@ function mapAgentSession(
 ): AFSAgentSession {
   return {
     sessionId: input.session_id,
-    workspaceId,
-    workspaceName,
-    databaseId,
-    databaseName,
+    workspaceId: input.workspace_id ?? workspaceId,
+    workspaceName: input.workspace_name ?? workspaceName,
+    databaseId: input.database_id ?? databaseId,
+    databaseName: input.database_name ?? databaseName,
     clientKind: input.client_kind ?? "",
     afsVersion: input.afs_version ?? "",
     hostname: input.hostname ?? "",
@@ -1357,26 +1363,20 @@ const httpAFSClient: AFSClient = {
   },
 
   async listAgents(databaseId = "") {
-    const workspaces = await httpAFSClient.listWorkspaceSummaries(databaseId);
-    const sessions = await Promise.allSettled(
-      workspaces.map(async (workspace) => {
-        const response = await requestJSON<HTTPWorkspaceSessionList>(
-          `${workspaceBasePath("", workspace.id)}/sessions`,
-        );
-        return response.items.map((item) =>
-          mapAgentSession(
-            item,
-            workspace.id,
-            workspace.name,
-            workspace.databaseId,
-            workspace.databaseName,
-          ),
-        );
-      }),
+    const response = await requestJSON<HTTPWorkspaceSessionList>(
+      databaseId === "" ? "/agents" : `/databases/${databaseId}/agents`,
     );
 
-    return sessions
-      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
+    return response.items
+      .map((item) =>
+        mapAgentSession(
+          item,
+          item.workspace_id ?? item.workspace,
+          item.workspace_name ?? item.workspace,
+          item.database_id ?? databaseId,
+          item.database_name,
+        ),
+      )
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
@@ -1450,25 +1450,8 @@ const httpAFSClient: AFSClient = {
       );
     }
 
-    const databases = await httpAFSClient.listDatabases();
-    const responses = await Promise.allSettled(
-      databases.map(async (database) => {
-        const response = await requestJSON<HTTPActivityList>(
-          `/databases/${database.id}/activity?limit=${limit}`,
-        );
-        return response.items.map((item) =>
-          mapActivity(item, {
-            databaseId: database.id,
-            databaseName: database.name,
-          }),
-        );
-      }),
-    );
-
-    return responses
-      .flatMap((result) => (result.status === "fulfilled" ? result.value : []))
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-      .slice(0, limit);
+    const response = await requestJSON<HTTPActivityList>(`/activity?limit=${limit}`);
+    return response.items.map((item) => mapActivity(item));
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {

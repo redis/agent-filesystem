@@ -30,6 +30,7 @@ type Props = {
   toolbarAction?: ReactNode;
   connectedAgentsByWorkspace?: Record<string, number>;
   onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  onPreviewWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: StudioTab) => void;
   onEditWorkspace: (workspace: AFSWorkspaceSummary) => void;
   onDeleteWorkspace: (workspace: AFSWorkspaceSummary) => void;
@@ -61,6 +62,7 @@ export function WorkspaceTable({
   toolbarAction,
   connectedAgentsByWorkspace = {},
   onOpenWorkspace,
+  onPreviewWorkspace,
   onOpenWorkspaceTab,
   onEditWorkspace,
   onDeleteWorkspace,
@@ -113,6 +115,8 @@ export function WorkspaceTable({
                 event.stopPropagation();
                 onOpenWorkspace(row.original);
               }}
+              onMouseEnter={() => onPreviewWorkspace?.(row.original)}
+              onFocus={() => onPreviewWorkspace?.(row.original)}
             >
               {row.original.name}
             </S.WorkspaceNameButton>
@@ -297,6 +301,8 @@ export function WorkspaceTable({
             return (
               <S.WorkspaceCard
                 key={ws.id}
+                onMouseEnter={() => onPreviewWorkspace?.(ws)}
+                onFocus={() => onPreviewWorkspace?.(ws)}
                 onClick={() => onOpenWorkspace(ws)}
               >
                 <S.CardTopRow>

@@ -24,8 +24,24 @@ import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { LiveTopologyCard } from "../components/live-topology-card";
 import { formatBytes } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
+import { queryClient } from "../foundation/query-client";
+import {
+  agentsQueryOptions,
+  databasesQueryOptions,
+  workspaceSummariesQueryOptions,
+} from "../foundation/hooks/use-afs";
 
 export const Route = createFileRoute("/")({
+  loader: async () => {
+    await Promise.all([
+      queryClient.ensureQueryData({ ...databasesQueryOptions(), revalidateIfStale: true }),
+      queryClient.ensureQueryData({
+        ...workspaceSummariesQueryOptions(null),
+        revalidateIfStale: true,
+      }),
+      queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
+    ]);
+  },
   component: OverviewPage,
 });
 

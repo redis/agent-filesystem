@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useRef, useState } from "react";
 import styled from "styled-components";
@@ -18,11 +18,13 @@ import {
   TextInput,
 } from "../components/afs-kit";
 import {
+  agentsQueryOptions,
   useCreateWorkspaceMutation,
   useDeleteWorkspaceMutation,
   useUpdateWorkspaceMutation,
   useImportLocalMutation,
   useWorkspace,
+  workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
 import {
   type AFSDatabaseScopeRecord,
@@ -30,10 +32,20 @@ import {
   useScopedAgents,
   useScopedWorkspaceSummaries,
 } from "../foundation/database-scope";
+import { queryClient } from "../foundation/query-client";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
 import type { AFSWorkspaceSummary } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/workspaces")({
+  loader: async () => {
+    await Promise.all([
+      queryClient.ensureQueryData({
+        ...workspaceSummariesQueryOptions(null),
+        revalidateIfStale: true,
+      }),
+      queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
+    ]);
+  },
   component: WorkspacesPage,
 });
 
@@ -223,6 +235,7 @@ function workspaceRowKey(workspaceId: string) {
 function WorkspacesPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const router = useRouter();
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
   const { databases } = useDatabaseScope();
@@ -350,6 +363,13 @@ function WorkspacesPage() {
     });
   }
 
+  function previewWorkspace(workspace: AFSWorkspaceSummary) {
+    void router.preloadRoute({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: workspace.id },
+    });
+  }
+
   function openWorkspaceTab(workspace: AFSWorkspaceSummary, tab: "browse" | "checkpoints" | "activity" | "settings") {
     void navigate({
       to: "/workspaces/$workspaceId",
@@ -400,6 +420,7 @@ function WorkspacesPage() {
           </Button>
         )}
         onOpenWorkspace={openWorkspace}
+        onPreviewWorkspace={previewWorkspace}
         onOpenWorkspaceTab={openWorkspaceTab}
         onEditWorkspace={openEditDialog}
         onDeleteWorkspace={deleteSelectedWorkspace}

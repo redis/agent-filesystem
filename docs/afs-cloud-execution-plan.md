@@ -37,9 +37,28 @@ workflow yet.
 - sync mode ships before mount mode in real cloud mode.
 - browser login for humans and short-lived workspace session bundles for local
   clients are separate layers.
+- the web UI must participate in the same hosted identity system as the CLI;
+  browser sign-in is a release requirement, not a later enhancement
 - Redis Cloud browser-assisted linking is not required for the first hosted
   release.
 - "external reachable database" ships before "external hybrid connector".
+
+## Deployment And Tenancy Guardrails
+
+- `self-hosted` and `cloud` should remain product modes of the same
+  control-plane codebase and binary, with mode-specific bootstrap behavior,
+  auth expectations, route exposure, and secret-store requirements
+- the browser/admin and client/session surfaces may share one process or binary
+  initially, but the implementation should preserve the option to split them
+  into separate deployments or at least separate middleware stacks later
+- the hosted `cloud` product should be treated as multi-tenant from the start:
+  users belong to organizations, and workspaces, sessions, database bindings,
+  and secrets are organization-scoped resources
+- the first `self-hosted` rollout should remain single-tenant by default, using
+  one implicit organization for the deployment rather than leaving org fields
+  blank
+- service-layer authorization must enforce tenant boundaries; route middleware
+  alone is not sufficient
 
 ## Current Blocking Gaps
 
@@ -77,10 +96,20 @@ Scope:
 
 - add control-plane user, organization, membership, and session models
 - add auth middleware for browser/admin and client/session surfaces
+- add a principal model that flows through control-plane service methods
+- add service-layer authorization rules for workspaces, database bindings, and
+  session issuance
+- add browser session handling for the web UI
 - implement Authorization Code + PKCE for `afs auth login`
 - add CLI token storage and profile selection
+- keep tokens out of `afs.config.json`; use OS keychain/keyring with an
+  encrypted-file fallback stored separately from config
 - add `afs auth login`, `afs auth logout`, and `afs auth status`
 - add `cloudBackend` bootstrap that requires authenticated control-plane access
+- define the initial tenant model:
+  - `cloud` is multi-tenant by organization
+  - `self-hosted` defaults to one implicit organization per deployment
+  - no long-term design should rely on blank `organization_id` values
 
 Likely code areas:
 
@@ -94,6 +123,8 @@ Acceptance:
 - the browser UI can render signed-in state and current account context
 - authenticated requests succeed against hosted-only routes
 - unauthenticated requests fail cleanly on protected routes
+- tenant ownership checks are enforced in service methods, not only in HTTP
+  middleware
 
 Suggested validation:
 
@@ -113,8 +144,20 @@ Scope:
 - make workspace selection/use persist hosted workspace ids end to end
 - add auth-aware `POST /v1/workspaces/{workspace_id}/sessions`
 - issue short-lived Redis credentials or brokered session tokens
+- define the child-daemon auth model for hosted mode:
+  - how the daemon receives its bootstrap/session material
+  - how it renews long-running access without interactive browser login
+  - how renewal failure and session expiry are surfaced locally
 - add renew/expiry handling for long-running sync daemons
 - remove the need for long-lived Redis credentials in managed local config
+
+Phase-order note:
+
+- full cloud session issuance for managed and external database bindings depends
+  on the secret-store and binding model in Phase C
+- Phase B can still begin earlier if the first hosted runtime is explicitly
+  scoped to a temporary single AFS-managed backing Redis environment, rather
+  than per-binding credential brokerage
 
 Likely code areas:
 
@@ -131,6 +174,7 @@ Acceptance:
 - sync daemon heartbeats and renews through the hosted control plane
 - local config no longer requires durable Redis credentials for hosted mode
 - session expiry and reconnect behavior are covered by tests
+- daemon renewal is non-interactive and does not depend on browser cookies
 
 Suggested validation:
 
@@ -272,6 +316,11 @@ These are the highest-value decisions to settle before implementation starts:
 4. Do we want one managed Redis database per workspace for the first release?
 5. Do we want to ship external reachable databases in the same release as
    managed databases, or one release later?
+6. Do we want `self-hosted` auth to stay optional single-tenant at first, or
+   should self-hosted deployments be able to enable the full multi-user/org
+   model immediately?
+7. Which settings belong at the user, organization, and workspace levels for
+   the first hosted release?
 
 ## Recommended Immediate Next Step
 
@@ -282,8 +331,10 @@ to write should be the auth-and-session slice:
 - browser session model
 - CLI PKCE flow
 - token storage/profile shape in `cmd/afs`
+- service-layer principal propagation and authorization rules
 - protected workspace-session routes
 - cloud session bundle schema and renewal rules
+- self-hosted implicit-organization behavior for the same control-plane binary
 
 That is the narrowest slice that converts today's self-hosted groundwork into
 the beginning of a real hosted product.

@@ -687,6 +687,84 @@ func (m *DatabaseManager) ListResolvedWorkspaceSessions(ctx context.Context, wor
 	return service.ListWorkspaceSessions(ctx, route.Name)
 }
 
+func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID string) (workspaceSessionListResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.catalog == nil {
+		return workspaceSessionListResponse{Items: []workspaceSessionInfo{}}, nil
+	}
+
+	records, err := m.catalog.ListSessions(ctx, databaseID)
+	if err != nil {
+		return workspaceSessionListResponse{}, err
+	}
+
+	items := make([]workspaceSessionInfo, 0, len(records))
+	for _, record := range records {
+		databaseName := record.DatabaseID
+		if profile, ok := m.profiles[record.DatabaseID]; ok && strings.TrimSpace(profile.Name) != "" {
+			databaseName = profile.Name
+		}
+		items = append(items, workspaceSessionInfo{
+			SessionID:       record.SessionID,
+			Workspace:       defaultString(record.WorkspaceName, record.WorkspaceID),
+			WorkspaceID:     record.WorkspaceID,
+			WorkspaceName:   record.WorkspaceName,
+			DatabaseID:      record.DatabaseID,
+			DatabaseName:    databaseName,
+			ClientKind:      record.ClientKind,
+			AFSVersion:      record.AFSVersion,
+			Hostname:        record.Hostname,
+			OperatingSystem: record.OperatingSystem,
+			LocalPath:       record.LocalPath,
+			Readonly:        record.Readonly,
+			State:           record.State,
+			StartedAt:       record.StartedAt,
+			LastSeenAt:      record.LastSeenAt,
+			LeaseExpiresAt:  record.LeaseExpiresAt,
+		})
+	}
+
+	return workspaceSessionListResponse{Items: items}, nil
+}
+
+func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activityListResponse, error) {
+	m.mu.Lock()
+	order := append([]string(nil), m.order...)
+	profiles := make(map[string]databaseProfile, len(m.profiles))
+	for id, profile := range m.profiles {
+		profiles[id] = profile
+	}
+	m.mu.Unlock()
+
+	items := make([]activityEvent, 0, limit)
+	for _, databaseID := range order {
+		service, _, err := m.serviceFor(ctx, databaseID)
+		if err != nil {
+			continue
+		}
+		response, err := service.ListGlobalActivity(ctx, limit)
+		if err != nil {
+			continue
+		}
+		for _, item := range response.Items {
+			item.DatabaseID = databaseID
+			item.DatabaseName = profiles[databaseID].Name
+			items = append(items, item)
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].CreatedAt > items[j].CreatedAt
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	return activityListResponse{Items: items}, nil
+}
+
 func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) (workspaceSessionInfo, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {

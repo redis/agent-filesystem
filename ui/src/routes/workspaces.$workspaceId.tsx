@@ -17,8 +17,10 @@ import { AgentConnectedDialog } from "../components/agent-connected-dialog";
 import {
   useDeleteWorkspaceMutation,
   useWorkspace,
+  workspaceQueryOptions,
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
+import { queryClient } from "../foundation/query-client";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
 import type { AFSAgentSession, AFSWorkspaceView } from "../foundation/types/afs";
@@ -34,6 +36,11 @@ const workspaceStudioSearchSchema = z.object({
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   validateSearch: workspaceStudioSearchSchema,
+  loader: ({ params }) =>
+    queryClient.ensureQueryData({
+      ...workspaceQueryOptions(null, params.workspaceId),
+      revalidateIfStale: true,
+    }),
   component: WorkspaceStudioPage,
 });
 

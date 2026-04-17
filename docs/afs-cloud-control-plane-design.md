@@ -134,6 +134,11 @@ Private deployment of the AFS API.
 - CLI talks to an HTTP control plane
 - the control plane manages workspace metadata and session bootstrap
 - the actual data plane may still be one or more Redis instances owned by that deployment
+- the first self-hosted shape should stay single-tenant by default
+- represent that deployment as one implicit organization rather than leaving
+  org fields blank
+- self-hosted auth may remain optional at first, but the data model should stay
+  compatible with later multi-user enablement
 
 ### `cloud`
 
@@ -143,6 +148,29 @@ Hosted AFS product.
 - the website owns workspace lifecycle and policy
 - the cloud service provisions managed databases or connects to user-supplied ones
 - local `afs` clients receive cloud-issued session bundles for workspace access
+- cloud is multi-tenant from the start, with organizations as the primary
+  tenant boundary
+
+### Deployment shape
+
+- `self-hosted` and `cloud` should remain product modes of the same
+  control-plane implementation and binary
+- mode should change bootstrap behavior, auth requirements, route exposure,
+  secret-store requirements, and operational defaults
+- this does not require one fixed deployment topology forever; browser/admin
+  and client/session surfaces may still be split into separate deployments later
+
+### Tenancy model
+
+The first hosted design should assume:
+
+- organizations are the primary tenant boundary
+- users belong to one or more organizations through membership records
+- workspaces, database bindings, managed-database jobs, and provider secrets are
+  organization-scoped resources
+- sessions carry both `organization_id` and `user_id`
+- user settings, organization settings, and workspace settings should stay
+  distinct in the model even if the first release implements only a small set
 
 ## Target Architecture
 
@@ -180,6 +208,8 @@ In production we should preserve the option to split them into separate deployme
 - workspace connection instructions
 - client session issuance, heartbeat tracking, and presence
 - activity and audit aggregation
+- service-layer authorization for every tenant-scoped operation, not only HTTP
+  middleware checks
 
 ### Control plane catalog
 
@@ -204,7 +234,8 @@ Recommended follow-up shape:
 
 - introduce an opaque stable `workspace_id` distinct from display name
 - treat workspace name as user-facing metadata, not routing identity
-- store database bindings, workspace ids, and session ownership/index metadata in the control-plane catalog
+- store organization ids, database bindings, workspace ids, and session
+  ownership/index metadata in the control-plane catalog
 - keep Redis responsible for workspace contents and per-workspace operational state
 
 ### Data plane responsibilities
@@ -278,6 +309,8 @@ Notes:
 - the website may use a gateway or same-origin session layer for browser cookies
 - that browser-session mechanism should stay a web concern, not the CLI transport
 - the CLI should remain PKCE-based even if the website uses cookie-backed sessions internally
+- browser auth for the web UI is a first-release requirement for AFS Cloud, not
+  a follow-on enhancement
 
 CLI commands:
 
@@ -289,6 +322,12 @@ Local storage:
 
 - config file stores profile metadata only
 - tokens go into keychain/keyring with encrypted-file fallback
+
+Authorization rule:
+
+- authenticated routes are not enough by themselves; the authenticated
+  principal should flow through control-plane service methods so ownership and
+  policy checks are enforced below the HTTP layer
 
 ### 2. Local client auth to a workspace
 
@@ -323,6 +362,16 @@ This is the main security boundary for cloud mode.
 The daemon-facing session routes should stay narrow and separate from browser/admin concerns.
 
 They should not depend on browser cookies.
+
+Daemon lifecycle requirements:
+
+- the parent CLI may hand the child a short-lived local bootstrap file or
+  equivalent handoff, but the daemon must not require interactive browser
+  login after startup
+- long-running daemons need a non-interactive renewal path through the control
+  plane
+- renewal failure, token/session expiry, and forced invalidation should have
+  explicit local behavior and user-visible errors
 
 ### 3. AFS Cloud auth to Redis Cloud APIs
 

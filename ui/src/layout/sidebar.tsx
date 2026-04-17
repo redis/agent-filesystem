@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "@tanstack/react-router";
+import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { SideBar } from "@redis-ui/components";
 import {
   DoubleChevronLeftIcon,
@@ -35,6 +35,7 @@ const ALWAYS_ENABLED_PATHS = new Set(["/", "/docs", "/agent-guide", "/downloads"
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const router = useRouter();
   const { colorMode, toggleColorMode } = useColorMode();
   const { databases, isLoading } = useDatabaseScope();
 
@@ -58,6 +59,9 @@ export function AppSidebar() {
   }, []);
 
   const handleNavigate = (path: string) => void navigate({ to: path });
+  const handlePrefetch = (path: string) => {
+    void router.preloadRoute({ to: path });
+  };
 
   const renderRouteItem = (item: NavigationItem) => {
     const disabled = isEmpty && !ALWAYS_ENABLED_PATHS.has(item.path);
@@ -69,6 +73,8 @@ export function AppSidebar() {
             text: disabled ? `${item.label} (add a database first)` : item.label,
             placement: "right",
           }}
+          onMouseEnter={disabled ? undefined : () => handlePrefetch(item.path)}
+          onFocus={disabled ? undefined : () => handlePrefetch(item.path)}
           onClick={disabled ? undefined : () => handleNavigate(item.path)}
         >
           <SideBar.Item.Icon icon={item.icon} aria-label={item.label} />

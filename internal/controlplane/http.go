@@ -191,6 +191,37 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		writeJSON(w, http.StatusCreated, response)
 	})
 
+	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListAgentSessions(r.Context(), "")
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/activity", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 50)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListAllActivity(r.Context(), limit)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -324,6 +355,17 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 				return
 			}
 			response, err := manager.ListGlobalActivity(r.Context(), databaseID, limit)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case rest == "agents":
+			if r.Method != http.MethodGet {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			response, err := manager.ListAgentSessions(r.Context(), databaseID)
 			if err != nil {
 				writeError(w, err)
 				return

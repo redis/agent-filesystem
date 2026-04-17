@@ -18,7 +18,14 @@ import type {
   ImportLocalInput,
 } from "../types/afs";
 
-const afsKeys = {
+const LIVE_QUERY_STALE_MS = 10_000;
+const LIVE_QUERY_GC_MS = 10 * 60 * 1000;
+const AGENT_QUERY_STALE_MS = 5_000;
+const AGENT_QUERY_GC_MS = 5 * 60 * 1000;
+const FILESYSTEM_QUERY_STALE_MS = 30_000;
+const FILESYSTEM_QUERY_GC_MS = 5 * 60 * 1000;
+
+export const afsKeys = {
   all: ["afs"] as const,
   databases: () => [...afsKeys.all, "databases"] as const,
   workspaceSummaries: (databaseId: string | null) =>
@@ -54,72 +61,124 @@ const afsKeys = {
     ] as const,
 };
 
+export function databasesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.databases(),
+    queryFn: () => afsApi.listDatabases(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function workspaceSummariesQueryOptions(databaseId: string | null) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceSummaries(databaseId),
+    queryFn: () => afsApi.listWorkspaceSummaries(databaseId ?? ""),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function workspaceQueryOptions(databaseId: string | null, workspaceId: string) {
+  return queryOptions({
+    queryKey: afsKeys.workspace(databaseId, workspaceId),
+    queryFn: () => afsApi.getWorkspace(databaseId ?? "", workspaceId),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function agentsQueryOptions(databaseId: string | null) {
+  return queryOptions({
+    queryKey: afsKeys.agents(databaseId),
+    queryFn: () => afsApi.listAgents(databaseId ?? ""),
+    staleTime: AGENT_QUERY_STALE_MS,
+    gcTime: AGENT_QUERY_GC_MS,
+  });
+}
+
+export function activityQueryOptions(databaseId: string | null, limit: number) {
+  return queryOptions({
+    queryKey: afsKeys.activity(databaseId, limit),
+    queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function workspaceTreeQueryOptions(input: GetWorkspaceTreeInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceTree(input),
+    queryFn: () => afsApi.getWorkspaceTree(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceFile(input),
+    queryFn: () => afsApi.getWorkspaceFileContent(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
 export function useDatabases() {
-  return useQuery(
-    queryOptions({
-      queryKey: afsKeys.databases(),
-      queryFn: () => afsApi.listDatabases(),
-    }),
-  );
+  return useQuery(databasesQueryOptions());
 }
 
 export function useWorkspaceSummaries(databaseId: string | null, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.workspaceSummaries(databaseId),
-      queryFn: () => afsApi.listWorkspaceSummaries(databaseId ?? ""),
+    {
+      ...workspaceSummariesQueryOptions(databaseId),
       enabled,
-    }),
+    },
   );
 }
 
 export function useWorkspace(databaseId: string | null, workspaceId: string, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.workspace(databaseId, workspaceId),
-      queryFn: () => afsApi.getWorkspace(databaseId ?? "", workspaceId),
+    {
+      ...workspaceQueryOptions(databaseId, workspaceId),
       enabled: enabled && workspaceId !== "",
-    }),
+    },
   );
 }
 
 export function useAgents(databaseId: string | null, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.agents(databaseId),
-      queryFn: () => afsApi.listAgents(databaseId ?? ""),
+    {
+      ...agentsQueryOptions(databaseId),
       enabled,
-    }),
+    },
   );
 }
 
 export function useActivity(databaseId: string | null, limit = 50, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.activity(databaseId, limit),
-      queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
+    {
+      ...activityQueryOptions(databaseId, limit),
       enabled,
-    }),
+    },
   );
 }
 
 export function useWorkspaceTree(input: GetWorkspaceTreeInput, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.workspaceTree(input),
-      queryFn: () => afsApi.getWorkspaceTree(input),
+    {
+      ...workspaceTreeQueryOptions(input),
       enabled: enabled && input.workspaceId !== "",
-    }),
+    },
   );
 }
 
 export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, enabled = true) {
   return useQuery(
-    queryOptions({
-      queryKey: afsKeys.workspaceFile(input),
-      queryFn: () => afsApi.getWorkspaceFileContent(input),
+    {
+      ...workspaceFileContentQueryOptions(input),
       enabled: enabled && input.workspaceId !== "",
-    }),
+    },
   );
 }
 
