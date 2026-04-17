@@ -192,16 +192,65 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListAllWorkspaceSummaries(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPost:
+			var input CreateWorkspaceRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.CreateResolvedWorkspace(r.Context(), input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	})
+
+	mux.HandleFunc("/v1/workspaces:import", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			return
 		}
-		response, err := manager.ListAllWorkspaceSummaries(r.Context())
+		var input ImportWorkspaceRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		response, err := manager.ImportResolvedWorkspace(r.Context(), input)
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, response)
+		writeJSON(w, http.StatusCreated, response)
+	})
+
+	mux.HandleFunc("/v1/workspaces:import-local", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input ImportLocalRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("invalid request body: %w", err))
+			return
+		}
+		response, err := manager.ImportResolvedLocal(r.Context(), input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
 	})
 
 	mux.HandleFunc("/v1/workspaces/", func(w http.ResponseWriter, r *http.Request) {
@@ -253,6 +302,17 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 		}
 
 		switch {
+		case rest == "default":
+			if r.Method != http.MethodPost {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			response, err := manager.SetDefaultDatabase(r.Context(), databaseID)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
 		case rest == "activity":
 			if r.Method != http.MethodGet {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -1072,6 +1132,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusInternalServerError
 	case errors.Is(err, os.ErrNotExist):
 		status = http.StatusNotFound
+	case errors.Is(err, ErrAmbiguousDatabase):
+		status = http.StatusBadRequest
 	case errors.Is(err, ErrAmbiguousWorkspace):
 		status = http.StatusBadRequest
 	case errors.Is(err, ErrWorkspaceConflict):

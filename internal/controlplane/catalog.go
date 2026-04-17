@@ -114,6 +114,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			redis_password TEXT NOT NULL DEFAULT '',
 			redis_db INTEGER NOT NULL DEFAULT 0,
 			redis_tls INTEGER NOT NULL DEFAULT 0,
+			is_default INTEGER NOT NULL DEFAULT 0,
 			order_index INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_database_registry_order ON database_registry(order_index ASC)`,
@@ -122,6 +123,9 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		if _, err := c.db.ExecContext(ctx, statement); err != nil {
 			return err
 		}
+	}
+	if _, err := c.db.ExecContext(ctx, `ALTER TABLE database_registry ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+		return err
 	}
 	return nil
 }

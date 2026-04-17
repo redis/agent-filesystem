@@ -6,6 +6,7 @@ import {
   useDatabases,
   useDeleteDatabaseMutation,
   useSaveDatabaseMutation,
+  useSetDefaultDatabaseMutation,
   useActivity,
   useAgents,
   useWorkspaceSummaries,
@@ -24,6 +25,7 @@ export type AFSDatabaseScopeRecord = {
   username: string;
   password: string;
   useTLS: boolean;
+  isDefault: boolean;
   workspaceCount: number;
   activeSessionCount: number;
   isHealthy: boolean;
@@ -53,6 +55,7 @@ type DatabaseScopeContextValue = {
   isLoading: boolean;
   errorMessage: string | null;
   saveDatabase: (input: SaveDatabaseInput) => Promise<void>;
+  setDefaultDatabase: (databaseId: string) => Promise<void>;
   removeDatabase: (databaseId: string) => Promise<void>;
   reconcileCatalog: () => Promise<void>;
 };
@@ -88,6 +91,7 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     username: input.redisUsername,
     password: input.redisPassword,
     useTLS: input.redisTLS,
+    isDefault: input.isDefault,
     workspaceCount: input.workspaceCount,
     activeSessionCount: input.activeSessionCount,
     isHealthy: !input.connectionError,
@@ -104,6 +108,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const queryClient = useQueryClient();
   const databasesQuery = useDatabases();
   const saveDatabaseMutation = useSaveDatabaseMutation();
+  const setDefaultDatabaseMutation = useSetDefaultDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
   const [legacyMigrated, setLegacyMigrated] = useState(clientMode !== "http");
 
@@ -180,6 +185,9 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
       saveDatabase: async (input: SaveDatabaseInput) => {
         await saveDatabaseMutation.mutateAsync(input);
       },
+      setDefaultDatabase: async (databaseId: string) => {
+        await setDefaultDatabaseMutation.mutateAsync(databaseId);
+      },
       removeDatabase: async (databaseId: string) => {
         await deleteDatabaseMutation.mutateAsync(databaseId);
       },
@@ -199,6 +207,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
       deleteDatabaseMutation,
       queryClient,
       saveDatabaseMutation,
+      setDefaultDatabaseMutation,
     ],
   );
 

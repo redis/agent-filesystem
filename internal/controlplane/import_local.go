@@ -13,6 +13,7 @@ import (
 
 // ImportLocalRequest describes a local directory to import as a workspace.
 type ImportLocalRequest struct {
+	DatabaseID  string `json:"database_id,omitempty"`
 	Name        string `json:"name"`
 	Path        string `json:"path"`
 	Description string `json:"description"`
@@ -154,6 +155,14 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 	}, nil
 }
 
+func (m *DatabaseManager) ImportResolvedLocal(ctx context.Context, input ImportLocalRequest) (ImportLocalResponse, error) {
+	profile, err := m.resolveTargetDatabase(ctx, input.DatabaseID)
+	if err != nil {
+		return ImportLocalResponse{}, err
+	}
+	return m.ImportLocal(ctx, profile.ID, input)
+}
+
 // buildManifestFromDirectory walks a local directory and builds a Manifest.
 // For simplicity and safety via the web UI, it inlines all file content and
 // skips files larger than 10MB and common non-essential directories.
@@ -175,15 +184,15 @@ func buildManifestFromDirectory(root, workspace string, now time.Time) (Manifest
 	dirCount++
 
 	skipDirs := map[string]bool{
-		".git":         true,
-		"node_modules": true,
-		".afs":         true,
-		"__pycache__":  true,
-		".tox":         true,
+		".git":          true,
+		"node_modules":  true,
+		".afs":          true,
+		"__pycache__":   true,
+		".tox":          true,
 		".pytest_cache": true,
-		"vendor":       true,
-		".venv":        true,
-		"venv":         true,
+		"vendor":        true,
+		".venv":         true,
+		"venv":          true,
 	}
 
 	err := filepath.WalkDir(root, func(absPath string, d fs.DirEntry, walkErr error) error {

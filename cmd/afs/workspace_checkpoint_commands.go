@@ -82,16 +82,42 @@ func cmdWorkspaceCreate(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceCreateUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 3 {
+	parsed, err := parseWorkspaceCreateArgs(args[2:])
+	if err != nil {
+		return err
+	}
+	if len(parsed.positionals) != 1 {
 		return fmt.Errorf("%s", workspaceCreateUsageText(filepath.Base(os.Args[0])))
 	}
 
-	workspace := args[2]
+	workspace := parsed.positionals[0]
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return err
 	}
 
-	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	cfg, err := loadAFSConfig()
+	if err != nil {
+		return err
+	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return err
+	}
+	if productMode == productModeSelfHosted {
+		client, _, err := newHTTPControlPlaneClient(context.Background(), cfg)
+		if err != nil {
+			return err
+		}
+		database, err := resolveManagedDatabaseForWrite(context.Background(), cfg, client, parsed.database, "workspace create")
+		if err != nil {
+			return err
+		}
+		cfg.DatabaseID = database.ID
+	} else if strings.TrimSpace(parsed.database) != "" {
+		return fmt.Errorf("--database is only supported in control plane mode")
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlaneForConfig(context.Background(), cfg)
 	if err != nil {
 		return err
 	}
@@ -120,6 +146,33 @@ func cmdWorkspaceCreate(args []string) error {
 		{Label: "next", Value: next},
 	})
 	return nil
+}
+
+type workspaceCreateArgs struct {
+	positionals []string
+	database    string
+}
+
+func parseWorkspaceCreateArgs(args []string) (workspaceCreateArgs, error) {
+	var parsed workspaceCreateArgs
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+		switch {
+		case arg == "--database":
+			if index+1 >= len(args) {
+				return parsed, fmt.Errorf("missing value for %q", arg)
+			}
+			index++
+			parsed.database = strings.TrimSpace(args[index])
+		case strings.HasPrefix(arg, "--database="):
+			parsed.database = strings.TrimSpace(strings.TrimPrefix(arg, "--database="))
+		case strings.HasPrefix(arg, "--"):
+			return parsed, fmt.Errorf("unknown flag %q", arg)
+		default:
+			parsed.positionals = append(parsed.positionals, arg)
+		}
+	}
+	return parsed, nil
 }
 
 func createEmptyWorkspace(ctx context.Context, cfg config, store *afsStore, workspace string) error {
@@ -154,43 +207,144 @@ func cmdWorkspaceList(args []string) error {
 		return err
 	}
 
-	nameWidth := 0
-	for _, meta := range workspaces.Items {
-		if w := runeWidth(workspaceListName(meta.Name, workspaceListSelected(cfg, meta))); w > nameWidth {
-			nameWidth = w
-		}
-	}
-
-	rows := make([]boxRow, 0, len(workspaces.Items))
-	for _, meta := range workspaces.Items {
-		value := workspaceListLine(meta.Name, checkpointCountLabel(meta.CheckpointCount), formatDisplayTimestamp(meta.UpdatedAt), workspaceListSelected(cfg, meta), nameWidth)
-		rows = append(rows, boxRow{
-			Value: value,
-		})
-	}
-	if len(rows) == 0 {
+	rows := make([]boxRow, 0, len(workspaces.Items)+1)
+	if len(workspaces.Items) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No workspaces found")})
+	} else {
+		layout := newWorkspaceListLayout(cfg, workspaces.Items)
+		rows = append(rows, boxRow{Value: layout.header()})
+		for _, meta := range workspaces.Items {
+			rows = append(rows, boxRow{Value: layout.row(meta, workspaceListSelected(cfg, meta))})
+		}
 	}
 	printBox(clr(ansiBold, "workspaces on "+configRemoteLabel(cfg)), rows)
 	return nil
 }
 
-func workspaceListName(name string, selected bool) string {
-	prefix := "  "
-	if selected {
-		prefix = clr(ansiBGreen, "✓") + " "
-	}
-	return prefix + clr(ansiBold+ansiWhite, name)
+const workspaceListColumnSep = "  "
+
+func workspaceListName(name string) string {
+	return clr(ansiBold+ansiWhite, name)
 }
 
-func workspaceListLine(name, checkpointLabel, updated string, selected bool, nameWidth int) string {
-	namePart := padVisibleText(workspaceListName(name, selected), nameWidth)
-	details := clr(ansiDim, checkpointLabel+" · updated "+updated)
-	line := namePart + "   " + details
+func workspaceListMarker(selected bool) string {
 	if selected {
-		line += " " + clr(ansiBGreen, "<active>")
+		return clr(ansiBGreen, "✓")
 	}
-	return line
+	return " "
+}
+
+type workspaceListLayout struct {
+	markerWidth   int
+	nameWidth     int
+	databaseWidth int
+	idWidth       int
+	updatedWidth  int
+}
+
+func newWorkspaceListLayout(cfg config, items []workspaceSummary) workspaceListLayout {
+	markerHeader := " "
+	nameHeader := "Workspace"
+	databaseHeader := "Database"
+	idHeader := "ID"
+	updatedHeader := "Updated"
+
+	layout := workspaceListLayout{
+		markerWidth:   runeWidth(markerHeader),
+		nameWidth:     runeWidth(nameHeader),
+		databaseWidth: runeWidth(databaseHeader),
+		idWidth:       runeWidth(idHeader),
+		updatedWidth:  runeWidth(updatedHeader),
+	}
+	for _, item := range items {
+		layout.markerWidth = maxInt(layout.markerWidth, runeWidth(workspaceListMarker(workspaceListSelected(cfg, item))))
+		layout.nameWidth = maxInt(layout.nameWidth, runeWidth(workspaceListName(item.Name)))
+		layout.databaseWidth = maxInt(layout.databaseWidth, runeWidth(workspaceListDatabase(item)))
+		layout.idWidth = maxInt(layout.idWidth, runeWidth(workspaceListID(item)))
+		layout.updatedWidth = maxInt(layout.updatedWidth, runeWidth(workspaceListUpdated(item)))
+	}
+
+	maxContentWidth := maxBoxText - 4*runeWidth(workspaceListColumnSep) - layout.markerWidth
+	layout.nameWidth, layout.databaseWidth, layout.idWidth, layout.updatedWidth =
+		shrinkWorkspaceListColumns(
+			maxContentWidth,
+			layout.nameWidth,
+			layout.databaseWidth,
+			layout.idWidth,
+			layout.updatedWidth,
+			runeWidth(nameHeader),
+			runeWidth(databaseHeader),
+			runeWidth(idHeader),
+			runeWidth(updatedHeader),
+		)
+	return layout
+}
+
+func shrinkWorkspaceListColumns(maxTotal, nameWidth, databaseWidth, idWidth, updatedWidth, minName, minDatabase, minID, minUpdated int) (int, int, int, int) {
+	for nameWidth+databaseWidth+idWidth+updatedWidth > maxTotal {
+		switch {
+		case nameWidth > minName && nameWidth >= databaseWidth:
+			nameWidth--
+		case databaseWidth > minDatabase:
+			databaseWidth--
+		case nameWidth > minName:
+			nameWidth--
+		case updatedWidth > minUpdated:
+			updatedWidth--
+		case idWidth > minID:
+			idWidth--
+		default:
+			return nameWidth, databaseWidth, idWidth, updatedWidth
+		}
+	}
+	return nameWidth, databaseWidth, idWidth, updatedWidth
+}
+
+func (l workspaceListLayout) header() string {
+	return strings.Join([]string{
+		clr(ansiDim, padVisibleText("", l.markerWidth)),
+		clr(ansiDim, padVisibleText("Workspace", l.nameWidth)),
+		clr(ansiDim, padVisibleText("Database", l.databaseWidth)),
+		clr(ansiDim, padVisibleText("ID", l.idWidth)),
+		clr(ansiDim, padVisibleText("Updated", l.updatedWidth)),
+	}, workspaceListColumnSep)
+}
+
+func (l workspaceListLayout) row(summary workspaceSummary, selected bool) string {
+	return strings.Join([]string{
+		padVisibleText(workspaceListMarker(selected), l.markerWidth),
+		padVisibleText(fitDisplayText(workspaceListName(summary.Name), l.nameWidth), l.nameWidth),
+		padVisibleText(fitDisplayText(workspaceListDatabase(summary), l.databaseWidth), l.databaseWidth),
+		padVisibleText(fitDisplayText(workspaceListID(summary), l.idWidth), l.idWidth),
+		padVisibleText(fitDisplayText(workspaceListUpdated(summary), l.updatedWidth), l.updatedWidth),
+	}, workspaceListColumnSep)
+}
+
+func workspaceListDatabase(summary workspaceSummary) string {
+	if databaseName := strings.TrimSpace(summary.DatabaseName); databaseName != "" {
+		return databaseName
+	}
+	return "Direct Redis"
+}
+
+func workspaceListID(summary workspaceSummary) string {
+	id := strings.TrimSpace(summary.ID)
+	if id == "" {
+		return "-"
+	}
+	return id
+}
+
+func workspaceListUpdated(summary workspaceSummary) string {
+	updated := strings.TrimSpace(summary.UpdatedAt)
+	if updated == "" {
+		return "unknown"
+	}
+	parsed, err := time.Parse(time.RFC3339, updated)
+	if err != nil {
+		return updated
+	}
+	return parsed.Local().Format("2006-01-02 15:04")
 }
 
 func cmdWorkspaceCurrent(args []string) error {
@@ -911,7 +1065,7 @@ Run '%s workspace <subcommand> --help' for details.
 
 func workspaceCreateUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s workspace create <workspace>
+  %s workspace create [--database <database-id|database-name>] <workspace>
 
 Create an empty workspace with an initial checkpoint named "initial".
 `, bin)
@@ -972,12 +1126,13 @@ Delete one or more workspaces from Redis and remove their local materialized sta
 
 func workspaceImportUsageText(bin string) string {
 	return fmt.Sprintf(`Usage:
-  %s workspace import [--force] [--mount-at-source] <workspace> <directory>
+  %s workspace import [--force] [--database <database-id|database-name>] [--mount-at-source] <workspace> <directory>
 
 Import a local directory into a workspace.
 
 Options:
   --force            Replace an existing workspace
+  --database         Override the control-plane database for this import
   --mount-at-source  Archive the source directory to <directory>.pre-afs and
                      mount the imported workspace at the original path
 `, bin)

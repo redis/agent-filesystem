@@ -16,7 +16,7 @@ export const Route = createFileRoute("/databases")({
 type DialogMode = "create" | "edit" | null;
 
 function DatabasesPage() {
-  const { databases, saveDatabase, removeDatabase, reconcileCatalog, isLoading, errorMessage } = useDatabaseScope();
+  const { databases, saveDatabase, setDefaultDatabase, removeDatabase, reconcileCatalog, isLoading, errorMessage } = useDatabaseScope();
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);
   const [pageMessage, setPageMessage] = useState<string | null>(null);
@@ -54,6 +54,17 @@ function DatabasesPage() {
     });
   }
 
+  async function makeDefaultDatabase(databaseId: string) {
+    try {
+      setPageMessage(null);
+      await setDefaultDatabase(databaseId);
+      const database = databases.find((item) => item.id === databaseId);
+      setPageMessage(`Default database set to ${database?.displayName || database?.databaseName || databaseId}.`);
+    } catch (error) {
+      setPageMessage(error instanceof Error ? error.message : "Unable to update the default database.");
+    }
+  }
+
   async function repairCatalog() {
     try {
       setPageMessage(null);
@@ -77,6 +88,7 @@ function DatabasesPage() {
         error={errorMessage != null}
         errorMessage={errorMessage ?? undefined}
         onEditDatabase={openEditDialog}
+        onSetDefaultDatabase={makeDefaultDatabase}
         onRemoveDatabase={deleteDatabase}
         toolbarAction={
           <div style={{ display: "flex", gap: 8 }}>

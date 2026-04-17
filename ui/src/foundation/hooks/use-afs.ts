@@ -155,6 +155,17 @@ export function useDeleteDatabaseMutation() {
   });
 }
 
+export function useSetDefaultDatabaseMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (databaseId: string) => afsApi.setDefaultDatabase(databaseId),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
 export function useCreateWorkspaceMutation() {
   const invalidate = useWorkspaceInvalidation();
 

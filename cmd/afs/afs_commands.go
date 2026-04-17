@@ -73,7 +73,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 	if len(parsed.positionals) != 2 {
-		return fmt.Errorf("usage: %s import [--force] <workspace> <directory>", filepath.Base(os.Args[0]))
+		return fmt.Errorf("usage: %s import [--force] [--database <database-id|database-name>] <workspace> <directory>", filepath.Base(os.Args[0]))
 	}
 
 	workspace := parsed.positionals[0]
@@ -105,9 +105,12 @@ func cmdImport(args []string) error {
 
 	switch productMode {
 	case productModeLocal:
+		if strings.TrimSpace(parsed.database) != "" {
+			return fmt.Errorf("--database is only supported in control plane mode")
+		}
 		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force)
 	case productModeSelfHosted:
-		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force)
+		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database)
 	default:
 		_, _, _, err := openAFSControlPlaneForConfig(ctx, cfg)
 		return err
@@ -284,7 +287,17 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	return nil
 }
 
-func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool) error {
+func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string) error {
+	client, _, err := newHTTPControlPlaneClient(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	database, err := resolveManagedDatabaseForWrite(ctx, cfg, client, explicitDatabase, "workspace import")
+	if err != nil {
+		return err
+	}
+	cfg.DatabaseID = database.ID
+
 	cfg, service, closeControlPlane, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
 		return err
@@ -808,7 +821,11 @@ func matchWorkspaceSelection(ref, displayName string, workspaces []workspaceSumm
 	default:
 		ids := make([]string, 0, len(matches))
 		for _, workspace := range matches {
-			ids = append(ids, workspace.ID)
+			label := workspace.ID
+			if databaseName := strings.TrimSpace(workspace.DatabaseName); databaseName != "" {
+				label = fmt.Sprintf("%s (%s)", workspace.ID, databaseName)
+			}
+			ids = append(ids, label)
 		}
 		return workspaceSelection{}, false, fmt.Errorf(
 			"workspace %q exists multiple times; use a workspace id instead: %s",
@@ -862,12 +879,19 @@ type afsParsedArgs struct {
 	positionals []string
 	force       bool
 	readonly    bool
+	database    string
 }
 
 func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs, error) {
 	var parsed afsParsedArgs
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--database":
+			if i+1 >= len(args) {
+				return parsed, fmt.Errorf("missing value for %q", args[i])
+			}
+			i++
+			parsed.database = strings.TrimSpace(args[i])
 		case "--force":
 			if !allowForce {
 				return parsed, fmt.Errorf("unknown flag %q", args[i])
@@ -879,6 +903,10 @@ func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs,
 			}
 			parsed.readonly = true
 		default:
+			if strings.HasPrefix(args[i], "--database=") {
+				parsed.database = strings.TrimSpace(strings.TrimPrefix(args[i], "--database="))
+				continue
+			}
 			if strings.HasPrefix(args[i], "--") {
 				return parsed, fmt.Errorf("unknown flag %q", args[i])
 			}

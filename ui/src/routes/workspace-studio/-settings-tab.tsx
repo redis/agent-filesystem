@@ -24,12 +24,20 @@ export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
         <MetaTable>
           <tbody>
             <MetaRow>
+              <MetaLabel>Workspace ID</MetaLabel>
+              <MetaValue>
+                <MonoValue>{workspace.id}</MonoValue>
+              </MetaValue>
+            </MetaRow>
+            <MetaRow>
               <MetaLabel>Database</MetaLabel>
               <MetaValue>{workspace.databaseName}</MetaValue>
             </MetaRow>
             <MetaRow>
               <MetaLabel>Redis key</MetaLabel>
-              <MetaValue>{workspace.redisKey}</MetaValue>
+              <MetaValue>
+                <MonoValue>{workspace.redisKey}</MonoValue>
+              </MetaValue>
             </MetaRow>
             {workspace.mountedPath ? (
               <MetaRow>
@@ -37,6 +45,13 @@ export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
                 <MetaValue>{workspace.mountedPath}</MetaValue>
               </MetaRow>
             ) : null}
+            <MetaRow>
+              <MetaLabel>Rename</MetaLabel>
+              <MetaValue>
+                Rename is not supported yet. When names overlap, use the workspace ID in the CLI,
+                for example <MonoValue>afs workspace use {workspace.id}</MonoValue>.
+              </MetaValue>
+            </MetaRow>
           </tbody>
         </MetaTable>
       </SectionCard>
@@ -91,6 +106,11 @@ const MetaValue = styled.td`
   font-size: 14px;
   line-height: 1.5;
   text-align: left;
+`;
+
+const MonoValue = styled.code`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
 `;
 
 const DangerZoneCard = styled.div`

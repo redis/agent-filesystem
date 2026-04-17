@@ -21,6 +21,7 @@ type databaseProfile struct {
 	RedisPassword string `json:"redis_password,omitempty"`
 	RedisDB       int    `json:"redis_db"`
 	RedisTLS      bool   `json:"redis_tls"`
+	IsDefault     bool   `json:"is_default"`
 }
 
 type databaseRecord struct {
@@ -31,6 +32,7 @@ type databaseRecord struct {
 	RedisUsername             string `json:"redis_username,omitempty"`
 	RedisDB                   int    `json:"redis_db"`
 	RedisTLS                  bool   `json:"redis_tls"`
+	IsDefault                 bool   `json:"is_default"`
 	WorkspaceCount            int    `json:"workspace_count"`
 	ActiveSessionCount        int    `json:"active_session_count"`
 	ConnectionError           string `json:"connection_error,omitempty"`
@@ -39,6 +41,8 @@ type databaseRecord struct {
 	LastSessionReconcileAt    string `json:"last_session_reconcile_at,omitempty"`
 	LastSessionReconcileError string `json:"last_session_reconcile_error,omitempty"`
 }
+
+var ErrAmbiguousDatabase = errors.New("control plane database is ambiguous")
 
 type databaseListResponse struct {
 	Items []databaseRecord `json:"items"`
@@ -105,6 +109,7 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 		manager.profiles[profile.ID] = profile
 		manager.order = append(manager.order, profile.ID)
 	}
+	manager.ensureDefaultDatabaseLocked()
 
 	if err := manager.saveRegistryLocked(); err != nil {
 		_ = manager.catalog.Close()
@@ -161,6 +166,7 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 			RedisUsername: profile.RedisUsername,
 			RedisDB:       profile.RedisDB,
 			RedisTLS:      profile.RedisTLS,
+			IsDefault:     profile.IsDefault,
 		}
 		if health, ok := healthByDatabase[id]; ok {
 			record.LastWorkspaceRefreshAt = health.LastWorkspaceRefreshAt
@@ -224,8 +230,8 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 		return databaseRecord{}, err
 	}
 
-	oldProfile, hadOldProfile := m.profiles[profile.ID]
 	oldRuntime := m.runtimes[profile.ID]
+	oldProfiles := cloneDatabaseProfiles(m.profiles)
 
 	m.profiles[profile.ID] = profile
 	if isNew {
@@ -235,11 +241,7 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 
 	if err := m.saveRegistryLocked(); err != nil {
 		runtime.closeFn()
-		if hadOldProfile {
-			m.profiles[profile.ID] = oldProfile
-		} else {
-			delete(m.profiles, profile.ID)
-		}
+		m.profiles = oldProfiles
 		if oldRuntime != nil {
 			m.runtimes[profile.ID] = oldRuntime
 		} else {
@@ -263,6 +265,7 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 		RedisUsername: profile.RedisUsername,
 		RedisDB:       profile.RedisDB,
 		RedisTLS:      profile.RedisTLS,
+		IsDefault:     profile.IsDefault,
 	}
 	items, _, err := m.liveWorkspaceSummariesLocked(ctx, profile.ID)
 	if err != nil {
@@ -277,19 +280,20 @@ func (m *DatabaseManager) DeleteDatabase(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	profile, exists := m.profiles[id]
-	if !exists {
+	if _, exists := m.profiles[id]; !exists {
 		return os.ErrNotExist
 	}
 	oldRuntime := m.runtimes[id]
 	oldOrder := append([]string(nil), m.order...)
+	oldProfiles := cloneDatabaseProfiles(m.profiles)
 
 	delete(m.profiles, id)
 	delete(m.runtimes, id)
 	m.order = withoutValue(m.order, id)
+	m.ensureDefaultDatabaseLocked()
 
 	if err := m.saveRegistryLocked(); err != nil {
-		m.profiles[id] = profile
+		m.profiles = oldProfiles
 		if oldRuntime != nil {
 			m.runtimes[id] = oldRuntime
 		}
@@ -317,6 +321,26 @@ func (m *DatabaseManager) ListWorkspaceSummaries(ctx context.Context, databaseID
 		return workspaceListResponse{}, err
 	}
 	return workspaceListResponse{Items: items}, nil
+}
+
+func (m *DatabaseManager) SetDefaultDatabase(ctx context.Context, id string) (databaseRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	profile, exists := m.profiles[strings.TrimSpace(id)]
+	if !exists {
+		return databaseRecord{}, os.ErrNotExist
+	}
+	oldProfiles := cloneDatabaseProfiles(m.profiles)
+	for databaseID, candidate := range m.profiles {
+		candidate.IsDefault = databaseID == profile.ID
+		m.profiles[databaseID] = candidate
+	}
+	if err := m.saveRegistryLocked(); err != nil {
+		m.profiles = oldProfiles
+		return databaseRecord{}, err
+	}
+	return m.databaseRecordLocked(ctx, profile.ID)
 }
 
 func (m *DatabaseManager) ListAllWorkspaceSummaries(ctx context.Context) (workspaceListResponse, error) {
@@ -377,6 +401,14 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 		return workspaceDetail{}, err
 	}
 	return detail, nil
+}
+
+func (m *DatabaseManager) CreateResolvedWorkspace(ctx context.Context, input createWorkspaceRequest) (workspaceDetail, error) {
+	profile, err := m.resolveTargetDatabase(ctx, input.DatabaseID)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	return m.CreateWorkspace(ctx, profile.ID, input)
 }
 
 func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
@@ -1094,6 +1126,7 @@ func (m *DatabaseManager) buildProfileLocked(id string, input upsertDatabaseRequ
 		RedisPassword: password,
 		RedisDB:       input.RedisDB,
 		RedisTLS:      input.RedisTLS,
+		IsDefault:     !isNew && m.profiles[resolvedID].IsDefault,
 	}, isNew, nil
 }
 
@@ -1101,6 +1134,7 @@ func (m *DatabaseManager) saveRegistryLocked() error {
 	if m.catalog == nil {
 		return errors.New("database registry catalog is unavailable")
 	}
+	m.ensureDefaultDatabaseLocked()
 	profiles := make([]databaseProfile, 0, len(m.order))
 	for _, id := range m.order {
 		if profile, exists := m.profiles[id]; exists {
@@ -1161,6 +1195,114 @@ func validateDatabaseProfile(profile databaseProfile) error {
 	return nil
 }
 
+func (m *DatabaseManager) resolveTargetDatabase(ctx context.Context, requestedID string) (databaseProfile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.resolveTargetDatabaseLocked(requestedID)
+}
+
+func (m *DatabaseManager) resolveTargetDatabaseLocked(requestedID string) (databaseProfile, error) {
+	resolvedID := strings.TrimSpace(requestedID)
+	if resolvedID != "" {
+		profile, exists := m.profiles[resolvedID]
+		if !exists {
+			return databaseProfile{}, os.ErrNotExist
+		}
+		return profile, nil
+	}
+
+	switch len(m.order) {
+	case 0:
+		return databaseProfile{}, fmt.Errorf("no databases are configured")
+	case 1:
+		return m.profiles[m.order[0]], nil
+	}
+
+	for _, id := range m.order {
+		if profile, exists := m.profiles[id]; exists && profile.IsDefault {
+			return profile, nil
+		}
+	}
+
+	labels := make([]string, 0, len(m.order))
+	for _, id := range m.order {
+		if profile, exists := m.profiles[id]; exists {
+			labels = append(labels, fmt.Sprintf("%s (%s)", profile.Name, profile.ID))
+		}
+	}
+	sort.Strings(labels)
+	return databaseProfile{}, fmt.Errorf("%w: select a database or set a default database first: %s", ErrAmbiguousDatabase, strings.Join(labels, ", "))
+}
+
+func (m *DatabaseManager) ensureDefaultDatabaseLocked() {
+	if len(m.order) == 0 {
+		return
+	}
+
+	defaultID := ""
+	for _, id := range m.order {
+		profile, exists := m.profiles[id]
+		if !exists || !profile.IsDefault {
+			continue
+		}
+		if defaultID == "" {
+			defaultID = id
+			continue
+		}
+		profile.IsDefault = false
+		m.profiles[id] = profile
+	}
+	if defaultID != "" {
+		return
+	}
+
+	profile := m.profiles[m.order[0]]
+	profile.IsDefault = true
+	m.profiles[profile.ID] = profile
+}
+
+func (m *DatabaseManager) databaseRecordLocked(ctx context.Context, id string) (databaseRecord, error) {
+	profile, exists := m.profiles[id]
+	if !exists {
+		return databaseRecord{}, os.ErrNotExist
+	}
+
+	record := databaseRecord{
+		ID:            profile.ID,
+		Name:          profile.Name,
+		Description:   profile.Description,
+		RedisAddr:     profile.RedisAddr,
+		RedisUsername: profile.RedisUsername,
+		RedisDB:       profile.RedisDB,
+		RedisTLS:      profile.RedisTLS,
+		IsDefault:     profile.IsDefault,
+	}
+	if m.catalog != nil {
+		healthByDatabase, err := m.catalog.ListDatabaseHealth(ctx)
+		if err != nil {
+			return databaseRecord{}, err
+		}
+		activeSessionsByDatabase, err := m.catalog.CountActiveSessionsByDatabase(ctx)
+		if err != nil {
+			return databaseRecord{}, err
+		}
+		if health, ok := healthByDatabase[id]; ok {
+			record.LastWorkspaceRefreshAt = health.LastWorkspaceRefreshAt
+			record.LastWorkspaceRefreshError = health.LastWorkspaceRefreshError
+			record.LastSessionReconcileAt = health.LastSessionReconcileAt
+			record.LastSessionReconcileError = health.LastSessionReconcileError
+		}
+		record.ActiveSessionCount = activeSessionsByDatabase[id]
+	}
+	items, _, err := m.liveWorkspaceSummariesLocked(ctx, id)
+	if err != nil {
+		record.ConnectionError = err.Error()
+		return record, nil
+	}
+	record.WorkspaceCount = len(items)
+	return record, nil
+}
+
 func uniqueDatabaseIDLocked(existing map[string]databaseProfile, profile databaseProfile) string {
 	base := slugify(profile.Name)
 	if base == "" {
@@ -1201,4 +1343,12 @@ func withoutValue(values []string, target string) []string {
 		}
 	}
 	return next
+}
+
+func cloneDatabaseProfiles(input map[string]databaseProfile) map[string]databaseProfile {
+	cloned := make(map[string]databaseProfile, len(input))
+	for id, profile := range input {
+		cloned[id] = profile
+	}
+	return cloned
 }

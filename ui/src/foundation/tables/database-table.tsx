@@ -13,6 +13,7 @@ type Props = {
   error?: boolean;
   errorMessage?: string;
   onEditDatabase: (databaseId: string) => void;
+  onSetDefaultDatabase: (databaseId: string) => void;
   onRemoveDatabase: (databaseId: string) => void;
 };
 
@@ -33,6 +34,7 @@ export function DatabaseTable({
   error = false,
   errorMessage = "Unable to load databases. Please retry.",
   onEditDatabase,
+  onSetDefaultDatabase,
   onRemoveDatabase,
   toolbarAction,
 }: Props & { toolbarAction?: React.ReactNode }) {
@@ -59,23 +61,47 @@ export function DatabaseTable({
           header: "Name",
           size: 120,
           enableSorting: false,
-          cell: ({ row }) => (
-            <S.Stack>
-              <S.WorkspaceNameButton
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onEditDatabase(row.original.id);
-                }}
-              >
-                {row.original.displayName || row.original.databaseName}
-              </S.WorkspaceNameButton>
-              {row.original.description ? (
-                <SecondaryLine color="secondary" component="span">
-                  {row.original.description}
-                </SecondaryLine>
-              ) : null}
-            </S.Stack>
-          ),
+          cell: ({ row }) => {
+            const isDefault = !!row.original.isDefault;
+            const nameLabel = row.original.displayName || row.original.databaseName;
+            return (
+              <S.Stack>
+                <NameLine>
+                  <S.WorkspaceNameButton
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onEditDatabase(row.original.id);
+                    }}
+                  >
+                    {nameLabel}
+                  </S.WorkspaceNameButton>
+                  <DefaultStarButton
+                    type="button"
+                    data-default-star
+                    $filled={isDefault}
+                    aria-label={
+                      isDefault
+                        ? `${nameLabel} is the default database`
+                        : `Set ${nameLabel} as the default database`
+                    }
+                    title={isDefault ? "Default database" : "Set as default"}
+                    disabled={isDefault}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!isDefault) onSetDefaultDatabase(row.original.id);
+                    }}
+                  >
+                    <StarIcon filled={isDefault} />
+                  </DefaultStarButton>
+                </NameLine>
+                {row.original.description ? (
+                  <SecondaryLine color="secondary" component="span">
+                    {row.original.description}
+                  </SecondaryLine>
+                ) : null}
+              </S.Stack>
+            );
+          },
         },
         {
           accessorKey: "isHealthy",
@@ -144,6 +170,11 @@ export function DatabaseTable({
               </Menu.Trigger>
               <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <Menu.Content.Item
+                  text={row.original.isDefault ? "Current default" : "Set as default"}
+                  disabled={row.original.isDefault}
+                  onClick={() => onSetDefaultDatabase(row.original.id)}
+                />
+                <Menu.Content.Item
                   text="Edit database"
                   onClick={() => onEditDatabase(row.original.id)}
                 />
@@ -156,7 +187,7 @@ export function DatabaseTable({
           ),
         },
       ] as ColumnDef<AFSDatabaseScopeRecord>[],
-    [onEditDatabase, onRemoveDatabase],
+    [onEditDatabase, onRemoveDatabase, onSetDefaultDatabase],
   );
 
   return (
@@ -203,6 +234,64 @@ const PlainText = styled.span`
   font-weight: 400;
 `;
 
+const NameLine = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const DEFAULT_AMBER = "#f59e0b";
+
+const DefaultStarButton = styled.button<{ $filled: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: ${({ $filled }) => ($filled ? "default" : "pointer")};
+  color: ${({ $filled }) => ($filled ? DEFAULT_AMBER : "var(--afs-muted, #71717a)")};
+  /* Filled star is always visible; outline star is hidden until row hover. */
+  opacity: ${({ $filled }) => ($filled ? 1 : 0)};
+  transition: opacity 140ms ease, color 140ms ease, transform 140ms ease;
+
+  &:hover:not(:disabled) {
+    color: ${DEFAULT_AMBER};
+    transform: scale(1.1);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+
+  &:focus-visible {
+    outline: 2px solid ${DEFAULT_AMBER};
+    outline-offset: 2px;
+    border-radius: 4px;
+    opacity: 1;
+  }
+`;
+
+function StarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
 const SecondaryLine = styled(Typography.Body)`
   && {
     font-size: 12px;
@@ -245,5 +334,14 @@ const LiveDot = styled.span<{ $active: boolean }>`
 const ClickableTableViewport = styled(S.TableViewport)`
   tbody tr {
     cursor: pointer;
+  }
+
+  /* Reveal the outline "set-as-default" star on row hover */
+  tbody tr:hover [data-default-star]:not(:disabled) {
+    opacity: 0.55;
+  }
+
+  tbody tr:hover [data-default-star]:not(:disabled):hover {
+    opacity: 1;
   }
 `;

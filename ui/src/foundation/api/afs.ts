@@ -42,6 +42,7 @@ type AFSClient = {
   listDatabases: () => Promise<AFSDatabase[]>;
   reconcileCatalog: () => Promise<void>;
   saveDatabase: (input: SaveDatabaseInput) => Promise<AFSDatabase>;
+  setDefaultDatabase: (databaseId: string) => Promise<AFSDatabase>;
   deleteDatabase: (databaseId: string) => Promise<void>;
   listWorkspaceSummaries: (databaseId?: string) => Promise<AFSWorkspaceSummary[]>;
   getWorkspace: (databaseId: string | undefined, workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
@@ -68,6 +69,7 @@ type HTTPDatabase = {
   redis_username?: string;
   redis_db: number;
   redis_tls: boolean;
+  is_default: boolean;
   workspace_count: number;
   active_session_count?: number;
   connection_error?: string;
@@ -495,6 +497,7 @@ function deriveDemoDatabases(state: AFSState) {
         redisPassword: "",
         redisDB: 0,
         redisTLS: false,
+        isDefault: false,
         workspaceCount: 1,
         activeSessionCount: 0,
       });
@@ -513,14 +516,21 @@ function deriveDemoDatabases(state: AFSState) {
     });
   }
 
-  return [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name));
+  const items = [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name));
+  if (items.length > 0 && !items.some((item) => item.isDefault)) {
+    items[0] = { ...items[0], isDefault: true };
+  }
+  return items;
 }
 
-function requireDemoDatabase(databaseId: string) {
-  const state = loadState();
-  const database = deriveDemoDatabases(state).find((item) => item.id === databaseId);
+function requireDemoDatabase(databaseId?: string) {
+  const databases = deriveDemoDatabases(loadState());
+  const resolvedID = databaseId?.trim() ?? "";
+  const database = resolvedID === ""
+    ? databases.find((item) => item.isDefault) ?? databases[0]
+    : databases.find((item) => item.id === resolvedID);
   if (database == null) {
-    throw new Error(`Database ${databaseId} was not found.`);
+    throw new Error(resolvedID === "" ? "No database was found." : `Database ${resolvedID} was not found.`);
   }
   return database;
 }
@@ -665,6 +675,7 @@ const demoAFSClient: AFSClient = {
     await wait();
     const current = loadDatabaseState();
     const id = input.id?.trim() || slugify(`${input.name}-${input.redisAddr}-${input.redisDB}`);
+    const wasDefault = current.find((item) => item.id === id)?.isDefault ?? false;
     const nextRecord: AFSDatabase = {
       id,
       name: input.name.trim(),
@@ -674,18 +685,37 @@ const demoAFSClient: AFSClient = {
       redisPassword: input.redisPassword,
       redisDB: input.redisDB,
       redisTLS: input.redisTLS,
+      isDefault: wasDefault || current.length === 0,
       workspaceCount: deriveDemoDatabases(loadState()).find((item) => item.id === id)?.workspaceCount ?? 0,
       activeSessionCount: 0,
     };
-    const next = current.filter((item) => item.id !== id);
+    const next = current
+      .filter((item) => item.id !== id)
+      .map((item) => ({ ...item, isDefault: nextRecord.isDefault ? false : item.isDefault }));
     next.unshift(nextRecord);
     saveDatabaseState(next);
     return nextRecord;
   },
 
+  async setDefaultDatabase(databaseId: string) {
+    await wait();
+    const current = deriveDemoDatabases(loadState());
+    const next = current.map((item) => ({ ...item, isDefault: item.id === databaseId }));
+    saveDatabaseState(next);
+    const updated = next.find((item) => item.id === databaseId);
+    if (updated == null) {
+      throw new Error(`Database ${databaseId} was not found.`);
+    }
+    return updated;
+  },
+
   async deleteDatabase(databaseId: string) {
     await wait();
-    saveDatabaseState(loadDatabaseState().filter((item) => item.id !== databaseId));
+    const next = loadDatabaseState().filter((item) => item.id !== databaseId);
+    if (next.length > 0 && !next.some((item) => item.isDefault)) {
+      next[0] = { ...next[0], isDefault: true };
+    }
+    saveDatabaseState(next);
   },
 
   async listWorkspaceSummaries(databaseId = "") {
@@ -718,6 +748,7 @@ const demoAFSClient: AFSClient = {
 
   async createWorkspace(input: CreateWorkspaceInput) {
     await wait();
+    const database = requireDemoDatabase(input.databaseId);
     const state = updateState((draft) => {
       const id = slugify(input.name);
       const createdAt = nowISO();
@@ -748,8 +779,8 @@ This workspace was created from the AFS Web UI.
         name: input.name.trim(),
         description: input.description.trim(),
         cloudAccount: input.cloudAccount?.trim() || "Direct Redis",
-        databaseId: input.databaseId.trim() || `db-${id}`,
-        databaseName: input.databaseName?.trim() || requireDemoDatabase(input.databaseId).name,
+        databaseId: database.id,
+        databaseName: input.databaseName?.trim() || database.name,
         redisKey: `afs:${id}`,
         region: input.region?.trim() || "",
         mountedPath: `~/.afs/workspaces/${id}`,
@@ -1090,6 +1121,7 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     redisPassword: "",
     redisDB: input.redis_db,
     redisTLS: input.redis_tls,
+    isDefault: input.is_default,
     workspaceCount: input.workspace_count,
     activeSessionCount: input.active_session_count ?? 0,
     connectionError: input.connection_error,
@@ -1277,6 +1309,14 @@ const httpAFSClient: AFSClient = {
     );
   },
 
+  async setDefaultDatabase(databaseId: string) {
+    return mapDatabase(
+      await requestJSON<HTTPDatabase>(`/databases/${databaseId}/default`, {
+        method: "POST",
+      }),
+    );
+  },
+
   async deleteDatabase(databaseId: string) {
     await requestJSON<void>(`/databases/${databaseId}`, {
       method: "DELETE",
@@ -1342,7 +1382,7 @@ const httpAFSClient: AFSClient = {
 
   async createWorkspace(input: CreateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>(`/databases/${input.databaseId}/workspaces`, {
+      await requestJSON<HTTPWorkspaceDetail>(input.databaseId?.trim() ? `/databases/${input.databaseId}/workspaces` : "/workspaces", {
         method: "POST",
         body: JSON.stringify({
           name: input.name,
@@ -1483,9 +1523,10 @@ const httpAFSClient: AFSClient = {
       file_count: number;
       dir_count: number;
       total_bytes: number;
-    }>(`/databases/${input.databaseId}/workspaces:import-local`, {
+    }>(input.databaseId?.trim() ? `/databases/${input.databaseId}/workspaces:import-local` : "/workspaces:import-local", {
       method: "POST",
       body: JSON.stringify({
+        database_id: input.databaseId,
         name: input.name,
         path: input.path,
         description: input.description,

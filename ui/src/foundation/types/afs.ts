@@ -159,6 +159,7 @@ export type AFSDatabase = {
   redisPassword: string;
   redisDB: number;
   redisTLS: boolean;
+  isDefault: boolean;
   workspaceCount: number;
   activeSessionCount: number;
   connectionError?: string;
@@ -177,7 +178,7 @@ export type AFSState = {
 };
 
 export type CreateWorkspaceInput = {
-  databaseId: string;
+  databaseId?: string;
   name: string;
   description: string;
   cloudAccount?: string;
@@ -257,7 +258,7 @@ export type QuickstartResponse = {
 };
 
 export type ImportLocalInput = {
-  databaseId: string;
+  databaseId?: string;
   name: string;
   path: string;
   description?: string;

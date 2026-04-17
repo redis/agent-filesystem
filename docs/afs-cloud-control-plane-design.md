@@ -3,6 +3,9 @@
 Date: 2026-04-13
 Status: In progress
 
+Follow-up execution plan:
+`docs/afs-cloud-execution-plan.md`
+
 ## Purpose
 
 Define a concrete architecture and rollout plan for a hosted AFS product where:
@@ -1143,39 +1146,39 @@ This gets user-visible value early without forcing a Redis Cloud auth decision u
 
 ## Recommended Next Steps
 
-The next implementation slices should finish turning the catalog into the identity backbone for both CLI and UI.
+The current repo is now past the initial opaque-workspace-id milestone.
 
-### Immediate next step: opaque workspace identity
+The next implementation slices should build on that catalog groundwork to add
+real hosted identity and credential brokering.
 
-Add stable opaque workspace ids and stop using workspace name as routing identity.
+### Immediate next step: cloud identity and session brokering
 
 Concretely:
 
-- add `workspace_id` as a control-plane-owned opaque identifier in the SQLite catalog
-- backfill existing workspaces into the catalog with generated ids
-- update workspace-first routes to resolve by `workspace_id` rather than name
-- preserve workspace name as display metadata and human-friendly lookup input
-- make duplicate workspace names across databases fully supported instead of an explicit error case
-- update CLI config/state so managed mode persists workspace ids, not just names
-- update the web UI to route by stable workspace id without needing hidden database-selection context
+- add browser and CLI auth for AFS Cloud with browser-launched PKCE for the CLI
+- add secure token storage and profile handling in the CLI
+- protect hosted workspace/session routes with real auth instead of self-hosted trust
+- attach user/org ownership to workspaces and sessions in the control-plane catalog
+- build real cloud session issuance and renewal on top of the existing catalog-backed workspace identity model
 
-### Next after that: finish catalog ownership
+### Next after that: secret-backed database bindings
 
-Move the remaining workspace-first metadata and routing concerns into the catalog:
+Before managed Redis Cloud provisioning or BYODB flows:
 
-- define reconciliation and repair behavior for out-of-band Redis changes
-- keep Redis as the live session lease plane while expanding the SQLite session catalog as the durable ownership/index layer
-- broaden catalog-backed routes so UI and CLI mutation flows use opaque workspace ids end-to-end without hidden database context
-- continue improving explicit catalog repair and health visibility in the control plane and UI
+- add a `SecretStore` layer to the control plane
+- move provider and external database credentials behind secret references
+- define cloud database binding records distinct from the local database registry
+- keep the workspace catalog focused on routing/index metadata rather than secret persistence
 
-### Then: cloud identity and auth
+### Then: hosted database workflows
 
-Once workspace identity is stable, add the cloud-facing auth layer:
+Once auth and secret-backed bindings exist:
 
-1. Add browser/CLI auth for AFS Cloud with browser-launched PKCE for the CLI.
-2. Attach user/org ownership to workspaces and sessions in the control-plane catalog.
-3. Add a secret-store layer before building managed Redis Cloud provisioning.
-4. Build real cloud session issuance on top of the catalog-backed workspace identity model.
+1. Ship managed database creation in the hosted UI.
+2. Ship reachable external database attachment and validation.
+3. Keep browser-assisted Redis Cloud linking as an explicit later enhancement.
+
+See `docs/afs-cloud-execution-plan.md` for the review-oriented phase plan.
 
 ## What We Should Not Do First
 
@@ -1202,13 +1205,10 @@ Once workspace identity is stable, add the cloud-facing auth layer:
 
 Before implementation, the next detailed spec should cover:
 
-- opaque `workspace_id` schema and backfill strategy
-- name lookup and duplicate-name behavior once names are no longer routing identity
-- catalog schema evolution: workspaces, database bindings, database registry, and session catalog ownership
-- CLI managed-mode config/state changes needed to persist workspace ids
-- UI routing changes needed to use workspace ids everywhere without database-selection context
-- catalog reconciliation and repair behavior for out-of-band Redis changes
-- auth endpoints and token lifecycle after workspace identity is stable
+- hosted user/org/account model in the control plane
+- CLI PKCE login flow and secure token storage
 - browser session model and JWKS-backed token validation
+- protected workspace-session routes for hosted mode
+- cloud session bundle schema, renewal, and expiry behavior
 - secret-store interface and first production backend
-- workspace session bundle schema and how session ownership attaches to catalog identities
+- cloud database binding model for managed and external databases

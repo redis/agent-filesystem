@@ -64,33 +64,56 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, "repo-copy") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want both workspace names", listOutput)
 	}
-	if !strings.Contains(listOutput, "✓ repo") {
+	if !strings.Contains(listOutput, "✓") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want selected workspace checkmark", listOutput)
 	}
-	if !strings.Contains(listOutput, "<active>") {
-		t.Fatalf("cmdWorkspace(list) output = %q, want active marker", listOutput)
+	if strings.Contains(listOutput, "<active>") {
+		t.Fatalf("cmdWorkspace(list) output = %q, did not expect trailing active marker", listOutput)
 	}
-	if strings.Contains(listOutput, "current ·") {
-		t.Fatalf("cmdWorkspace(list) output = %q, did not expect current marker text", listOutput)
+	if strings.Contains(listOutput, "checkpoint") {
+		t.Fatalf("cmdWorkspace(list) output = %q, did not expect checkpoint-count column", listOutput)
+	}
+
+	stripped := stripAnsi(listOutput)
+	if !strings.Contains(stripped, "Workspace") || !strings.Contains(stripped, "Database") || !strings.Contains(stripped, "Updated") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want table headers", listOutput)
 	}
 	var repoLine, copyLine string
+	var headerLine string
 	for _, line := range strings.Split(listOutput, "\n") {
-		if strings.Contains(line, "repo-copy") {
-			copyLine = line
-		} else if strings.Contains(line, "✓ repo") {
-			repoLine = line
+		strippedLine := stripAnsi(line)
+		switch {
+		case strings.Contains(strippedLine, "Workspace") && strings.Contains(strippedLine, "Database"):
+			headerLine = strippedLine
+		case strings.Contains(strippedLine, "repo-copy"):
+			copyLine = strippedLine
+		case strings.Contains(strippedLine, "repo"):
+			repoLine = strippedLine
 		}
 	}
-	if repoLine == "" || copyLine == "" {
-		t.Fatalf("cmdWorkspace(list) output = %q, want both workspace rows", listOutput)
+	if headerLine == "" || repoLine == "" || copyLine == "" {
+		t.Fatalf("cmdWorkspace(list) output = %q, want header and both workspace rows", listOutput)
 	}
-	repoValueIdx := strings.Index(repoLine, "1 checkpoint")
-	copyValueIdx := strings.Index(copyLine, "1 checkpoint")
-	if repoValueIdx == -1 || copyValueIdx == -1 {
-		t.Fatalf("workspace list output = %q, want checkpoint counts on both rows", listOutput)
+	databaseIdx := strings.Index(headerLine, "Database")
+	idIdx := strings.Index(headerLine, "ID")
+	updatedIdx := strings.Index(headerLine, "Updated")
+	if databaseIdx == -1 || idIdx == -1 || updatedIdx == -1 {
+		t.Fatalf("workspace list output = %q, want fixed header columns", listOutput)
 	}
-	if got, want := runeWidth(repoLine[:repoValueIdx]), runeWidth(copyLine[:copyValueIdx]); got != want {
-		t.Fatalf("workspace list columns misaligned:\nrepo: %q\ncopy: %q", repoLine, copyLine)
+	if len(repoLine) < updatedIdx || len(copyLine) < updatedIdx {
+		t.Fatalf("workspace list output = %q, want rows wide enough for all columns", listOutput)
+	}
+	if got := strings.TrimSpace(repoLine[databaseIdx:idIdx]); got == "" {
+		t.Fatalf("repo database column empty\nheader: %q\nrow: %q", headerLine, repoLine)
+	}
+	if got := strings.TrimSpace(copyLine[databaseIdx:idIdx]); got == "" {
+		t.Fatalf("copy database column empty\nheader: %q\nrow: %q", headerLine, copyLine)
+	}
+	if got, want := strings.TrimSpace(repoLine[idIdx:updatedIdx]), "repo"; got != want {
+		t.Fatalf("repo id column = %q, want %q\nheader: %q\nrow: %q", got, want, headerLine, repoLine)
+	}
+	if got, want := strings.TrimSpace(copyLine[idIdx:updatedIdx]), "repo-copy"; got != want {
+		t.Fatalf("copy id column = %q, want %q\nheader: %q\nrow: %q", got, want, headerLine, copyLine)
 	}
 
 	if err := cmdWorkspace([]string{"workspace", "delete", "repo-copy"}); err != nil {
@@ -130,8 +153,58 @@ func TestWorkspaceListSelfHostedAggregatesAcrossDatabasesWithoutConfiguredDataba
 	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, secondaryWorkspace) {
 		t.Fatalf("cmdWorkspace(list) output = %q, want workspaces from both databases", listOutput)
 	}
-	if !strings.Contains(listOutput, "✓ "+secondaryWorkspace) {
+	if !strings.Contains(listOutput, "✓") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want selected workspace marker for %q", listOutput, secondaryWorkspace)
+	}
+	if !strings.Contains(stripAnsi(listOutput), "Workspace") || !strings.Contains(stripAnsi(listOutput), "ID") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want workspace list headers", listOutput)
+	}
+}
+
+func TestWorkspaceListSelfHostedIgnoresStaleConfiguredDatabaseForWorkspaceFirstRoutes(t *testing.T) {
+	t.Helper()
+
+	server, secondaryWorkspace, _, secondaryDatabaseID := newMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = secondaryDatabaseID
+	cfg.CurrentWorkspace = secondaryWorkspace
+	saveTempConfig(t, cfg)
+
+	listOutput, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "list"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
+	}
+	if !strings.Contains(listOutput, "repo") || !strings.Contains(listOutput, secondaryWorkspace) {
+		t.Fatalf("cmdWorkspace(list) output = %q, want workspaces from both databases despite stale config database", listOutput)
+	}
+}
+
+func TestWorkspaceListSelfHostedShowsDatabaseAndIDForDuplicateNames(t *testing.T) {
+	t.Helper()
+
+	server, _, _, _ := newDuplicateNameSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	saveTempConfig(t, cfg)
+
+	listOutput, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "list"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
+	}
+	if !strings.Contains(listOutput, "primary") || !strings.Contains(listOutput, "secondary") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want database names for duplicate workspaces", listOutput)
+	}
+	if !strings.Contains(listOutput, "ws_") {
+		t.Fatalf("cmdWorkspace(list) output = %q, want workspace ids for duplicate workspaces", listOutput)
 	}
 }
 

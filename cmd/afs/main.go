@@ -66,6 +66,10 @@ func main() {
 		if err := cmdWorkspace(args); err != nil {
 			fatal(err)
 		}
+	case "database", "db":
+		if err := cmdDatabase(args); err != nil {
+			fatal(err)
+		}
 	case "checkpoint", "c", "ch":
 		if err := cmdCheckpoint(args); err != nil {
 			fatal(err)
@@ -102,6 +106,7 @@ Commands:
   grep [flags] <pat>   Search a workspace directly in Redis
   mcp                  Start the workspace-first MCP server over stdio
   workspace ...        Workspace operations (create, list, current, use, clone, fork, delete, import)
+  database ...         Database operations (list, use)
   checkpoint ...       Checkpoint operations (create, list, restore)
 
 Config: %s

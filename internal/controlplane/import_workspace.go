@@ -10,6 +10,7 @@ import (
 // ImportWorkspaceRequest uploads a client-built manifest and blob set to create
 // a workspace with an initial checkpoint.
 type ImportWorkspaceRequest struct {
+	DatabaseID  string            `json:"database_id,omitempty"`
 	Name        string            `json:"name"`
 	Description string            `json:"description,omitempty"`
 	Manifest    Manifest          `json:"manifest"`
@@ -143,4 +144,12 @@ func (m *DatabaseManager) ImportWorkspace(ctx context.Context, databaseID string
 	}
 	response.WorkspaceID = response.Workspace.ID
 	return response, nil
+}
+
+func (m *DatabaseManager) ImportResolvedWorkspace(ctx context.Context, input ImportWorkspaceRequest) (ImportWorkspaceResponse, error) {
+	profile, err := m.resolveTargetDatabase(ctx, input.DatabaseID)
+	if err != nil {
+		return ImportWorkspaceResponse{}, err
+	}
+	return m.ImportWorkspace(ctx, profile.ID, input)
 }

@@ -340,6 +340,29 @@ func TestResolveWorkspaceSelectionFromControlPlanePrefersConfiguredWorkspaceID(t
 	}
 }
 
+func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameErrorIncludesDatabaseNames(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+
+	_, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_local", Name: "getting-started", DatabaseName: "Local Development"},
+				{ID: "ws_cloud", Name: "getting-started", DatabaseName: "Cloud Redis"},
+			},
+		},
+	}, "getting-started")
+	if err == nil {
+		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want duplicate-name guidance")
+	}
+	if !strings.Contains(err.Error(), "ws_local (Local Development)") || !strings.Contains(err.Error(), "ws_cloud (Cloud Redis)") {
+		t.Fatalf("resolveWorkspaceSelectionFromControlPlane() error = %q, want ids with database names", err)
+	}
+}
+
 func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *testing.T) {
 	t.Helper()
 

@@ -829,6 +829,8 @@ Flags:
 
 Notes:
   Saved config is the default, but explicit 'up' flags override it for this run.
+  Redis connection, mount backend, and readonly mode come from config unless
+  you override them on the command line.
   Current workspace must already be selected with '%s workspace use <workspace>'
   unless you pass <workspace> positionally.
   If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.

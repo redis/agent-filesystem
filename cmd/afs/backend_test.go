@@ -171,6 +171,35 @@ func TestPrepareSyncBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testi
 	}
 }
 
+func TestPrepareSyncBootstrapSelfHostedIgnoresStaleConfiguredDatabaseForWorkspaceFirstRoutes(t *testing.T) {
+	t.Helper()
+
+	server, primaryWorkspace, primaryRedisAddr, primaryDatabaseID, _, _, secondaryDatabaseID := newDetailedMultiDatabaseSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = secondaryDatabaseID
+	cfg.CurrentWorkspace = primaryWorkspace
+	cfg.LocalPath = filepath.Join(t.TempDir(), primaryWorkspace)
+
+	bootstrap, closeFn, err := prepareSyncBootstrap(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("prepareSyncBootstrap() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if bootstrap.workspace != primaryWorkspace {
+		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, primaryWorkspace)
+	}
+	if bootstrap.cfg.RedisAddr != primaryRedisAddr {
+		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, primaryRedisAddr)
+	}
+	if bootstrap.cfg.DatabaseID != primaryDatabaseID {
+		t.Fatalf("bootstrap DatabaseID = %q, want %q", bootstrap.cfg.DatabaseID, primaryDatabaseID)
+	}
+}
+
 func TestPrepareSyncBootstrapSelfHostedUsesWorkspaceIDForDuplicateNames(t *testing.T) {
 	t.Helper()
 
@@ -303,6 +332,11 @@ func newSelfHostedControlPlaneServer(t *testing.T) *httptest.Server {
 }
 
 func newMultiDatabaseSelfHostedControlPlaneServer(t *testing.T) (*httptest.Server, string, string, string) {
+	server, _, _, _, secondaryWorkspace, secondaryRedisAddr, secondaryDatabaseID := newDetailedMultiDatabaseSelfHostedControlPlaneServer(t)
+	return server, secondaryWorkspace, secondaryRedisAddr, secondaryDatabaseID
+}
+
+func newDetailedMultiDatabaseSelfHostedControlPlaneServer(t *testing.T) (*httptest.Server, string, string, string, string, string, string) {
 	t.Helper()
 
 	primary := miniredis.RunT(t)
@@ -358,7 +392,7 @@ func newMultiDatabaseSelfHostedControlPlaneServer(t *testing.T) (*httptest.Serve
 
 	server := httptest.NewServer(controlplane.NewHandler(manager, "*"))
 	t.Cleanup(server.Close)
-	return server, secondaryWorkspace, secondary.Addr(), secondaryRecord.ID
+	return server, "repo", primary.Addr(), primaryID, secondaryWorkspace, secondary.Addr(), secondaryRecord.ID
 }
 
 func newDuplicateNameSelfHostedControlPlaneServer(t *testing.T) (*httptest.Server, string, string, string) {

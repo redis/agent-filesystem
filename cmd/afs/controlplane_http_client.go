@@ -78,11 +78,7 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 
 func (c *httpControlPlaneClient) ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error) {
 	var out controlplane.WorkspaceListResponse
-	path := "/v1/workspaces"
-	if c.hasScopedDatabase() {
-		path = c.scopedPath("workspaces")
-	}
-	err := c.doJSON(ctx, http.MethodGet, path, nil, &out, http.StatusOK)
+	err := c.doJSON(ctx, http.MethodGet, "/v1/workspaces", nil, &out, http.StatusOK)
 	return out, err
 }
 
@@ -213,16 +209,10 @@ func (c *httpControlPlaneClient) clientScopedPathFor(databaseID string, parts ..
 }
 
 func (c *httpControlPlaneClient) workspacePath(workspace string, more ...string) string {
-	if c.hasScopedDatabase() {
-		return c.scopedPath(append([]string{"workspaces", workspace}, more...)...)
-	}
 	return c.unscopedPath("/v1/workspaces", append([]string{workspace}, more...)...)
 }
 
 func (c *httpControlPlaneClient) clientWorkspacePath(workspace string, more ...string) string {
-	if c.hasScopedDatabase() {
-		return c.clientScopedPath(append([]string{"workspaces", workspace}, more...)...)
-	}
 	return c.unscopedPath("/v1/client/workspaces", append([]string{workspace}, more...)...)
 }
 

@@ -70,7 +70,7 @@ function ImportDialog({
     name: "",
     path: "",
     description: "",
-    databaseId: databases[0]?.id ?? "",
+    databaseId: preferredDatabase(databases)?.id ?? "",
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -200,6 +200,10 @@ function createWorkspaceDefaults(database?: AFSDatabaseScopeRecord | null) {
   };
 }
 
+function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
+  return databases.find((database) => database.isDefault) ?? databases[0] ?? null;
+}
+
 function createInitialFormState(database?: AFSDatabaseScopeRecord | null): WorkspaceFormState {
   const defaults = createWorkspaceDefaults(database);
   return {
@@ -234,7 +238,7 @@ function WorkspacesPage() {
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
-    createInitialFormState(databases[0] ?? null),
+    createInitialFormState(preferredDatabase(databases)),
   );
 
   const editingWorkspaceQuery = useWorkspace(
@@ -265,7 +269,7 @@ function WorkspacesPage() {
     }
 
     setForm((current) => {
-      const currentDatabase = databases.find((item) => item.id === current.databaseId) ?? databases[0] ?? null;
+      const currentDatabase = databases.find((item) => item.id === current.databaseId) ?? preferredDatabase(databases);
       const defaults = createWorkspaceDefaults(currentDatabase);
       return { ...current, ...defaults };
     });
@@ -295,7 +299,7 @@ function WorkspacesPage() {
     setEditingWorkspaceId(null);
     setFormError(null);
     setImportPath("");
-    setForm(createInitialFormState(databases[0] ?? null));
+    setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
   function openCreateDialog() {
@@ -307,7 +311,7 @@ function WorkspacesPage() {
     setDialogMode("create");
     setEditingWorkspaceId(null);
     setFormError(null);
-    setForm(createInitialFormState(databases[0] ?? null));
+    setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
   function openEditDialog(workspace: AFSWorkspaceSummary) {
@@ -409,7 +413,7 @@ function WorkspacesPage() {
                 </DialogTitle>
                 <DialogBody>
                   {isEditing
-                    ? "Update the workspace name and description."
+                    ? "Update workspace metadata. Rename is not supported yet."
                     : "Add a new workspace and choose which database will host it."}
                 </DialogBody>
               </div>
@@ -507,6 +511,12 @@ function WorkspacesPage() {
                   onChange={(event) => updateForm("name", event.target.value)}
                   placeholder="customer-portal"
                 />
+                {isEditing ? (
+                  <FieldHint>
+                    Workspace names are immutable today. Use the workspace ID and database name below to
+                    disambiguate duplicates.
+                  </FieldHint>
+                ) : null}
               </Field>
 
               {!isEditing ? (
@@ -637,6 +647,12 @@ const ImportFilesHeader = styled.span`
 `;
 
 const ImportFilesDescription = styled.span`
+  font-size: 12px;
+  color: var(--afs-muted, #71717a);
+  line-height: 1.5;
+`;
+
+const FieldHint = styled.span`
   font-size: 12px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;

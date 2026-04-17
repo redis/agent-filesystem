@@ -19,7 +19,8 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 			redis_username,
 			redis_password,
 			redis_db,
-			redis_tls
+			redis_tls,
+			is_default
 		FROM database_registry
 		ORDER BY order_index ASC, lower(name), id`,
 	)
@@ -32,6 +33,7 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 	for rows.Next() {
 		var item databaseProfile
 		var redisTLS int
+		var isDefault int
 		if err := rows.Scan(
 			&item.ID,
 			&item.Name,
@@ -41,10 +43,12 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 			&item.RedisPassword,
 			&item.RedisDB,
 			&redisTLS,
+			&isDefault,
 		); err != nil {
 			return nil, err
 		}
 		item.RedisTLS = redisTLS != 0
+		item.IsDefault = isDefault != 0
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -77,6 +81,10 @@ func (c *workspaceCatalog) ReplaceDatabaseProfiles(ctx context.Context, profiles
 		if profile.RedisTLS {
 			redisTLS = 1
 		}
+		isDefault := 0
+		if profile.IsDefault {
+			isDefault = 1
+		}
 		if _, err := statement.ExecContext(
 			ctx,
 			strings.TrimSpace(profile.ID),
@@ -87,6 +95,7 @@ func (c *workspaceCatalog) ReplaceDatabaseProfiles(ctx context.Context, profiles
 			profile.RedisPassword,
 			profile.RedisDB,
 			redisTLS,
+			isDefault,
 			index,
 		); err != nil {
 			return err
@@ -105,8 +114,9 @@ const databaseRegistryUpsertSQL = `INSERT INTO database_registry (
 	redis_password,
 	redis_db,
 	redis_tls,
+	is_default,
 	order_index
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name = excluded.name,
 	description = excluded.description,
@@ -115,4 +125,5 @@ ON CONFLICT(id) DO UPDATE SET
 	redis_password = excluded.redis_password,
 	redis_db = excluded.redis_db,
 	redis_tls = excluded.redis_tls,
+	is_default = excluded.is_default,
 	order_index = excluded.order_index`

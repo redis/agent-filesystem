@@ -803,6 +803,100 @@ func TestHTTPWorkspaceFirstRoutesResolveAcrossDatabases(t *testing.T) {
 	}
 }
 
+func TestHTTPUnscopedWorkspaceCreateUsesDefaultDatabase(t *testing.T) {
+	t.Helper()
+
+	manager, primaryDatabaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	secondaryRedis := miniredis.RunT(t)
+	createDatabaseBody := fmtJSON(t, upsertDatabaseRequest{
+		Name:      "secondary",
+		RedisAddr: secondaryRedis.Addr(),
+		RedisDB:   0,
+	})
+
+	resp, err := http.Post(server.URL+"/v1/databases", "application/json", strings.NewReader(createDatabaseBody))
+	if err != nil {
+		t.Fatalf("POST /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var secondary databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&secondary); err != nil {
+		t.Fatalf("Decode(database) returned error: %v", err)
+	}
+	if secondary.IsDefault {
+		t.Fatal("new secondary database should not become the default automatically")
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/workspaces",
+		"application/json",
+		strings.NewReader(`{"name":"repo-default","source":{"kind":"blank"}}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var created workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Decode(created workspace) returned error: %v", err)
+	}
+	if created.DatabaseID != primaryDatabaseID {
+		t.Fatalf("created database_id = %q, want default %q", created.DatabaseID, primaryDatabaseID)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/databases/"+secondary.ID+"/default", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(POST default) returned error: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /v1/databases/:id/default returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/databases/:id/default status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var updated databaseRecord
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		t.Fatalf("Decode(updated database) returned error: %v", err)
+	}
+	if !updated.IsDefault {
+		t.Fatal("updated database should be marked default")
+	}
+
+	resp, err = http.Post(
+		server.URL+"/v1/workspaces",
+		"application/json",
+		strings.NewReader(`{"name":"repo-secondary-default","source":{"kind":"blank"}}`),
+	)
+	if err != nil {
+		t.Fatalf("POST /v1/workspaces after default switch returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/workspaces after default switch status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Decode(created workspace after default switch) returned error: %v", err)
+	}
+	if created.DatabaseID != secondary.ID {
+		t.Fatalf("created database_id after default switch = %q, want %q", created.DatabaseID, secondary.ID)
+	}
+}
+
 func TestHTTPWorkspaceFirstListSkipsDatabasesThatAreNoLongerReachable(t *testing.T) {
 	t.Helper()
 
