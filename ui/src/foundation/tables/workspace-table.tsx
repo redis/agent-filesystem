@@ -1,5 +1,5 @@
-import { Menu, Typography } from "@redis-ui/components";
-import { FoldersIcon, MoreactionsIcon } from "@redis-ui/icons/monochrome";
+import { Typography } from "@redis-ui/components";
+import { FoldersIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
@@ -96,9 +96,6 @@ export function WorkspaceTable({
   onOpenWorkspace,
   onPreviewWorkspace,
   onOpenWorkspaceTab,
-  onEditWorkspace,
-  onDeleteWorkspace,
-  deletingWorkspaceKey = null,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -153,70 +150,24 @@ export function WorkspaceTable({
         {
           accessorKey: "name",
           header: "Name",
-          size: 160,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.WorkspaceNameButton
-              onClick={(event) => {
-                event.stopPropagation();
-                onOpenWorkspace(row.original);
-              }}
-              onMouseEnter={() => onPreviewWorkspace?.(row.original)}
-              onFocus={() => onPreviewWorkspace?.(row.original)}
-            >
-              {row.original.name}
-            </S.WorkspaceNameButton>
-          ),
-        },
-        {
-          id: "connectedAgents",
-          header: "Agents",
-          size: 60,
-          enableSorting: true,
-          cell: ({ row }) => {
-            const count = connectedAgentsByWorkspace[workspaceRowKey(row.original)] ?? 0;
-            return (
-              <S.CountCell>
-                <LiveDot $active={count > 0} />
-                <Typography.Body component="strong">{count}</Typography.Body>
-              </S.CountCell>
-            );
-          },
-        },
-        {
-          accessorKey: "totalBytes",
-          header: "Size",
-          size: 90,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <SizeCell>
-              <strong>{formatBytes(row.original.totalBytes)}</strong>
-              <DetailsMuted>
-                {" "}
-                · {row.original.fileCount} file{row.original.fileCount === 1 ? "" : "s"}
-              </DetailsMuted>
-            </SizeCell>
-          ),
-        },
-        {
-          accessorKey: "databaseName",
-          header: "Details",
-          size: 220,
+          size: 240,
           enableSorting: true,
           cell: ({ row }) => {
             const id = row.original.id;
-            const idDisplay = id.length > 22 ? `${id.slice(0, 22)}…` : id;
             return (
-              <DetailsStack>
-                <DetailsRow>
-                  <DetailsLabel>DB:</DetailsLabel>
-                  <DetailsValue title={row.original.databaseName}>
-                    {row.original.databaseName}
-                  </DetailsValue>
-                </DetailsRow>
-                <DetailsRow>
-                  <DetailsLabel>Workspace ID:</DetailsLabel>
-                  <DetailsMono title={id}>{idDisplay}</DetailsMono>
+              <NameStack>
+                <WorkspaceNameButton
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenWorkspace(row.original);
+                  }}
+                  onMouseEnter={() => onPreviewWorkspace?.(row.original)}
+                  onFocus={() => onPreviewWorkspace?.(row.original)}
+                >
+                  {row.original.name}
+                </WorkspaceNameButton>
+                <IdRow>
+                  <IdText title={id}>{shortenId(id)}</IdText>
                   <CopyButton
                     type="button"
                     aria-label={`Copy workspace ID ${id}`}
@@ -228,15 +179,56 @@ export function WorkspaceTable({
                   >
                     {copiedId === id ? <CheckIcon /> : <CopyIcon />}
                   </CopyButton>
-                </DetailsRow>
-              </DetailsStack>
+                </IdRow>
+              </NameStack>
             );
           },
         },
         {
+          id: "connectedAgents",
+          header: "Agents",
+          size: 90,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const count = connectedAgentsByWorkspace[workspaceRowKey(row.original)] ?? 0;
+            return (
+              <S.CountCell>
+                <LiveDot $active={count > 0} />
+                <Typography.Body component="span">{count}</Typography.Body>
+              </S.CountCell>
+            );
+          },
+        },
+        {
+          accessorKey: "totalBytes",
+          header: "Size",
+          size: 110,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <SizeCell>
+              <span>{formatBytes(row.original.totalBytes)}</span>
+              <DetailsMuted>
+                {" "}
+                · {row.original.fileCount} file{row.original.fileCount === 1 ? "" : "s"}
+              </DetailsMuted>
+            </SizeCell>
+          ),
+        },
+        {
+          accessorKey: "databaseName",
+          header: "Database",
+          size: 160,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <DatabaseName title={row.original.databaseName}>
+              {row.original.databaseName}
+            </DatabaseName>
+          ),
+        },
+        {
           accessorKey: "updatedAt",
           header: "Last updated",
-          size: 130,
+          size: 150,
           enableSorting: true,
           cell: ({ row }) => (
             <UpdatedStack>
@@ -245,48 +237,8 @@ export function WorkspaceTable({
             </UpdatedStack>
           ),
         },
-        {
-          id: "actions",
-          header: "Actions",
-          size: 72,
-          maxSize: 72,
-          enableSorting: false,
-          cell: ({ row }) => (
-            <Menu>
-              <Menu.Trigger withButton={false}>
-                <S.MoreActionsTrigger
-                  aria-label={`More actions for ${row.original.name}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                  }}
-                >
-                  <MoreactionsIcon size="S" />
-                </S.MoreActionsTrigger>
-              </Menu.Trigger>
-              <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                <Menu.Content.Item
-                  text="Open workspace"
-                  onClick={() => onOpenWorkspace(row.original)}
-                />
-                <Menu.Content.Item
-                  text="Edit workspace"
-                  onClick={() => onEditWorkspace(row.original)}
-                />
-                <Menu.Content.Item
-                  text={deletingWorkspaceKey === workspaceRowKey(row.original) ? "Deleting..." : "Delete workspace"}
-                  onClick={() => {
-                    if (deletingWorkspaceKey === workspaceRowKey(row.original)) {
-                      return;
-                    }
-                    onDeleteWorkspace(row.original);
-                  }}
-                />
-              </Menu.Content>
-            </Menu>
-          ),
-        },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace, onPreviewWorkspace],
+    [connectedAgentsByWorkspace, copiedId, onOpenWorkspace, onPreviewWorkspace],
   );
 
   return (
@@ -458,57 +410,45 @@ const WorkspaceTableViewport = styled(S.DenseTableViewport)`
   }
 `;
 
+function shortenId(id: string): string {
+  if (id.length <= 18) return id;
+  return `${id.slice(0, 18)}…`;
+}
+
 const SizeCell = styled.span`
   font-size: 13px;
   color: var(--afs-ink, #18181b);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  strong {
-    font-weight: 700;
-  }
 `;
 
 const DetailsMuted = styled.span`
   color: var(--afs-muted, #71717a);
 `;
 
-const DetailsStack = styled.div`
+const NameStack = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
 `;
 
-const DetailsRow = styled.div`
+const IdRow = styled.div`
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 12.5px;
-  line-height: 1.3;
+  gap: 4px;
 `;
 
-const DetailsLabel = styled.span`
-  color: var(--afs-muted, #71717a);
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-`;
-
-const DetailsValue = styled.span`
-  color: var(--afs-ink, #18181b);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-`;
-
-const DetailsMono = styled.span`
+const IdText = styled.span`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 11.5px;
-  color: var(--afs-ink-soft, #3f3f46);
+  font-size: 11px;
+  color: var(--afs-muted, #71717a);
+  line-height: 1.2;
+`;
+
+const DatabaseName = styled.span`
+  font-size: 13px;
+  color: var(--afs-ink, #18181b);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -588,11 +528,16 @@ const UpdatedStack = styled.div`
 
 const UpdatedDate = styled.span`
   font-size: 13px;
-  font-weight: 700;
   color: var(--afs-ink, #18181b);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   white-space: nowrap;
+`;
+
+const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
+  && {
+    font-weight: 700;
+  }
 `;
 
 const UpdatedAgo = styled.span`
