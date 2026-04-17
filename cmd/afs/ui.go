@@ -30,6 +30,12 @@ const (
 	ansiHideCur = "\033[?25l"
 	ansiShowCur = "\033[?25h"
 	ansiClearLn = "\033[2K"
+	// ansiBorder uses cyan for box-drawing characters — visible on both
+	// light and dark terminal backgrounds (unlike ansiDim which vanishes
+	// on light themes).
+	ansiBorder = "\033[36m"
+	// ansiLabel uses bold cyan for row labels — clear on any background.
+	ansiLabel = "\033[36m"
 )
 
 // markerSuccess is the emoji marker we use at the start of success box
@@ -428,7 +434,7 @@ func printBox(title string, rows []boxRow) {
 				valueWidth = 0
 			}
 			content = fmt.Sprintf("%s   %s",
-				clr(ansiDim, label),
+				clr(ansiLabel, label),
 				fitDisplayText(r.Value, valueWidth))
 		} else {
 			content = fitDisplayText(r.Value, maxBoxText)
@@ -465,14 +471,14 @@ func printBox(title string, rows []boxRow) {
 		return
 	}
 
-	d := ansiDim
+	b := ansiBorder
 	r := ansiReset
 
 	// Branded top border, centered: ╭──── ░▒▓█ Redis Agent Filesystem (AFS) █▓▒░ ────╮
 	brandText := "Redis Agent Filesystem (AFS)"
-	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiWhite + "█" + ansiReset
-	gradientR := ansiBold + ansiWhite + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
-	brandLabel := gradient + " " + ansiBold + ansiWhite + brandText + ansiReset + " " + gradientR
+	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiBRed + "█" + ansiReset
+	gradientR := ansiBold + ansiBRed + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
+	brandLabel := gradient + " " + ansiBold + ansiBRed + brandText + ansiReset + " " + gradientR
 	brandVisible := 4 + 1 + len(brandText) + 1 + 4 // ░▒▓█ + space + text + space + █▓▒░
 	totalFill := innerWidth - brandVisible - 2       // 2 for the spaces around brand
 	if totalFill < 2 {
@@ -480,24 +486,24 @@ func printBox(title string, rows []boxRow) {
 	}
 	leftFill := totalFill / 2
 	rightFill := totalFill - leftFill
-	fmt.Printf("  %s╭%s %s%s %s%s╮%s\n", d, strings.Repeat("─", leftFill), ansiReset, brandLabel, ansiDim, strings.Repeat("─", rightFill), r)
-	fmt.Printf("  %s│%s%s%s│%s\n", d, r, strings.Repeat(" ", innerWidth), d, r)
+	fmt.Printf("  %s╭%s %s%s %s%s╮%s\n", b, strings.Repeat("─", leftFill), ansiReset, brandLabel, ansiBorder, strings.Repeat("─", rightFill), r)
+	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
 
 	for _, l := range lines {
 		if l.empty {
-			fmt.Printf("  %s│%s%s%s│%s\n", d, r, strings.Repeat(" ", innerWidth), d, r)
+			fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
 		} else {
 			rightPad := innerWidth - 2 - runeWidth(l.content)
 			if rightPad < 2 {
 				rightPad = 2
 			}
 			fmt.Printf("  %s│%s  %s%s%s│%s\n",
-				d, r, l.content, strings.Repeat(" ", rightPad), d, r)
+				b, r, l.content, strings.Repeat(" ", rightPad), b, r)
 		}
 	}
 
-	fmt.Printf("  %s│%s%s%s│%s\n", d, r, strings.Repeat(" ", innerWidth), d, r)
-	fmt.Printf("  %s╰%s╯%s\n", d, strings.Repeat("─", innerWidth), r)
+	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
+	fmt.Printf("  %s╰%s╯%s\n", b, strings.Repeat("─", innerWidth), r)
 }
 
 // ---------------------------------------------------------------------------

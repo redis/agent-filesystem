@@ -19,16 +19,16 @@ import {
   useWorkspace,
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
+import { studioTabSchema } from "../foundation/workspace-tabs";
+import type { StudioTab } from "../foundation/workspace-tabs";
 import type { AFSAgentSession, AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
 import { SettingsTab } from "./workspace-studio/-settings-tab";
 
-type StudioTab = "browse" | "checkpoints" | "activity" | "settings";
-
 const workspaceStudioSearchSchema = z.object({
-  tab: z.enum(["browse", "checkpoints", "activity", "settings"]).optional(),
+  tab: studioTabSchema.optional(),
   welcome: z.boolean().optional(),
 });
 
@@ -57,7 +57,7 @@ function WorkspaceStudioPage() {
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
-  const hasAgents = (workspace?.agents?.length ?? 0) > 0;
+  const hasAgents = (workspace?.agents.length ?? 0) > 0;
   // Show the banner only during the first-time setup flow (welcome=true in URL),
   // or when the agent-connected dialog / "What's Next" step is active.
   const showBanner = workspace != null && !bannerDismissed &&
@@ -69,7 +69,6 @@ function WorkspaceStudioPage() {
       void workspaceQuery.refetch();
     }, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Detect first agent connection: hasAgents transitions false → true.
@@ -83,10 +82,7 @@ function WorkspaceStudioPage() {
       return;
     }
     if (hasAgents && !hadAgentsBefore.current) {
-      const agent = workspace.agents?.[0] ?? null;
-      if (agent) {
-        setConnectedAgent(agent);
-      }
+      setConnectedAgent(workspace.agents[0]);
     }
     hadAgentsBefore.current = hasAgents;
   }, [hasAgents, workspace]);
@@ -127,7 +123,7 @@ function WorkspaceStudioPage() {
       return;
     }
     const confirmed = window.confirm(
-      `Delete workspace "${workspace?.name ?? workspaceId}"? This removes it from the workspace registry.`,
+      `Delete workspace "${workspace.name}"? This removes it from the workspace registry.`,
     );
 
     if (!confirmed) {
@@ -377,4 +373,3 @@ const ConnectAgentButton = styled(Button)`
     box-shadow: none;
   }
 `;
-

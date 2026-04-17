@@ -1,16 +1,19 @@
 import { Menu, Typography } from "@redis-ui/components";
-import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
-import { FoldersIcon } from "@redis-ui/icons";
+import { FoldersIcon, MoreactionsIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
+import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSWorkspaceSummary } from "../types/afs";
+import type { StudioTab } from "../workspace-tabs";
 import * as S from "./workspace-table.styles";
 
 type WorkspaceSortField =
   | "name"
+  | "id"
   | "cloudAccount"
   | "connectedAgents"
   | "databaseName"
@@ -18,10 +21,6 @@ type WorkspaceSortField =
   | "updatedAt";
 
 type RowWorkspaceSortField = Exclude<WorkspaceSortField, "connectedAgents">;
-
-type ViewMode = "table" | "cards";
-
-type WorkspaceTab = "overview" | "files" | "checkpoints" | "activity";
 
 type Props = {
   rows: AFSWorkspaceSummary[];
@@ -31,7 +30,7 @@ type Props = {
   toolbarAction?: ReactNode;
   connectedAgentsByWorkspace?: Record<string, number>;
   onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
-  onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: WorkspaceTab) => void;
+  onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: StudioTab) => void;
   onEditWorkspace: (workspace: AFSWorkspaceSummary) => void;
   onDeleteWorkspace: (workspace: AFSWorkspaceSummary) => void;
   deletingWorkspaceKey?: string | null;
@@ -70,7 +69,7 @@ export function WorkspaceTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode");
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -109,21 +108,27 @@ export function WorkspaceTable({
           size: 110,
           enableSorting: true,
           cell: ({ row }) => (
-            <S.Stack>
-              <S.WorkspaceNameButton
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenWorkspace(row.original);
-                }}
-              >
-                {row.original.name}
-              </S.WorkspaceNameButton>
-              <TruncatedId title={row.original.id}>
-                {row.original.id.length > 12
-                  ? `${row.original.id.slice(0, 12)}…`
-                  : row.original.id}
-              </TruncatedId>
-            </S.Stack>
+            <S.WorkspaceNameButton
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenWorkspace(row.original);
+              }}
+            >
+              {row.original.name}
+            </S.WorkspaceNameButton>
+          ),
+        },
+        {
+          accessorKey: "id",
+          header: "Workspace ID",
+          size: 120,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <TruncatedId title={row.original.id}>
+              {row.original.id.length > 16
+                ? `${row.original.id.slice(0, 16)}…`
+                : row.original.id}
+            </TruncatedId>
           ),
         },
         {
@@ -160,9 +165,11 @@ export function WorkspaceTable({
           cell: ({ row }) => (
             <S.Stack>
               <Typography.Body component="strong">{row.original.databaseName}</Typography.Body>
-              <SecondaryLine color="secondary" component="span">
-                {row.original.cloudAccount} · {row.original.region}
-              </SecondaryLine>
+              {row.original.region ? (
+                <SecondaryLine color="secondary" component="span">
+                  {row.original.region}
+                </SecondaryLine>
+              ) : null}
             </S.Stack>
           ),
         },
@@ -350,7 +357,7 @@ export function WorkspaceTable({
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onOpenWorkspaceTab?.(ws, "files");
+                      onOpenWorkspaceTab?.(ws, "browse");
                     }}
                   >
                     Browse Files

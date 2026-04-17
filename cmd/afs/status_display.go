@@ -50,7 +50,7 @@ func configRemoteLabel(cfg config) string {
 }
 
 func configPathLabel() string {
-	return clr(ansiDim, compactDisplayPath(configPath()))
+	return clr(ansiGray, compactDisplayPath(configPath()))
 }
 
 func configStatusRow(cfg config) boxRow {

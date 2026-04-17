@@ -84,7 +84,11 @@ export function DatabaseTable({
                         ? `${nameLabel} is the default database`
                         : `Set ${nameLabel} as the default database`
                     }
-                    title={isDefault ? "Default database" : "Set as default"}
+                    title={
+                      isDefault
+                        ? "Default database for new workspaces"
+                        : "Set as default database for new workspaces"
+                    }
                     disabled={isDefault}
                     onClick={(event) => {
                       event.stopPropagation();

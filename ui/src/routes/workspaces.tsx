@@ -233,6 +233,7 @@ function WorkspacesPage() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [importPath, setImportPath] = useState("");
+  const [importPathAuto, setImportPathAuto] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
@@ -299,6 +300,7 @@ function WorkspacesPage() {
     setEditingWorkspaceId(null);
     setFormError(null);
     setImportPath("");
+    setImportPathAuto(true);
     setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
@@ -311,6 +313,8 @@ function WorkspacesPage() {
     setDialogMode("create");
     setEditingWorkspaceId(null);
     setFormError(null);
+    setImportPath("");
+    setImportPathAuto(true);
     setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
@@ -326,6 +330,10 @@ function WorkspacesPage() {
   ) {
     setFormError(null);
     setForm((current) => ({ ...current, [key]: value }));
+    if (key === "name" && importPathAuto && dialogMode === "create") {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      setImportPath(trimmed === "" ? "" : `~/${trimmed}`);
+    }
   }
 
   function mutationErrorMessage(error: unknown, fallback: string) {
@@ -560,7 +568,10 @@ function WorkspacesPage() {
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <TextInput
                         value={importPath}
-                        onChange={(event) => setImportPath(event.target.value)}
+                        onChange={(event) => {
+                          setImportPath(event.target.value);
+                          setImportPathAuto(false);
+                        }}
                         placeholder="~/code/my-project"
                         style={{ flex: 1 }}
                       />
@@ -584,11 +595,19 @@ function WorkspacesPage() {
                           if (files && files.length > 0) {
                             // Extract the common directory path from the first file
                             const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
-                            if (path) setImportPath(path);
+                            if (path) {
+                              setImportPath(path);
+                              setImportPathAuto(false);
+                            }
                           }
                         }}
                       />
                     </div>
+                    {importPathAuto && importPath !== "" ? (
+                      <FieldHint>
+                        Auto-filled from workspace name. Edit to customize.
+                      </FieldHint>
+                    ) : null}
                   </Field>
                 </ImportFilesSection>
               ) : null}

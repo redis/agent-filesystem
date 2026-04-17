@@ -3,6 +3,12 @@ import { Button } from "@redis-ui/components";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
 import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
   PageStack,
 } from "../components/afs-kit";
 import { AddDatabaseDialog } from "../components/add-database-dialog";
@@ -21,6 +27,13 @@ function DatabasesPage() {
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);
   const [pageMessage, setPageMessage] = useState<string | null>(null);
   const [isReconciling, setIsReconciling] = useState(false);
+  const [pendingDefaultId, setPendingDefaultId] = useState<string | null>(null);
+  const [isApplyingDefault, setIsApplyingDefault] = useState(false);
+
+  const pendingDefaultDatabase = useMemo(
+    () => databases.find((database) => database.id === pendingDefaultId) ?? null,
+    [databases, pendingDefaultId],
+  );
 
   const editingDatabase = useMemo(
     () => databases.find((database) => database.id === editingDatabaseId) ?? null,
@@ -54,14 +67,29 @@ function DatabasesPage() {
     });
   }
 
-  async function makeDefaultDatabase(databaseId: string) {
+  function requestMakeDefaultDatabase(databaseId: string) {
+    setPendingDefaultId(databaseId);
+  }
+
+  function cancelMakeDefaultDatabase() {
+    if (isApplyingDefault) return;
+    setPendingDefaultId(null);
+  }
+
+  async function confirmMakeDefaultDatabase() {
+    if (pendingDefaultId == null) return;
+    const databaseId = pendingDefaultId;
     try {
       setPageMessage(null);
+      setIsApplyingDefault(true);
       await setDefaultDatabase(databaseId);
       const database = databases.find((item) => item.id === databaseId);
       setPageMessage(`Default database set to ${database?.displayName || database?.databaseName || databaseId}.`);
+      setPendingDefaultId(null);
     } catch (error) {
       setPageMessage(error instanceof Error ? error.message : "Unable to update the default database.");
+    } finally {
+      setIsApplyingDefault(false);
     }
   }
 
@@ -88,7 +116,7 @@ function DatabasesPage() {
         error={errorMessage != null}
         errorMessage={errorMessage ?? undefined}
         onEditDatabase={openEditDialog}
-        onSetDefaultDatabase={makeDefaultDatabase}
+        onSetDefaultDatabase={requestMakeDefaultDatabase}
         onRemoveDatabase={deleteDatabase}
         toolbarAction={
           <div style={{ display: "flex", gap: 8 }}>
@@ -110,9 +138,54 @@ function DatabasesPage() {
         editingDatabase={editingDatabase}
         onDelete={deleteDatabase}
       />
+
+      {pendingDefaultDatabase ? (
+        <DialogOverlay
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="set-default-dialog-title"
+          onClick={cancelMakeDefaultDatabase}
+        >
+          <ConfirmCard onClick={(event) => event.stopPropagation()}>
+            <DialogHeader>
+              <DialogTitle id="set-default-dialog-title">
+                Make &ldquo;{pendingDefaultDatabase.displayName || pendingDefaultDatabase.databaseName}&rdquo; the default database?
+              </DialogTitle>
+            </DialogHeader>
+            <DialogBody>
+              The default database is the one used automatically when you create a new
+              workspace, so you don&rsquo;t have to pick a database every time. It also
+              becomes the suggested target for imports and quick actions across the app.
+              Existing workspaces stay attached to whichever database they were created in
+              &mdash; only future workspaces are affected.
+            </DialogBody>
+            <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>
+              <Button
+                variant="secondary-fill"
+                size="medium"
+                onClick={cancelMakeDefaultDatabase}
+                disabled={isApplyingDefault}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="medium"
+                onClick={confirmMakeDefaultDatabase}
+                disabled={isApplyingDefault}
+              >
+                {isApplyingDefault ? "Setting..." : "Make default"}
+              </Button>
+            </DialogActions>
+          </ConfirmCard>
+        </DialogOverlay>
+      ) : null}
     </PageStack>
   );
 }
+
+const ConfirmCard = styled(DialogCard)`
+  width: min(480px, 100%);
+`;
 
 const RefreshButton = styled(Button)`
   && {

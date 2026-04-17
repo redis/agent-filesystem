@@ -2,6 +2,7 @@ import { Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
+import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
 import styled, { keyframes, css } from "styled-components";
@@ -291,8 +292,6 @@ const ToggleButton = styled.button<{ $active: boolean }>`
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-type ViewMode = "table" | "cards";
-
 type Props = {
   rows: AFSAgentSession[];
   loading?: boolean;
@@ -407,7 +406,7 @@ export function AgentsTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<AgentSortField>("lastSeenAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useStoredViewMode("afs.agents.viewMode");
   const [selectedAgent, setSelectedAgent] = useState<AFSAgentSession | null>(null);
 
   // Tick every second so live counters (uptime, time-ago) update in real-time.
