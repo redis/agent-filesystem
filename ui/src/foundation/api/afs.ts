@@ -61,6 +61,17 @@ type AFSClient = {
   resetDemo: () => AFSState;
 };
 
+type HTTPRedisStats = {
+  used_memory_bytes?: number;
+  max_memory_bytes?: number;
+  fragmentation_ratio?: number;
+  key_count?: number;
+  ops_per_sec?: number;
+  cache_hit_rate?: number;
+  connected_clients?: number;
+  sampled_at?: string;
+};
+
 type HTTPDatabase = {
   id: string;
   name: string;
@@ -77,6 +88,9 @@ type HTTPDatabase = {
   last_workspace_refresh_error?: string;
   last_session_reconcile_at?: string;
   last_session_reconcile_error?: string;
+  afs_total_bytes?: number;
+  afs_file_count?: number;
+  stats?: HTTPRedisStats;
 };
 
 type HTTPWorkspaceSummary = {
@@ -1135,6 +1149,20 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     lastWorkspaceRefreshError: input.last_workspace_refresh_error,
     lastSessionReconcileAt: input.last_session_reconcile_at,
     lastSessionReconcileError: input.last_session_reconcile_error,
+    afsTotalBytes: input.afs_total_bytes ?? 0,
+    afsFileCount: input.afs_file_count ?? 0,
+    stats: input.stats
+      ? {
+          usedMemoryBytes: input.stats.used_memory_bytes ?? 0,
+          maxMemoryBytes: input.stats.max_memory_bytes ?? 0,
+          fragmentationRatio: input.stats.fragmentation_ratio ?? 0,
+          keyCount: input.stats.key_count ?? 0,
+          opsPerSec: input.stats.ops_per_sec ?? 0,
+          cacheHitRate: input.stats.cache_hit_rate ?? 0,
+          connectedClients: input.stats.connected_clients ?? 0,
+          sampledAt: input.stats.sampled_at,
+        }
+      : undefined,
   };
 }
 

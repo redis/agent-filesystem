@@ -150,6 +150,17 @@ export type AFSActivityListResponse = {
 
 export type AFSWorkspaceDetail = AFSWorkspace;
 
+export type AFSRedisStats = {
+  usedMemoryBytes: number;
+  maxMemoryBytes: number; // 0 = no limit
+  fragmentationRatio: number;
+  keyCount: number;
+  opsPerSec: number;
+  cacheHitRate: number; // 0..1 (0 if no hits/misses sampled yet)
+  connectedClients: number;
+  sampledAt?: string;
+};
+
 export type AFSDatabase = {
   id: string;
   name: string;
@@ -167,6 +178,12 @@ export type AFSDatabase = {
   lastWorkspaceRefreshError?: string;
   lastSessionReconcileAt?: string;
   lastSessionReconcileError?: string;
+  // AFS-specific footprint across all workspaces in this database
+  afsTotalBytes: number;
+  afsFileCount: number;
+  // Redis server stats snapshot (undefined while the poller warms up or the
+  // database is unreachable)
+  stats?: AFSRedisStats;
 };
 
 export type AFSDatabaseListResponse = {

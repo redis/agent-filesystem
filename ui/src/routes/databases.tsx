@@ -14,7 +14,7 @@ import {
 import { AddDatabaseDialog } from "../components/add-database-dialog";
 import { databasesQueryOptions } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
-import { DatabaseTable } from "../foundation/tables/database-table";
+import { DatabaseTable, DatabaseSummaryStrip } from "../foundation/tables/database-table";
 import { useDatabaseScope } from "../foundation/database-scope";
 
 export const Route = createFileRoute("/databases")({
@@ -113,6 +113,8 @@ function DatabasesPage() {
   return (
     <PageStack>
       {pageMessage ? <StatusMessage>{pageMessage}</StatusMessage> : null}
+
+      <DatabaseSummaryStrip rows={databases} />
 
       <DatabaseTable
         rows={databases}

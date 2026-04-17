@@ -34,6 +34,20 @@ export type AFSDatabaseScopeRecord = {
   lastWorkspaceRefreshError?: string;
   lastSessionReconcileAt?: string;
   lastSessionReconcileError?: string;
+  // AFS aggregates
+  afsTotalBytes: number;
+  afsFileCount: number;
+  // Redis server stats snapshot (from background poller); undefined until sampled
+  stats?: {
+    usedMemoryBytes: number;
+    maxMemoryBytes: number;
+    fragmentationRatio: number;
+    keyCount: number;
+    opsPerSec: number;
+    cacheHitRate: number;
+    connectedClients: number;
+    sampledAt?: string;
+  };
 };
 
 type LegacySavedDatabaseRecord = {
@@ -100,6 +114,9 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     lastWorkspaceRefreshError: input.lastWorkspaceRefreshError,
     lastSessionReconcileAt: input.lastSessionReconcileAt,
     lastSessionReconcileError: input.lastSessionReconcileError,
+    afsTotalBytes: input.afsTotalBytes,
+    afsFileCount: input.afsFileCount,
+    stats: input.stats,
   };
 }
 

@@ -40,6 +40,15 @@ type databaseRecord struct {
 	LastWorkspaceRefreshError string `json:"last_workspace_refresh_error,omitempty"`
 	LastSessionReconcileAt    string `json:"last_session_reconcile_at,omitempty"`
 	LastSessionReconcileError string `json:"last_session_reconcile_error,omitempty"`
+
+	// AFS-specific aggregates (summed across all workspaces in this database)
+	AFSTotalBytes int64 `json:"afs_total_bytes"`
+	AFSFileCount  int   `json:"afs_file_count"`
+
+	// Redis server stats (populated by the background poller). Pointer so the
+	// JSON omits the whole block when we have never sampled (e.g. for an
+	// unreachable DB on startup).
+	Stats *RedisStats `json:"stats,omitempty"`
 }
 
 var ErrAmbiguousDatabase = errors.New("control plane database is ambiguous")
@@ -79,7 +88,22 @@ type DatabaseManager struct {
 	profiles map[string]databaseProfile
 	order    []string
 	runtimes map[string]*databaseRuntime
+
+	// Stats cache populated by the background poller. Keyed by database ID.
+	// Protected by statsMu so callers hitting ListDatabases don't contend
+	// with the poller goroutine on mu.
+	statsMu sync.RWMutex
+	stats   map[string]RedisStats
+
+	// Poller lifecycle
+	pollerStop   chan struct{}
+	pollerDoneWG sync.WaitGroup
 }
+
+// redisStatsPollInterval is how often the background poller re-samples each
+// database's INFO snapshot. Cheap for small clusters; tunable via env if we
+// ever need it.
+const redisStatsPollInterval = 30 * time.Second
 
 func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 	catalog, err := openWorkspaceCatalog(configPathOverride)
@@ -94,10 +118,12 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 	}
 
 	manager := &DatabaseManager{
-		catalog:  catalog,
-		profiles: make(map[string]databaseProfile, len(loadedProfiles)),
-		order:    make([]string, 0, len(loadedProfiles)),
-		runtimes: make(map[string]*databaseRuntime),
+		catalog:    catalog,
+		profiles:   make(map[string]databaseProfile, len(loadedProfiles)),
+		order:      make([]string, 0, len(loadedProfiles)),
+		runtimes:   make(map[string]*databaseRuntime),
+		stats:      make(map[string]RedisStats),
+		pollerStop: make(chan struct{}),
 	}
 	for _, profile := range loadedProfiles {
 		if err := validateDatabaseProfile(profile); err != nil {
@@ -120,10 +146,118 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 		return nil, err
 	}
 
+	// Kick off the background stats poller. Fire-and-forget; it self-throttles
+	// and silently skips unavailable databases.
+	manager.pollerDoneWG.Add(1)
+	go manager.runStatsPoller()
+
 	return manager, nil
 }
 
+// runStatsPoller periodically samples RedisStats for each known database and
+// caches the result. Ticks on redisStatsPollInterval until Close stops it.
+func (m *DatabaseManager) runStatsPoller() {
+	defer m.pollerDoneWG.Done()
+
+	// Prime the cache on startup so the first ListDatabases call already has
+	// data (instead of making the user wait for the first tick).
+	m.sampleAllDatabaseStats(context.Background())
+
+	ticker := time.NewTicker(redisStatsPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-m.pollerStop:
+			return
+		case <-ticker.C:
+			m.sampleAllDatabaseStats(context.Background())
+		}
+	}
+}
+
+// sampleAllDatabaseStats iterates the known profiles and refreshes each
+// database's cached RedisStats. Errors are non-fatal: the prior sample stays
+// in place so the UI doesn't flicker on transient failures.
+func (m *DatabaseManager) sampleAllDatabaseStats(parent context.Context) {
+	m.mu.Lock()
+	ids := make([]string, len(m.order))
+	copy(ids, m.order)
+	m.mu.Unlock()
+
+	for _, id := range ids {
+		select {
+		case <-m.pollerStop:
+			return
+		default:
+		}
+
+		ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+		stats, err := m.collectStatsFor(ctx, id)
+		cancel()
+		if err != nil {
+			continue
+		}
+
+		m.statsMu.Lock()
+		m.stats[id] = stats
+		m.statsMu.Unlock()
+	}
+}
+
+// collectStatsFor opens (or reuses) a runtime for the given database ID and
+// issues one INFO+DBSIZE round-trip. The runtime is left in m.runtimes so a
+// subsequent service request does not pay the connection cost again.
+func (m *DatabaseManager) collectStatsFor(ctx context.Context, databaseID string) (RedisStats, error) {
+	m.mu.Lock()
+	profile, ok := m.profiles[databaseID]
+	if !ok {
+		m.mu.Unlock()
+		return RedisStats{}, fmt.Errorf("unknown database %q", databaseID)
+	}
+	runtime, ok := m.runtimes[databaseID]
+	if !ok {
+		m.mu.Unlock()
+		opened, err := openDatabaseRuntime(ctx, profile)
+		if err != nil {
+			return RedisStats{}, err
+		}
+		m.mu.Lock()
+		// Someone may have raced us; keep the first winner.
+		if existing, alreadyThere := m.runtimes[databaseID]; alreadyThere {
+			opened.closeFn()
+			runtime = existing
+		} else {
+			m.runtimes[databaseID] = opened
+			runtime = opened
+		}
+	}
+	m.mu.Unlock()
+
+	return runtime.store.CollectRedisStats(ctx)
+}
+
+// statsFor returns the last cached RedisStats for a database, if any.
+func (m *DatabaseManager) statsFor(databaseID string) (RedisStats, bool) {
+	m.statsMu.RLock()
+	defer m.statsMu.RUnlock()
+	s, ok := m.stats[databaseID]
+	return s, ok
+}
+
 func (m *DatabaseManager) Close() {
+	// Signal the stats poller to stop and wait for it to exit so it doesn't
+	// race with runtime teardown below.
+	if m.pollerStop != nil {
+		select {
+		case <-m.pollerStop:
+			// already closed
+		default:
+			close(m.pollerStop)
+		}
+		m.pollerDoneWG.Wait()
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -179,10 +313,31 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 		workspaces, _, err := m.liveWorkspaceSummariesLocked(ctx, id)
 		if err != nil {
 			record.ConnectionError = err.Error()
+			// Even without live workspace data we can still surface the last
+			// cached stats sample if we have one.
+			if stats, ok := m.statsFor(id); ok {
+				s := stats
+				record.Stats = &s
+			}
 			items = append(items, record)
 			continue
 		}
 		record.WorkspaceCount = len(workspaces)
+
+		// Aggregate AFS-specific footprint across this database's workspaces.
+		var totalBytes int64
+		var totalFiles int
+		for _, ws := range workspaces {
+			totalBytes += ws.TotalBytes
+			totalFiles += ws.FileCount
+		}
+		record.AFSTotalBytes = totalBytes
+		record.AFSFileCount = totalFiles
+
+		if stats, ok := m.statsFor(id); ok {
+			s := stats
+			record.Stats = &s
+		}
 		items = append(items, record)
 	}
 
