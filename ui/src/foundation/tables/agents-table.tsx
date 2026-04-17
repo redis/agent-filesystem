@@ -512,7 +512,7 @@ export function AgentsTable({
       {/* ---- TABLE VIEW ---- */}
       {!loading && !error && filteredRows.length > 0 && viewMode === "table" ? (
         <S.TableCard>
-          <S.TableViewport>
+          <S.DenseTableViewport>
             <Table
               columns={columns}
               data={filteredRows}
@@ -532,7 +532,7 @@ export function AgentsTable({
               stripedRows
               onRowClick={(rowData) => setSelectedAgent(rowData)}
             />
-          </S.TableViewport>
+          </S.DenseTableViewport>
         </S.TableCard>
       ) : null}
 

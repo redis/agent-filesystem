@@ -155,7 +155,7 @@ export function ActivityTable({
 
       {!loading && !error && filteredRows.length > 0 ? (
         <S.TableCard>
-          <S.TableViewport>
+          <S.DenseTableViewport>
             <Table
               columns={columns}
               data={filteredRows}
@@ -176,7 +176,7 @@ export function ActivityTable({
               stripedRows
               onRowClick={(rowData) => onOpenActivity(rowData)}
             />
-          </S.TableViewport>
+          </S.DenseTableViewport>
         </S.TableCard>
       ) : null}
     </>

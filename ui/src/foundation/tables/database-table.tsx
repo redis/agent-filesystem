@@ -7,6 +7,7 @@ import styled, { css, keyframes } from "styled-components";
 import type { AFSDatabaseScopeRecord } from "../database-scope";
 import { formatBytes } from "../api/afs";
 import * as S from "./workspace-table.styles";
+import { DenseTableViewport } from "./workspace-table.styles";
 
 type Props = {
   rows: AFSDatabaseScopeRecord[];
@@ -429,7 +430,7 @@ export function DatabaseTable({
 
       {!loading && !error && filteredRows.length > 0 ? (
         <S.TableCard>
-          <DenseTableViewport>
+          <DatabaseTableViewport>
             <Table
               columns={columns}
               data={filteredRows}
@@ -437,7 +438,7 @@ export function DatabaseTable({
               stripedRows
               onRowClick={(rowData) => onEditDatabase(rowData.id)}
             />
-          </DenseTableViewport>
+          </DatabaseTableViewport>
         </S.TableCard>
       ) : null}
     </>
@@ -823,29 +824,9 @@ const SummaryDetail = styled.span`
   line-height: 1.35;
 `;
 
-/* ---- Table viewport: tight rows ---- */
+/* ---- Table viewport: dense + database-specific hover reveals ---- */
 
-const DenseTableViewport = styled(S.TableViewport)`
-  tbody tr {
-    cursor: pointer;
-  }
-
-  /* Tight rows — fixed, compact vertical rhythm. */
-  tbody td {
-    padding-top: 10px !important;
-    padding-bottom: 10px !important;
-    vertical-align: middle;
-  }
-
-  thead th {
-    padding-top: 10px !important;
-    padding-bottom: 10px !important;
-    font-size: 10.5px;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--afs-muted, #71717a);
-  }
-
+const DatabaseTableViewport = styled(DenseTableViewport)`
   /* Reveal star + copy button on row hover */
   tbody tr:hover [data-default-star]:not(:disabled) {
     opacity: 0.55;

@@ -2,7 +2,7 @@ import { Menu, Typography } from "@redis-ui/components";
 import { FoldersIcon, MoreactionsIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
@@ -13,7 +13,6 @@ import * as S from "./workspace-table.styles";
 
 type WorkspaceSortField =
   | "name"
-  | "id"
   | "cloudAccount"
   | "connectedAgents"
   | "databaseName"
@@ -21,6 +20,39 @@ type WorkspaceSortField =
   | "updatedAt";
 
 type RowWorkspaceSortField = Exclude<WorkspaceSortField, "connectedAgents">;
+
+/** Short date like "4/16 5:04p" */
+function shortDateTime(iso: string): string {
+  const d = new Date(iso);
+  const month = d.getMonth() + 1;
+  const day = d.getDate();
+  let hours = d.getHours();
+  const minutes = d.getMinutes();
+  const ampm = hours >= 12 ? "p" : "a";
+  hours = hours % 12 || 12;
+  return `${month}/${day} ${hours}:${minutes.toString().padStart(2, "0")}${ampm}`;
+}
+
+/** Spelled-out relative time: "5 seconds ago", "2 minutes ago", "3 hours ago", "4 days ago" */
+function relativeTimeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} second${seconds === 1 ? "" : "s"} ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+/** Re-render once per minute so relative times stay fresh. */
+function useMinuteTick() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 30000);
+    return () => clearInterval(id);
+  }, []);
+}
 
 type Props = {
   rows: AFSWorkspaceSummary[];
@@ -72,6 +104,20 @@ export function WorkspaceTable({
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  useMinuteTick();
+
+  async function copyWorkspaceId(id: string) {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      window.setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current));
+      }, 1500);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -106,8 +152,8 @@ export function WorkspaceTable({
       [
         {
           accessorKey: "name",
-          header: "Workspace name",
-          size: 110,
+          header: "Name",
+          size: 160,
           enableSorting: true,
           cell: ({ row }) => (
             <S.WorkspaceNameButton
@@ -123,22 +169,9 @@ export function WorkspaceTable({
           ),
         },
         {
-          accessorKey: "id",
-          header: "Workspace ID",
-          size: 120,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <TruncatedId title={row.original.id}>
-              {row.original.id.length > 16
-                ? `${row.original.id.slice(0, 16)}…`
-                : row.original.id}
-            </TruncatedId>
-          ),
-        },
-        {
           id: "connectedAgents",
           header: "Agents",
-          size: 52,
+          size: 60,
           enableSorting: true,
           cell: ({ row }) => {
             const count = connectedAgentsByWorkspace[workspaceRowKey(row.original)] ?? 0;
@@ -153,36 +186,64 @@ export function WorkspaceTable({
         {
           accessorKey: "totalBytes",
           header: "Size",
-          size: 60,
+          size: 90,
           enableSorting: true,
           cell: ({ row }) => (
-            <Typography.Body component="span">
-              {formatBytes(row.original.totalBytes)} ({row.original.fileCount} files)
-            </Typography.Body>
+            <SizeCell>
+              <strong>{formatBytes(row.original.totalBytes)}</strong>
+              <DetailsMuted>
+                {" "}
+                · {row.original.fileCount} file{row.original.fileCount === 1 ? "" : "s"}
+              </DetailsMuted>
+            </SizeCell>
           ),
         },
         {
           accessorKey: "databaseName",
-          header: "Database hosting",
-          size: 110,
+          header: "Details",
+          size: 220,
           enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="strong">{row.original.databaseName}</Typography.Body>
-              {row.original.region ? (
-                <SecondaryLine color="secondary" component="span">
-                  {row.original.region}
-                </SecondaryLine>
-              ) : null}
-            </S.Stack>
-          ),
+          cell: ({ row }) => {
+            const id = row.original.id;
+            const idDisplay = id.length > 22 ? `${id.slice(0, 22)}…` : id;
+            return (
+              <DetailsStack>
+                <DetailsRow>
+                  <DetailsLabel>DB:</DetailsLabel>
+                  <DetailsValue title={row.original.databaseName}>
+                    {row.original.databaseName}
+                  </DetailsValue>
+                </DetailsRow>
+                <DetailsRow>
+                  <DetailsLabel>Workspace ID:</DetailsLabel>
+                  <DetailsMono title={id}>{idDisplay}</DetailsMono>
+                  <CopyButton
+                    type="button"
+                    aria-label={`Copy workspace ID ${id}`}
+                    title={copiedId === id ? "Copied" : "Copy workspace ID"}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void copyWorkspaceId(id);
+                    }}
+                  >
+                    {copiedId === id ? <CheckIcon /> : <CopyIcon />}
+                  </CopyButton>
+                </DetailsRow>
+              </DetailsStack>
+            );
+          },
         },
         {
           accessorKey: "updatedAt",
           header: "Last updated",
-          size: 120,
+          size: 130,
           enableSorting: true,
-          cell: ({ row }) => new Date(row.original.updatedAt).toLocaleString(),
+          cell: ({ row }) => (
+            <UpdatedStack>
+              <UpdatedDate>{shortDateTime(row.original.updatedAt)}</UpdatedDate>
+              <UpdatedAgo>{relativeTimeAgo(row.original.updatedAt)}</UpdatedAgo>
+            </UpdatedStack>
+          ),
         },
         {
           id: "actions",
@@ -225,7 +286,7 @@ export function WorkspaceTable({
           ),
         },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, deletingWorkspaceKey, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace],
+    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onEditWorkspace, onOpenWorkspace, onPreviewWorkspace],
   );
 
   return (
@@ -266,7 +327,7 @@ export function WorkspaceTable({
       {/* ---- TABLE VIEW ---- */}
       {!loading && !error && filteredRows.length > 0 && viewMode === "table" ? (
         <S.TableCard>
-          <S.RegistryTableViewport>
+          <WorkspaceTableViewport>
             <Table
               columns={columns}
               data={filteredRows}
@@ -288,7 +349,7 @@ export function WorkspaceTable({
               stripedRows
               onRowClick={(rowData) => onOpenWorkspace(rowData)}
             />
-          </S.RegistryTableViewport>
+          </WorkspaceTableViewport>
         </S.TableCard>
       ) : null}
 
@@ -387,19 +448,158 @@ export function WorkspaceTable({
   );
 }
 
-const SecondaryLine = styled(Typography.Body)`
-  && {
-    font-size: 12px;
-    line-height: 1.4;
+const WorkspaceTableViewport = styled(S.DenseTableViewport)`
+  /* Reveal copy button on row hover */
+  tbody tr:hover button[aria-label^="Copy workspace ID"] {
+    opacity: 0.7;
+  }
+  tbody tr:hover button[aria-label^="Copy workspace ID"]:hover {
+    opacity: 1;
   }
 `;
 
-const TruncatedId = styled.span`
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--afs-muted);
-  cursor: default;
-  font-family: var(--afs-mono);
+const SizeCell = styled.span`
+  font-size: 13px;
+  color: var(--afs-ink, #18181b);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  strong {
+    font-weight: 700;
+  }
+`;
+
+const DetailsMuted = styled.span`
+  color: var(--afs-muted, #71717a);
+`;
+
+const DetailsStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+`;
+
+const DetailsRow = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.3;
+`;
+
+const DetailsLabel = styled.span`
+  color: var(--afs-muted, #71717a);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+`;
+
+const DetailsValue = styled.span`
+  color: var(--afs-ink, #18181b);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+`;
+
+const DetailsMono = styled.span`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11.5px;
+  color: var(--afs-ink-soft, #3f3f46);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+`;
+
+const CopyButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--afs-muted, #71717a);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 140ms ease, color 140ms ease;
+  opacity: 0;
+
+  &:hover {
+    background: rgba(8, 6, 13, 0.06);
+    color: var(--afs-ink, #18181b);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent, #dc2626);
+    outline-offset: 1px;
+    opacity: 1;
+  }
+`;
+
+function CopyIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#16a34a"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+const UpdatedStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+`;
+
+const UpdatedDate = styled.span`
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--afs-ink, #18181b);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+`;
+
+const UpdatedAgo = styled.span`
+  font-size: 11.5px;
+  color: var(--afs-muted, #71717a);
+  line-height: 1.2;
+  white-space: nowrap;
 `;
 
 const pulse = keyframes`

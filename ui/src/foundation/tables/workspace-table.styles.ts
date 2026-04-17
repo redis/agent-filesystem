@@ -32,29 +32,34 @@ export const TableViewport = styled.div`
   }
 `;
 
-export const RegistryTableViewport = styled(TableViewport)`
-  /* Remove vertical separator between Updated | More actions (last two columns). */
-  thead tr > *:nth-child(7),
-  [role="row"] > [role="columnheader"]:nth-child(7) {
-    border-right: none !important;
-    box-shadow: none !important;
+/**
+ * Shared dense table styling used across the app.
+ *  - Compact 10px row padding
+ *  - Uppercase, letter-spaced, muted column headers
+ *  - Click-to-edit cursor on rows when used inside a clickable table
+ */
+export const DenseTableViewport = styled(TableViewport)`
+  tbody tr {
+    cursor: pointer;
   }
 
-  thead tr > *:nth-child(8),
-  [role="row"] > [role="columnheader"]:nth-child(8) {
-    border-left: none !important;
+  tbody td {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+    vertical-align: middle;
   }
 
-  thead tr > *:nth-child(7)::before,
-  thead tr > *:nth-child(7)::after,
-  [role="row"] > [role="columnheader"]:nth-child(7)::before,
-  [role="row"] > [role="columnheader"]:nth-child(7)::after {
-    border: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    content: none !important;
+  thead th {
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--afs-muted, #71717a);
   }
 `;
+
+export const RegistryTableViewport = DenseTableViewport;
 
 export const EmptyState = styled.div`
   padding: 40px;
