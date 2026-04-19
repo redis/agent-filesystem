@@ -13,6 +13,7 @@ import { useColorMode } from "../../foundation/theme-context";
  */
 const AuthRootFontSize = createGlobalStyle`
   html, :root { font-size: 16px; }
+  body { font-size: 14px; }
 `;
 
 type AuthShellProps = {
