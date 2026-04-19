@@ -1,8 +1,19 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import styled, { keyframes } from "styled-components";
+import styled, { createGlobalStyle, keyframes } from "styled-components";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
 import { useColorMode } from "../../foundation/theme-context";
+
+/**
+ * @redis-ui/styles normalizes the root font-size to 62.5% (10px) so that
+ * rem-based design tokens resolve cleanly. Clerk's prebuilt components use
+ * rem/em internally and render crushed at that scale. Restore the browser
+ * default on auth routes so Clerk's own spacing, padding, and fonts look
+ * right without us needing to micro-manage every Clerk element.
+ */
+const AuthRootFontSize = createGlobalStyle`
+  html { font-size: 16px; }
+`;
 
 type AuthShellProps = {
   title: string;
@@ -15,6 +26,7 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
 
   return (
     <Page>
+      <AuthRootFontSize />
       <BrandPanel>
         <BrandOrbA />
         <BrandOrbB />
