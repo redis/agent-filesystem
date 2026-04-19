@@ -173,5 +173,5 @@ fi
   cd "$stage_dir"
   npx --yes vercel@latest deploy --yes --logs \
     -e "AFS_CATALOG_PATH=$catalog_path" \
-    "${extra_deploy_args[@]}"
+    ${extra_deploy_args[@]+"${extra_deploy_args[@]}"}
 )
