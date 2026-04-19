@@ -199,6 +199,7 @@ export function DatabaseTable({
             const isDefault = !!row.original.isDefault;
             const nameLabel = row.original.displayName || row.original.databaseName;
             const id = row.original.id;
+            const canEdit = row.original.canEdit;
             return (
               <NameStack>
                 <NameLine>
@@ -212,9 +213,12 @@ export function DatabaseTable({
                     aria-label={row.original.isHealthy ? "Connected" : "Unavailable"}
                   />
                   <NameButton
+                    disabled={!canEdit}
                     onClick={(event) => {
                       event.stopPropagation();
-                      onEditDatabase(row.original.id);
+                      if (canEdit) {
+                        onEditDatabase(row.original.id);
+                      }
                     }}
                   >
                     {nameLabel}
@@ -257,6 +261,13 @@ export function DatabaseTable({
                     {copiedId === id ? <CheckIcon /> : <CopyIcon />}
                   </CopyButton>
                 </IdRow>
+                {!canEdit ? (
+                  <ManagedHint>
+                    {row.original.ownerLabel?.trim()
+                      ? `Managed by ${row.original.ownerLabel}`
+                      : "Managed by AFS Cloud"}
+                  </ManagedHint>
+                ) : null}
               </NameStack>
             );
           },
@@ -393,10 +404,12 @@ export function DatabaseTable({
                 />
                 <Menu.Content.Item
                   text="Edit database"
+                  disabled={!row.original.canEdit}
                   onClick={() => onEditDatabase(row.original.id)}
                 />
                 <Menu.Content.Item
                   text="Delete database"
+                  disabled={!row.original.canDelete}
                   onClick={() => onRemoveDatabase(row.original.id)}
                 />
               </Menu.Content>
@@ -436,7 +449,11 @@ export function DatabaseTable({
               data={filteredRows}
               getRowId={(row) => row.id}
               stripedRows
-              onRowClick={(rowData) => onEditDatabase(rowData.id)}
+              onRowClick={(rowData) => {
+                if (rowData.canEdit) {
+                  onEditDatabase(rowData.id);
+                }
+              }}
             />
           </DatabaseTableViewport>
         </S.TableCard>
@@ -486,6 +503,17 @@ const NameButton = styled.button`
   &:hover {
     color: var(--afs-accent, #dc2626);
   }
+
+  &:disabled {
+    cursor: default;
+    color: var(--afs-ink, #18181b);
+  }
+`;
+
+const ManagedHint = styled.div`
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--afs-muted-ink, #7c6f63);
 `;
 
 /* Glowing status dot, inline before the name */

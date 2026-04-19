@@ -13,21 +13,29 @@ import (
 )
 
 type databaseProfile struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Description   string `json:"description,omitempty"`
-	RedisAddr     string `json:"redis_addr"`
-	RedisUsername string `json:"redis_username,omitempty"`
-	RedisPassword string `json:"redis_password,omitempty"`
-	RedisDB       int    `json:"redis_db"`
-	RedisTLS      bool   `json:"redis_tls"`
-	IsDefault     bool   `json:"is_default"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	OwnerSubject   string `json:"owner_subject,omitempty"`
+	OwnerLabel     string `json:"owner_label,omitempty"`
+	ManagementType string `json:"management_type"`
+	RedisAddr      string `json:"redis_addr"`
+	RedisUsername  string `json:"redis_username,omitempty"`
+	RedisPassword  string `json:"redis_password,omitempty"`
+	RedisDB        int    `json:"redis_db"`
+	RedisTLS       bool   `json:"redis_tls"`
+	IsDefault      bool   `json:"is_default"`
 }
 
 type databaseRecord struct {
 	ID                        string `json:"id"`
 	Name                      string `json:"name"`
 	Description               string `json:"description,omitempty"`
+	OwnerSubject              string `json:"owner_subject,omitempty"`
+	OwnerLabel                string `json:"owner_label,omitempty"`
+	ManagementType            string `json:"management_type"`
+	CanEdit                   bool   `json:"can_edit"`
+	CanDelete                 bool   `json:"can_delete"`
 	RedisAddr                 string `json:"redis_addr"`
 	RedisUsername             string `json:"redis_username,omitempty"`
 	RedisDB                   int    `json:"redis_db"`
@@ -71,6 +79,11 @@ type upsertDatabaseRequest struct {
 	RedisDB       int    `json:"redis_db"`
 	RedisTLS      bool   `json:"redis_tls"`
 }
+
+const (
+	databaseManagementSystemManaged = "system-managed"
+	databaseManagementUserManaged   = "user-managed"
+)
 
 type databaseRuntime struct {
 	cfg     Config
@@ -275,6 +288,7 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 	if err := m.ensureBootstrapDatabase(); err != nil {
 		return databaseListResponse{}, err
 	}
+	subject := authSubjectFromContext(ctx)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -296,15 +310,23 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 	items := make([]databaseRecord, 0, len(m.order))
 	for _, id := range m.order {
 		profile := m.profiles[id]
+		if !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
 		record := databaseRecord{
-			ID:            profile.ID,
-			Name:          profile.Name,
-			Description:   profile.Description,
-			RedisAddr:     profile.RedisAddr,
-			RedisUsername: profile.RedisUsername,
-			RedisDB:       profile.RedisDB,
-			RedisTLS:      profile.RedisTLS,
-			IsDefault:     profile.IsDefault,
+			ID:             profile.ID,
+			Name:           profile.Name,
+			Description:    profile.Description,
+			OwnerSubject:   profile.OwnerSubject,
+			OwnerLabel:     profile.OwnerLabel,
+			ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
+			CanEdit:        databaseProfileCanEdit(profile),
+			CanDelete:      databaseProfileCanDelete(profile),
+			RedisAddr:      profile.RedisAddr,
+			RedisUsername:  profile.RedisUsername,
+			RedisDB:        profile.RedisDB,
+			RedisTLS:       profile.RedisTLS,
+			IsDefault:      profile.IsDefault,
 		}
 		if health, ok := healthByDatabase[id]; ok {
 			record.LastWorkspaceRefreshAt = health.LastWorkspaceRefreshAt
@@ -407,7 +429,7 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	profile, isNew, err := m.buildProfileLocked(id, input)
+	profile, isNew, err := m.buildProfileLocked(ctx, id, input)
 	if err != nil {
 		return databaseRecord{}, err
 	}
@@ -448,14 +470,19 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 	}
 
 	record := databaseRecord{
-		ID:            profile.ID,
-		Name:          profile.Name,
-		Description:   profile.Description,
-		RedisAddr:     profile.RedisAddr,
-		RedisUsername: profile.RedisUsername,
-		RedisDB:       profile.RedisDB,
-		RedisTLS:      profile.RedisTLS,
-		IsDefault:     profile.IsDefault,
+		ID:             profile.ID,
+		Name:           profile.Name,
+		Description:    profile.Description,
+		OwnerSubject:   profile.OwnerSubject,
+		OwnerLabel:     profile.OwnerLabel,
+		ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
+		CanEdit:        databaseProfileCanEdit(profile),
+		CanDelete:      databaseProfileCanDelete(profile),
+		RedisAddr:      profile.RedisAddr,
+		RedisUsername:  profile.RedisUsername,
+		RedisDB:        profile.RedisDB,
+		RedisTLS:       profile.RedisTLS,
+		IsDefault:      profile.IsDefault,
 	}
 	items, _, err := m.liveWorkspaceSummariesLocked(ctx, profile.ID)
 	if err != nil {
@@ -467,11 +494,22 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 }
 
 func (m *DatabaseManager) DeleteDatabase(id string) error {
+	return m.DeleteDatabaseWithContext(context.Background(), id)
+}
+
+func (m *DatabaseManager) DeleteDatabaseWithContext(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.profiles[id]; !exists {
+	profile, exists := m.profiles[id]
+	if !exists {
 		return os.ErrNotExist
+	}
+	if !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+		return os.ErrNotExist
+	}
+	if !databaseProfileCanDelete(profile) {
+		return fmt.Errorf("database %q is managed by AFS Cloud and cannot be deleted", profile.Name)
 	}
 	oldRuntime := m.runtimes[id]
 	oldOrder := append([]string(nil), m.order...)
@@ -519,6 +557,9 @@ func (m *DatabaseManager) SetDefaultDatabase(ctx context.Context, id string) (da
 
 	profile, exists := m.profiles[strings.TrimSpace(id)]
 	if !exists {
+		return databaseRecord{}, os.ErrNotExist
+	}
+	if !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
 		return databaseRecord{}, os.ErrNotExist
 	}
 	oldProfiles := cloneDatabaseProfiles(m.profiles)
@@ -581,7 +622,7 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	input.DatabaseID = profile.ID
 	input.DatabaseName = profile.Name
 	if strings.TrimSpace(input.CloudAccount) == "" {
-		input.CloudAccount = "Direct Redis"
+		input.CloudAccount = quickstartCloudAccount(profile)
 	}
 	detail, err := service.CreateWorkspace(ctx, input)
 	if err != nil {
@@ -610,7 +651,7 @@ func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, works
 		input.DatabaseName = profile.Name
 	}
 	if strings.TrimSpace(input.CloudAccount) == "" {
-		input.CloudAccount = "Direct Redis"
+		input.CloudAccount = quickstartCloudAccount(profile)
 	}
 	detail, err := service.UpdateWorkspace(ctx, route.Name, input)
 	if err != nil {
@@ -631,7 +672,7 @@ func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace
 		input.DatabaseName = profile.Name
 	}
 	if strings.TrimSpace(input.CloudAccount) == "" {
-		input.CloudAccount = "Direct Redis"
+		input.CloudAccount = quickstartCloudAccount(profile)
 	}
 	detail, err := service.UpdateWorkspace(ctx, route.Name, input)
 	if err != nil {
@@ -884,6 +925,7 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 	if m.catalog == nil {
 		return workspaceSessionListResponse{Items: []workspaceSessionInfo{}}, nil
 	}
+	subject := authSubjectFromContext(ctx)
 
 	records, err := m.catalog.ListSessions(ctx, databaseID)
 	if err != nil {
@@ -892,6 +934,9 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 
 	items := make([]workspaceSessionInfo, 0, len(records))
 	for _, record := range records {
+		if profile, ok := m.profiles[record.DatabaseID]; ok && !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
 		databaseName := record.DatabaseID
 		if profile, ok := m.profiles[record.DatabaseID]; ok && strings.TrimSpace(profile.Name) != "" {
 			databaseName = profile.Name
@@ -927,9 +972,13 @@ func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activ
 		profiles[id] = profile
 	}
 	m.mu.Unlock()
+	subject := authSubjectFromContext(ctx)
 
 	items := make([]activityEvent, 0, limit)
 	for _, databaseID := range order {
+		if profile, ok := profiles[databaseID]; ok && !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
 		service, _, err := m.serviceFor(ctx, databaseID)
 		if err != nil {
 			continue
@@ -1036,6 +1085,9 @@ func (m *DatabaseManager) serviceForLocked(ctx context.Context, databaseID strin
 	if !exists {
 		return nil, databaseProfile{}, os.ErrNotExist
 	}
+	if !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+		return nil, databaseProfile{}, os.ErrNotExist
+	}
 	runtime, exists := m.runtimes[databaseID]
 	if !exists {
 		var err error
@@ -1059,15 +1111,23 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 		if err != nil {
 			return nil, databaseProfile{}, workspaceCatalogRoute{}, err
 		}
-		switch len(routes) {
+		filteredRoutes := make([]workspaceCatalogRoute, 0, len(routes))
+		for _, route := range routes {
+			profile, ok := m.profiles[route.DatabaseID]
+			if !ok || !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+				continue
+			}
+			filteredRoutes = append(filteredRoutes, route)
+		}
+		switch len(filteredRoutes) {
 		case 1:
-			service, profile, err := m.serviceForLocked(ctx, routes[0].DatabaseID)
-			return service, profile, routes[0], err
+			service, profile, err := m.serviceForLocked(ctx, filteredRoutes[0].DatabaseID)
+			return service, profile, filteredRoutes[0], err
 		case 0:
 			// Fall back to a scan so out-of-band changes can still be discovered.
 		default:
-			labels := make([]string, 0, len(routes))
-			for _, route := range routes {
+			labels := make([]string, 0, len(filteredRoutes))
+			for _, route := range filteredRoutes {
 				profile := m.profiles[route.DatabaseID]
 				label := route.DatabaseID
 				if profile.Name != "" && profile.Name != route.DatabaseID {
@@ -1088,6 +1148,9 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 	)
 
 	for _, id := range m.order {
+		if profile, ok := m.profiles[id]; ok && !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+			continue
+		}
 		service, profile, err := m.serviceForLocked(ctx, id)
 		if err != nil {
 			return nil, databaseProfile{}, workspaceCatalogRoute{}, err
@@ -1135,9 +1198,13 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context) (workspaceListResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	subject := authSubjectFromContext(ctx)
 
 	items := make([]workspaceSummary, 0)
 	for _, id := range m.order {
+		if profile, ok := m.profiles[id]; ok && !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
 		summaries, _, err := m.liveWorkspaceSummariesLocked(ctx, id)
 		if err != nil {
 			continue
@@ -1359,7 +1426,7 @@ func (m *DatabaseManager) attachWorkspaceDetailIdentity(ctx context.Context, det
 	return nil
 }
 
-func (m *DatabaseManager) buildProfileLocked(id string, input upsertDatabaseRequest) (databaseProfile, bool, error) {
+func (m *DatabaseManager) buildProfileLocked(ctx context.Context, id string, input upsertDatabaseRequest) (databaseProfile, bool, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return databaseProfile{}, false, fmt.Errorf("database name is required")
@@ -1377,6 +1444,16 @@ func (m *DatabaseManager) buildProfileLocked(id string, input upsertDatabaseRequ
 	} else if _, exists := m.profiles[resolvedID]; !exists {
 		isNew = true
 	}
+	if !isNew {
+		if existing, exists := m.profiles[resolvedID]; exists {
+			if !databaseProfileVisibleToSubject(existing, authSubjectFromContext(ctx)) {
+				return databaseProfile{}, false, os.ErrNotExist
+			}
+			if !databaseProfileCanEdit(existing) {
+				return databaseProfile{}, false, fmt.Errorf("database %q is managed by AFS Cloud and cannot be edited", existing.Name)
+			}
+		}
+	}
 
 	password := input.RedisPassword
 	if !isNew && strings.TrimSpace(password) == "" {
@@ -1386,15 +1463,18 @@ func (m *DatabaseManager) buildProfileLocked(id string, input upsertDatabaseRequ
 	}
 
 	return databaseProfile{
-		ID:            resolvedID,
-		Name:          name,
-		Description:   strings.TrimSpace(input.Description),
-		RedisAddr:     normalizeRedisAddr(input.RedisAddr),
-		RedisUsername: strings.TrimSpace(input.RedisUsername),
-		RedisPassword: password,
-		RedisDB:       input.RedisDB,
-		RedisTLS:      input.RedisTLS,
-		IsDefault:     !isNew && m.profiles[resolvedID].IsDefault,
+		ID:             resolvedID,
+		Name:           name,
+		Description:    strings.TrimSpace(input.Description),
+		OwnerSubject:   ownerSubjectForDatabaseProfile(ctx, isNew, m.profiles[resolvedID]),
+		OwnerLabel:     ownerLabelForDatabaseProfile(ctx, isNew, m.profiles[resolvedID]),
+		ManagementType: managementTypeForDatabaseProfile(isNew, m.profiles[resolvedID]),
+		RedisAddr:      normalizeRedisAddr(input.RedisAddr),
+		RedisUsername:  strings.TrimSpace(input.RedisUsername),
+		RedisPassword:  password,
+		RedisDB:        input.RedisDB,
+		RedisTLS:       input.RedisTLS,
+		IsDefault:      !isNew && m.profiles[resolvedID].IsDefault,
 	}, isNew, nil
 }
 
@@ -1466,34 +1546,47 @@ func validateDatabaseProfile(profile databaseProfile) error {
 func (m *DatabaseManager) resolveTargetDatabase(ctx context.Context, requestedID string) (databaseProfile, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.resolveTargetDatabaseLocked(requestedID)
+	return m.resolveTargetDatabaseLocked(ctx, requestedID)
 }
 
-func (m *DatabaseManager) resolveTargetDatabaseLocked(requestedID string) (databaseProfile, error) {
+func (m *DatabaseManager) resolveTargetDatabaseLocked(ctx context.Context, requestedID string) (databaseProfile, error) {
 	resolvedID := strings.TrimSpace(requestedID)
+	subject := authSubjectFromContext(ctx)
 	if resolvedID != "" {
 		profile, exists := m.profiles[resolvedID]
 		if !exists {
 			return databaseProfile{}, os.ErrNotExist
 		}
+		if !databaseProfileVisibleToSubject(profile, subject) {
+			return databaseProfile{}, os.ErrNotExist
+		}
 		return profile, nil
 	}
 
-	switch len(m.order) {
+	visibleOrder := make([]string, 0, len(m.order))
+	for _, id := range m.order {
+		profile, exists := m.profiles[id]
+		if !exists || !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
+		visibleOrder = append(visibleOrder, id)
+	}
+
+	switch len(visibleOrder) {
 	case 0:
 		return databaseProfile{}, fmt.Errorf("no databases are configured")
 	case 1:
-		return m.profiles[m.order[0]], nil
+		return m.profiles[visibleOrder[0]], nil
 	}
 
-	for _, id := range m.order {
+	for _, id := range visibleOrder {
 		if profile, exists := m.profiles[id]; exists && profile.IsDefault {
 			return profile, nil
 		}
 	}
 
-	labels := make([]string, 0, len(m.order))
-	for _, id := range m.order {
+	labels := make([]string, 0, len(visibleOrder))
+	for _, id := range visibleOrder {
 		if profile, exists := m.profiles[id]; exists {
 			labels = append(labels, fmt.Sprintf("%s (%s)", profile.Name, profile.ID))
 		}
@@ -1536,14 +1629,19 @@ func (m *DatabaseManager) databaseRecordLocked(ctx context.Context, id string) (
 	}
 
 	record := databaseRecord{
-		ID:            profile.ID,
-		Name:          profile.Name,
-		Description:   profile.Description,
-		RedisAddr:     profile.RedisAddr,
-		RedisUsername: profile.RedisUsername,
-		RedisDB:       profile.RedisDB,
-		RedisTLS:      profile.RedisTLS,
-		IsDefault:     profile.IsDefault,
+		ID:             profile.ID,
+		Name:           profile.Name,
+		Description:    profile.Description,
+		OwnerSubject:   profile.OwnerSubject,
+		OwnerLabel:     profile.OwnerLabel,
+		ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
+		CanEdit:        databaseProfileCanEdit(profile),
+		CanDelete:      databaseProfileCanDelete(profile),
+		RedisAddr:      profile.RedisAddr,
+		RedisUsername:  profile.RedisUsername,
+		RedisDB:        profile.RedisDB,
+		RedisTLS:       profile.RedisTLS,
+		IsDefault:      profile.IsDefault,
 	}
 	if m.catalog != nil {
 		healthByDatabase, err := m.catalog.ListDatabaseHealth(ctx)
@@ -1596,11 +1694,75 @@ func uniqueDatabaseIDLocked(existing map[string]databaseProfile, profile databas
 func stampWorkspaceSummary(summary *workspaceSummary, profile databaseProfile) {
 	summary.DatabaseID = profile.ID
 	summary.DatabaseName = profile.Name
+	summary.OwnerSubject = profile.OwnerSubject
+	summary.OwnerLabel = profile.OwnerLabel
+	summary.DatabaseManagementType = normalizedDatabaseManagementType(profile.ManagementType)
+	summary.DatabaseCanEdit = databaseProfileCanEdit(profile)
+	summary.DatabaseCanDelete = databaseProfileCanDelete(profile)
 }
 
 func stampWorkspaceDetail(detail *workspaceDetail, profile databaseProfile) {
 	detail.DatabaseID = profile.ID
 	detail.DatabaseName = profile.Name
+	detail.OwnerSubject = profile.OwnerSubject
+	detail.OwnerLabel = profile.OwnerLabel
+	detail.DatabaseManagementType = normalizedDatabaseManagementType(profile.ManagementType)
+	detail.DatabaseCanEdit = databaseProfileCanEdit(profile)
+	detail.DatabaseCanDelete = databaseProfileCanDelete(profile)
+}
+
+func normalizedDatabaseManagementType(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", databaseManagementUserManaged:
+		return databaseManagementUserManaged
+	case databaseManagementSystemManaged:
+		return databaseManagementSystemManaged
+	default:
+		return databaseManagementUserManaged
+	}
+}
+
+func databaseProfileCanEdit(profile databaseProfile) bool {
+	return normalizedDatabaseManagementType(profile.ManagementType) != databaseManagementSystemManaged
+}
+
+func databaseProfileCanDelete(profile databaseProfile) bool {
+	return normalizedDatabaseManagementType(profile.ManagementType) != databaseManagementSystemManaged
+}
+
+func ownerSubjectForDatabaseProfile(ctx context.Context, isNew bool, existing databaseProfile) string {
+	if !isNew {
+		return strings.TrimSpace(existing.OwnerSubject)
+	}
+	if identity, ok := AuthIdentityFromContext(ctx); ok {
+		return strings.TrimSpace(identity.Subject)
+	}
+	return ""
+}
+
+func ownerLabelForDatabaseProfile(ctx context.Context, isNew bool, existing databaseProfile) string {
+	if !isNew {
+		return strings.TrimSpace(existing.OwnerLabel)
+	}
+	if identity, ok := AuthIdentityFromContext(ctx); ok {
+		if value := strings.TrimSpace(identity.Name); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(identity.Email); value != "" {
+			return value
+		}
+		if value := strings.TrimSpace(identity.Subject); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func managementTypeForDatabaseProfile(isNew bool, existing databaseProfile) string {
+	if !isNew {
+		return normalizedDatabaseManagementType(existing.ManagementType)
+	}
+	return databaseManagementUserManaged
 }
 
 func withoutValue(values []string, target string) []string {
@@ -1619,4 +1781,23 @@ func cloneDatabaseProfiles(input map[string]databaseProfile) map[string]database
 		cloned[id] = profile
 	}
 	return cloned
+}
+
+func authSubjectFromContext(ctx context.Context) string {
+	if identity, ok := AuthIdentityFromContext(ctx); ok {
+		return strings.TrimSpace(identity.Subject)
+	}
+	return ""
+}
+
+func databaseProfileVisibleToSubject(profile databaseProfile, subject string) bool {
+	subject = strings.TrimSpace(subject)
+	if subject == "" {
+		return true
+	}
+	ownerSubject := strings.TrimSpace(profile.OwnerSubject)
+	if ownerSubject == "" {
+		return true
+	}
+	return ownerSubject == subject
 }

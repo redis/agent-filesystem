@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PropsWithChildren } from "react";
 import { afsApi, getAFSClientMode } from "./api/afs";
+import { useAuthSession } from "./auth-context";
 import {
   useDatabases,
   useDeleteDatabaseMutation,
@@ -20,6 +21,11 @@ export type AFSDatabaseScopeRecord = {
   displayName: string;
   databaseName: string;
   description: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  managementType?: string;
+  canEdit: boolean;
+  canDelete: boolean;
   endpointLabel: string;
   dbIndex: string;
   username: string;
@@ -100,6 +106,11 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     displayName: input.name,
     databaseName: input.name,
     description: input.description,
+    ownerSubject: input.ownerSubject,
+    ownerLabel: input.ownerLabel,
+    managementType: input.managementType,
+    canEdit: input.canEdit,
+    canDelete: input.canDelete,
     endpointLabel: input.redisAddr,
     dbIndex: String(input.redisDB),
     username: input.redisUsername,
@@ -123,7 +134,9 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
 export function DatabaseScopeProvider(props: PropsWithChildren) {
   const clientMode = getAFSClientMode();
   const queryClient = useQueryClient();
-  const databasesQuery = useDatabases();
+  const auth = useAuthSession();
+  const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
+  const databasesQuery = useDatabases(queriesEnabled);
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const setDefaultDatabaseMutation = useSetDefaultDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
@@ -133,7 +146,9 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     () => (databasesQuery.data ?? []).map(mapDatabaseRecord),
     [databasesQuery.data],
   );
-  const errorMessage = databasesQuery.error instanceof Error
+  const errorMessage = !queriesEnabled
+    ? null
+    : databasesQuery.error instanceof Error
     ? databasesQuery.error.message
     : databasesQuery.error != null
       ? "Unable to load databases."
@@ -144,7 +159,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   );
 
   useEffect(() => {
-    if (clientMode !== "http" || legacyMigrated || databasesQuery.isLoading) {
+    if (clientMode !== "http" || legacyMigrated || databasesQuery.isLoading || !queriesEnabled) {
       return;
     }
 
@@ -190,14 +205,14 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     return () => {
       cancelled = true;
     };
-  }, [clientMode, databases, databasesQuery, legacyMigrated]);
+  }, [clientMode, databases, databasesQuery, legacyMigrated, queriesEnabled]);
 
   const value = useMemo<DatabaseScopeContextValue>(
     () => ({
       clientMode,
       databases,
       unavailableDatabases,
-      isLoading: databasesQuery.isLoading,
+      isLoading: auth.isLoading || (queriesEnabled && databasesQuery.isLoading),
       errorMessage,
       saveDatabase: async (input: SaveDatabaseInput) => {
         await saveDatabaseMutation.mutateAsync(input);
@@ -219,11 +234,13 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
       clientMode,
       databases,
       unavailableDatabases,
+      auth.isLoading,
       databasesQuery.isLoading,
       errorMessage,
       deleteDatabaseMutation,
       queryClient,
       saveDatabaseMutation,
+      queriesEnabled,
       setDefaultDatabaseMutation,
     ],
   );

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -93,6 +94,18 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	if !record.IsDefault {
 		t.Fatal("record.IsDefault = false, want true")
 	}
+	if record.ManagementType != databaseManagementSystemManaged {
+		t.Fatalf("record.ManagementType = %q, want %q", record.ManagementType, databaseManagementSystemManaged)
+	}
+	if record.CanEdit {
+		t.Fatal("record.CanEdit = true, want false")
+	}
+	if record.CanDelete {
+		t.Fatal("record.CanDelete = true, want false")
+	}
+	if record.OwnerLabel != "AFS Cloud" {
+		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "AFS Cloud")
+	}
 
 	profiles, err := manager.catalog.ListDatabaseProfiles(context.Background())
 	if err != nil {
@@ -103,5 +116,45 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	}
 	if profiles[0].ID != "afs-cloud" {
 		t.Fatalf("profiles[0].ID = %q, want %q", profiles[0].ID, "afs-cloud")
+	}
+	if profiles[0].ManagementType != databaseManagementSystemManaged {
+		t.Fatalf("profiles[0].ManagementType = %q, want %q", profiles[0].ManagementType, databaseManagementSystemManaged)
+	}
+}
+
+func TestManagedDatabaseCannotBeEditedOrDeleted(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/7")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	if _, err := manager.ListDatabases(context.Background()); err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+
+	_, err = manager.UpsertDatabase(context.Background(), "afs-cloud", upsertDatabaseRequest{
+		Name:      "Changed",
+		RedisAddr: mr.Addr(),
+		RedisDB:   7,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be edited") {
+		t.Fatalf("UpsertDatabase(managed) error = %v, want managed edit rejection", err)
+	}
+
+	err = manager.DeleteDatabase("afs-cloud")
+	if err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
+		t.Fatalf("DeleteDatabase(managed) error = %v, want managed delete rejection", err)
 	}
 }

@@ -56,22 +56,27 @@ type capabilities struct {
 }
 
 type workspaceSummary struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	CloudAccount     string `json:"cloud_account"`
-	DatabaseID       string `json:"database_id"`
-	DatabaseName     string `json:"database_name"`
-	RedisKey         string `json:"redis_key"`
-	Status           string `json:"status"`
-	FileCount        int    `json:"file_count"`
-	FolderCount      int    `json:"folder_count"`
-	TotalBytes       int64  `json:"total_bytes"`
-	CheckpointCount  int    `json:"checkpoint_count"`
-	DraftState       string `json:"draft_state"`
-	LastCheckpointAt string `json:"last_checkpoint_at"`
-	UpdatedAt        string `json:"updated_at"`
-	Region           string `json:"region"`
-	Source           string `json:"source"`
+	ID                     string `json:"id"`
+	Name                   string `json:"name"`
+	CloudAccount           string `json:"cloud_account"`
+	DatabaseID             string `json:"database_id"`
+	DatabaseName           string `json:"database_name"`
+	OwnerSubject           string `json:"owner_subject,omitempty"`
+	OwnerLabel             string `json:"owner_label,omitempty"`
+	DatabaseManagementType string `json:"database_management_type,omitempty"`
+	DatabaseCanEdit        bool   `json:"database_can_edit"`
+	DatabaseCanDelete      bool   `json:"database_can_delete"`
+	RedisKey               string `json:"redis_key"`
+	Status                 string `json:"status"`
+	FileCount              int    `json:"file_count"`
+	FolderCount            int    `json:"folder_count"`
+	TotalBytes             int64  `json:"total_bytes"`
+	CheckpointCount        int    `json:"checkpoint_count"`
+	DraftState             string `json:"draft_state"`
+	LastCheckpointAt       string `json:"last_checkpoint_at"`
+	UpdatedAt              string `json:"updated_at"`
+	Region                 string `json:"region"`
+	Source                 string `json:"source"`
 }
 
 type workspaceListResponse struct {
@@ -109,28 +114,33 @@ type activityListResponse struct {
 }
 
 type workspaceDetail struct {
-	ID               string              `json:"id"`
-	Name             string              `json:"name"`
-	Description      string              `json:"description,omitempty"`
-	CloudAccount     string              `json:"cloud_account"`
-	DatabaseID       string              `json:"database_id"`
-	DatabaseName     string              `json:"database_name"`
-	RedisKey         string              `json:"redis_key"`
-	Region           string              `json:"region"`
-	Status           string              `json:"status"`
-	Source           string              `json:"source"`
-	CreatedAt        string              `json:"created_at"`
-	UpdatedAt        string              `json:"updated_at"`
-	DraftState       string              `json:"draft_state"`
-	HeadCheckpointID string              `json:"head_checkpoint_id"`
-	Tags             []string            `json:"tags,omitempty"`
-	FileCount        int                 `json:"file_count"`
-	FolderCount      int                 `json:"folder_count"`
-	TotalBytes       int64               `json:"total_bytes"`
-	CheckpointCount  int                 `json:"checkpoint_count"`
-	Checkpoints      []checkpointSummary `json:"checkpoints"`
-	Activity         []activityEvent     `json:"activity"`
-	Capabilities     capabilities        `json:"capabilities"`
+	ID                     string              `json:"id"`
+	Name                   string              `json:"name"`
+	Description            string              `json:"description,omitempty"`
+	CloudAccount           string              `json:"cloud_account"`
+	DatabaseID             string              `json:"database_id"`
+	DatabaseName           string              `json:"database_name"`
+	OwnerSubject           string              `json:"owner_subject,omitempty"`
+	OwnerLabel             string              `json:"owner_label,omitempty"`
+	DatabaseManagementType string              `json:"database_management_type,omitempty"`
+	DatabaseCanEdit        bool                `json:"database_can_edit"`
+	DatabaseCanDelete      bool                `json:"database_can_delete"`
+	RedisKey               string              `json:"redis_key"`
+	Region                 string              `json:"region"`
+	Status                 string              `json:"status"`
+	Source                 string              `json:"source"`
+	CreatedAt              string              `json:"created_at"`
+	UpdatedAt              string              `json:"updated_at"`
+	DraftState             string              `json:"draft_state"`
+	HeadCheckpointID       string              `json:"head_checkpoint_id"`
+	Tags                   []string            `json:"tags,omitempty"`
+	FileCount              int                 `json:"file_count"`
+	FolderCount            int                 `json:"folder_count"`
+	TotalBytes             int64               `json:"total_bytes"`
+	CheckpointCount        int                 `json:"checkpoint_count"`
+	Checkpoints            []checkpointSummary `json:"checkpoints"`
+	Activity               []activityEvent     `json:"activity"`
+	Capabilities           capabilities        `json:"capabilities"`
 }
 
 type treeItem struct {

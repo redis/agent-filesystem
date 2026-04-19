@@ -40,31 +40,43 @@ type saveCheckpointRequest struct {
 	SkipWorkspaceRootSync bool              `json:"skip_workspace_root_sync"`
 }
 
+type HandlerOptions struct {
+	AllowOrigin string
+	Auth        *AuthHandler
+}
+
 func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
+	return NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: allowOrigin,
+		Auth:        NewNoAuthHandler(),
+	})
+}
+
+func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
 
-	admin := newAdminMux(manager)
+	admin := authWrappedAdminMux(manager, opts.Auth)
 
 	// Serve embedded UI for non-API paths, falling back to index.html for SPA routes.
 	uiFS, err := fs.Sub(uistatic.Content, "dist")
 	if err != nil {
 		// If the UI is not embedded (e.g. dev build), serve API only.
 		root.Handle("/", admin)
-		return cors(root, allowOrigin)
+		return cors(root, opts.AllowOrigin)
 	}
 
 	// Check if the embedded UI has real content (not just the placeholder).
 	if _, err := fs.Stat(uiFS, "index.html"); err != nil {
 		// No UI built — serve API only.
 		root.Handle("/", admin)
-		return cors(root, allowOrigin)
+		return cors(root, opts.AllowOrigin)
 	}
 
 	fileServer := http.FileServer(http.FS(uiFS))
 	spaHandler := &spaFallbackHandler{fs: uiFS, fileServer: fileServer, admin: admin}
 	root.Handle("/", spaHandler)
-	return cors(root, allowOrigin)
+	return cors(root, opts.AllowOrigin)
 }
 
 // spaFallbackHandler serves static files from the embedded UI filesystem.
@@ -99,14 +111,29 @@ func (h *spaFallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func NewAdminHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
-	return cors(newAdminMux(manager), allowOrigin)
+	return NewAdminHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: allowOrigin,
+		Auth:        NewNoAuthHandler(),
+	})
+}
+
+func NewAdminHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.Handler {
+	return cors(authWrappedAdminMux(manager, opts.Auth), opts.AllowOrigin)
 }
 
 func NewClientHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
 	return cors(newClientMux(manager), allowOrigin)
 }
 
-func newAdminMux(manager *DatabaseManager) *http.ServeMux {
+func authWrappedAdminMux(manager *DatabaseManager, auth *AuthHandler) http.Handler {
+	admin := newAdminMux(manager, auth)
+	if auth == nil {
+		auth = NewNoAuthHandler()
+	}
+	return auth.Middleware(admin)
+}
+
+func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +142,17 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	})
+
+	mux.HandleFunc("/v1/auth/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		if auth == nil {
+			auth = NewNoAuthHandler()
+		}
+		writeJSON(w, http.StatusOK, auth.RuntimeConfig(r))
 	})
 
 	mux.HandleFunc("/v1/databases", func(w http.ResponseWriter, r *http.Request) {
@@ -341,7 +379,7 @@ func newAdminMux(manager *DatabaseManager) *http.ServeMux {
 				}
 				writeJSON(w, http.StatusOK, response)
 			case http.MethodDelete:
-				if err := manager.DeleteDatabase(databaseID); err != nil {
+				if err := manager.DeleteDatabaseWithContext(r.Context(), databaseID); err != nil {
 					writeError(w, err)
 					return
 				}

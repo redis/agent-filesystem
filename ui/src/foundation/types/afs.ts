@@ -1,7 +1,25 @@
 export type AFSWorkspaceSource = "blank" | "git-import" | "cloud-import";
 export type AFSClientMode = "demo" | "http";
+export type AFSAuthMode = "none" | "trusted-header" | "clerk" | "oidc" | string;
 export type AFSWorkspaceView = "head" | `checkpoint:${string}` | "working-copy";
 export type AFSTreeItemKind = "file" | "dir" | "symlink";
+
+export type AFSAuthUser = {
+  subject: string;
+  name?: string;
+  email?: string;
+  groups?: string[];
+};
+
+export type AFSAuthConfig = {
+  mode: AFSAuthMode;
+  enabled: boolean;
+  provider: string;
+  signInRequired: boolean;
+  authenticated: boolean;
+  clerkPublishableKey?: string;
+  user?: AFSAuthUser;
+};
 
 export type AFSFile = {
   language: string;
@@ -104,6 +122,11 @@ export type AFSWorkspace = {
   cloudAccount: string;
   databaseId: string;
   databaseName: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  databaseManagementType?: string;
+  databaseCanEdit?: boolean;
+  databaseCanDelete?: boolean;
   redisKey: string;
   region: string;
   mountedPath?: string;
@@ -129,6 +152,11 @@ export type AFSWorkspaceSummary = {
   cloudAccount: string;
   databaseId: string;
   databaseName: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  databaseManagementType?: string;
+  databaseCanEdit?: boolean;
+  databaseCanDelete?: boolean;
   redisKey: string;
   fileCount: number;
   folderCount: number;
@@ -165,6 +193,11 @@ export type AFSDatabase = {
   id: string;
   name: string;
   description: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
+  managementType?: string;
+  canEdit: boolean;
+  canDelete: boolean;
   redisAddr: string;
   redisUsername: string;
   redisPassword: string;

@@ -57,6 +57,9 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			workspace_id TEXT NOT NULL,
 			name TEXT NOT NULL,
 			database_name TEXT NOT NULL DEFAULT '',
+			owner_subject TEXT NOT NULL DEFAULT '',
+			owner_label TEXT NOT NULL DEFAULT '',
+			database_management_type TEXT NOT NULL DEFAULT '',
 			cloud_account TEXT NOT NULL DEFAULT '',
 			redis_key TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL DEFAULT '',
@@ -110,6 +113,9 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL,
 			description TEXT NOT NULL DEFAULT '',
+			owner_subject TEXT NOT NULL DEFAULT '',
+			owner_label TEXT NOT NULL DEFAULT '',
+			management_type TEXT NOT NULL DEFAULT '',
 			redis_addr TEXT NOT NULL,
 			redis_username TEXT NOT NULL DEFAULT '',
 			redis_password TEXT NOT NULL DEFAULT '',
@@ -136,11 +142,35 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		}
 	}
 	if c.dialect == catalogSQLDialectPostgres {
-		_, err := c.execContext(ctx, `ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0`)
-		return err
+		alterations := []string{
+			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS management_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS database_management_type TEXT NOT NULL DEFAULT ''`,
+		}
+		for _, statement := range alterations {
+			if _, err := c.execContext(ctx, statement); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
-	if _, err := c.execContext(ctx, `ALTER TABLE database_registry ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
-		return err
+	sqliteAlterations := []string{
+		`ALTER TABLE database_registry ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE database_registry ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE database_registry ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE database_registry ADD COLUMN management_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workspace_catalog ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workspace_catalog ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workspace_catalog ADD COLUMN database_management_type TEXT NOT NULL DEFAULT ''`,
+	}
+	for _, statement := range sqliteAlterations {
+		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
 	}
 	return nil
 }
@@ -240,6 +270,9 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 			cloud_account,
 			database_id,
 			database_name,
+			owner_subject,
+			owner_label,
+			database_management_type,
 			redis_key,
 			status,
 			file_count,
@@ -267,6 +300,9 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 			&item.CloudAccount,
 			&item.DatabaseID,
 			&item.DatabaseName,
+			&item.OwnerSubject,
+			&item.OwnerLabel,
+			&item.DatabaseManagementType,
 			&item.RedisKey,
 			&item.Status,
 			&item.FileCount,
@@ -426,6 +462,9 @@ func upsertCatalogWorkspaceSummary(
 		item.ID,
 		item.Name,
 		strings.TrimSpace(item.DatabaseName),
+		strings.TrimSpace(item.OwnerSubject),
+		strings.TrimSpace(item.OwnerLabel),
+		strings.TrimSpace(item.DatabaseManagementType),
 		strings.TrimSpace(item.CloudAccount),
 		strings.TrimSpace(item.RedisKey),
 		strings.TrimSpace(item.Status),
@@ -493,22 +532,27 @@ func workspaceSummaryFromDetail(detail workspaceDetail) workspaceSummary {
 	}
 
 	return workspaceSummary{
-		ID:               detail.ID,
-		Name:             detail.Name,
-		CloudAccount:     detail.CloudAccount,
-		DatabaseID:       detail.DatabaseID,
-		DatabaseName:     detail.DatabaseName,
-		RedisKey:         detail.RedisKey,
-		Status:           detail.Status,
-		FileCount:        detail.FileCount,
-		FolderCount:      detail.FolderCount,
-		TotalBytes:       detail.TotalBytes,
-		CheckpointCount:  detail.CheckpointCount,
-		DraftState:       detail.DraftState,
-		LastCheckpointAt: lastCheckpointAt,
-		UpdatedAt:        detail.UpdatedAt,
-		Region:           detail.Region,
-		Source:           detail.Source,
+		ID:                     detail.ID,
+		Name:                   detail.Name,
+		CloudAccount:           detail.CloudAccount,
+		DatabaseID:             detail.DatabaseID,
+		DatabaseName:           detail.DatabaseName,
+		OwnerSubject:           detail.OwnerSubject,
+		OwnerLabel:             detail.OwnerLabel,
+		DatabaseManagementType: detail.DatabaseManagementType,
+		DatabaseCanEdit:        detail.DatabaseCanEdit,
+		DatabaseCanDelete:      detail.DatabaseCanDelete,
+		RedisKey:               detail.RedisKey,
+		Status:                 detail.Status,
+		FileCount:              detail.FileCount,
+		FolderCount:            detail.FolderCount,
+		TotalBytes:             detail.TotalBytes,
+		CheckpointCount:        detail.CheckpointCount,
+		DraftState:             detail.DraftState,
+		LastCheckpointAt:       lastCheckpointAt,
+		UpdatedAt:              detail.UpdatedAt,
+		Region:                 detail.Region,
+		Source:                 detail.Source,
 	}
 }
 
@@ -517,6 +561,9 @@ const workspaceCatalogUpsertSQL = `INSERT INTO workspace_catalog (
 	workspace_id,
 	name,
 	database_name,
+	owner_subject,
+	owner_label,
+	database_management_type,
 	cloud_account,
 	redis_key,
 	status,
@@ -529,10 +576,13 @@ const workspaceCatalogUpsertSQL = `INSERT INTO workspace_catalog (
 	updated_at,
 	region,
 	source
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(database_id, workspace_id) DO UPDATE SET
 	name = excluded.name,
 	database_name = excluded.database_name,
+	owner_subject = excluded.owner_subject,
+	owner_label = excluded.owner_label,
+	database_management_type = excluded.database_management_type,
 	cloud_account = excluded.cloud_account,
 	redis_key = excluded.redis_key,
 	status = excluded.status,

@@ -10,6 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as SignupRouteImport } from './routes/signup'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as DatabasesRouteImport } from './routes/databases'
@@ -19,10 +22,27 @@ import { Route as AgentGuideRouteImport } from './routes/agent-guide'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
+import { Route as SignupClerkPathRouteImport } from './routes/signup.$clerkPath'
+import { Route as LoginClerkPathRouteImport } from './routes/login.$clerkPath'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
   path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SignupRoute = SignupRouteImport.update({
+  id: '/signup',
+  path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DownloadsRoute = DownloadsRouteImport.update({
@@ -70,6 +90,16 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   path: '/$workspaceId',
   getParentRoute: () => WorkspacesRoute,
 } as any)
+const SignupClerkPathRoute = SignupClerkPathRouteImport.update({
+  id: '/$clerkPath',
+  path: '/$clerkPath',
+  getParentRoute: () => SignupRoute,
+} as any)
+const LoginClerkPathRoute = LoginClerkPathRouteImport.update({
+  id: '/$clerkPath',
+  path: '/$clerkPath',
+  getParentRoute: () => LoginRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -80,7 +110,12 @@ export interface FileRoutesByFullPath {
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRouteWithChildren
+  '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/login/$clerkPath': typeof LoginClerkPathRoute
+  '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
@@ -92,7 +127,12 @@ export interface FileRoutesByTo {
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRouteWithChildren
+  '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/login/$clerkPath': typeof LoginClerkPathRoute
+  '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesById {
@@ -105,7 +145,12 @@ export interface FileRoutesById {
   '/databases': typeof DatabasesRoute
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRouteWithChildren
+  '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/login/$clerkPath': typeof LoginClerkPathRoute
+  '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRouteTypes {
@@ -119,7 +164,12 @@ export interface FileRouteTypes {
     | '/databases'
     | '/docs'
     | '/downloads'
+    | '/forgot-password'
+    | '/login'
+    | '/signup'
     | '/workspaces'
+    | '/login/$clerkPath'
+    | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -131,7 +181,12 @@ export interface FileRouteTypes {
     | '/databases'
     | '/docs'
     | '/downloads'
+    | '/forgot-password'
+    | '/login'
+    | '/signup'
     | '/workspaces'
+    | '/login/$clerkPath'
+    | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
   id:
     | '__root__'
@@ -143,7 +198,12 @@ export interface FileRouteTypes {
     | '/databases'
     | '/docs'
     | '/downloads'
+    | '/forgot-password'
+    | '/login'
+    | '/signup'
     | '/workspaces'
+    | '/login/$clerkPath'
+    | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
 }
@@ -156,6 +216,9 @@ export interface RootRouteChildren {
   DatabasesRoute: typeof DatabasesRoute
   DocsRoute: typeof DocsRoute
   DownloadsRoute: typeof DownloadsRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  LoginRoute: typeof LoginRouteWithChildren
+  SignupRoute: typeof SignupRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
 }
 
@@ -166,6 +229,27 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/signup': {
+      id: '/signup'
+      path: '/signup'
+      fullPath: '/signup'
+      preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/downloads': {
@@ -231,8 +315,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof WorkspacesRoute
     }
+    '/signup/$clerkPath': {
+      id: '/signup/$clerkPath'
+      path: '/$clerkPath'
+      fullPath: '/signup/$clerkPath'
+      preLoaderRoute: typeof SignupClerkPathRouteImport
+      parentRoute: typeof SignupRoute
+    }
+    '/login/$clerkPath': {
+      id: '/login/$clerkPath'
+      path: '/$clerkPath'
+      fullPath: '/login/$clerkPath'
+      preLoaderRoute: typeof LoginClerkPathRouteImport
+      parentRoute: typeof LoginRoute
+    }
   }
 }
+
+interface LoginRouteChildren {
+  LoginClerkPathRoute: typeof LoginClerkPathRoute
+}
+
+const LoginRouteChildren: LoginRouteChildren = {
+  LoginClerkPathRoute: LoginClerkPathRoute,
+}
+
+const LoginRouteWithChildren = LoginRoute._addFileChildren(LoginRouteChildren)
+
+interface SignupRouteChildren {
+  SignupClerkPathRoute: typeof SignupClerkPathRoute
+}
+
+const SignupRouteChildren: SignupRouteChildren = {
+  SignupClerkPathRoute: SignupClerkPathRoute,
+}
+
+const SignupRouteWithChildren =
+  SignupRoute._addFileChildren(SignupRouteChildren)
 
 interface WorkspacesRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
@@ -255,6 +374,9 @@ const rootRouteChildren: RootRouteChildren = {
   DatabasesRoute: DatabasesRoute,
   DocsRoute: DocsRoute,
   DownloadsRoute: DownloadsRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  LoginRoute: LoginRouteWithChildren,
+  SignupRoute: SignupRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
 }
 export const routeTree = rootRouteImport

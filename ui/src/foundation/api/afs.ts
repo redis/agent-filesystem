@@ -30,6 +30,7 @@ import type {
   OnboardingTokenResponse,
   ImportLocalInput,
   ImportLocalResponse,
+  AFSAuthConfig,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
@@ -60,6 +61,7 @@ type AFSClient = {
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
+  getAuthConfig: () => Promise<AFSAuthConfig>;
   resetDemo: () => AFSState;
 };
 
@@ -78,6 +80,11 @@ type HTTPDatabase = {
   id: string;
   name: string;
   description?: string;
+  owner_subject?: string;
+  owner_label?: string;
+  management_type?: string;
+  can_edit?: boolean;
+  can_delete?: boolean;
   redis_addr: string;
   redis_username?: string;
   redis_db: number;
@@ -101,6 +108,11 @@ type HTTPWorkspaceSummary = {
   cloud_account: string;
   database_id: string;
   database_name: string;
+  owner_subject?: string;
+  owner_label?: string;
+  database_management_type?: string;
+  database_can_edit?: boolean;
+  database_can_delete?: boolean;
   redis_key: string;
   file_count: number;
   folder_count: number;
@@ -154,6 +166,11 @@ type HTTPWorkspaceDetail = {
   cloud_account: string;
   database_id: string;
   database_name: string;
+  owner_subject?: string;
+  owner_label?: string;
+  database_management_type?: string;
+  database_can_edit?: boolean;
+  database_can_delete?: boolean;
   redis_key: string;
   region: string;
   source: AFSWorkspaceSource;
@@ -235,6 +252,21 @@ type HTTPOnboardingTokenResponse = {
   workspace_id: string;
   workspace_name: string;
   expires_at: string;
+};
+
+type HTTPAuthConfig = {
+  mode: string;
+  enabled: boolean;
+  provider: string;
+  sign_in_required: boolean;
+  authenticated: boolean;
+  clerk_publishable_key?: string;
+  user?: {
+    subject: string;
+    name?: string;
+    email?: string;
+    groups?: string[];
+  };
 };
 
 class HTTPError extends Error {
@@ -1052,6 +1084,16 @@ This workspace was created from the AFS Web UI.
     throw new Error("Import is not available in demo mode.");
   },
 
+  async getAuthConfig() {
+    return {
+      mode: "none",
+      enabled: false,
+      provider: "none",
+      signInRequired: false,
+      authenticated: true,
+    };
+  },
+
   resetDemo() {
     const seeded = cloneInitialAFSState();
     saveState(seeded);
@@ -1150,6 +1192,11 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     id: input.id,
     name: input.name,
     description: input.description ?? "",
+    ownerSubject: input.owner_subject,
+    ownerLabel: input.owner_label,
+    managementType: input.management_type,
+    canEdit: input.can_edit ?? true,
+    canDelete: input.can_delete ?? true,
     redisAddr: input.redis_addr,
     redisUsername: input.redis_username ?? "",
     redisPassword: "",
@@ -1248,6 +1295,11 @@ function mapWorkspaceSummary(input: HTTPWorkspaceSummary): AFSWorkspaceSummary {
     cloudAccount: input.cloud_account,
     databaseId: input.database_id,
     databaseName: input.database_name,
+    ownerSubject: input.owner_subject,
+    ownerLabel: input.owner_label,
+    databaseManagementType: input.database_management_type,
+    databaseCanEdit: input.database_can_edit ?? true,
+    databaseCanDelete: input.database_can_delete ?? true,
     redisKey: input.redis_key,
     fileCount: input.file_count,
     folderCount: input.folder_count,
@@ -1268,6 +1320,11 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     cloudAccount: input.cloud_account,
     databaseId: input.database_id,
     databaseName: input.database_name,
+    ownerSubject: input.owner_subject,
+    ownerLabel: input.owner_label,
+    databaseManagementType: input.database_management_type,
+    databaseCanEdit: input.database_can_edit ?? true,
+    databaseCanDelete: input.database_can_delete ?? true,
     redisKey: input.redis_key,
     region: input.region,
     source: input.source,
@@ -1578,6 +1635,24 @@ const httpAFSClient: AFSClient = {
       dirCount: response.dir_count,
       totalBytes: response.total_bytes,
     } as ImportLocalResponse;
+  },
+
+  async getAuthConfig() {
+    const response = await requestJSON<HTTPAuthConfig>("/auth/config");
+    return {
+      mode: response.mode,
+      enabled: response.enabled,
+      provider: response.provider,
+      signInRequired: response.sign_in_required,
+      authenticated: response.authenticated,
+      clerkPublishableKey: response.clerk_publishable_key,
+      user: response.user == null ? undefined : {
+        subject: response.user.subject,
+        name: response.user.name,
+        email: response.user.email,
+        groups: response.user.groups ?? [],
+      },
+    } as AFSAuthConfig;
   },
 
   resetDemo() {

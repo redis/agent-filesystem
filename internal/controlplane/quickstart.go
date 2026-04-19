@@ -147,29 +147,32 @@ func redisConfigFromAFSEnv() (RedisConfig, bool) {
 func bootstrapDatabaseProfileFromEnv() (databaseProfile, bool) {
 	if cfg, ok := redisConfigFromAFSEnv(); ok {
 		return databaseProfile{
-			ID:            "local-development",
-			Name:          quickstartLocalDBName,
-			Description:   "Configured from AFS_REDIS_* environment variables.",
-			RedisAddr:     cfg.RedisAddr,
-			RedisUsername: cfg.RedisUsername,
-			RedisPassword: cfg.RedisPassword,
-			RedisDB:       cfg.RedisDB,
-			RedisTLS:      cfg.RedisTLS,
-			IsDefault:     true,
+			ID:             "local-development",
+			Name:           quickstartLocalDBName,
+			Description:    "Configured from AFS_REDIS_* environment variables.",
+			ManagementType: databaseManagementUserManaged,
+			RedisAddr:      cfg.RedisAddr,
+			RedisUsername:  cfg.RedisUsername,
+			RedisPassword:  cfg.RedisPassword,
+			RedisDB:        cfg.RedisDB,
+			RedisTLS:       cfg.RedisTLS,
+			IsDefault:      true,
 		}, true
 	}
 
 	if cfg, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
 		return databaseProfile{
-			ID:            "afs-cloud",
-			Name:          quickstartCloudDBName,
-			Description:   "Managed Redis Cloud data plane for hosted Agent Filesystem.",
-			RedisAddr:     cfg.RedisAddr,
-			RedisUsername: cfg.RedisUsername,
-			RedisPassword: cfg.RedisPassword,
-			RedisDB:       cfg.RedisDB,
-			RedisTLS:      cfg.RedisTLS,
-			IsDefault:     true,
+			ID:             "afs-cloud",
+			Name:           quickstartCloudDBName,
+			Description:    "Managed Redis Cloud data plane for hosted Agent Filesystem.",
+			OwnerLabel:     "AFS Cloud",
+			ManagementType: databaseManagementSystemManaged,
+			RedisAddr:      cfg.RedisAddr,
+			RedisUsername:  cfg.RedisUsername,
+			RedisPassword:  cfg.RedisPassword,
+			RedisDB:        cfg.RedisDB,
+			RedisTLS:       cfg.RedisTLS,
+			IsDefault:      true,
 		}, true
 	}
 

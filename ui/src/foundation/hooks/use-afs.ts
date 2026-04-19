@@ -124,8 +124,11 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
   });
 }
 
-export function useDatabases() {
-  return useQuery(databasesQueryOptions());
+export function useDatabases(enabled = true) {
+  return useQuery({
+    ...databasesQueryOptions(),
+    enabled,
+  });
 }
 
 export function useWorkspaceSummaries(databaseId: string | null, enabled = true) {

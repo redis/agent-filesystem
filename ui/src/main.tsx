@@ -13,6 +13,7 @@ import "./index.css";
 import { routeTree } from "./routeTree.gen";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { AppErrorBoundary } from "./error-boundaries/app-error-boundary";
+import { AuthProvider } from "./foundation/auth-context";
 import { DatabaseScopeProvider } from "./foundation/database-scope";
 import { ColorModeProvider } from "./foundation/theme-context";
 import { queryClient } from "./foundation/query-client";
@@ -49,9 +50,11 @@ if (!rootElement.innerHTML) {
             <CommonStyles />
             <AppErrorBoundary>
               <QueryClientProvider client={queryClient}>
-                <DatabaseScopeProvider>
-                  <RouterProvider router={router} />
-                </DatabaseScopeProvider>
+                <AuthProvider>
+                  <DatabaseScopeProvider>
+                    <RouterProvider router={router} />
+                  </DatabaseScopeProvider>
+                </AuthProvider>
               </QueryClientProvider>
             </AppErrorBoundary>
           </ThemeProvider>

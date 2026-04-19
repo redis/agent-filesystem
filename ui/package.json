@@ -12,6 +12,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@clerk/react": "^6.4.2",
     "@redis-ui/components": "^44.0.2",
     "@redis-ui/icons": "^6.9.3",
     "@redis-ui/styles": "^15.0.0",

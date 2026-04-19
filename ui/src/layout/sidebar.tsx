@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
+import { SignOutButton } from "@clerk/react";
 import { SideBar } from "@redis-ui/components";
 import {
+  ChevronDownIcon,
   DoubleChevronLeftIcon,
   DoubleChevronRightIcon,
 } from "@redis-ui/icons";
@@ -12,6 +14,7 @@ import {
 import * as S from "./sidebar.styles";
 import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
+import { useAuthSession } from "../foundation/auth-context";
 import { useColorMode } from "../foundation/theme-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 
@@ -38,8 +41,11 @@ export function AppSidebar() {
   const router = useRouter();
   const { colorMode, toggleColorMode } = useColorMode();
   const { databases, isLoading } = useDatabaseScope();
+  const auth = useAuthSession();
 
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
 
   const isEmpty = !isLoading && databases.length === 0;
 
@@ -57,6 +63,22 @@ export function AppSidebar() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      if (profileMenuRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setIsProfileMenuOpen(false);
+    };
+
+    if (!isProfileMenuOpen) {
+      return;
+    }
+
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
+  }, [isProfileMenuOpen]);
 
   const handleNavigate = (path: string) => void navigate({ to: path });
   const handlePrefetch = (path: string) => {
@@ -124,6 +146,48 @@ export function AppSidebar() {
         <SideBar.Footer>
           <>
             <SideBar.Divider fullWidth />
+            <S.ProfileMenuContainer ref={profileMenuRef} $isExpanded={isExpanded}>
+              <S.ProfileButton
+                type="button"
+                onClick={() => setIsProfileMenuOpen((open) => !open)}
+                aria-expanded={isProfileMenuOpen}
+                aria-haspopup="menu"
+                title={auth.displayName}
+                $isExpanded={isExpanded}
+              >
+                <S.ProfileAvatar>{auth.displayName.slice(0, 1).toUpperCase()}</S.ProfileAvatar>
+                {isExpanded ? (
+                  <S.ProfileTextGroup>
+                    <S.ProfileName>{auth.displayName}</S.ProfileName>
+                    {auth.secondaryLabel ? <S.ProfileMeta>{auth.secondaryLabel}</S.ProfileMeta> : null}
+                  </S.ProfileTextGroup>
+                ) : null}
+                <S.ProfileChevron $isOpen={isProfileMenuOpen} $isExpanded={isExpanded}>
+                  <ChevronDownIcon customSize="14px" />
+                </S.ProfileChevron>
+              </S.ProfileButton>
+              {isProfileMenuOpen ? (
+                <S.ProfileDropdown $isExpanded={isExpanded} role="menu">
+                  {auth.supportsAccountAuth ? (
+                    <SignOutButton redirectUrl="/login">
+                      <S.ProfileMenuItem
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setIsProfileMenuOpen(false);
+                        }}
+                      >
+                        Log out
+                      </S.ProfileMenuItem>
+                    </SignOutButton>
+                  ) : (
+                    <S.ProfileMenuItem type="button" role="menuitem" disabled>
+                      Authentication managed externally
+                    </S.ProfileMenuItem>
+                  )}
+                </S.ProfileDropdown>
+              ) : null}
+            </S.ProfileMenuContainer>
             <S.DarkModeRow>
               <S.DarkModeToggle
                 role="switch"

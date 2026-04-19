@@ -166,6 +166,11 @@ The next major milestone is:
 See [auth-plan.md](/Users/rowantrollope/git/agent-filesystem/deploy/vercel/auth-plan.md)
 for the recommended hosted auth direction.
 
+Important deployment rule:
+
+- `local` and `self-hosted` must not require a cloud auth provider
+- `cloud managed` can use a hosted provider through the pluggable auth boundary
+
 ## Near-Term Build Order
 
 1. keep preview deploys healthy and repeatable on Vercel

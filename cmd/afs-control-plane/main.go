@@ -21,9 +21,14 @@ func main() {
 		fatal(err)
 	}
 	defer manager.Close()
+
+	auth, err := controlplane.LoadAuthHandlerFromEnv()
+	if err != nil {
+		fatal(err)
+	}
 	server := &http.Server{
 		Addr:              *listenAddr,
-		Handler:           controlplane.NewHandler(manager, *allowOrigin),
+		Handler:           controlplane.NewHandlerWithOptions(manager, controlplane.HandlerOptions{AllowOrigin: *allowOrigin, Auth: auth}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

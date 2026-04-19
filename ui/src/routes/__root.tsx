@@ -1,6 +1,9 @@
-import { createRootRoute, Outlet, useLocation, useRouter } from "@tanstack/react-router";
+import { createRootRoute, Outlet, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
+import styled from "styled-components";
+import { Loader } from "@redis-ui/components";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
+import { useAuthSession } from "../foundation/auth-context";
 import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
@@ -10,6 +13,13 @@ import {
   FlexColItem,
   MainContainer,
 } from "../layout/layout.styles";
+
+const AUTH_PATH_PREFIXES = ["/login", "/signup", "/forgot-password", "/sso-callback"];
+const PUBLIC_APP_PATHS = new Set(["/connect-cli"]);
+
+function isAuthPath(pathname: string) {
+  return AUTH_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
 
 function RouteWarmup() {
   const router = useRouter();
@@ -39,6 +49,34 @@ function RouteWarmup() {
 }
 
 function RootLayout() {
+  const location = useLocation();
+  const auth = useAuthSession();
+  const navigate = useNavigate();
+
+  const onAuthRoute = isAuthPath(location.pathname);
+  const isPublicAppPath = PUBLIC_APP_PATHS.has(location.pathname);
+
+  useEffect(() => {
+    if (auth.isLoading) return;
+    if (onAuthRoute) return;
+    if (isPublicAppPath) return;
+    if (!auth.isSignedOut) return;
+    const target = location.pathname + location.searchStr;
+    void navigate({
+      to: "/login",
+      search: target && target !== "/" ? { redirect: target } : undefined,
+      replace: true,
+    });
+  }, [auth.isLoading, auth.isSignedOut, isPublicAppPath, location.pathname, location.searchStr, navigate, onAuthRoute]);
+
+  if (onAuthRoute) {
+    return (
+      <BackgroundPatternProvider>
+        <Outlet />
+      </BackgroundPatternProvider>
+    );
+  }
+
   return (
     <BackgroundPatternProvider>
       <RouteWarmup />
@@ -47,7 +85,17 @@ function RootLayout() {
         <FlexColItem>
           <AppBar />
           <MainContainer>
-            <Outlet />
+            {auth.isLoading && !isPublicAppPath ? (
+              <CenteredState>
+                <Loader data-testid="loader--spinner" />
+              </CenteredState>
+            ) : auth.isSignedOut && !isPublicAppPath ? (
+              <CenteredState>
+                <Loader data-testid="loader--spinner" />
+              </CenteredState>
+            ) : (
+              <Outlet />
+            )}
           </MainContainer>
         </FlexColItem>
       </FlexRow>
@@ -63,3 +111,10 @@ export const Route = createRootRoute({
   component: RootLayout,
   errorComponent: RootErrorBoundary,
 });
+
+const CenteredState = styled.div`
+  min-height: calc(100vh - 140px);
+  display: grid;
+  place-items: center;
+  padding: 32px;
+`;

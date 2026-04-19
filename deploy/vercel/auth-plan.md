@@ -28,9 +28,37 @@ The website needs:
 - CLI handoff that depends on a signed-in browser session, not an anonymous
   bootstrap page
 
-## Recommended provider
+The sync path also needs a second credential type:
 
-Use Clerk as the first real hosted auth provider.
+- scoped machine tokens for developers, CI, and agents
+- no admin browser login required for routine `afs up` / sync activity
+- revocable, auditable, and limited to the org/database/workspace permissions we grant
+
+## Auth boundary first
+
+AFS Cloud should not hard-code one auth system into every deployment mode.
+
+The control plane should support pluggable auth modes, with different defaults
+for different product shapes:
+
+- `none`
+- `trusted-header`
+- later `clerk`
+- later generic `oidc`
+
+Current direction:
+
+- `local` defaults to `none`
+- `self-hosted` defaults to `none`, with `trusted-header` as the first serious
+  operator-managed option
+- `cloud managed` will eventually use `clerk`
+
+That keeps `make`, local development, and on-prem installs free of any cloud
+dependency.
+
+## Recommended hosted provider
+
+Use Clerk as the first real hosted auth provider for `Cloud Managed`.
 
 Why:
 
@@ -56,7 +84,14 @@ It is not the best primary auth layer for v1 because:
 
 ## Phase plan
 
-### Phase 1: Website auth
+### Phase 0: Auth boundary
+
+- keep `none` as the default mode
+- add `trusted-header` for self-managed deployments behind a reverse proxy
+- expose runtime auth mode to the hosted UI
+- make future auth providers plug into the same control-plane seam
+
+### Phase 1: Website auth for Cloud Managed
 
 - install Clerk on the Vercel project
 - add sign-up and sign-in pages in the hosted UI
@@ -79,6 +114,13 @@ It is not the best primary auth layer for v1 because:
 - after sign-in, the browser attaches the CLI to the selected workspace
 - exchange the one-time handoff into durable local CLI config
 
+### Phase 3.5: Sync tokens
+
+- add AFS-issued machine tokens stored hashed in Postgres
+- let admins issue tokens from the web console
+- allow admin-provided download/login commands that already include a scoped token
+- support both browser login and token login in the CLI
+
 ### Phase 4: Optional convenience providers
 
 - optionally add Sign in with Vercel as a social login
@@ -90,7 +132,8 @@ This should be the next major build slice after the current onboarding polish.
 
 Recommended order:
 
-1. add real website auth
-2. enforce workspace ownership
-3. reconnect the CLI handoff through the authenticated session
-4. then refine billing, invites, and multi-user collaboration
+1. land the auth boundary with `none` and `trusted-header`
+2. add real website auth for cloud with Clerk
+3. enforce workspace ownership
+4. reconnect the CLI handoff through the authenticated session
+5. then refine billing, invites, and multi-user collaboration
