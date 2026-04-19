@@ -102,8 +102,8 @@ function AgentsPage() {
           </NoticeBody>
         </NoticeCard>
       ) : null}
-      <InlineActions>
-        {isFiltered ? (
+      {isFiltered ? (
+        <InlineActions>
           <Button
             kind="ghost"
             size="small"
@@ -113,30 +113,22 @@ function AgentsPage() {
           >
             Show all agents
           </Button>
-        ) : null}
-        <ActionsSpacer />
-        <Button
-          size="small"
-          onClick={() => {
-            void navigate({ to: "/agents/add" });
-          }}
-        >
-          + Add Agent
-        </Button>
-      </InlineActions>
+        </InlineActions>
+      ) : null}
       <AgentsTable
         rows={rows}
         loading={agentsQuery.isLoading}
         error={agentsQuery.isError}
+        toolbarAction={(
+          <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
+            Add agent
+          </Button>
+        )}
         onOpenWorkspace={openWorkspace}
       />
     </PageStack>
   );
 }
-
-const ActionsSpacer = styled.div`
-  flex: 1;
-`;
 
 /* ── Empty state ── */
 

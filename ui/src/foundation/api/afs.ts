@@ -83,8 +83,10 @@ type HTTPDatabase = {
   owner_subject?: string;
   owner_label?: string;
   management_type?: string;
+  purpose?: string;
   can_edit?: boolean;
   can_delete?: boolean;
+  can_create_workspaces?: boolean;
   redis_addr: string;
   redis_username?: string;
   redis_db: number;
@@ -554,6 +556,10 @@ function deriveDemoDatabases(state: AFSState) {
         id: workspace.databaseId,
         name: workspace.databaseName,
         description: "",
+        purpose: "general",
+        canEdit: true,
+        canDelete: true,
+        canCreateWorkspaces: true,
         redisAddr: workspace.databaseName,
         redisUsername: "",
         redisPassword: "",
@@ -742,6 +748,10 @@ const demoAFSClient: AFSClient = {
       id,
       name: input.name.trim(),
       description: input.description.trim(),
+      purpose: "general",
+      canEdit: true,
+      canDelete: true,
+      canCreateWorkspaces: true,
       redisAddr: input.redisAddr.trim(),
       redisUsername: input.redisUsername.trim(),
       redisPassword: input.redisPassword,
@@ -1195,8 +1205,10 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     ownerSubject: input.owner_subject,
     ownerLabel: input.owner_label,
     managementType: input.management_type,
+    purpose: input.purpose,
     canEdit: input.can_edit ?? true,
     canDelete: input.can_delete ?? true,
+    canCreateWorkspaces: input.can_create_workspaces ?? true,
     redisAddr: input.redis_addr,
     redisUsername: input.redis_username ?? "",
     redisPassword: "",
@@ -1668,7 +1680,14 @@ export function getAFSClientMode() {
 
 /** Returns the control plane base URL (e.g. "http://localhost:8091"). */
 export function getControlPlaneURL() {
-  return HTTP_BASE_URL;
+  if (HTTP_BASE_URL) {
+    return HTTP_BASE_URL;
+  }
+  // Cloud / same-origin deploy: API is mounted at this site's root.
+  if (typeof window !== "undefined") {
+    return window.location.origin;
+  }
+  return "";
 }
 
 export function getDemoAFSClientForTesting() {

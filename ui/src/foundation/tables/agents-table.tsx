@@ -1,7 +1,7 @@
 import { Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
@@ -297,6 +297,7 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  toolbarAction?: ReactNode;
   onOpenWorkspace: (agent: AFSAgentSession) => void;
 };
 
@@ -401,6 +402,7 @@ export function AgentsTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load connected agents. Please retry.",
+  toolbarAction,
   onOpenWorkspace,
 }: Props) {
   const [search, setSearch] = useState("");
@@ -497,6 +499,7 @@ export function AgentsTable({
             Table
           </ToggleButton>
         </ToggleGroup>
+        {toolbarAction}
       </ToolbarWrap>
 
       {loading ? <S.EmptyState>Loading connected agents...</S.EmptyState> : null}
