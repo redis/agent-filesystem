@@ -12,7 +12,7 @@ import { useColorMode } from "../../foundation/theme-context";
  * right without us needing to micro-manage every Clerk element.
  */
 const AuthRootFontSize = createGlobalStyle`
-  html { font-size: 16px; }
+  html, :root { font-size: 16px; }
 `;
 
 type AuthShellProps = {
