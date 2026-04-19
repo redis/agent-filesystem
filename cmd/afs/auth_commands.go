@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-const defaultCloudControlPlaneURL = "https://agent-filesystem.vercel.app"
+const defaultCloudControlPlaneURL = "https://agentfilesystem.ai"
 
 type authExchangeResponse struct {
 	DatabaseID    string `json:"database_id"`

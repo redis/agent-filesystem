@@ -10,6 +10,7 @@ import {
   CrossLinkArrow,
 } from "../../components/doc-kit";
 import { getControlPlaneURL } from "../../foundation/api/afs";
+import { useAuthSession } from "../../foundation/auth-context";
 
 type Props = {
   compact?: boolean;
@@ -17,10 +18,14 @@ type Props = {
 
 export function AgentSetupGuide({ compact = false }: Props) {
   const [copied, setCopied] = useState<string | null>(null);
+  const auth = useAuthSession();
   const controlPlaneUrl = getControlPlaneURL();
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
-  const configCmd = `${cliPath} config --control-plane-url "${controlPlaneUrl}"`;
+  const isCloud = auth.config.mode === "clerk";
+  const step2Cmd = isCloud
+    ? `${cliPath} auth login --control-plane-url "${controlPlaneUrl}"`
+    : `${cliPath} config --control-plane-url "${controlPlaneUrl}"`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -67,14 +72,18 @@ export function AgentSetupGuide({ compact = false }: Props) {
 
         <StepDivider />
 
-        <StepLabel>Step 2 — Configure the connection</StepLabel>
+        <StepLabel>
+          Step 2 — {isCloud ? "Sign in to AFS Cloud" : "Point the CLI at this control plane"}
+        </StepLabel>
         <SetupDesc>
-          Point the CLI at this control plane server. You only need to do this once per machine.
+          {isCloud
+            ? "The CLI opens your browser, you sign in with the same account you're using here, and the CLI receives a short-lived auth token scoped to your account. This also saves the control-plane URL so you don't need to configure it separately."
+            : "Point the CLI at this control plane server. You only need to do this once per machine."}
         </SetupDesc>
         <CodeContainer>
-          <CodePre>{configCmd}</CodePre>
-          <CopyButton type="button" onClick={() => copyToClipboard(configCmd, "config")}>
-            {copied === "config" ? "Copied!" : "Copy"}
+          <CodePre>{step2Cmd}</CodePre>
+          <CopyButton type="button" onClick={() => copyToClipboard(step2Cmd, "step2")}>
+            {copied === "step2" ? "Copied!" : "Copy"}
           </CopyButton>
         </CodeContainer>
 
