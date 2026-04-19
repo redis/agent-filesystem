@@ -24,6 +24,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as SignupClerkPathRouteImport } from './routes/signup.$clerkPath'
 import { Route as LoginClerkPathRouteImport } from './routes/login.$clerkPath'
+import { Route as AgentsAddRouteImport } from './routes/agents_.add'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
@@ -100,6 +101,11 @@ const LoginClerkPathRoute = LoginClerkPathRouteImport.update({
   path: '/$clerkPath',
   getParentRoute: () => LoginRoute,
 } as any)
+const AgentsAddRoute = AgentsAddRouteImport.update({
+  id: '/agents_/add',
+  path: '/agents/add',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -114,6 +120,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRouteWithChildren
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/agents/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -131,6 +138,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRouteWithChildren
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/agents/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -149,6 +157,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRouteWithChildren
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
+  '/agents_/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -168,6 +177,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/agents/add'
     | '/login/$clerkPath'
     | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
@@ -185,6 +195,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/agents/add'
     | '/login/$clerkPath'
     | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
@@ -202,6 +213,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/workspaces'
+    | '/agents_/add'
     | '/login/$clerkPath'
     | '/signup/$clerkPath'
     | '/workspaces/$workspaceId'
@@ -220,6 +232,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRouteWithChildren
   SignupRoute: typeof SignupRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
+  AgentsAddRoute: typeof AgentsAddRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -329,6 +342,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginClerkPathRouteImport
       parentRoute: typeof LoginRoute
     }
+    '/agents_/add': {
+      id: '/agents_/add'
+      path: '/agents/add'
+      fullPath: '/agents/add'
+      preLoaderRoute: typeof AgentsAddRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -378,6 +398,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRouteWithChildren,
   SignupRoute: SignupRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
+  AgentsAddRoute: AgentsAddRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
