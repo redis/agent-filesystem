@@ -37,6 +37,7 @@ type syncSettings struct {
 type controlPlaneSettings struct {
 	URL        string `json:"url,omitempty"`
 	DatabaseID string `json:"databaseID,omitempty"`
+	AuthToken  string `json:"authToken,omitempty"`
 }
 
 // config captures the persisted CLI/runtime settings for the AFS surface.

@@ -99,6 +99,7 @@ type AuthHandler struct {
 	clerkJWKCache     map[string]cachedClerkJWK
 	clerkAuthenticate func(*http.Request) (*AuthIdentity, error)
 	clerkDeleteUser   func(context.Context, string) error
+	cliAuthenticate   func(context.Context, string) (*AuthIdentity, error)
 	mcpAuthenticate   func(context.Context, string) (*AuthIdentity, error)
 }
 
@@ -232,6 +233,13 @@ func (a *AuthHandler) AttachMCPTokenAuthenticator(authenticate func(context.Cont
 	a.mcpAuthenticate = authenticate
 }
 
+func (a *AuthHandler) AttachCLITokenAuthenticator(authenticate func(context.Context, string) (*AuthIdentity, error)) {
+	if a == nil {
+		return
+	}
+	a.cliAuthenticate = authenticate
+}
+
 func (a *AuthHandler) Middleware(next http.Handler) http.Handler {
 	if a == nil || a.cfg.Mode == AuthModeNone {
 		return next
@@ -327,15 +335,24 @@ func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
 		return nil, nil
 	}
 
-	if bearer, ok := bearerTokenFromRequest(r); ok && isMCPTokenAuthPath(r.URL.Path) {
-		if a.mcpAuthenticate == nil {
-			return nil, ErrUnauthorized
+	if bearer, ok := bearerTokenFromRequest(r); ok {
+		if isMCPTokenAuthPath(r.URL.Path) {
+			if a.mcpAuthenticate == nil {
+				return nil, ErrUnauthorized
+			}
+			identity, err := a.mcpAuthenticate(r.Context(), bearer)
+			if err != nil {
+				return nil, ErrUnauthorized
+			}
+			return identity, nil
 		}
-		identity, err := a.mcpAuthenticate(r.Context(), bearer)
-		if err != nil {
-			return nil, ErrUnauthorized
+		if a.cliAuthenticate != nil {
+			identity, err := a.cliAuthenticate(r.Context(), bearer)
+			if err != nil {
+				return nil, ErrUnauthorized
+			}
+			return identity, nil
 		}
-		return identity, nil
 	}
 
 	switch a.cfg.Mode {

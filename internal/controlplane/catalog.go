@@ -128,6 +128,8 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_database_registry_order ON database_registry(order_index ASC)`,
 		`CREATE TABLE IF NOT EXISTS onboarding_tokens (
 			token TEXT PRIMARY KEY,
+			owner_subject TEXT NOT NULL DEFAULT '',
+			owner_label TEXT NOT NULL DEFAULT '',
 			database_id TEXT NOT NULL,
 			workspace_id TEXT NOT NULL,
 			workspace_name TEXT NOT NULL DEFAULT '',
@@ -136,6 +138,20 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			consumed_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_expires_at ON onboarding_tokens(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS cli_access_tokens (
+			id TEXT PRIMARY KEY,
+			owner_subject TEXT NOT NULL DEFAULT '',
+			owner_label TEXT NOT NULL DEFAULT '',
+			database_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			workspace_name TEXT NOT NULL DEFAULT '',
+			secret_hash TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			last_used_at TEXT NOT NULL DEFAULT '',
+			expires_at TEXT NOT NULL DEFAULT '',
+			revoked_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_cli_access_tokens_owner ON cli_access_tokens(owner_subject, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS mcp_access_tokens (
 			id TEXT PRIMARY KEY,
 			name TEXT NOT NULL DEFAULT '',
@@ -169,6 +185,8 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS database_management_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 		}
 		for _, statement := range alterations {
 			if _, err := c.execContext(ctx, statement); err != nil {
@@ -186,6 +204,8 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN database_management_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE onboarding_tokens ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE onboarding_tokens ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, statement := range sqliteAlterations {
 		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

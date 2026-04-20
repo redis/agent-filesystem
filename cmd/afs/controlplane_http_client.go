@@ -21,6 +21,7 @@ import (
 type httpControlPlaneClient struct {
 	baseURL    string
 	databaseID string
+	authToken  string
 	client     *http.Client
 	importer   *http.Client
 }
@@ -62,16 +63,24 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 	if err != nil {
 		return nil, "", err
 	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return nil, "", err
+	}
 
 	client := &httpControlPlaneClient{
 		baseURL:    baseURL,
 		databaseID: strings.TrimSpace(cfg.DatabaseID),
+		authToken:  "",
 		client: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 		importer: &http.Client{
 			Timeout: 15 * time.Minute,
 		},
+	}
+	if productMode == productModeCloud {
+		client.authToken = strings.TrimSpace(cfg.AuthToken)
 	}
 	return client, client.databaseID, nil
 }
@@ -291,6 +300,9 @@ func (c *httpControlPlaneClient) doJSONWithClient(ctx context.Context, httpClien
 	}
 	if requestBody != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if strings.TrimSpace(c.authToken) != "" {
+		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.authToken))
 	}
 
 	if httpClient == nil {

@@ -92,6 +92,83 @@ func TestTrustedHeaderAuthProtectsAdminRoutes(t *testing.T) {
 	}
 }
 
+func TestCLIExchangeTokenAuthenticatesProtectedRoutes(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+		TrustedNameHeader: "X-Forwarded-Name",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/workspaces/repo/onboarding-token", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(onboarding token) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "rowan@example.com")
+	req.Header.Set("X-Forwarded-Name", "Rowan")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST onboarding token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST onboarding token status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var token onboardingTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(onboarding token) returned error: %v", err)
+	}
+	if strings.TrimSpace(token.Token) == "" {
+		t.Fatal("expected onboarding token to be populated")
+	}
+
+	resp, err = http.Post(server.URL+"/v1/auth/exchange", "application/json", strings.NewReader(fmtJSON(t, onboardingExchangeRequest{
+		Token: token.Token,
+	})))
+	if err != nil {
+		t.Fatalf("POST auth exchange returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST auth exchange status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var exchange onboardingExchangeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&exchange); err != nil {
+		t.Fatalf("Decode(onboarding exchange) returned error: %v", err)
+	}
+	if strings.TrimSpace(exchange.AccessToken) == "" {
+		t.Fatal("expected exchange access token to be populated")
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/workspaces", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(workspaces) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+exchange.AccessToken)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authorized GET /v1/workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("authorized GET /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+}
+
 func TestAuthConfigEndpointIsPublic(t *testing.T) {
 	manager, _ := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{

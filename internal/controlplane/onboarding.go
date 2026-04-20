@@ -31,6 +31,7 @@ type onboardingExchangeResponse struct {
 	DatabaseID    string `json:"database_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
+	AccessToken   string `json:"access_token,omitempty"`
 }
 
 func (m *DatabaseManager) CreateResolvedOnboardingToken(ctx context.Context, workspace string) (onboardingTokenResponse, error) {
@@ -64,8 +65,15 @@ func (m *DatabaseManager) createOnboardingTokenRecord(ctx context.Context, datab
 	}
 	now := time.Now().UTC()
 	expiresAt := now.Add(onboardingTokenTTL)
+	ownerSubject := authSubjectFromContext(ctx)
+	ownerLabel := ownerSubject
+	if identity, ok := AuthIdentityFromContext(ctx); ok {
+		ownerLabel = firstNonEmpty(identity.Name, identity.Email, ownerSubject)
+	}
 	record := onboardingTokenRecord{
 		Token:         token,
+		OwnerSubject:  ownerSubject,
+		OwnerLabel:    ownerLabel,
 		DatabaseID:    databaseID,
 		WorkspaceID:   workspaceID,
 		WorkspaceName: workspaceName,
@@ -97,11 +105,19 @@ func (m *DatabaseManager) ExchangeOnboardingToken(ctx context.Context, token str
 		}
 		return onboardingExchangeResponse{}, err
 	}
+	var accessToken string
+	if strings.TrimSpace(record.OwnerSubject) != "" {
+		accessToken, err = m.createCLIAccessTokenRecord(ctx, record.OwnerSubject, record.OwnerLabel, record.DatabaseID, record.WorkspaceID, record.WorkspaceName)
+		if err != nil {
+			return onboardingExchangeResponse{}, err
+		}
+	}
 
 	return onboardingExchangeResponse{
 		DatabaseID:    record.DatabaseID,
 		WorkspaceID:   record.WorkspaceID,
 		WorkspaceName: record.WorkspaceName,
+		AccessToken:   accessToken,
 	}, nil
 }
 

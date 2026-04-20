@@ -52,6 +52,11 @@ type catalogStore interface {
 	CreateOnboardingToken(ctx context.Context, item onboardingTokenRecord) error
 	ConsumeOnboardingToken(ctx context.Context, token, consumedAt string) (onboardingTokenRecord, error)
 
+	CreateCLIAccessToken(ctx context.Context, item cliAccessTokenRecord) error
+	GetCLIAccessToken(ctx context.Context, tokenID string) (cliAccessTokenRecord, error)
+	TouchCLIAccessToken(ctx context.Context, tokenID, lastUsedAt string) error
+	RevokeCLIAccessTokensByOwner(ctx context.Context, ownerSubject, revokedAt string) error
+
 	CreateMCPAccessToken(ctx context.Context, item mcpAccessTokenRecord) error
 	ListMCPAccessTokens(ctx context.Context, databaseID, workspaceID string) ([]mcpAccessTokenRecord, error)
 	GetMCPAccessToken(ctx context.Context, tokenID string) (mcpAccessTokenRecord, error)

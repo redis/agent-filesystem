@@ -116,6 +116,10 @@ func prepareConfigForSave(cfg *config) error {
 		}
 		cfg.URL = controlPlaneURL
 		cfg.DatabaseID = strings.TrimSpace(cfg.DatabaseID)
+		cfg.AuthToken = strings.TrimSpace(cfg.AuthToken)
+	}
+	if productMode != productModeCloud {
+		cfg.AuthToken = ""
 	}
 
 	if cfg.LocalPath != "" {

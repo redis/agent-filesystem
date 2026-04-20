@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 type accountResponse struct {
@@ -64,6 +65,11 @@ func (m *DatabaseManager) ResetAccountData(ctx context.Context) (accountResponse
 	onboardingDatabaseID, starterWorkspace, hasStarterWorkspace, err := m.subjectOnboardingWorkspace(ctx, subject)
 	if err != nil {
 		return accountResponse{}, err
+	}
+	if m.catalog != nil {
+		if err := m.catalog.RevokeCLIAccessTokensByOwner(ctx, subject, time.Now().UTC().Format(timeRFC3339)); err != nil {
+			return accountResponse{}, err
+		}
 	}
 	if hasStarterWorkspace {
 		if err := m.DeleteWorkspace(ctx, onboardingDatabaseID, starterWorkspace); err != nil && !errors.Is(err, os.ErrNotExist) {

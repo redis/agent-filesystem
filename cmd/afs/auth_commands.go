@@ -16,6 +16,7 @@ type authExchangeResponse struct {
 	DatabaseID    string `json:"database_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
+	AccessToken   string `json:"access_token,omitempty"`
 }
 
 var runBrowserLoginFlow = launchBrowserLoginFlow
@@ -96,6 +97,7 @@ func cmdAuthLogin(args []string) error {
 	cfg.DatabaseID = strings.TrimSpace(response.DatabaseID)
 	cfg.CurrentWorkspaceID = strings.TrimSpace(response.WorkspaceID)
 	cfg.CurrentWorkspace = strings.TrimSpace(response.WorkspaceName)
+	cfg.AuthToken = strings.TrimSpace(response.AccessToken)
 	cfg.Mode = modeSync
 
 	if err := resolveConfigPaths(&cfg); err != nil {
@@ -135,6 +137,7 @@ func cmdAuthLogout(args []string) error {
 	cfg.ProductMode = productModeLocal
 	cfg.URL = ""
 	cfg.DatabaseID = ""
+	cfg.AuthToken = ""
 	cfg.CurrentWorkspace = ""
 	cfg.CurrentWorkspaceID = ""
 
@@ -184,6 +187,14 @@ func cmdAuthStatus(args []string) error {
 		printBox(clr(ansiBold, "auth"), []boxRow{
 			{Label: "status", Value: "not signed in to cloud"},
 			{Label: "mode", Value: productModeDisplayLabel(productMode)},
+		})
+		return nil
+	}
+	if strings.TrimSpace(cfg.AuthToken) == "" {
+		printBox(clr(ansiBold, "auth"), []boxRow{
+			{Label: "status", Value: "cloud login needs refresh"},
+			{Label: "control plane", Value: cfg.URL},
+			{Label: "hint", Value: clr(ansiDim, "Run '"+filepath.Base(os.Args[0])+" auth login' again to finish browser sign-in.")},
 		})
 		return nil
 	}

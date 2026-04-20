@@ -10,6 +10,8 @@ import (
 
 type onboardingTokenRecord struct {
 	Token         string
+	OwnerSubject  string
+	OwnerLabel    string
 	DatabaseID    string
 	WorkspaceID   string
 	WorkspaceName string
@@ -40,16 +42,20 @@ func (c *workspaceCatalog) CreateOnboardingToken(ctx context.Context, item onboa
 
 	_, err := c.execContext(
 		ctx,
-		`INSERT INTO onboarding_tokens (
+		c.rebind(`INSERT INTO onboarding_tokens (
 			token,
+			owner_subject,
+			owner_label,
 			database_id,
 			workspace_id,
 			workspace_name,
 			created_at,
 			expires_at,
 			consumed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		strings.TrimSpace(item.Token),
+		strings.TrimSpace(item.OwnerSubject),
+		strings.TrimSpace(item.OwnerLabel),
 		strings.TrimSpace(item.DatabaseID),
 		strings.TrimSpace(item.WorkspaceID),
 		strings.TrimSpace(item.WorkspaceName),
@@ -83,6 +89,8 @@ func (c *workspaceCatalog) ConsumeOnboardingToken(ctx context.Context, token, co
 
 	row := tx.QueryRowContext(ctx, c.rebind(`SELECT
 			token,
+			owner_subject,
+			owner_label,
 			database_id,
 			workspace_id,
 			workspace_name,
@@ -95,6 +103,8 @@ func (c *workspaceCatalog) ConsumeOnboardingToken(ctx context.Context, token, co
 	var item onboardingTokenRecord
 	if err := row.Scan(
 		&item.Token,
+		&item.OwnerSubject,
+		&item.OwnerLabel,
 		&item.DatabaseID,
 		&item.WorkspaceID,
 		&item.WorkspaceName,

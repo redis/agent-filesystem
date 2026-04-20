@@ -58,6 +58,21 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
 
 	if opts.Auth != nil && manager != nil {
+		opts.Auth.AttachCLITokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
+			record, err := manager.AuthenticateCLIAccessToken(ctx, rawToken)
+			if err != nil {
+				return nil, err
+			}
+			return &AuthIdentity{
+				Subject:           strings.TrimSpace(record.OwnerSubject),
+				Name:              strings.TrimSpace(record.OwnerLabel),
+				Provider:          "cli-token",
+				TokenID:           strings.TrimSpace(record.ID),
+				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
+				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
+				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
+			}, nil
+		})
 		opts.Auth.AttachMCPTokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
 			record, err := manager.AuthenticateMCPAccessToken(ctx, rawToken)
 			if err != nil {

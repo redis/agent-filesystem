@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
@@ -31,6 +33,7 @@ func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
 			DatabaseID:    "afs-cloud",
 			WorkspaceID:   "ws_demo",
 			WorkspaceName: "getting-started",
+			AccessToken:   "afs_cli_demo",
 		})
 	}))
 	defer server.Close()
@@ -60,6 +63,9 @@ func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
 	if cfg.CurrentWorkspace != "getting-started" {
 		t.Fatalf("CurrentWorkspace = %q, want %q", cfg.CurrentWorkspace, "getting-started")
 	}
+	if cfg.AuthToken != "afs_cli_demo" {
+		t.Fatalf("AuthToken = %q, want %q", cfg.AuthToken, "afs_cli_demo")
+	}
 }
 
 func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
@@ -69,6 +75,7 @@ func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	cfg.ProductMode = productModeCloud
 	cfg.URL = "https://afs.example.com"
 	cfg.DatabaseID = "afs-cloud"
+	cfg.AuthToken = "afs_cli_demo"
 	cfg.CurrentWorkspace = "getting-started"
 	cfg.CurrentWorkspaceID = "ws_demo"
 	saveTempConfig(t, cfg)
@@ -84,7 +91,7 @@ func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	if saved.ProductMode != productModeLocal {
 		t.Fatalf("ProductMode = %q, want %q", saved.ProductMode, productModeLocal)
 	}
-	if saved.URL != "" || saved.DatabaseID != "" || saved.CurrentWorkspace != "" || saved.CurrentWorkspaceID != "" {
+	if saved.URL != "" || saved.DatabaseID != "" || saved.AuthToken != "" || saved.CurrentWorkspace != "" || saved.CurrentWorkspaceID != "" {
 		t.Fatalf("logout should clear cloud config, got %#v", saved)
 	}
 }
@@ -96,6 +103,7 @@ func TestCmdAuthStatusShowsSignedInCloudState(t *testing.T) {
 	cfg.ProductMode = productModeCloud
 	cfg.URL = "https://afs.example.com"
 	cfg.DatabaseID = "afs-cloud"
+	cfg.AuthToken = "afs_cli_demo"
 	cfg.CurrentWorkspace = "getting-started"
 	cfg.CurrentWorkspaceID = "ws_demo"
 	saveTempConfig(t, cfg)
@@ -140,6 +148,74 @@ func TestCloudModeUsesHTTPControlPlaneBackend(t *testing.T) {
 	}
 }
 
+func TestCloudModeUsesPersistedAuthTokenForWorkspaceList(t *testing.T) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/auth/exchange" && r.Method == http.MethodPost:
+			var input struct {
+				Token string `json:"token"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Fatalf("Decode(exchange request) returned error: %v", err)
+			}
+			if input.Token != "afs_otk_test" {
+				t.Fatalf("token = %q, want %q", input.Token, "afs_otk_test")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(authExchangeResponse{
+				DatabaseID:    "afs-cloud",
+				WorkspaceID:   "ws_demo",
+				WorkspaceName: "getting-started",
+				AccessToken:   "afs_cli_demo",
+			})
+		case r.URL.Path == "/v1/workspaces" && r.Method == http.MethodGet:
+			if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "Bearer afs_cli_demo" {
+				http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(controlplane.WorkspaceListResponse{
+				Items: []controlplane.WorkspaceSummary{
+					{
+						ID:           "ws_demo",
+						Name:         "getting-started",
+						DatabaseID:   "afs-cloud",
+						DatabaseName: "AFS Cloud",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	saveTempConfig(t, defaultConfig())
+
+	if err := cmdAuth([]string{"auth", "login", "--control-plane-url", server.URL, "--token", "afs_otk_test"}); err != nil {
+		t.Fatalf("cmdAuth(login) returned error: %v", err)
+	}
+
+	cfg, service, closeFn, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSControlPlane() returned error: %v", err)
+	}
+	defer closeFn()
+	if cfg.AuthToken != "afs_cli_demo" {
+		t.Fatalf("cfg.AuthToken = %q, want %q", cfg.AuthToken, "afs_cli_demo")
+	}
+
+	workspaces, err := service.ListWorkspaceSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("ListWorkspaceSummaries() returned error: %v", err)
+	}
+	if len(workspaces.Items) != 1 || workspaces.Items[0].Name != "getting-started" {
+		t.Fatalf("workspaces = %#v, want one getting-started workspace", workspaces.Items)
+	}
+}
+
 func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 	t.Helper()
 
@@ -162,6 +238,7 @@ func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 			DatabaseID:    "afs-cloud",
 			WorkspaceID:   "ws_demo",
 			WorkspaceName: "getting-started",
+			AccessToken:   "afs_cli_browser",
 		})
 	}))
 	defer server.Close()
