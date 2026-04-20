@@ -35,6 +35,7 @@ type catalogStore interface {
 	ResolveWorkspaceInDatabase(ctx context.Context, databaseID, workspace string) (workspaceCatalogRoute, error)
 
 	UpsertSession(ctx context.Context, item sessionCatalogRecord) error
+	DeleteSessionsForWorkspace(ctx context.Context, workspaceID string) error
 	ListSessionsForWorkspace(ctx context.Context, workspaceID string) ([]sessionCatalogRecord, error)
 	ListSessions(ctx context.Context, databaseID string) ([]sessionCatalogRecord, error)
 	GetSession(ctx context.Context, sessionID string) (sessionCatalogRecord, error)

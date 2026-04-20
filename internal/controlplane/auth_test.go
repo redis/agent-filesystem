@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadAuthConfigFromEnvDefaultsToNone(t *testing.T) {
@@ -427,8 +428,8 @@ func TestTrustedHeaderDeveloperResetDeletesOwnedDatabases(t *testing.T) {
 	}
 }
 
-func TestTrustedHeaderDeveloperResetSkipsSystemManagedOnboardingDatabase(t *testing.T) {
-	manager, _ := newTestManager(t)
+func TestTrustedHeaderDeveloperResetClearsStarterWorkspaceWithoutDeletingOnboardingDatabase(t *testing.T) {
+	manager, databaseID := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{
 		Mode:              AuthModeTrustedHeader,
 		TrustedUserHeader: "X-Forwarded-User",
@@ -438,7 +439,60 @@ func TestTrustedHeaderDeveloperResetSkipsSystemManagedOnboardingDatabase(t *test
 	}
 
 	manager.mu.Lock()
-	profile := manager.profiles[quickstartCloudDBID]
+	baseProfile := manager.profiles[databaseID]
+	manager.profiles[quickstartCloudDBID] = databaseProfile{
+		ID:             quickstartCloudDBID,
+		Name:           quickstartCloudDBName,
+		Description:    "Shared AFS Cloud onboarding database.",
+		ManagementType: databaseManagementSystemManaged,
+		Purpose:        databasePurposeOnboarding,
+		RedisAddr:      baseProfile.RedisAddr,
+		RedisUsername:  baseProfile.RedisUsername,
+		RedisPassword:  baseProfile.RedisPassword,
+		RedisDB:        baseProfile.RedisDB,
+		RedisTLS:       baseProfile.RedisTLS,
+		IsDefault:      true,
+	}
+	manager.order = append(manager.order, quickstartCloudDBID)
+	manager.mu.Unlock()
+
+	aliceCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "alice@example.com",
+		Name:    "Alice",
+		Email:   "alice@example.com",
+	})
+	service, profile, err := manager.serviceFor(aliceCtx, quickstartCloudDBID)
+	if err != nil {
+		t.Fatalf("serviceFor(afs-cloud) returned error: %v", err)
+	}
+	starterName := quickstartWorkspaceNameFor(profile, "alice@example.com")
+	starter, err := createQuickstartWorkspace(aliceCtx, service, profile, starterName)
+	if err != nil {
+		t.Fatalf("createQuickstartWorkspace() returned error: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := manager.catalog.UpsertSession(context.Background(), sessionCatalogRecord{
+		SessionID:       "starter-agent",
+		WorkspaceID:     starter.ID,
+		DatabaseID:      quickstartCloudDBID,
+		WorkspaceName:   starter.Name,
+		ClientKind:      "sync",
+		AFSVersion:      "test",
+		Hostname:        "mac-mini",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/getting-started",
+		State:           workspaceSessionStateActive,
+		StartedAt:       now.Format(timeRFC3339),
+		LastSeenAt:      now.Format(timeRFC3339),
+		LeaseExpiresAt:  now.Add(time.Hour).Format(timeRFC3339),
+		UpdatedAt:       now.Format(timeRFC3339),
+	}); err != nil {
+		t.Fatalf("UpsertSession(starter) returned error: %v", err)
+	}
+
+	manager.mu.Lock()
+	profile = manager.profiles[quickstartCloudDBID]
 	profile.OwnerSubject = "alice@example.com"
 	manager.profiles[quickstartCloudDBID] = profile
 	manager.mu.Unlock()
@@ -470,6 +524,49 @@ func TestTrustedHeaderDeveloperResetSkipsSystemManagedOnboardingDatabase(t *test
 	}
 	if payload.DeletedDatabaseCount != 0 {
 		t.Fatalf("DeletedDatabaseCount = %d, want 0 for system-managed onboarding db", payload.DeletedDatabaseCount)
+	}
+	if payload.DeletedWorkspaceCount != 1 {
+		t.Fatalf("DeletedWorkspaceCount = %d, want 1 starter workspace", payload.DeletedWorkspaceCount)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/workspaces", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(workspaces after reset) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces after reset returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var workspaces workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("Decode(workspaces after reset) returned error: %v", err)
+	}
+	for _, item := range workspaces.Items {
+		if item.Name == starter.Name {
+			t.Fatalf("starter workspace still visible after reset: %#v", workspaces.Items)
+		}
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/agents", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(agents after reset) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/agents after reset returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var agents workspaceSessionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
+		t.Fatalf("Decode(agents after reset) returned error: %v", err)
+	}
+	for _, item := range agents.Items {
+		if item.WorkspaceName == starter.Name {
+			t.Fatalf("starter agent still visible after reset: %#v", agents.Items)
+		}
 	}
 }
 

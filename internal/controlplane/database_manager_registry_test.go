@@ -348,16 +348,19 @@ func TestOnboardingDatabaseHidesLegacyGettingStartedWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDatabases() after seed returned error: %v", err)
 	}
-	if databases.Items[0].WorkspaceCount != 0 {
-		t.Fatalf("WorkspaceCount = %d, want 0 for onboarding database", databases.Items[0].WorkspaceCount)
+	if databases.Items[0].WorkspaceCount != 1 {
+		t.Fatalf("WorkspaceCount = %d, want 1 for onboarding database", databases.Items[0].WorkspaceCount)
 	}
 
 	workspaces, err := manager.ListAllWorkspaceSummaries(context.Background())
 	if err != nil {
 		t.Fatalf("ListAllWorkspaceSummaries() returned error: %v", err)
 	}
-	if len(workspaces.Items) != 0 {
-		t.Fatalf("len(ListAllWorkspaceSummaries().Items) = %d, want 0 because onboarding workspaces stay hidden", len(workspaces.Items))
+	if len(workspaces.Items) != 1 {
+		t.Fatalf("len(ListAllWorkspaceSummaries().Items) = %d, want 1 starter workspace", len(workspaces.Items))
+	}
+	if workspaces.Items[0].Name != quickstartWorkspaceName {
+		t.Fatalf("workspaces.Items[0].Name = %q, want %q", workspaces.Items[0].Name, quickstartWorkspaceName)
 	}
 }
 

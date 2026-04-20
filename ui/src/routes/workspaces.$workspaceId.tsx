@@ -69,6 +69,7 @@ function WorkspaceStudioPage() {
   // or when the agent-connected dialog / "What's Next" step is active.
   const showBanner = workspace != null && !bannerDismissed &&
     (search.welcome || connectedAgent != null || showWhatsNext);
+  const showWelcomeInterstitial = workspace != null && search.welcome && connectedAgent == null && !showWhatsNext;
 
   // Always poll while on this page so we detect agent connections promptly.
   useEffect(() => {
@@ -175,6 +176,8 @@ function WorkspaceStudioPage() {
     throw new Error("Workspace not found.");
   }
 
+  const workspaceLabel = workspace.name === "getting-started" ? "Getting-started" : workspace.name;
+
   return (
     <PageStack>
       {unavailableDatabases.length > 0 ? (
@@ -205,6 +208,67 @@ function WorkspaceStudioPage() {
             }
           }}
         />
+      ) : null}
+
+      {showWelcomeInterstitial ? (
+        <WelcomeInterstitial>
+          <WelcomeCard>
+            <WelcomeHeader>
+              <WelcomeIconWrap aria-hidden>
+                <WelcomeIconSpark>✦</WelcomeIconSpark>
+              </WelcomeIconWrap>
+              <WelcomeHeaderCopy>
+                <WelcomeEyebrow>Step 1 of 2 • AFS Cloud</WelcomeEyebrow>
+                <WelcomeTitle>{workspaceLabel} is ready</WelcomeTitle>
+              </WelcomeHeaderCopy>
+            </WelcomeHeader>
+            <WelcomeBody>
+              Congrats. We created your first workspace, <WelcomeWorkspaceName>{workspaceLabel}</WelcomeWorkspaceName>, inside the shared Getting Started database and loaded it with sample files so you can explore AFS immediately.
+            </WelcomeBody>
+            <WelcomeFacts>
+              <WelcomeFact>
+                <WelcomeFactValue>{workspace.fileCount}</WelcomeFactValue>
+                <WelcomeFactLabel>sample files</WelcomeFactLabel>
+              </WelcomeFact>
+              <WelcomeFact>
+                <WelcomeFactValue>{workspace.folderCount}</WelcomeFactValue>
+                <WelcomeFactLabel>folders ready</WelcomeFactLabel>
+              </WelcomeFact>
+              <WelcomeFact>
+                <WelcomeFactValue>{workspace.databaseName}</WelcomeFactValue>
+                <WelcomeFactLabel>connected database</WelcomeFactLabel>
+              </WelcomeFact>
+            </WelcomeFacts>
+            <WelcomeBody>
+              Next, let&apos;s connect your first agent. Once it&apos;s linked, your agent can sync this workspace locally or use it through MCP.
+            </WelcomeBody>
+            <WelcomeActions>
+              <Button
+                size="large"
+                onClick={() => {
+                  setShowWhatsNext(true);
+                  setTimeout(() => bannerStepRef.current?.jumpToStep(1), 0);
+                }}
+              >
+                Connect my first agent
+              </Button>
+              <Button
+                size="large"
+                kind="ghost"
+                onClick={() => {
+                  void navigate({
+                    to: "/workspaces/$workspaceId",
+                    params: { workspaceId },
+                    search: tab === "browse" ? {} : { tab },
+                    replace: true,
+                  });
+                }}
+              >
+                I&apos;ll do this later
+              </Button>
+            </WelcomeActions>
+          </WelcomeCard>
+        </WelcomeInterstitial>
       ) : null}
 
       <StudioNavRow>
@@ -380,4 +444,137 @@ const ConnectAgentButton = styled(Button)`
     white-space: nowrap;
     box-shadow: none;
   }
+`;
+
+const WelcomeInterstitial = styled.section`
+  display: flex;
+  justify-content: center;
+`;
+
+const WelcomeCard = styled.div`
+  width: min(100%, 760px);
+  border-radius: 24px;
+  padding: 28px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 16%, transparent), transparent 28%),
+    radial-gradient(circle at bottom left, rgba(255, 209, 102, 0.18), transparent 34%),
+    linear-gradient(180deg, var(--afs-panel-strong), color-mix(in srgb, var(--afs-bg-soft) 58%, white));
+  border: 1px solid color-mix(in srgb, var(--afs-accent) 16%, var(--afs-line));
+  box-shadow: 0 24px 60px rgba(79, 51, 24, 0.10);
+
+  @media (max-width: 720px) {
+    padding: 22px;
+  }
+`;
+
+const WelcomeHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 10px;
+
+  @media (max-width: 640px) {
+    align-items: flex-start;
+  }
+`;
+
+const WelcomeHeaderCopy = styled.div`
+  min-width: 0;
+`;
+
+const WelcomeIconWrap = styled.div`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  flex: 0 0 auto;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--afs-accent) 18%, white),
+    color-mix(in srgb, #ffd98f 72%, white)
+  );
+  color: var(--afs-accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--afs-accent) 14%, transparent);
+`;
+
+const WelcomeIconSpark = styled.span`
+  font-size: 22px;
+  line-height: 1;
+`;
+
+const WelcomeEyebrow = styled.div`
+  color: var(--afs-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+`;
+
+const WelcomeTitle = styled.h2`
+  margin: 10px 0 12px;
+  color: var(--afs-ink);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.05;
+`;
+
+const WelcomeBody = styled.p`
+  margin: 0;
+  max-width: 66ch;
+  color: var(--afs-muted);
+  font-size: 16px;
+  line-height: 1.6;
+
+  & + & {
+    margin-top: 10px;
+  }
+`;
+
+const WelcomeWorkspaceName = styled.strong`
+  color: var(--afs-ink);
+`;
+
+const WelcomeFacts = styled.div`
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 18px 0;
+
+  @media (max-width: 820px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const WelcomeFact = styled.div`
+  border: 1px solid var(--afs-line);
+  border-radius: 18px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--afs-panel) 72%, white);
+`;
+
+const WelcomeFactValue = styled.div`
+  color: var(--afs-ink);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  word-break: break-word;
+`;
+
+const WelcomeFactLabel = styled.div`
+  margin-top: 4px;
+  color: var(--afs-muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+`;
+
+const WelcomeActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
 `;

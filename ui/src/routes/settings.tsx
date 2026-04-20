@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useClerk } from "@clerk/react";
 import { Button, Loader, Typography } from "@redis-ui/components";
 import styled from "styled-components";
@@ -59,6 +59,7 @@ function SettingsPage() {
 
 function ClerkSettingsPage() {
   const auth = useAuthSession();
+  const navigate = useNavigate();
   const clerk = useClerk();
   const accountQuery = useAccount(!auth.isLoading && auth.isAuthenticated);
   const resetMutation = useResetAccountDataMutation();
@@ -87,7 +88,9 @@ function ClerkSettingsPage() {
       setActionError(null);
       if (pendingAction === "reset") {
         await resetMutation.mutateAsync();
-        await redirectAfterSignOut("/login");
+        window.localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
+        setPendingAction(null);
+        void navigate({ to: "/" });
         return;
       }
       await deleteMutation.mutateAsync();
@@ -146,8 +149,8 @@ function ClerkSettingsPage() {
             <ActionCopy>
               <ActionTitle>Reset onboarding state</ActionTitle>
               <ActionBody>
-                Deletes your AFS Cloud databases and workspace metadata, then signs you out so the next
-                login starts fresh.
+                Clears your getting-started workspace and any account-owned cloud databases, then sends
+                you back to Overview so you can start onboarding again.
               </ActionBody>
             </ActionCopy>
             <WarningButton
@@ -218,7 +221,7 @@ function ClerkSettingsPage() {
                 <DialogBody>
                   {pendingAction === "delete"
                     ? "This deletes your AFS Cloud data, removes the account, and signs you out. You will need to sign up again to come back."
-                    : "This deletes your AFS Cloud databases and workspace metadata, then signs you out. Your next login will start from a clean onboarding state."}
+                    : "This clears your getting-started workspace and any account-owned cloud databases, then returns you to Overview. You will stay signed in."}
                 </DialogBody>
               </div>
               <DialogCloseButton
@@ -237,7 +240,7 @@ function ClerkSettingsPage() {
             <Checklist>
               <li>Owned databases deleted: {account?.ownedDatabaseCount ?? 0}</li>
               <li>Owned workspaces removed: {account?.ownedWorkspaceCount ?? 0}</li>
-              <li>{pendingAction === "delete" ? "Your account will be deleted" : "Your account will stay active"}</li>
+              <li>{pendingAction === "delete" ? "Your account will be deleted" : "Your account will stay active and signed in"}</li>
             </Checklist>
 
             {actionError ? <DialogError role="alert">{actionError}</DialogError> : null}

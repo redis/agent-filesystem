@@ -56,26 +56,30 @@ function ConnectCLIPage() {
     }
     return null;
   }, [search.workspace, workspaces]);
+  const explicitWorkspaceHint = search.workspace?.trim() ?? "";
 
-  async function connectWorkspace(workspaceId: string, databaseId: string) {
+  async function redirectWithOnboardingToken(createToken: () => Promise<{ token: string; workspaceName: string }>) {
     if (returnToError != null) {
       setError(returnToError);
       return;
     }
 
-    setError(null);
-    setConnectingWorkspaceId(workspaceId);
     try {
-      const onboarding = await afsApi.createOnboardingToken(databaseId, workspaceId);
+      const onboarding = await createToken();
       const target = new URL(search.return_to);
       target.searchParams.set("token", onboarding.token);
       target.searchParams.set("state", search.state);
       target.searchParams.set("workspace", onboarding.workspaceName);
       window.location.assign(target.toString());
     } catch (cause) {
-      setConnectingWorkspaceId(null);
       setError(cause instanceof Error ? cause.message : "Could not prepare the CLI login.");
     }
+  }
+
+  async function connectWorkspace(workspaceId: string, databaseId: string) {
+    setError(null);
+    setConnectingWorkspaceId(workspaceId);
+    await redirectWithOnboardingToken(() => afsApi.createOnboardingToken(databaseId, workspaceId));
   }
 
   useEffect(() => {
@@ -85,6 +89,22 @@ function ConnectCLIPage() {
     autoConnectAttempted.current = true;
     void connectWorkspace(autoWorkspace.id, autoWorkspace.databaseId);
   }, [autoWorkspace, returnToError, workspacesQuery.isLoading]);
+
+  useEffect(() => {
+    if (
+      autoConnectAttempted.current ||
+      explicitWorkspaceHint === "" ||
+      autoWorkspace != null ||
+      workspacesQuery.isLoading ||
+      returnToError != null
+    ) {
+      return;
+    }
+    autoConnectAttempted.current = true;
+    setConnectingWorkspaceId(explicitWorkspaceHint);
+    setError(null);
+    void redirectWithOnboardingToken(() => afsApi.createOnboardingToken(undefined, explicitWorkspaceHint));
+  }, [autoWorkspace, explicitWorkspaceHint, returnToError, workspacesQuery.isLoading]);
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -132,17 +152,26 @@ function ConnectCLIPage() {
 
         {workspaces.length === 0 ? (
           <CreateAnotherSection>
-            <SectionHeading>No workspaces yet</SectionHeading>
+            <SectionHeading>{explicitWorkspaceHint ? "Preparing your starter workspace…" : "No workspaces yet"}</SectionHeading>
             <SectionCopy>
-              {hasCreatableDatabase
+              {explicitWorkspaceHint
+                ? "AFS Cloud is trying to connect this CLI to your starter workspace. If this page stays here, refresh once and retry the login from the terminal."
+                : hasCreatableDatabase
                 ? "Create your first workspace in AFS Cloud, then come back here to connect this CLI."
                 : "Your account only has access to the shared getting-started database right now. Create your own cloud database or add an existing Redis database before creating a workspace."}
             </SectionCopy>
-            <Link to={hasCreatableDatabase ? "/workspaces" : "/databases"}>
-              <Button size="large" variant="secondary-fill">
-                {hasCreatableDatabase ? "Open workspace manager" : "Open database manager"}
-              </Button>
-            </Link>
+            {explicitWorkspaceHint ? (
+              <LoadingPanel>
+                <Loader data-testid="loader--spinner" />
+                <p>Looking for {explicitWorkspaceHint}…</p>
+              </LoadingPanel>
+            ) : (
+              <Link to={hasCreatableDatabase ? "/workspaces" : "/databases"}>
+                <Button size="large" variant="secondary-fill">
+                  {hasCreatableDatabase ? "Open workspace manager" : "Open database manager"}
+                </Button>
+              </Link>
+            )}
           </CreateAnotherSection>
         ) : autoWorkspace != null && connectingWorkspaceId === autoWorkspace.id ? (
           <LoadingPanel>

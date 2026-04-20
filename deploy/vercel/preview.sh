@@ -128,6 +128,8 @@ rsync -a --delete \
   --exclude 'ui/node_modules' \
   --exclude 'afs' \
   --exclude 'afs-control-plane' \
+  --exclude 'mount/agent-filesystem-mount' \
+  --exclude 'mount/agent-filesystem-nfs' \
   --exclude 'vercel' \
   --exclude 'afs.catalog.sqlite*' \
   --exclude 'afs.config.json' \
@@ -151,9 +153,12 @@ fi
 
 printf 'staged preview source at %s\n' "$stage_dir" >&2
 
+build_probe="$(mktemp "${TMPDIR:-/tmp}/afs-vercel-server.XXXXXX")"
+trap 'rm -f "$build_probe"; cleanup' EXIT
+
 (
   cd "$stage_dir"
-  go build ./cmd/server
+  go build -o "$build_probe" ./cmd/server
 )
 
 if [[ "$stage_only" -eq 1 ]]; then
@@ -171,7 +176,7 @@ fi
 
 (
   cd "$stage_dir"
-  npx --yes vercel@latest deploy --yes --logs \
+  npx --yes vercel@latest deploy --yes --logs --archive=tgz \
     -e "AFS_CATALOG_PATH=$catalog_path" \
     ${extra_deploy_args[@]+"${extra_deploy_args[@]}"}
 )

@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
+import { useState } from "react";
 import styled from "styled-components";
 import {
   PageStack,
@@ -19,6 +20,7 @@ import {
   CrossLinkArrow,
 } from "../components/doc-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
+import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { LiveTopologyCard } from "../components/live-topology-card";
 import { formatBytes } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
@@ -26,8 +28,10 @@ import { queryClient } from "../foundation/query-client";
 import {
   agentsQueryOptions,
   databasesQueryOptions,
+  useQuickstartMutation,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
+import type { AFSWorkspaceDetail } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/")({
   loader: async () => {
@@ -47,6 +51,7 @@ function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
   const { databases, isLoading: databasesLoading } = useDatabaseScope();
+  const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceDetail | null>(null);
 
   if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -54,24 +59,47 @@ function OverviewPage() {
 
   const hasDatabase = databases.length > 0;
 
-  if (!hasDatabase) {
-    return <GettingStartedView hasDatabase={false} />;
-  }
-
   const workspaces = workspacesQuery.data;
+  let content;
+  if (!hasDatabase) {
+    content = <GettingStartedView hasDatabase={false} onQuickstartCreated={setOnboardingWorkspace} />;
+  } else if (workspaces.length === 0) {
+    content = <GettingStartedView hasDatabase={true} onQuickstartCreated={setOnboardingWorkspace} />;
+  } else {
+    /* ── Dashboard ── */
+    const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
+    const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
+    const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
+    const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
 
-  if (workspaces.length === 0) {
-    return <GettingStartedView hasDatabase={true} />;
+    content = (
+      <DashboardView
+        databases={databases}
+        workspaces={workspaces}
+        agents={agentsQuery.data}
+        checkpointCount={checkpointCount}
+        checkpointCoverage={checkpointCoverage}
+        totalBytes={totalBytes}
+      />
+    );
   }
 
-  /* ── Dashboard ── */
-  const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
-  const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
-  const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
-  const connectedAgents = agentsQuery.data.length;
-  const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
-
-  return <DashboardView databases={databases} workspaces={workspaces} agents={agentsQuery.data} checkpointCount={checkpointCount} checkpointCoverage={checkpointCoverage} totalBytes={totalBytes} />;
+  return (
+    <>
+      {content}
+      {onboardingWorkspace ? (
+        <GettingStartedOnboardingDialog
+          open
+          workspaceId={onboardingWorkspace.id}
+          workspaceName={onboardingWorkspace.name}
+          databaseName={onboardingWorkspace.databaseName}
+          fileCount={onboardingWorkspace.fileCount}
+          folderCount={onboardingWorkspace.folderCount}
+          onClose={() => setOnboardingWorkspace(null)}
+        />
+      ) : null}
+    </>
+  );
 }
 
 function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
@@ -129,24 +157,19 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
   );
 }
 
-/* ── Getting Started (empty-state) ── */
-
-import { useQuickstartMutation } from "../foundation/hooks/use-afs";
-
-function GettingStartedView({ hasDatabase }: {
+function GettingStartedView({
+  hasDatabase,
+  onQuickstartCreated,
+}: {
   hasDatabase: boolean;
+  onQuickstartCreated: (workspace: AFSWorkspaceDetail) => void;
 }) {
-  const navigate = useNavigate();
   const quickstartMutation = useQuickstartMutation();
 
   const handleQuickstart = async () => {
     try {
       const result = await quickstartMutation.mutateAsync({});
-      navigate({
-        to: "/workspaces/$workspaceId",
-        params: { workspaceId: result.workspaceId },
-        search: { welcome: true },
-      });
+      onQuickstartCreated(result.workspace);
     } catch {
       // Error is stored in quickstartMutation.error
     }
@@ -493,4 +516,3 @@ const SecondaryButton = styled(Button)`
     }
   }
 `;
-

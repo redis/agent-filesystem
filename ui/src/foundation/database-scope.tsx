@@ -276,16 +276,10 @@ export function useDatabaseScope() {
 
 export function useScopedWorkspaceSummaries() {
   const query = useWorkspaceSummaries(null);
-  const { databases } = useDatabaseScope();
-  const hiddenDatabaseIDs = new Set(
-    databases
-      .filter((database) => !database.canCreateWorkspaces)
-      .map((database) => database.id),
-  );
 
   return {
     ...query,
-    data: (query.data ?? []).filter((workspace) => !hiddenDatabaseIDs.has(workspace.databaseId)),
+    data: query.data ?? [],
   };
 }
 
@@ -300,20 +294,9 @@ export function useScopedActivity(limit = 50) {
 
 export function useScopedAgents() {
   const query = useAgents(null);
-  const { databases } = useDatabaseScope();
-  const hiddenDatabaseIDs = new Set(
-    databases
-      .filter((database) => !database.canCreateWorkspaces)
-      .map((database) => database.id),
-  );
 
   return {
     ...query,
-    data: (query.data ?? []).filter((agent) => {
-      if (!agent.databaseId) {
-        return true;
-      }
-      return !hiddenDatabaseIDs.has(agent.databaseId);
-    }),
+    data: query.data ?? [],
   };
 }

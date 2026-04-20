@@ -154,6 +154,22 @@ func (c *workspaceCatalog) ListSessionsForWorkspace(ctx context.Context, workspa
 	return items, rows.Err()
 }
 
+func (c *workspaceCatalog) DeleteSessionsForWorkspace(ctx context.Context, workspaceID string) error {
+	if c == nil || c.db == nil {
+		return nil
+	}
+	resolvedWorkspaceID := strings.TrimSpace(workspaceID)
+	if resolvedWorkspaceID == "" {
+		return nil
+	}
+	_, err := c.execContext(
+		ctx,
+		`DELETE FROM session_catalog WHERE workspace_id = ?`,
+		resolvedWorkspaceID,
+	)
+	return err
+}
+
 func (c *workspaceCatalog) ListSessions(ctx context.Context, databaseID string) ([]sessionCatalogRecord, error) {
 	if c == nil || c.db == nil {
 		return nil, nil

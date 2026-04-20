@@ -7,6 +7,7 @@ import { getControlPlaneURL } from "../foundation/api/afs";
 type Props = {
   workspaceId: string;
   workspaceName: string;
+  workspaceLabel?: string;
   onDismiss: () => void;
 };
 
@@ -15,7 +16,7 @@ export type ConnectAgentBannerHandle = {
 };
 
 export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
-  function ConnectAgentBanner({ workspaceId, workspaceName, onDismiss }, ref) {
+  function ConnectAgentBanner({ workspaceId, workspaceName, workspaceLabel, onDismiss }, ref) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   useImperativeHandle(ref, () => ({
@@ -24,6 +25,7 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
   const [copied, setCopied] = useState<string | null>(null);
 
   const controlPlaneUrl = getControlPlaneURL();
+  const displayName = workspaceLabel?.trim() || workspaceName;
   const mountPath = `~/afs/${workspaceName}`;
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
@@ -61,9 +63,9 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
             </svg>
           </BannerIcon>
           <div>
-            <BannerTitle>Workspace created! Now connect an agent.</BannerTitle>
+            <BannerTitle>Connect an agent to this workspace.</BannerTitle>
             <BannerSubtitle>
-              Your <strong>{workspaceName}</strong> workspace is ready with sample files.
+              Your <strong>{displayName}</strong> workspace is ready with sample files.
               Follow the steps below to connect an AI agent.
             </BannerSubtitle>
           </div>
@@ -174,7 +176,7 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
           </CodeContainer>
           <StepHint>
             After adding, restart your agent. It will have access to all AFS workspaces
-            including <strong>{workspaceName}</strong>.
+            including <strong>{displayName}</strong>.
           </StepHint>
 
           <NextButtonRow>

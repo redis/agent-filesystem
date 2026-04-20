@@ -757,6 +757,9 @@ func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, works
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.Name); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+		}
 		return err
 	}
 	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
@@ -768,6 +771,9 @@ func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.Name); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+		}
 		return err
 	}
 	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
@@ -1341,9 +1347,6 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 		}
 		return nil, databaseProfile{}, err
 	}
-	if normalizedDatabasePurpose(profile.Purpose) == databasePurposeOnboarding {
-		response.Items = nil
-	}
 	for index := range response.Items {
 		stampWorkspaceSummary(&response.Items[index], profile)
 	}
@@ -1419,7 +1422,10 @@ func (m *DatabaseManager) deleteWorkspaceFromCatalog(ctx context.Context, databa
 		return nil
 	}
 	if strings.TrimSpace(route.WorkspaceID) != "" {
-		return m.catalog.DeleteWorkspace(ctx, databaseID, route.WorkspaceID)
+		if err := m.catalog.DeleteWorkspace(ctx, databaseID, route.WorkspaceID); err != nil {
+			return err
+		}
+		return m.catalog.DeleteSessionsForWorkspace(ctx, route.WorkspaceID)
 	}
 	return m.catalog.DeleteWorkspaceByName(ctx, databaseID, route.Name)
 }

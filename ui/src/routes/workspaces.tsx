@@ -17,6 +17,7 @@ import {
   Select,
   TextInput,
 } from "../components/afs-kit";
+import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import {
   agentsQueryOptions,
   useCreateWorkspaceMutation,
@@ -256,6 +257,7 @@ function WorkspacesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceSummary | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
     createInitialFormState(preferredDatabase(databases)),
@@ -304,6 +306,11 @@ function WorkspacesPage() {
     counts[key] = (counts[key] ?? 0) + 1;
     return counts;
   }, {});
+  const starterWorkspace = workspaces.length === 1 && isGettingStartedWorkspace(workspaces[0].name)
+    ? workspaces[0]
+    : null;
+  const showStarterConnectPanel = starterWorkspace != null &&
+    (connectedAgentsByWorkspace[workspaceRowKey(starterWorkspace.id)] ?? 0) === 0;
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
@@ -413,6 +420,30 @@ function WorkspacesPage() {
 
   return (
     <PageStack>
+      {showStarterConnectPanel ? (
+        <GettingStartedPanel>
+          <GettingStartedPanelCopy>
+            <GettingStartedPanelEyebrow>Getting Started</GettingStartedPanelEyebrow>
+            <GettingStartedPanelTitle>Connect your agents to your first workspace</GettingStartedPanelTitle>
+            <GettingStartedPanelBody>
+              Your starter workspace is ready with sample files. Connect an agent to sync it locally or access it through MCP.
+            </GettingStartedPanelBody>
+          </GettingStartedPanelCopy>
+          <GettingStartedPanelActions>
+            <Button size="medium" onClick={() => setOnboardingWorkspace(starterWorkspace)}>
+              Connect my first agent
+            </Button>
+            <Button
+              size="medium"
+              variant="secondary-fill"
+              onClick={() => openWorkspace(starterWorkspace)}
+            >
+              Open workspace
+            </Button>
+          </GettingStartedPanelActions>
+        </GettingStartedPanel>
+      ) : null}
+
       <WorkspaceTable
         rows={workspaces}
         loading={workspacesQuery.isLoading}
@@ -674,8 +705,26 @@ function WorkspacesPage() {
       ) : null}
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} databases={databases} />
+
+      {onboardingWorkspace ? (
+        <GettingStartedOnboardingDialog
+          open
+          workspaceId={onboardingWorkspace.id}
+          workspaceName={onboardingWorkspace.name}
+          databaseName={onboardingWorkspace.databaseName}
+          fileCount={onboardingWorkspace.fileCount}
+          folderCount={onboardingWorkspace.folderCount}
+          initialStage="connect"
+          onClose={() => setOnboardingWorkspace(null)}
+        />
+      ) : null}
     </PageStack>
   );
+}
+
+function isGettingStartedWorkspace(name: string) {
+  const trimmed = name.trim().toLowerCase();
+  return trimmed === "getting-started" || trimmed.startsWith("getting-started-");
 }
 
 /* ---- Import Files section styled components ---- */
@@ -705,4 +754,58 @@ const FieldHint = styled.span`
   font-size: 12px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;
+`;
+
+const GettingStartedPanel = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px 24px;
+  border: 1px solid color-mix(in srgb, var(--afs-accent) 18%, var(--afs-line));
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 12%, transparent), transparent 32%),
+    linear-gradient(180deg, var(--afs-panel-strong), color-mix(in srgb, var(--afs-bg-soft) 52%, white));
+
+  @media (max-width: 900px) {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+`;
+
+const GettingStartedPanelCopy = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+`;
+
+const GettingStartedPanelEyebrow = styled.div`
+  color: var(--afs-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+`;
+
+const GettingStartedPanelTitle = styled.h2`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 22px;
+  line-height: 1.15;
+`;
+
+const GettingStartedPanelBody = styled.p`
+  margin: 0;
+  max-width: 58ch;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
+const GettingStartedPanelActions = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 `;

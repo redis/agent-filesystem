@@ -113,6 +113,8 @@ rsync -a --delete \
   --exclude 'ui/node_modules' \
   --exclude 'afs' \
   --exclude 'afs-control-plane' \
+  --exclude 'mount/agent-filesystem-mount' \
+  --exclude 'mount/agent-filesystem-nfs' \
   --exclude 'vercel' \
   --exclude 'afs.catalog.sqlite*' \
   --exclude 'afs.config.json' \
@@ -136,9 +138,12 @@ fi
 
 printf 'staged production source at %s\n' "$stage_dir" >&2
 
+build_probe="$(mktemp "${TMPDIR:-/tmp}/afs-vercel-server.XXXXXX")"
+trap 'rm -f "$build_probe"; cleanup' EXIT
+
 (
   cd "$stage_dir"
-  go build ./cmd/server
+  go build -o "$build_probe" ./cmd/server
 )
 
 if [[ ! -f "$stage_dir/.vercel/project.json" ]]; then
@@ -149,7 +154,7 @@ if [[ ! -f "$stage_dir/.vercel/project.json" ]]; then
   )
 fi
 
-deploy_cmd=(npx --yes vercel@latest deploy --prod --yes)
+deploy_cmd=(npx --yes vercel@latest deploy --prod --yes --archive=tgz)
 if [[ ${#extra_deploy_args[@]} -gt 0 ]]; then
   deploy_cmd+=("${extra_deploy_args[@]}")
 fi
