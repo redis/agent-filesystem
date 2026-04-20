@@ -53,16 +53,15 @@ function OverviewPage() {
   }
 
   const hasDatabase = databases.length > 0;
-  const canCreateWorkspace = databases.some((database) => database.canCreateWorkspaces);
 
   if (!hasDatabase) {
-    return <GettingStartedView hasDatabase={false} canCreateWorkspace={false} />;
+    return <GettingStartedView hasDatabase={false} />;
   }
 
   const workspaces = workspacesQuery.data;
 
   if (workspaces.length === 0) {
-    return <GettingStartedView hasDatabase={true} canCreateWorkspace={canCreateWorkspace} />;
+    return <GettingStartedView hasDatabase={true} />;
   }
 
   /* ── Dashboard ── */
@@ -134,13 +133,11 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 
 import { useQuickstartMutation } from "../foundation/hooks/use-afs";
 
-function GettingStartedView({ hasDatabase, canCreateWorkspace }: {
+function GettingStartedView({ hasDatabase }: {
   hasDatabase: boolean;
-  canCreateWorkspace: boolean;
 }) {
   const navigate = useNavigate();
   const quickstartMutation = useQuickstartMutation();
-  const showHostedOnboarding = hasDatabase && !canCreateWorkspace;
 
   const handleQuickstart = async () => {
     try {
@@ -162,17 +159,13 @@ function GettingStartedView({ hasDatabase, canCreateWorkspace }: {
         <EmptyStateContent>
           <ProductName>Agent Filesystem</ProductName>
           <Headline>
-            {showHostedOnboarding
-              ? "Create your first cloud database"
-              : hasDatabase
-              ? "Start with getting-started"
+            {hasDatabase
+              ? "Create your first workspace"
               : "Fast, durable filesystem workspaces for AI agents, backed by Redis"}
           </Headline>
           <Description>
-            {showHostedOnboarding
-              ? "Your Getting Started database is ready, but it is only for guided onboarding. To add more workspaces, connect your own Redis database first."
-              : hasDatabase
-              ? "Your hosted database is connected. Create a starter workspace with sample files so you can explore AFS immediately."
+            {hasDatabase
+              ? "Start with a getting-started workspace pre-populated with sample files, so you can explore AFS in one click."
               : "Give every AI agent a persistent, checkpointed workspace. Browse files, create recovery points, and track activity — all from one UI."}
           </Description>
         </EmptyStateContent>
@@ -186,38 +179,28 @@ function GettingStartedView({ hasDatabase, canCreateWorkspace }: {
               </svg>
             </OnboardingCardIcon>
             <OnboardingCardTitle>
-              {showHostedOnboarding ? "Provision your own database" : hasDatabase ? "Create a workspace" : "Quick Start"}
+              {hasDatabase ? "Create your first workspace" : "Quick Start"}
             </OnboardingCardTitle>
             <OnboardingCardDesc>
-              {showHostedOnboarding
-                ? "New workspaces can't be created on the shared Getting Started database. Connect a dedicated Redis database for your account to start adding workspaces."
-                : hasDatabase
-                ? "Create the getting-started workspace with sample files and start exploring in one click."
+              {hasDatabase
+                ? "We'll deploy a getting-started workspace with sample files so you can connect an agent right away."
                 : "Connect to local Redis, create a workspace with sample files, and start exploring — all in one click."}
             </OnboardingCardDesc>
-            {showHostedOnboarding ? (
-              <CTAButton size="large" onClick={() => navigate({ to: "/databases" })}>
-                Open database manager
-              </CTAButton>
-            ) : (
-              <>
-                <CTAButton
-                  size="large"
-                  onClick={handleQuickstart}
-                  disabled={quickstartMutation.isPending}
-                >
-                  {quickstartMutation.isPending ? "Setting up..." : hasDatabase ? "Create getting-started" : "Create my first workspace"}
-                </CTAButton>
-                {quickstartMutation.isError && (
-                  <QuickstartError>
-                    {quickstartMutation.error?.message?.includes("cannot connect")
-                      ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
-                      : quickstartMutation.error?.message ?? "Something went wrong."}
-                  </QuickstartError>
-                )}
-              </>
+            <CTAButton
+              size="large"
+              onClick={handleQuickstart}
+              disabled={quickstartMutation.isPending}
+            >
+              {quickstartMutation.isPending ? "Setting up..." : "Create my first workspace"}
+            </CTAButton>
+            {quickstartMutation.isError && (
+              <QuickstartError>
+                {quickstartMutation.error?.message?.includes("cannot connect")
+                  ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
+                  : quickstartMutation.error?.message ?? "Something went wrong."}
+              </QuickstartError>
             )}
-            {hasDatabase && !showHostedOnboarding && (
+            {hasDatabase && (
               <Link to="/workspaces">
                 <SecondaryButton size="large">Create empty workspace instead</SecondaryButton>
               </Link>

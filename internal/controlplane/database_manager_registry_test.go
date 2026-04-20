@@ -340,7 +340,7 @@ func TestOnboardingDatabaseHidesLegacyGettingStartedWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("serviceFor(afs-cloud) returned error: %v", err)
 	}
-	if _, err := createQuickstartWorkspace(context.Background(), service, profile); err != nil {
+	if _, err := createQuickstartWorkspace(context.Background(), service, profile, quickstartWorkspaceName); err != nil {
 		t.Fatalf("createQuickstartWorkspace() returned error: %v", err)
 	}
 

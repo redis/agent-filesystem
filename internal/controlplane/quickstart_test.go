@@ -98,7 +98,7 @@ func TestBootstrapDatabaseProfileFromRedisURL(t *testing.T) {
 	}
 }
 
-func TestQuickstartRejectsBootstrappedCloudOnboardingDatabase(t *testing.T) {
+func TestQuickstartCreatesPerSubjectWorkspaceOnOnboardingDatabase(t *testing.T) {
 	mr := miniredis.RunT(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "afs.config.json")
@@ -116,8 +116,68 @@ func TestQuickstartRejectsBootstrappedCloudOnboardingDatabase(t *testing.T) {
 	}
 	t.Cleanup(manager.Close)
 
-	_, err = manager.Quickstart(context.Background(), QuickstartRequest{})
-	if err == nil || !strings.Contains(err.Error(), "Getting Started database") {
-		t.Fatalf("Quickstart() error = %v, want onboarding rejection", err)
+	ctxA := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{Subject: "user-alice"})
+	respA, err := manager.Quickstart(ctxA, QuickstartRequest{})
+	if err != nil {
+		t.Fatalf("Quickstart(alice) returned error: %v", err)
+	}
+	if respA.DatabaseID != quickstartCloudDBID {
+		t.Fatalf("Quickstart(alice) DatabaseID = %q, want %q", respA.DatabaseID, quickstartCloudDBID)
+	}
+	if respA.Workspace.Name == quickstartWorkspaceName {
+		t.Fatalf("Quickstart(alice) workspace name = %q, want per-subject suffix", respA.Workspace.Name)
+	}
+	if !strings.HasPrefix(respA.Workspace.Name, quickstartWorkspaceName+"-") {
+		t.Fatalf("Quickstart(alice) workspace name = %q, want prefix %q", respA.Workspace.Name, quickstartWorkspaceName+"-")
+	}
+
+	ctxB := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{Subject: "user-bob"})
+	respB, err := manager.Quickstart(ctxB, QuickstartRequest{})
+	if err != nil {
+		t.Fatalf("Quickstart(bob) returned error: %v", err)
+	}
+	if respB.Workspace.Name == respA.Workspace.Name {
+		t.Fatalf("Quickstart(bob) workspace name = %q, want different from alice", respB.Workspace.Name)
+	}
+
+	// Calling Quickstart again for alice should be idempotent — return the
+	// same workspace by name (the opaque catalog ID is intentionally unstable
+	// for onboarding databases, so the response exposes the name as the ID).
+	respA2, err := manager.Quickstart(ctxA, QuickstartRequest{})
+	if err != nil {
+		t.Fatalf("Quickstart(alice) second call returned error: %v", err)
+	}
+	if respA2.WorkspaceID != respA.WorkspaceID {
+		t.Fatalf("Quickstart(alice) second call WorkspaceID = %q, want %q", respA2.WorkspaceID, respA.WorkspaceID)
+	}
+	if respA2.Workspace.Name != respA.Workspace.Name {
+		t.Fatalf("Quickstart(alice) second call Name = %q, want %q", respA2.Workspace.Name, respA.Workspace.Name)
+	}
+}
+
+func TestQuickstartWithEmptySubjectUsesFlatWorkspaceName(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/4")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	resp, err := manager.Quickstart(context.Background(), QuickstartRequest{})
+	if err != nil {
+		t.Fatalf("Quickstart(anonymous) returned error: %v", err)
+	}
+	if resp.Workspace.Name != quickstartWorkspaceName {
+		t.Fatalf("Quickstart(anonymous) workspace name = %q, want %q", resp.Workspace.Name, quickstartWorkspaceName)
 	}
 }

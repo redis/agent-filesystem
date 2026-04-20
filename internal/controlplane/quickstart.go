@@ -2,7 +2,9 @@ package controlplane
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -58,9 +60,6 @@ func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartReques
 		if err == nil && len(dbList.Items) > 0 {
 			dbRecord := dbList.Items[0]
 			if dbRecord.ConnectionError == "" {
-				if dbRecord.Purpose == databasePurposeOnboarding {
-					return QuickstartResponse{}, fmt.Errorf("quickstart is not available on the shared Getting Started database; create your own database first")
-				}
 				return m.quickstartWithDatabase(ctx, dbRecord.ID)
 			}
 		}
@@ -190,12 +189,20 @@ func bootstrapDatabaseProfileFromContext(_ context.Context) (databaseProfile, bo
 
 // quickstartWithDatabase creates the getting-started workspace on an existing database.
 func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID string) (QuickstartResponse, error) {
-	// Check if workspace already exists — if so, just return it.
-	existing, err := m.GetWorkspace(ctx, databaseID, quickstartWorkspaceName)
+	service, profile, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return QuickstartResponse{}, fmt.Errorf("quickstart: open service: %w", err)
+	}
+
+	// On a shared onboarding database, scope the workspace name to the subject
+	// so tenants don't collide on "getting-started" in the same Redis.
+	workspaceName := quickstartWorkspaceNameFor(profile, authSubjectFromContext(ctx))
+
+	existing, err := m.GetWorkspace(ctx, databaseID, workspaceName)
 	if err == nil {
 		return QuickstartResponse{
 			DatabaseID:  databaseID,
-			WorkspaceID: existing.ID,
+			WorkspaceID: existing.Name,
 			Workspace:   existing,
 		}, nil
 	}
@@ -203,13 +210,7 @@ func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID
 		return QuickstartResponse{}, fmt.Errorf("quickstart: check workspace: %w", err)
 	}
 
-	// Create the workspace with seed data.
-	service, profile, err := m.serviceFor(ctx, databaseID)
-	if err != nil {
-		return QuickstartResponse{}, fmt.Errorf("quickstart: open service: %w", err)
-	}
-
-	detail, err := createQuickstartWorkspace(ctx, service, profile)
+	detail, err := createQuickstartWorkspace(ctx, service, profile, workspaceName)
 	if err != nil {
 		return QuickstartResponse{}, fmt.Errorf("quickstart: create workspace: %w", err)
 	}
@@ -218,9 +219,14 @@ func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID
 		return QuickstartResponse{}, err
 	}
 
+	// Return the workspace name as WorkspaceID so the UI redirect resolves
+	// by name. Opaque catalog IDs aren't stable for onboarding databases
+	// (ListDatabases prunes them on every call to keep cross-tenant metadata
+	// out of the shared sqlite catalog), but resolve-by-name hits Redis
+	// directly and works regardless.
 	return QuickstartResponse{
 		DatabaseID:  databaseID,
-		WorkspaceID: detail.ID,
+		WorkspaceID: detail.Name,
 		Workspace:   detail,
 	}, nil
 }
@@ -235,9 +241,21 @@ func isNotFound(err error) bool {
 	return strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist")
 }
 
+// quickstartWorkspaceNameFor returns the workspace name to use for a quickstart
+// run on the given database. For shared onboarding databases that serve multiple
+// tenants out of one Redis instance, we derive a per-subject suffix so each
+// account gets its own isolated workspace key (`afs:{name}:workspace:meta`).
+func quickstartWorkspaceNameFor(profile databaseProfile, subject string) string {
+	subject = strings.TrimSpace(subject)
+	if profile.Purpose != databasePurposeOnboarding || subject == "" {
+		return quickstartWorkspaceName
+	}
+	sum := sha256.Sum256([]byte(subject))
+	return quickstartWorkspaceName + "-" + hex.EncodeToString(sum[:])[:8]
+}
+
 // createQuickstartWorkspace builds a workspace pre-populated with sample files.
-func createQuickstartWorkspace(ctx context.Context, service *Service, profile databaseProfile) (workspaceDetail, error) {
-	workspace := quickstartWorkspaceName
+func createQuickstartWorkspace(ctx context.Context, service *Service, profile databaseProfile, workspace string) (workspaceDetail, error) {
 	now := time.Now().UTC()
 
 	// Build the seed manifest with embedded content.

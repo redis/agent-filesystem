@@ -47,7 +47,7 @@ function ConnectCLIPage() {
       }
     }
 
-    const gettingStarted = workspaces.find((workspace) => workspace.name === "getting-started");
+    const gettingStarted = workspaces.find((workspace) => isGettingStartedName(workspace.name));
     if (gettingStarted != null) {
       return gettingStarted;
     }
@@ -118,8 +118,8 @@ function ConnectCLIPage() {
         <Description>
           {autoWorkspace == null
             ? "Pick a workspace for this terminal. If you have not created one yet, finish onboarding in AFS Cloud first."
-            : autoWorkspace.name === "getting-started"
-              ? "Connecting this CLI to getting-started so you can start with sample files right away."
+            : isGettingStartedName(autoWorkspace.name)
+              ? "Connecting this CLI to your getting-started workspace so you can start with sample files right away."
               : `Preparing browser login for ${autoWorkspace.name}.`}
         </Description>
 
@@ -147,7 +147,7 @@ function ConnectCLIPage() {
         ) : autoWorkspace != null && connectingWorkspaceId === autoWorkspace.id ? (
           <LoadingPanel>
             <Loader data-testid="loader--spinner" />
-            <p>{autoWorkspace.name === "getting-started" ? "Connecting you to getting-started…" : "Finishing your CLI login…"}</p>
+            <p>{isGettingStartedName(autoWorkspace.name) ? "Connecting you to getting-started…" : "Finishing your CLI login…"}</p>
           </LoadingPanel>
         ) : (
           <>
@@ -185,6 +185,10 @@ function ConnectCLIPage() {
       </ConnectCard>
     </PageShell>
   );
+}
+
+function isGettingStartedName(name: string) {
+  return name === "getting-started" || name.startsWith("getting-started-");
 }
 
 function validateReturnTo(raw: string) {
