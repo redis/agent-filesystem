@@ -1,5 +1,4 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
 import { Button, Loader } from "@redis-ui/components";
 import styled from "styled-components";
 import {
@@ -19,7 +18,6 @@ import {
   CrossLinkDesc,
   CrossLinkArrow,
 } from "../components/doc-kit";
-import { AddDatabaseDialog } from "../components/add-database-dialog";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { LiveTopologyCard } from "../components/live-topology-card";
 import { formatBytes } from "../foundation/api/afs";
@@ -48,22 +46,23 @@ export const Route = createFileRoute("/")({
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
-  const { databases, saveDatabase, isLoading: databasesLoading } = useDatabaseScope();
+  const { databases, isLoading: databasesLoading } = useDatabaseScope();
 
   if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
   const hasDatabase = databases.length > 0;
+  const canCreateWorkspace = databases.some((database) => database.canCreateWorkspaces);
 
   if (!hasDatabase) {
-    return <GettingStartedView saveDatabase={saveDatabase} hasDatabase={false} />;
+    return <GettingStartedView hasDatabase={false} canCreateWorkspace={false} />;
   }
 
   const workspaces = workspacesQuery.data;
 
   if (workspaces.length === 0) {
-    return <GettingStartedView saveDatabase={saveDatabase} hasDatabase={true} />;
+    return <GettingStartedView hasDatabase={true} canCreateWorkspace={canCreateWorkspace} />;
   }
 
   /* ── Dashboard ── */
@@ -133,13 +132,15 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 
 /* ── Getting Started (empty-state) ── */
 
-import type { SaveDatabaseInput } from "../foundation/types/afs";
 import { useQuickstartMutation } from "../foundation/hooks/use-afs";
 
-function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (input: SaveDatabaseInput) => Promise<void>; hasDatabase: boolean }) {
-  const [showAddDb, setShowAddDb] = useState(false);
+function GettingStartedView({ hasDatabase, canCreateWorkspace }: {
+  hasDatabase: boolean;
+  canCreateWorkspace: boolean;
+}) {
   const navigate = useNavigate();
   const quickstartMutation = useQuickstartMutation();
+  const showHostedOnboarding = hasDatabase && !canCreateWorkspace;
 
   const handleQuickstart = async () => {
     try {
@@ -161,12 +162,16 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
         <EmptyStateContent>
           <ProductName>Agent Filesystem</ProductName>
           <Headline>
-            {hasDatabase
+            {showHostedOnboarding
+              ? "Create your first cloud database"
+              : hasDatabase
               ? "Start with getting-started"
               : "Fast, durable filesystem workspaces for AI agents, backed by Redis"}
           </Headline>
           <Description>
-            {hasDatabase
+            {showHostedOnboarding
+              ? "Your Getting Started database is ready, but it is only for guided onboarding. To add more workspaces, connect your own Redis database first."
+              : hasDatabase
               ? "Your hosted database is connected. Create a starter workspace with sample files so you can explore AFS immediately."
               : "Give every AI agent a persistent, checkpointed workspace. Browse files, create recovery points, and track activity — all from one UI."}
           </Description>
@@ -180,27 +185,39 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
                 <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
             </OnboardingCardIcon>
-            <OnboardingCardTitle>{hasDatabase ? "Create a workspace" : "Quick Start"}</OnboardingCardTitle>
+            <OnboardingCardTitle>
+              {showHostedOnboarding ? "Provision your own database" : hasDatabase ? "Create a workspace" : "Quick Start"}
+            </OnboardingCardTitle>
             <OnboardingCardDesc>
-              {hasDatabase
+              {showHostedOnboarding
+                ? "New workspaces can't be created on the shared Getting Started database. Connect a dedicated Redis database for your account to start adding workspaces."
+                : hasDatabase
                 ? "Create the getting-started workspace with sample files and start exploring in one click."
                 : "Connect to local Redis, create a workspace with sample files, and start exploring — all in one click."}
             </OnboardingCardDesc>
-            <CTAButton
-              size="large"
-              onClick={handleQuickstart}
-              disabled={quickstartMutation.isPending}
-            >
-              {quickstartMutation.isPending ? "Setting up..." : hasDatabase ? "Create getting-started" : "Create my first workspace"}
-            </CTAButton>
-            {quickstartMutation.isError && (
-              <QuickstartError>
-                {quickstartMutation.error?.message?.includes("cannot connect")
-                  ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
-                  : quickstartMutation.error?.message ?? "Something went wrong."}
-              </QuickstartError>
+            {showHostedOnboarding ? (
+              <CTAButton size="large" onClick={() => navigate({ to: "/databases" })}>
+                Open database manager
+              </CTAButton>
+            ) : (
+              <>
+                <CTAButton
+                  size="large"
+                  onClick={handleQuickstart}
+                  disabled={quickstartMutation.isPending}
+                >
+                  {quickstartMutation.isPending ? "Setting up..." : hasDatabase ? "Create getting-started" : "Create my first workspace"}
+                </CTAButton>
+                {quickstartMutation.isError && (
+                  <QuickstartError>
+                    {quickstartMutation.error?.message?.includes("cannot connect")
+                      ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
+                      : quickstartMutation.error?.message ?? "Something went wrong."}
+                  </QuickstartError>
+                )}
+              </>
             )}
-            {hasDatabase && (
+            {hasDatabase && !showHostedOnboarding && (
               <Link to="/workspaces">
                 <SecondaryButton size="large">Create empty workspace instead</SecondaryButton>
               </Link>
@@ -211,34 +228,6 @@ function GettingStartedView({ saveDatabase, hasDatabase }: { saveDatabase: (inpu
               </OnboardingCardHint>
             )}
           </OnboardingCard>
-
-          {!hasDatabase && (
-            <>
-              <OnboardingDivider>
-                <OnboardingDividerLine />
-                <OnboardingDividerLabel>or</OnboardingDividerLabel>
-                <OnboardingDividerLine />
-              </OnboardingDivider>
-
-              <OnboardingCard>
-                <OnboardingCardIcon>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <ellipse cx="12" cy="5" rx="9" ry="3" />
-                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-                  </svg>
-                </OnboardingCardIcon>
-                <OnboardingCardTitle>Connect a remote database</OnboardingCardTitle>
-                <OnboardingCardDesc>
-                  Point AFS at any Redis instance — local, hosted, or Redis Cloud.
-                  You'll create workspaces manually after connecting.
-                </OnboardingCardDesc>
-                <SecondaryButton size="large" onClick={() => setShowAddDb(true)}>
-                  Add database manually
-                </SecondaryButton>
-              </OnboardingCard>
-            </>
-          )}
         </OnboardingPaths>
 
         {/* ── Steps ── */}
@@ -297,12 +286,6 @@ afs workspace use my-project && afs up
           <CrossLinkArrow>&rarr;</CrossLinkArrow>
         </CrossLinkCard>
       </EmptyStateLayout>
-
-      <AddDatabaseDialog
-        isOpen={showAddDb}
-        onClose={() => setShowAddDb(false)}
-        saveDatabase={saveDatabase}
-      />
     </PageStack>
   );
 }
@@ -528,25 +511,3 @@ const SecondaryButton = styled(Button)`
   }
 `;
 
-const OnboardingDivider = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-  max-width: 480px;
-  padding: 16px 0;
-`;
-
-const OnboardingDividerLine = styled.div`
-  flex: 1;
-  height: 1px;
-  background: var(--afs-line);
-`;
-
-const OnboardingDividerLabel = styled.span`
-  color: var(--afs-muted);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-`;

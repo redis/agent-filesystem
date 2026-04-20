@@ -2,66 +2,23 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/mcpproto"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
 const afsMCPProtocolVersion = "2024-11-05"
-
-type mcpRequest struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id,omitempty"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type mcpResponse struct {
-	JSONRPC string        `json:"jsonrpc"`
-	ID      any           `json:"id,omitempty"`
-	Result  any           `json:"result,omitempty"`
-	Error   *mcpErrorBody `json:"error,omitempty"`
-}
-
-type mcpErrorBody struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
-type mcpTool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
-}
-
-type mcpTextContent struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
-type mcpToolResult struct {
-	Content           []mcpTextContent `json:"content"`
-	StructuredContent any              `json:"structuredContent,omitempty"`
-	IsError           bool             `json:"isError,omitempty"`
-}
-
-type mcpToolCallParams struct {
-	Name      string         `json:"name"`
-	Arguments map[string]any `json:"arguments"`
-}
 
 type afsMCPServer struct {
 	cfg     config
@@ -111,7 +68,7 @@ func cmdMCP(args []string) error {
 		store:   store,
 		service: controlPlaneServiceFromStore(cfg, store),
 	}
-	return server.serve(context.Background(), os.Stdin, os.Stdout)
+	return server.protocolServer().Serve(context.Background(), os.Stdin, os.Stdout)
 }
 
 func mcpUsageText(bin string) string {
@@ -133,165 +90,22 @@ This command is meant to be launched by an MCP client, for example:
 `, bin, bin)
 }
 
+func (s *afsMCPServer) protocolServer() *mcpproto.Server {
+	return &mcpproto.Server{
+		ProtocolVersion: afsMCPProtocolVersion,
+		Name:            "afs",
+		Version:         "0.1.0",
+		Instructions:    "Workspace-first Agent Filesystem MCP server. Use workspace/file/checkpoint tools instead of raw Redis FS commands.",
+		Provider:        s,
+	}
+}
+
 func (s *afsMCPServer) serve(ctx context.Context, r io.Reader, w io.Writer) error {
-	reader := bufio.NewReader(r)
-	writer := bufio.NewWriter(w)
-
-	for {
-		payload, err := readMCPFrame(reader)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
-		}
-		if len(bytes.TrimSpace(payload)) == 0 {
-			continue
-		}
-
-		var req mcpRequest
-		if err := json.Unmarshal(payload, &req); err != nil {
-			if err := writeMCPFrame(writer, mcpResponse{
-				JSONRPC: "2.0",
-				Error:   &mcpErrorBody{Code: -32700, Message: "parse error"},
-			}); err != nil {
-				return err
-			}
-			if err := writer.Flush(); err != nil {
-				return err
-			}
-			continue
-		}
-
-		resp := s.handleRequest(ctx, req)
-		if resp == nil {
-			continue
-		}
-		if err := writeMCPFrame(writer, *resp); err != nil {
-			return err
-		}
-		if err := writer.Flush(); err != nil {
-			return err
-		}
-	}
+	return s.protocolServer().Serve(ctx, r, w)
 }
 
-func readMCPFrame(r *bufio.Reader) ([]byte, error) {
-	contentLength := -1
-
-	for {
-		line, err := r.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) && line == "" {
-				return nil, io.EOF
-			}
-			return nil, err
-		}
-
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			if contentLength >= 0 {
-				break
-			}
-			continue
-		}
-
-		parts := strings.SplitN(trimmed, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		if !strings.EqualFold(strings.TrimSpace(parts[0]), "Content-Length") {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimSpace(parts[1]))
-		if err != nil || n < 0 {
-			return nil, fmt.Errorf("invalid Content-Length header %q", trimmed)
-		}
-		contentLength = n
-	}
-
-	if contentLength < 0 {
-		return nil, errors.New("missing Content-Length header")
-	}
-
-	payload := make([]byte, contentLength)
-	if _, err := io.ReadFull(r, payload); err != nil {
-		return nil, err
-	}
-	return payload, nil
-}
-
-func writeMCPFrame(w io.Writer, resp mcpResponse) error {
-	body, err := json.Marshal(resp)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n", len(body)); err != nil {
-		return err
-	}
-	_, err = w.Write(body)
-	return err
-}
-
-func (s *afsMCPServer) handleRequest(ctx context.Context, req mcpRequest) *mcpResponse {
-	if req.Method == "" {
-		return &mcpResponse{
-			JSONRPC: "2.0",
-			ID:      req.ID,
-			Error:   &mcpErrorBody{Code: -32600, Message: "invalid request"},
-		}
-	}
-
-	if strings.HasPrefix(req.Method, "notifications/") && req.ID == nil {
-		return nil
-	}
-
-	resp := &mcpResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-	}
-
-	switch req.Method {
-	case "initialize":
-		resp.Result = map[string]any{
-			"protocolVersion": afsMCPProtocolVersion,
-			"capabilities": map[string]any{
-				"tools": map[string]any{},
-			},
-			"serverInfo": map[string]string{
-				"name":    "afs",
-				"version": "0.1.0",
-			},
-			"instructions": "Workspace-first Agent Filesystem MCP server. Use workspace/file/checkpoint tools instead of raw Redis FS commands.",
-		}
-	case "ping":
-		resp.Result = map[string]any{}
-	case "tools/list":
-		resp.Result = map[string]any{
-			"tools": s.tools(),
-		}
-	case "tools/call":
-		var params mcpToolCallParams
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &params); err != nil {
-				resp.Error = &mcpErrorBody{Code: -32602, Message: "invalid tools/call params"}
-				return resp
-			}
-		}
-		if params.Arguments == nil {
-			params.Arguments = map[string]any{}
-		}
-		result := s.callTool(ctx, params.Name, params.Arguments)
-		resp.Result = result
-	default:
-		resp.Error = &mcpErrorBody{Code: -32601, Message: "method not found"}
-	}
-
-	return resp
-}
-
-func (s *afsMCPServer) tools() []mcpTool {
-	return []mcpTool{
+func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
+	return []mcpproto.Tool{
 		{
 			Name:        "afs_status",
 			Description: "Show the current AFS configuration and selected workspace",
@@ -496,7 +310,7 @@ func (s *afsMCPServer) tools() []mcpTool {
 	}
 }
 
-func (s *afsMCPServer) callTool(ctx context.Context, name string, args map[string]any) mcpToolResult {
+func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
 	var (
 		value any
 		err   error
@@ -542,37 +356,23 @@ func (s *afsMCPServer) callTool(ctx context.Context, name string, args map[strin
 	}
 
 	if err != nil {
-		return mcpToolResult{
-			Content: []mcpTextContent{{
+		return mcpproto.ToolResult{
+			Content: []mcpproto.TextContent{{
 				Type: "text",
 				Text: err.Error(),
 			}},
 			IsError: true,
 		}
 	}
-	return mcpStructuredResult(value)
+	return mcpproto.StructuredResult(value)
 }
 
-func mcpStructuredResult(value any) mcpToolResult {
-	text := ""
-	switch v := value.(type) {
-	case string:
-		text = v
-	default:
-		body, err := json.MarshalIndent(v, "", "  ")
-		if err != nil {
-			text = fmt.Sprintf("%v", value)
-		} else {
-			text = string(body)
-		}
-	}
-	return mcpToolResult{
-		Content: []mcpTextContent{{
-			Type: "text",
-			Text: text,
-		}},
-		StructuredContent: value,
-	}
+func (s *afsMCPServer) callTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
+	return s.CallTool(ctx, name, args)
+}
+
+func readMCPFrame(r *bufio.Reader) ([]byte, error) {
+	return mcpproto.ReadFrame(r)
 }
 
 func (s *afsMCPServer) toolAFSStatus() (any, error) {

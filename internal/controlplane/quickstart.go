@@ -15,7 +15,8 @@ const (
 	quickstartCheckpoint    = "initial"
 	quickstartSource        = "quickstart"
 	quickstartLocalDBName   = "Local Development"
-	quickstartCloudDBName   = "AFS Cloud"
+	quickstartCloudDBName   = "Getting Started"
+	quickstartCloudDBID     = "afs-cloud"
 )
 
 // QuickstartRequest contains optional overrides for the quickstart flow.
@@ -37,7 +38,7 @@ type QuickstartResponse struct {
 // Quickstart creates a database connection and a workspace pre-populated with
 // sample content in a single call. It is designed for first-time onboarding.
 func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartRequest) (QuickstartResponse, error) {
-	if err := m.ensureBootstrapDatabase(); err != nil {
+	if err := m.ensureBootstrapDatabase(ctx); err != nil {
 		return QuickstartResponse{}, err
 	}
 
@@ -57,6 +58,9 @@ func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartReques
 		if err == nil && len(dbList.Items) > 0 {
 			dbRecord := dbList.Items[0]
 			if dbRecord.ConnectionError == "" {
+				if dbRecord.Purpose == databasePurposeOnboarding {
+					return QuickstartResponse{}, fmt.Errorf("quickstart is not available on the shared Getting Started database; create your own database first")
+				}
 				return m.quickstartWithDatabase(ctx, dbRecord.ID)
 			}
 		}
@@ -145,6 +149,10 @@ func redisConfigFromAFSEnv() (RedisConfig, bool) {
 }
 
 func bootstrapDatabaseProfileFromEnv() (databaseProfile, bool) {
+	return bootstrapDatabaseProfileFromContext(context.Background())
+}
+
+func bootstrapDatabaseProfileFromContext(_ context.Context) (databaseProfile, bool) {
 	if cfg, ok := redisConfigFromAFSEnv(); ok {
 		return databaseProfile{
 			ID:             "local-development",
@@ -162,11 +170,12 @@ func bootstrapDatabaseProfileFromEnv() (databaseProfile, bool) {
 
 	if cfg, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
 		return databaseProfile{
-			ID:             "afs-cloud",
+			ID:             quickstartCloudDBID,
 			Name:           quickstartCloudDBName,
 			Description:    "Managed Redis Cloud data plane for hosted Agent Filesystem.",
-			OwnerLabel:     "AFS Cloud",
+			OwnerLabel:     "Getting Started",
 			ManagementType: databaseManagementSystemManaged,
+			Purpose:        databasePurposeOnboarding,
 			RedisAddr:      cfg.RedisAddr,
 			RedisUsername:  cfg.RedisUsername,
 			RedisPassword:  cfg.RedisPassword,

@@ -242,6 +242,118 @@ func TestHTTPOnboardingTokenExchange(t *testing.T) {
 	}
 }
 
+func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+		TrustedNameHeader: "X-Forwarded-Name",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	createReq, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/workspaces/repo/mcp-tokens",
+		strings.NewReader(`{"name":"Claude Desktop","readonly":false}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(create token) returned error: %v", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-Forwarded-User", "alice@example.com")
+	createReq.Header.Set("X-Forwarded-Name", "Alice")
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("POST mcp token returned error: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("POST mcp token status = %d, want %d, body=%s", createResp.StatusCode, http.StatusCreated, body)
+	}
+
+	var token mcpAccessTokenResponse
+	if err := json.NewDecoder(createResp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(mcp token) returned error: %v", err)
+	}
+	if token.Token == "" {
+		t.Fatal("expected created mcp token secret")
+	}
+
+	callBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"file_read","arguments":{"path":"/README.md"}}}`
+	callReq, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(callBody))
+	if err != nil {
+		t.Fatalf("NewRequest(mcp call) returned error: %v", err)
+	}
+	callReq.Header.Set("Content-Type", "application/json")
+	callReq.Header.Set("Authorization", "Bearer "+token.Token)
+	callReq.Header.Set("X-AFS-Hostname", "devbox")
+	callReq.Header.Set("X-AFS-Client-Kind", "mcp")
+	callResp, err := http.DefaultClient.Do(callReq)
+	if err != nil {
+		t.Fatalf("POST /mcp returned error: %v", err)
+	}
+	defer callResp.Body.Close()
+	if callResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(callResp.Body)
+		t.Fatalf("POST /mcp status = %d, want %d, body=%s", callResp.StatusCode, http.StatusOK, body)
+	}
+
+	var mcpPayload struct {
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(callResp.Body).Decode(&mcpPayload); err != nil {
+		t.Fatalf("Decode(mcp response) returned error: %v", err)
+	}
+	if got := mcpPayload.Result.StructuredContent["content"]; got != "# demo\n" {
+		t.Fatalf("mcp file_read content = %#v, want %#v", got, "# demo\n")
+	}
+
+	agentsReq, err := http.NewRequest(http.MethodGet, server.URL+"/v1/agents", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(agents) returned error: %v", err)
+	}
+	agentsReq.Header.Set("X-Forwarded-User", "alice@example.com")
+	agentsResp, err := http.DefaultClient.Do(agentsReq)
+	if err != nil {
+		t.Fatalf("GET /v1/agents returned error: %v", err)
+	}
+	defer agentsResp.Body.Close()
+	if agentsResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(agentsResp.Body)
+		t.Fatalf("GET /v1/agents status = %d, want %d, body=%s", agentsResp.StatusCode, http.StatusOK, body)
+	}
+
+	var sessions workspaceSessionListResponse
+	if err := json.NewDecoder(agentsResp.Body).Decode(&sessions); err != nil {
+		t.Fatalf("Decode(agents) returned error: %v", err)
+	}
+	if len(sessions.Items) != 1 {
+		t.Fatalf("len(agents.items) = %d, want 1", len(sessions.Items))
+	}
+	if sessions.Items[0].ClientKind != "mcp" {
+		t.Fatalf("agent client_kind = %q, want %q", sessions.Items[0].ClientKind, "mcp")
+	}
+	if sessions.Items[0].WorkspaceName != "repo" {
+		t.Fatalf("agent workspace_name = %q, want %q", sessions.Items[0].WorkspaceName, "repo")
+	}
+	if sessions.Items[0].Hostname != "devbox" {
+		t.Fatalf("agent hostname = %q, want %q", sessions.Items[0].Hostname, "devbox")
+	}
+}
+
 func TestHTTPResolvedOnboardingTokenExchange(t *testing.T) {
 	t.Helper()
 

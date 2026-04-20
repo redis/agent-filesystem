@@ -116,6 +116,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			owner_subject TEXT NOT NULL DEFAULT '',
 			owner_label TEXT NOT NULL DEFAULT '',
 			management_type TEXT NOT NULL DEFAULT '',
+			purpose TEXT NOT NULL DEFAULT '',
 			redis_addr TEXT NOT NULL,
 			redis_username TEXT NOT NULL DEFAULT '',
 			redis_password TEXT NOT NULL DEFAULT '',
@@ -135,6 +136,23 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			consumed_at TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_onboarding_tokens_expires_at ON onboarding_tokens(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS mcp_access_tokens (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			owner_subject TEXT NOT NULL DEFAULT '',
+			owner_label TEXT NOT NULL DEFAULT '',
+			database_id TEXT NOT NULL,
+			workspace_id TEXT NOT NULL,
+			workspace_name TEXT NOT NULL DEFAULT '',
+			readonly INTEGER NOT NULL DEFAULT 0,
+			secret_hash TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			last_used_at TEXT NOT NULL DEFAULT '',
+			expires_at TEXT NOT NULL DEFAULT '',
+			revoked_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_workspace ON mcp_access_tokens(database_id, workspace_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_owner ON mcp_access_tokens(owner_subject, created_at DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := c.execContext(ctx, statement); err != nil {
@@ -147,6 +165,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS management_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE database_registry ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS database_management_type TEXT NOT NULL DEFAULT ''`,
@@ -163,6 +182,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE database_registry ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE database_registry ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE database_registry ADD COLUMN management_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE database_registry ADD COLUMN purpose TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN database_management_type TEXT NOT NULL DEFAULT ''`,

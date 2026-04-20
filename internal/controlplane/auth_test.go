@@ -337,3 +337,166 @@ func TestTrustedHeaderScopesOwnedDatabasesAndWorkspaces(t *testing.T) {
 		t.Fatalf("GET bob workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusNotFound, body)
 	}
 }
+
+func TestTrustedHeaderDeveloperResetDeletesOwnedDatabases(t *testing.T) {
+	manager, databaseID := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	baseProfile := manager.profiles[databaseID]
+	aliceCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject:  "alice@example.com",
+		Name:     "Alice",
+		Provider: string(AuthModeTrustedHeader),
+	})
+	aliceDatabase, err := manager.UpsertDatabase(aliceCtx, "", upsertDatabaseRequest{
+		Name:      "Alice DB",
+		RedisAddr: baseProfile.RedisAddr,
+		RedisDB:   1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDatabase(alice) returned error: %v", err)
+	}
+	if _, err := manager.CreateWorkspace(aliceCtx, aliceDatabase.ID, createWorkspaceRequest{
+		Name:   "alice-repo",
+		Source: sourceRef{Kind: SourceBlank},
+	}); err != nil {
+		t.Fatalf("CreateWorkspace(alice) returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/account/developer/reset", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(reset) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /v1/account/developer/reset returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/account/developer/reset status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var payload accountResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode(reset payload) returned error: %v", err)
+	}
+	if payload.DeletedDatabaseCount != 1 {
+		t.Fatalf("DeletedDatabaseCount = %d, want 1", payload.DeletedDatabaseCount)
+	}
+	if payload.DeletedWorkspaceCount != 1 {
+		t.Fatalf("DeletedWorkspaceCount = %d, want 1", payload.DeletedWorkspaceCount)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v1/databases", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(databases after reset) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /v1/databases after reset returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/databases after reset status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var databases databaseListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&databases); err != nil {
+		t.Fatalf("Decode(databases after reset) returned error: %v", err)
+	}
+	for _, item := range databases.Items {
+		if item.ID == aliceDatabase.ID {
+			t.Fatalf("alice-owned database still visible after reset: %#v", databases.Items)
+		}
+	}
+}
+
+func TestTrustedHeaderDeveloperResetSkipsSystemManagedOnboardingDatabase(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	manager.mu.Lock()
+	profile := manager.profiles[quickstartCloudDBID]
+	profile.OwnerSubject = "alice@example.com"
+	manager.profiles[quickstartCloudDBID] = profile
+	manager.mu.Unlock()
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/account/developer/reset", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(reset) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "alice@example.com")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /v1/account/developer/reset returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST /v1/account/developer/reset status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var payload accountResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("Decode(reset payload) returned error: %v", err)
+	}
+	if payload.DeletedDatabaseCount != 0 {
+		t.Fatalf("DeletedDatabaseCount = %d, want 0 for system-managed onboarding db", payload.DeletedDatabaseCount)
+	}
+}
+
+func TestDeleteCurrentIdentityUsesClerkDeleter(t *testing.T) {
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:                AuthModeClerk,
+		ClerkJWTKey:         "-----BEGIN PUBLIC KEY-----\nMFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBAKq8QyFfJOLLmObAun1vDLteA94ppIqh\napMI2vlA38nSxrdbidKdvUSsfx8bVsgcuyo6edSxnl2xe50Tzw9uQWkCAwEAAQ==\n-----END PUBLIC KEY-----",
+		ClerkPublishableKey: "pk_test_123",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	deletedSubject := ""
+	auth.clerkDeleteUser = func(_ context.Context, subject string) error {
+		deletedSubject = subject
+		return nil
+	}
+
+	ctx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject:  "user_123",
+		Provider: string(AuthModeClerk),
+	})
+	if err := auth.DeleteCurrentIdentity(ctx); err != nil {
+		t.Fatalf("DeleteCurrentIdentity() returned error: %v", err)
+	}
+	if deletedSubject != "user_123" {
+		t.Fatalf("deletedSubject = %q, want user_123", deletedSubject)
+	}
+}

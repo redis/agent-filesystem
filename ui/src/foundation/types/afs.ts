@@ -21,6 +21,18 @@ export type AFSAuthConfig = {
   user?: AFSAuthUser;
 };
 
+export type AFSAccount = {
+  subject?: string;
+  provider: string;
+  canDeleteIdentity: boolean;
+  canResetData: boolean;
+  ownedDatabaseCount: number;
+  ownedWorkspaceCount: number;
+  deletedDatabaseCount?: number;
+  deletedWorkspaceCount?: number;
+  identityDeleted?: boolean;
+};
+
 export type AFSFile = {
   language: string;
   modifiedAt: string;
@@ -196,8 +208,10 @@ export type AFSDatabase = {
   ownerSubject?: string;
   ownerLabel?: string;
   managementType?: string;
+  purpose?: string;
   canEdit: boolean;
   canDelete: boolean;
+  canCreateWorkspaces: boolean;
   redisAddr: string;
   redisUsername: string;
   redisPassword: string;

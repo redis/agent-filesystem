@@ -168,6 +168,16 @@ export function AppSidebar() {
               </S.ProfileButton>
               {isProfileMenuOpen ? (
                 <S.ProfileDropdown $isExpanded={isExpanded} role="menu">
+                  <S.ProfileMenuItem
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsProfileMenuOpen(false);
+                      void navigate({ to: "/settings" });
+                    }}
+                  >
+                    Settings
+                  </S.ProfileMenuItem>
                   {auth.supportsAccountAuth ? (
                     <SignOutButton redirectUrl="/login">
                       <S.ProfileMenuItem

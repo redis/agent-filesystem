@@ -18,6 +18,7 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 			owner_subject,
 			owner_label,
 			management_type,
+			purpose,
 			redis_addr,
 			redis_username,
 			redis_password,
@@ -44,6 +45,7 @@ func (c *workspaceCatalog) ListDatabaseProfiles(ctx context.Context) ([]database
 			&item.OwnerSubject,
 			&item.OwnerLabel,
 			&item.ManagementType,
+			&item.Purpose,
 			&item.RedisAddr,
 			&item.RedisUsername,
 			&item.RedisPassword,
@@ -99,6 +101,7 @@ func (c *workspaceCatalog) ReplaceDatabaseProfiles(ctx context.Context, profiles
 			strings.TrimSpace(profile.OwnerSubject),
 			strings.TrimSpace(profile.OwnerLabel),
 			strings.TrimSpace(profile.ManagementType),
+			strings.TrimSpace(profile.Purpose),
 			strings.TrimSpace(profile.RedisAddr),
 			strings.TrimSpace(profile.RedisUsername),
 			profile.RedisPassword,
@@ -121,6 +124,7 @@ const databaseRegistryUpsertSQL = `INSERT INTO database_registry (
 	owner_subject,
 	owner_label,
 	management_type,
+	purpose,
 	redis_addr,
 	redis_username,
 	redis_password,
@@ -128,13 +132,14 @@ const databaseRegistryUpsertSQL = `INSERT INTO database_registry (
 	redis_tls,
 	is_default,
 	order_index
- ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
 	name = excluded.name,
 	description = excluded.description,
 	owner_subject = excluded.owner_subject,
 	owner_label = excluded.owner_label,
 	management_type = excluded.management_type,
+	purpose = excluded.purpose,
 	redis_addr = excluded.redis_addr,
 	redis_username = excluded.redis_username,
 	redis_password = excluded.redis_password,

@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import { afsApi } from "../foundation/api/afs";
+import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
-import { useQuickstartMutation, workspaceSummariesQueryOptions, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import { workspaceSummariesQueryOptions, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
 
 const connectCLISearchSchema = z.object({
   return_to: z.string().url(),
@@ -29,13 +30,13 @@ export const Route = createFileRoute("/connect-cli")({
 function ConnectCLIPage() {
   const search = Route.useSearch();
   const workspacesQuery = useWorkspaceSummaries(null);
-  const quickstart = useQuickstartMutation();
+  const { databases } = useDatabaseScope();
   const [error, setError] = useState<string | null>(null);
   const [connectingWorkspaceId, setConnectingWorkspaceId] = useState<string | null>(null);
   const autoConnectAttempted = useRef(false);
-  const autoQuickstartAttempted = useRef(false);
 
   const workspaces = workspacesQuery.data ?? [];
+  const hasCreatableDatabase = databases.some((database) => database.canCreateWorkspaces);
   const returnToError = validateReturnTo(search.return_to);
   const autoWorkspace = useMemo(() => {
     const workspaceHint = search.workspace?.trim();
@@ -85,22 +86,6 @@ function ConnectCLIPage() {
     void connectWorkspace(autoWorkspace.id, autoWorkspace.databaseId);
   }, [autoWorkspace, returnToError, workspacesQuery.isLoading]);
 
-  useEffect(() => {
-    if (autoQuickstartAttempted.current || workspacesQuery.isLoading || workspaces.length > 0 || returnToError != null) {
-      return;
-    }
-    autoQuickstartAttempted.current = true;
-    void (async () => {
-      setError(null);
-      try {
-        const created = await quickstart.mutateAsync({});
-        await connectWorkspace(created.workspace.id, created.workspace.databaseId);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Could not set up getting-started.");
-      }
-    })();
-  }, [quickstart, returnToError, workspaces, workspacesQuery.isLoading]);
-
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
@@ -132,7 +117,7 @@ function ConnectCLIPage() {
         <Title>Connect your CLI</Title>
         <Description>
           {autoWorkspace == null
-            ? "Pick a workspace for this terminal. If this is your first run, AFS Cloud will connect you to getting-started automatically."
+            ? "Pick a workspace for this terminal. If you have not created one yet, finish onboarding in AFS Cloud first."
             : autoWorkspace.name === "getting-started"
               ? "Connecting this CLI to getting-started so you can start with sample files right away."
               : `Preparing browser login for ${autoWorkspace.name}.`}
@@ -146,13 +131,19 @@ function ConnectCLIPage() {
         ) : null}
 
         {workspaces.length === 0 ? (
-          <LoadingPanel>
-            <Loader data-testid="loader--spinner" />
-            <p>{quickstart.isPending ? "Creating getting-started…" : "Looking for getting-started…"}</p>
-            <LoadingHint>
-              Your first AFS Cloud session creates the <code>getting-started</code> workspace automatically so you can start immediately.
-            </LoadingHint>
-          </LoadingPanel>
+          <CreateAnotherSection>
+            <SectionHeading>No workspaces yet</SectionHeading>
+            <SectionCopy>
+              {hasCreatableDatabase
+                ? "Create your first workspace in AFS Cloud, then come back here to connect this CLI."
+                : "Your account only has access to the shared getting-started database right now. Create your own cloud database or add an existing Redis database before creating a workspace."}
+            </SectionCopy>
+            <Link to={hasCreatableDatabase ? "/workspaces" : "/databases"}>
+              <Button size="large" variant="secondary-fill">
+                {hasCreatableDatabase ? "Open workspace manager" : "Open database manager"}
+              </Button>
+            </Link>
+          </CreateAnotherSection>
         ) : autoWorkspace != null && connectingWorkspaceId === autoWorkspace.id ? (
           <LoadingPanel>
             <Loader data-testid="loader--spinner" />
@@ -347,14 +338,6 @@ const SuccessCode = styled.code`
 const SuccessHint = styled.p`
   margin: 0;
   color: #5f533d;
-  line-height: 1.6;
-`;
-
-const LoadingHint = styled.p`
-  max-width: 560px;
-  margin: 0;
-  text-align: center;
-  color: #72654a;
   line-height: 1.6;
 `;
 

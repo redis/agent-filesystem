@@ -24,8 +24,10 @@ export type AFSDatabaseScopeRecord = {
   ownerSubject?: string;
   ownerLabel?: string;
   managementType?: string;
+  purpose?: string;
   canEdit: boolean;
   canDelete: boolean;
+  canCreateWorkspaces: boolean;
   endpointLabel: string;
   dbIndex: string;
   username: string;
@@ -109,8 +111,10 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     ownerSubject: input.ownerSubject,
     ownerLabel: input.ownerLabel,
     managementType: input.managementType,
+    purpose: input.purpose,
     canEdit: input.canEdit,
     canDelete: input.canDelete,
+    canCreateWorkspaces: input.canCreateWorkspaces,
     endpointLabel: input.redisAddr,
     dbIndex: String(input.redisDB),
     username: input.redisUsername,
@@ -136,6 +140,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const queryClient = useQueryClient();
   const auth = useAuthSession();
   const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
+  const usesHostedAccountAuth = clientMode === "http" && auth.supportsAccountAuth;
   const databasesQuery = useDatabases(queriesEnabled);
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const setDefaultDatabaseMutation = useSetDefaultDatabaseMutation();
@@ -159,6 +164,14 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   );
 
   useEffect(() => {
+    if (usesHostedAccountAuth) {
+      localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
+      if (!legacyMigrated) {
+        setLegacyMigrated(true);
+      }
+      return;
+    }
+
     if (clientMode !== "http" || legacyMigrated || databasesQuery.isLoading || !queriesEnabled) {
       return;
     }
@@ -205,7 +218,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     return () => {
       cancelled = true;
     };
-  }, [clientMode, databases, databasesQuery, legacyMigrated, queriesEnabled]);
+  }, [clientMode, databases, databasesQuery, legacyMigrated, queriesEnabled, usesHostedAccountAuth]);
 
   const value = useMemo<DatabaseScopeContextValue>(
     () => ({
@@ -263,10 +276,16 @@ export function useDatabaseScope() {
 
 export function useScopedWorkspaceSummaries() {
   const query = useWorkspaceSummaries(null);
+  const { databases } = useDatabaseScope();
+  const hiddenDatabaseIDs = new Set(
+    databases
+      .filter((database) => !database.canCreateWorkspaces)
+      .map((database) => database.id),
+  );
 
   return {
     ...query,
-    data: query.data ?? [],
+    data: (query.data ?? []).filter((workspace) => !hiddenDatabaseIDs.has(workspace.databaseId)),
   };
 }
 
@@ -281,9 +300,20 @@ export function useScopedActivity(limit = 50) {
 
 export function useScopedAgents() {
   const query = useAgents(null);
+  const { databases } = useDatabaseScope();
+  const hiddenDatabaseIDs = new Set(
+    databases
+      .filter((database) => !database.canCreateWorkspaces)
+      .map((database) => database.id),
+  );
 
   return {
     ...query,
-    data: query.data ?? [],
+    data: (query.data ?? []).filter((agent) => {
+      if (!agent.databaseId) {
+        return true;
+      }
+      return !hiddenDatabaseIDs.has(agent.databaseId);
+    }),
   };
 }

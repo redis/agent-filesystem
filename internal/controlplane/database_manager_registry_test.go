@@ -97,14 +97,20 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	if record.ManagementType != databaseManagementSystemManaged {
 		t.Fatalf("record.ManagementType = %q, want %q", record.ManagementType, databaseManagementSystemManaged)
 	}
+	if record.Purpose != databasePurposeOnboarding {
+		t.Fatalf("record.Purpose = %q, want %q", record.Purpose, databasePurposeOnboarding)
+	}
 	if record.CanEdit {
 		t.Fatal("record.CanEdit = true, want false")
 	}
 	if record.CanDelete {
 		t.Fatal("record.CanDelete = true, want false")
 	}
-	if record.OwnerLabel != "AFS Cloud" {
-		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "AFS Cloud")
+	if record.CanCreateWorkspaces {
+		t.Fatal("record.CanCreateWorkspaces = true, want false")
+	}
+	if record.OwnerLabel != "Getting Started" {
+		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "Getting Started")
 	}
 
 	profiles, err := manager.catalog.ListDatabaseProfiles(context.Background())
@@ -119,6 +125,9 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	}
 	if profiles[0].ManagementType != databaseManagementSystemManaged {
 		t.Fatalf("profiles[0].ManagementType = %q, want %q", profiles[0].ManagementType, databaseManagementSystemManaged)
+	}
+	if profiles[0].Purpose != databasePurposeOnboarding {
+		t.Fatalf("profiles[0].Purpose = %q, want %q", profiles[0].Purpose, databasePurposeOnboarding)
 	}
 }
 
@@ -156,5 +165,234 @@ func TestManagedDatabaseCannotBeEditedOrDeleted(t *testing.T) {
 	err = manager.DeleteDatabase("afs-cloud")
 	if err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
 		t.Fatalf("DeleteDatabase(managed) error = %v, want managed delete rejection", err)
+	}
+
+	_, err = manager.CreateWorkspace(context.Background(), "afs-cloud", createWorkspaceRequest{
+		Name:   "blocked",
+		Source: sourceRef{Kind: SourceBlank},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved for onboarding") {
+		t.Fatalf("CreateWorkspace(onboarding) error = %v, want onboarding rejection", err)
+	}
+}
+
+func TestListDatabasesDedupesLegacyOnboardingProfiles(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/7")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	manager.mu.Lock()
+	manager.profiles["afs-cloud-legacy"] = databaseProfile{
+		ID:             "afs-cloud-legacy",
+		Name:           quickstartCloudDBName,
+		Description:    "Legacy onboarding database record.",
+		OwnerSubject:   "rowan@example.com",
+		ManagementType: databaseManagementSystemManaged,
+		Purpose:        databasePurposeOnboarding,
+		RedisAddr:      mr.Addr(),
+		RedisDB:        7,
+	}
+	manager.order = append(manager.order, "afs-cloud-legacy")
+	manager.mu.Unlock()
+
+	response, err := manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+	if len(response.Items) != 1 {
+		t.Fatalf("len(ListDatabases().Items) = %d, want 1 canonical onboarding database", len(response.Items))
+	}
+	if response.Items[0].ID != quickstartCloudDBID {
+		t.Fatalf("record.ID = %q, want %q", response.Items[0].ID, quickstartCloudDBID)
+	}
+
+	profiles, err := manager.catalog.ListDatabaseProfiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabaseProfiles() returned error: %v", err)
+	}
+	if len(profiles) != 1 {
+		t.Fatalf("len(ListDatabaseProfiles()) = %d, want 1 after dedupe", len(profiles))
+	}
+	if profiles[0].ID != quickstartCloudDBID {
+		t.Fatalf("profiles[0].ID = %q, want %q", profiles[0].ID, quickstartCloudDBID)
+	}
+}
+
+func TestListDatabasesDedupesLegacyUserManagedBootstrapProfile(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/7")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	manager.mu.Lock()
+	manager.profiles["afs-cloud-duplicate"] = databaseProfile{
+		ID:             "afs-cloud-duplicate",
+		Name:           quickstartCloudDBName,
+		Description:    "Legacy user-managed duplicate.",
+		OwnerSubject:   "user_123",
+		OwnerLabel:     "user_123",
+		ManagementType: databaseManagementUserManaged,
+		Purpose:        databasePurposeGeneral,
+		RedisAddr:      mr.Addr(),
+		RedisDB:        7,
+		RedisTLS:       false,
+		IsDefault:      true,
+	}
+	manager.order = append(manager.order, "afs-cloud-duplicate")
+	manager.mu.Unlock()
+
+	response, err := manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+	if len(response.Items) != 1 {
+		t.Fatalf("len(ListDatabases().Items) = %d, want 1 canonical onboarding database", len(response.Items))
+	}
+	if response.Items[0].ID != quickstartCloudDBID {
+		t.Fatalf("record.ID = %q, want %q", response.Items[0].ID, quickstartCloudDBID)
+	}
+}
+
+func TestReservedAFSCloudNameCannotBeUsedForUserManagedDatabase(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/7")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	if _, err := manager.ListDatabases(context.Background()); err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+
+	_, err = manager.UpsertDatabase(context.Background(), "", upsertDatabaseRequest{
+		Name:      quickstartCloudDBName,
+		RedisAddr: mr.Addr(),
+		RedisDB:   8,
+	})
+	if err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("UpsertDatabase(reserved name) error = %v, want reserved-name rejection", err)
+	}
+}
+
+func TestOnboardingDatabaseHidesLegacyGettingStartedWorkspaces(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "redis://"+mr.Addr()+"/7")
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	databases, err := manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+	if len(databases.Items) != 1 {
+		t.Fatalf("len(ListDatabases().Items) = %d, want 1", len(databases.Items))
+	}
+
+	service, profile, err := manager.serviceFor(context.Background(), quickstartCloudDBID)
+	if err != nil {
+		t.Fatalf("serviceFor(afs-cloud) returned error: %v", err)
+	}
+	if _, err := createQuickstartWorkspace(context.Background(), service, profile); err != nil {
+		t.Fatalf("createQuickstartWorkspace() returned error: %v", err)
+	}
+
+	databases, err = manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() after seed returned error: %v", err)
+	}
+	if databases.Items[0].WorkspaceCount != 0 {
+		t.Fatalf("WorkspaceCount = %d, want 0 for onboarding database", databases.Items[0].WorkspaceCount)
+	}
+
+	workspaces, err := manager.ListAllWorkspaceSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllWorkspaceSummaries() returned error: %v", err)
+	}
+	if len(workspaces.Items) != 0 {
+		t.Fatalf("len(ListAllWorkspaceSummaries().Items) = %d, want 0 because onboarding workspaces stay hidden", len(workspaces.Items))
+	}
+}
+
+func TestListAgentSessionsSkipsOrphanedDatabaseRecords(t *testing.T) {
+	manager, _ := newTestManager(t)
+
+	manager.mu.Lock()
+	delete(manager.profiles, "secondary")
+	manager.order = withoutValue(manager.order, "secondary")
+	manager.mu.Unlock()
+
+	if err := manager.catalog.UpsertSession(context.Background(), sessionCatalogRecord{
+		SessionID:       "sess-orphaned",
+		WorkspaceID:     "ws-orphaned",
+		DatabaseID:      "secondary",
+		WorkspaceName:   "getting-started",
+		ClientKind:      "sync",
+		AFSVersion:      "vdev",
+		Hostname:        "example",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/getting-started",
+		State:           workspaceSessionStateActive,
+		StartedAt:       "2026-04-19T00:00:00Z",
+		LastSeenAt:      "2026-04-19T00:01:00Z",
+		LeaseExpiresAt:  "2026-04-19T00:02:00Z",
+		UpdatedAt:       "2026-04-19T00:01:00Z",
+	}); err != nil {
+		t.Fatalf("UpsertSession(orphaned) returned error: %v", err)
+	}
+
+	response, err := manager.ListAgentSessions(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListAgentSessions() returned error: %v", err)
+	}
+	if len(response.Items) != 0 {
+		t.Fatalf("len(ListAgentSessions().Items) = %d, want 0 when session database no longer exists", len(response.Items))
 	}
 }

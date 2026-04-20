@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,7 +57,29 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 	root := http.NewServeMux()
 	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
 
+	if opts.Auth != nil && manager != nil {
+		opts.Auth.AttachMCPTokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
+			record, err := manager.AuthenticateMCPAccessToken(ctx, rawToken)
+			if err != nil {
+				return nil, err
+			}
+			return &AuthIdentity{
+				Subject:           strings.TrimSpace(record.OwnerSubject),
+				Name:              strings.TrimSpace(record.OwnerLabel),
+				Provider:          "mcp-token",
+				TokenID:           strings.TrimSpace(record.ID),
+				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
+				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
+				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
+				Readonly:          record.Readonly,
+			}, nil
+		})
+	}
+
 	admin := authWrappedAdminMux(manager, opts.Auth)
+	if manager != nil {
+		root.Handle("/mcp", authWrappedMCPHandler(manager, opts.Auth))
+	}
 
 	// Serve embedded UI for non-API paths, falling back to index.html for SPA routes.
 	uiFS, err := fs.Sub(uistatic.Content, "dist")
@@ -153,6 +176,56 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			auth = NewNoAuthHandler()
 		}
 		writeJSON(w, http.StatusOK, auth.RuntimeConfig(r))
+	})
+
+	mux.HandleFunc("/v1/account", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.Account(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			if auth != nil {
+				response.CanDeleteIdentity = auth.CanDeleteIdentity()
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodDelete:
+			response, err := manager.ResetAccountData(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			if auth == nil || !auth.CanDeleteIdentity() {
+				writeError(w, fmt.Errorf("account deletion requires Clerk account authentication"))
+				return
+			}
+			if err := auth.DeleteCurrentIdentity(r.Context()); err != nil {
+				writeError(w, err)
+				return
+			}
+			response.CanDeleteIdentity = true
+			response.IdentityDeleted = true
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	})
+
+	mux.HandleFunc("/v1/account/developer/reset", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ResetAccountData(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		if auth != nil {
+			response.CanDeleteIdentity = auth.CanDeleteIdentity()
+		}
+		writeJSON(w, http.StatusOK, response)
 	})
 
 	mux.HandleFunc("/v1/databases", func(w http.ResponseWriter, r *http.Request) {
@@ -823,6 +896,48 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/mcp-tokens"):
+		workspace := strings.TrimSuffix(workspacePath, "/mcp-tokens")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListMCPAccessTokens(r.Context(), databaseID, workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": response})
+		case http.MethodPost:
+			var input createMCPAccessTokenRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.CreateMCPAccessToken(r.Context(), databaseID, workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	case strings.Contains(workspacePath, "/mcp-tokens/"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "mcp-tokens" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		if err := manager.RevokeMCPAccessToken(r.Context(), databaseID, parts[0], parts[2]); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(workspacePath, "/onboarding-token"):
 		workspace := strings.TrimSuffix(workspacePath, "/onboarding-token")
 		if r.Method != http.MethodPost {
@@ -1034,6 +1149,48 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/mcp-tokens"):
+		workspace := strings.TrimSuffix(workspacePath, "/mcp-tokens")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.ListResolvedMCPAccessTokens(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": response})
+		case http.MethodPost:
+			var input createMCPAccessTokenRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.CreateResolvedMCPAccessToken(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	case strings.Contains(workspacePath, "/mcp-tokens/"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "mcp-tokens" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodDelete {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		if err := manager.RevokeResolvedMCPAccessToken(r.Context(), parts[0], parts[2]); err != nil {
+			writeError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(workspacePath, "/onboarding-token"):
 		workspace := strings.TrimSuffix(workspacePath, "/onboarding-token")
 		if r.Method != http.MethodPost {

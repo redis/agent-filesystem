@@ -107,6 +107,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
     return { page: "Activity", subtitle: "Track workspace changes, agent actions, and system events." };
   }
 
+  if (pathname.startsWith("/settings")) {
+    return { page: "Settings", subtitle: "Manage your AFS Cloud account and developer reset options." };
+  }
+
   for (const item of navigationItems) {
     if (item.kind === "route" && isPathMatch(pathname, item.path)) {
       if (item.path === "/") {

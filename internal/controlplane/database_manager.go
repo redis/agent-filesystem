@@ -19,6 +19,7 @@ type databaseProfile struct {
 	OwnerSubject   string `json:"owner_subject,omitempty"`
 	OwnerLabel     string `json:"owner_label,omitempty"`
 	ManagementType string `json:"management_type"`
+	Purpose        string `json:"purpose,omitempty"`
 	RedisAddr      string `json:"redis_addr"`
 	RedisUsername  string `json:"redis_username,omitempty"`
 	RedisPassword  string `json:"redis_password,omitempty"`
@@ -34,8 +35,10 @@ type databaseRecord struct {
 	OwnerSubject              string `json:"owner_subject,omitempty"`
 	OwnerLabel                string `json:"owner_label,omitempty"`
 	ManagementType            string `json:"management_type"`
+	Purpose                   string `json:"purpose,omitempty"`
 	CanEdit                   bool   `json:"can_edit"`
 	CanDelete                 bool   `json:"can_delete"`
+	CanCreateWorkspaces       bool   `json:"can_create_workspaces"`
 	RedisAddr                 string `json:"redis_addr"`
 	RedisUsername             string `json:"redis_username,omitempty"`
 	RedisDB                   int    `json:"redis_db"`
@@ -83,6 +86,8 @@ type upsertDatabaseRequest struct {
 const (
 	databaseManagementSystemManaged = "system-managed"
 	databaseManagementUserManaged   = "user-managed"
+	databasePurposeGeneral          = "general"
+	databasePurposeOnboarding       = "onboarding"
 )
 
 type databaseRuntime struct {
@@ -285,7 +290,7 @@ func (m *DatabaseManager) Close() {
 }
 
 func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListResponse, error) {
-	if err := m.ensureBootstrapDatabase(); err != nil {
+	if err := m.ensureBootstrapDatabase(ctx); err != nil {
 		return databaseListResponse{}, err
 	}
 	subject := authSubjectFromContext(ctx)
@@ -308,25 +313,28 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 	}
 
 	items := make([]databaseRecord, 0, len(m.order))
+	defaultID := m.effectiveDefaultDatabaseIDLocked(subject)
 	for _, id := range m.order {
 		profile := m.profiles[id]
 		if !databaseProfileVisibleToSubject(profile, subject) {
 			continue
 		}
 		record := databaseRecord{
-			ID:             profile.ID,
-			Name:           profile.Name,
-			Description:    profile.Description,
-			OwnerSubject:   profile.OwnerSubject,
-			OwnerLabel:     profile.OwnerLabel,
-			ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
-			CanEdit:        databaseProfileCanEdit(profile),
-			CanDelete:      databaseProfileCanDelete(profile),
-			RedisAddr:      profile.RedisAddr,
-			RedisUsername:  profile.RedisUsername,
-			RedisDB:        profile.RedisDB,
-			RedisTLS:       profile.RedisTLS,
-			IsDefault:      profile.IsDefault,
+			ID:                  profile.ID,
+			Name:                profile.Name,
+			Description:         profile.Description,
+			OwnerSubject:        profile.OwnerSubject,
+			OwnerLabel:          profile.OwnerLabel,
+			ManagementType:      normalizedDatabaseManagementType(profile.ManagementType),
+			Purpose:             normalizedDatabasePurpose(profile.Purpose),
+			CanEdit:             databaseProfileCanEdit(profile),
+			CanDelete:           databaseProfileCanDelete(profile),
+			CanCreateWorkspaces: databaseProfileCanCreateWorkspaces(profile),
+			RedisAddr:           profile.RedisAddr,
+			RedisUsername:       profile.RedisUsername,
+			RedisDB:             profile.RedisDB,
+			RedisTLS:            profile.RedisTLS,
+			IsDefault:           id == defaultID,
 		}
 		if health, ok := healthByDatabase[id]; ok {
 			record.LastWorkspaceRefreshAt = health.LastWorkspaceRefreshAt
@@ -373,23 +381,35 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 	return databaseListResponse{Items: items}, nil
 }
 
-func (m *DatabaseManager) ensureBootstrapDatabase() error {
+func (m *DatabaseManager) ensureBootstrapDatabase(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.ensureBootstrapDatabaseLocked()
+	return m.ensureBootstrapDatabaseLocked(ctx)
 }
 
-func (m *DatabaseManager) ensureBootstrapDatabaseLocked() error {
-	if len(m.order) > 0 {
-		return nil
-	}
-
-	profile, ok := bootstrapDatabaseProfileFromEnv()
+func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) error {
+	profile, ok := bootstrapDatabaseProfileFromContext(ctx)
 	if !ok {
 		return nil
 	}
 	if err := validateDatabaseProfile(profile); err != nil {
 		return err
+	}
+
+	changed := false
+	if updated := m.normalizeBootstrapProfilesLocked(profile); updated {
+		changed = true
+	}
+	if existing, exists := m.profiles[profile.ID]; exists {
+		if existing != profile {
+			m.profiles[profile.ID] = profile
+			changed = true
+		}
+		if changed {
+			m.ensureDefaultDatabaseLocked()
+			return m.saveRegistryLocked()
+		}
+		return nil
 	}
 
 	m.profiles[profile.ID] = profile
@@ -402,6 +422,41 @@ func (m *DatabaseManager) ensureBootstrapDatabaseLocked() error {
 		return err
 	}
 	return nil
+}
+
+func (m *DatabaseManager) normalizeBootstrapProfilesLocked(canonical databaseProfile) bool {
+	changed := false
+	for _, id := range append([]string(nil), m.order...) {
+		if id == canonical.ID {
+			continue
+		}
+		profile, exists := m.profiles[id]
+		if !exists {
+			continue
+		}
+		if !shouldPruneLegacyBootstrapProfile(profile, canonical) {
+			continue
+		}
+		if runtime := m.runtimes[id]; runtime != nil {
+			runtime.closeFn()
+			delete(m.runtimes, id)
+		}
+		delete(m.profiles, id)
+		m.order = withoutValue(m.order, id)
+		changed = true
+	}
+	return changed
+}
+
+func shouldPruneLegacyBootstrapProfile(profile, canonical databaseProfile) bool {
+	if normalizedDatabaseManagementType(profile.ManagementType) == databaseManagementSystemManaged &&
+		normalizedDatabasePurpose(profile.Purpose) == databasePurposeOnboarding {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(profile.Name), strings.TrimSpace(canonical.Name)) {
+		return true
+	}
+	return false
 }
 
 func (m *DatabaseManager) CatalogHealth(ctx context.Context) (catalogHealthResponse, error) {
@@ -470,19 +525,21 @@ func (m *DatabaseManager) UpsertDatabase(ctx context.Context, id string, input u
 	}
 
 	record := databaseRecord{
-		ID:             profile.ID,
-		Name:           profile.Name,
-		Description:    profile.Description,
-		OwnerSubject:   profile.OwnerSubject,
-		OwnerLabel:     profile.OwnerLabel,
-		ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
-		CanEdit:        databaseProfileCanEdit(profile),
-		CanDelete:      databaseProfileCanDelete(profile),
-		RedisAddr:      profile.RedisAddr,
-		RedisUsername:  profile.RedisUsername,
-		RedisDB:        profile.RedisDB,
-		RedisTLS:       profile.RedisTLS,
-		IsDefault:      profile.IsDefault,
+		ID:                  profile.ID,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		OwnerSubject:        profile.OwnerSubject,
+		OwnerLabel:          profile.OwnerLabel,
+		ManagementType:      normalizedDatabaseManagementType(profile.ManagementType),
+		Purpose:             normalizedDatabasePurpose(profile.Purpose),
+		CanEdit:             databaseProfileCanEdit(profile),
+		CanDelete:           databaseProfileCanDelete(profile),
+		CanCreateWorkspaces: databaseProfileCanCreateWorkspaces(profile),
+		RedisAddr:           profile.RedisAddr,
+		RedisUsername:       profile.RedisUsername,
+		RedisDB:             profile.RedisDB,
+		RedisTLS:            profile.RedisTLS,
+		IsDefault:           profile.IsDefault,
 	}
 	items, _, err := m.liveWorkspaceSummariesLocked(ctx, profile.ID)
 	if err != nil {
@@ -555,15 +612,19 @@ func (m *DatabaseManager) SetDefaultDatabase(ctx context.Context, id string) (da
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	subject := authSubjectFromContext(ctx)
 	profile, exists := m.profiles[strings.TrimSpace(id)]
 	if !exists {
 		return databaseRecord{}, os.ErrNotExist
 	}
-	if !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+	if !databaseProfileVisibleToSubject(profile, subject) {
 		return databaseRecord{}, os.ErrNotExist
 	}
 	oldProfiles := cloneDatabaseProfiles(m.profiles)
 	for databaseID, candidate := range m.profiles {
+		if !databaseProfileVisibleToSubject(candidate, subject) {
+			continue
+		}
 		candidate.IsDefault = databaseID == profile.ID
 		m.profiles[databaseID] = candidate
 	}
@@ -619,6 +680,9 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	if err != nil {
 		return workspaceDetail{}, err
 	}
+	if !databaseProfileCanCreateWorkspaces(profile) {
+		return workspaceDetail{}, fmt.Errorf("database %q is reserved for onboarding and cannot host new workspaces", profile.Name)
+	}
 	input.DatabaseID = profile.ID
 	input.DatabaseName = profile.Name
 	if strings.TrimSpace(input.CloudAccount) == "" {
@@ -638,6 +702,9 @@ func (m *DatabaseManager) CreateResolvedWorkspace(ctx context.Context, input cre
 	profile, err := m.resolveTargetDatabase(ctx, input.DatabaseID)
 	if err != nil {
 		return workspaceDetail{}, err
+	}
+	if !databaseProfileCanCreateWorkspaces(profile) {
+		return workspaceDetail{}, fmt.Errorf("database %q is reserved for onboarding and cannot host new workspaces", profile.Name)
 	}
 	return m.CreateWorkspace(ctx, profile.ID, input)
 }
@@ -881,6 +948,14 @@ func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID
 	return session, nil
 }
 
+func (m *DatabaseManager) UpsertWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string, input createWorkspaceSessionRequest) (workspaceSessionInfo, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return workspaceSessionInfo{}, err
+	}
+	return service.UpsertWorkspaceSession(ctx, route.Name, sessionID, input)
+}
+
 func (m *DatabaseManager) CreateResolvedWorkspaceSession(ctx context.Context, workspace string, input createWorkspaceSessionRequest) (workspaceSession, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -934,11 +1009,15 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 
 	items := make([]workspaceSessionInfo, 0, len(records))
 	for _, record := range records {
-		if profile, ok := m.profiles[record.DatabaseID]; ok && !databaseProfileVisibleToSubject(profile, subject) {
+		profile, ok := m.profiles[record.DatabaseID]
+		if !ok {
+			continue
+		}
+		if !databaseProfileVisibleToSubject(profile, subject) {
 			continue
 		}
 		databaseName := record.DatabaseID
-		if profile, ok := m.profiles[record.DatabaseID]; ok && strings.TrimSpace(profile.Name) != "" {
+		if strings.TrimSpace(profile.Name) != "" {
 			databaseName = profile.Name
 		}
 		items = append(items, workspaceSessionInfo{
@@ -1262,6 +1341,9 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 		}
 		return nil, databaseProfile{}, err
 	}
+	if normalizedDatabasePurpose(profile.Purpose) == databasePurposeOnboarding {
+		response.Items = nil
+	}
 	for index := range response.Items {
 		stampWorkspaceSummary(&response.Items[index], profile)
 	}
@@ -1431,6 +1513,9 @@ func (m *DatabaseManager) buildProfileLocked(ctx context.Context, id string, inp
 	if name == "" {
 		return databaseProfile{}, false, fmt.Errorf("database name is required")
 	}
+	if strings.EqualFold(name, quickstartCloudDBName) && strings.TrimSpace(id) != quickstartCloudDBID {
+		return databaseProfile{}, false, fmt.Errorf("database name %q is reserved for the shared onboarding database", quickstartCloudDBName)
+	}
 
 	resolvedID := strings.TrimSpace(id)
 	isNew := false
@@ -1469,6 +1554,7 @@ func (m *DatabaseManager) buildProfileLocked(ctx context.Context, id string, inp
 		OwnerSubject:   ownerSubjectForDatabaseProfile(ctx, isNew, m.profiles[resolvedID]),
 		OwnerLabel:     ownerLabelForDatabaseProfile(ctx, isNew, m.profiles[resolvedID]),
 		ManagementType: managementTypeForDatabaseProfile(isNew, m.profiles[resolvedID]),
+		Purpose:        purposeForDatabaseProfile(isNew, m.profiles[resolvedID]),
 		RedisAddr:      normalizeRedisAddr(input.RedisAddr),
 		RedisUsername:  strings.TrimSpace(input.RedisUsername),
 		RedisPassword:  password,
@@ -1579,9 +1665,13 @@ func (m *DatabaseManager) resolveTargetDatabaseLocked(ctx context.Context, reque
 		return m.profiles[visibleOrder[0]], nil
 	}
 
-	for _, id := range visibleOrder {
-		if profile, exists := m.profiles[id]; exists && profile.IsDefault {
-			return profile, nil
+	if defaultID := m.effectiveDefaultDatabaseIDLocked(subject); defaultID != "" {
+		if profile, exists := m.profiles[defaultID]; exists {
+			for _, id := range visibleOrder {
+				if id == defaultID {
+					return profile, nil
+				}
+			}
 		}
 	}
 
@@ -1600,26 +1690,42 @@ func (m *DatabaseManager) ensureDefaultDatabaseLocked() {
 		return
 	}
 
-	defaultID := ""
+	firstByScope := make(map[string]string)
+	defaultByScope := make(map[string]string)
 	for _, id := range m.order {
 		profile, exists := m.profiles[id]
-		if !exists || !profile.IsDefault {
+		if !exists {
 			continue
 		}
-		if defaultID == "" {
-			defaultID = id
+		scope := databaseDefaultScopeKey(profile)
+		if _, recorded := firstByScope[scope]; !recorded {
+			firstByScope[scope] = id
+		}
+		if !profile.IsDefault {
+			continue
+		}
+		if _, recorded := defaultByScope[scope]; !recorded {
+			defaultByScope[scope] = id
 			continue
 		}
 		profile.IsDefault = false
 		m.profiles[id] = profile
 	}
-	if defaultID != "" {
-		return
+	for scope, id := range firstByScope {
+		if _, exists := defaultByScope[scope]; exists {
+			continue
+		}
+		profile := m.profiles[id]
+		profile.IsDefault = true
+		m.profiles[id] = profile
 	}
+}
 
-	profile := m.profiles[m.order[0]]
-	profile.IsDefault = true
-	m.profiles[profile.ID] = profile
+func databaseDefaultScopeKey(profile databaseProfile) string {
+	if owner := strings.TrimSpace(profile.OwnerSubject); owner != "" {
+		return "subject:" + owner
+	}
+	return "global"
 }
 
 func (m *DatabaseManager) databaseRecordLocked(ctx context.Context, id string) (databaseRecord, error) {
@@ -1627,21 +1733,24 @@ func (m *DatabaseManager) databaseRecordLocked(ctx context.Context, id string) (
 	if !exists {
 		return databaseRecord{}, os.ErrNotExist
 	}
+	defaultID := m.effectiveDefaultDatabaseIDLocked(authSubjectFromContext(ctx))
 
 	record := databaseRecord{
-		ID:             profile.ID,
-		Name:           profile.Name,
-		Description:    profile.Description,
-		OwnerSubject:   profile.OwnerSubject,
-		OwnerLabel:     profile.OwnerLabel,
-		ManagementType: normalizedDatabaseManagementType(profile.ManagementType),
-		CanEdit:        databaseProfileCanEdit(profile),
-		CanDelete:      databaseProfileCanDelete(profile),
-		RedisAddr:      profile.RedisAddr,
-		RedisUsername:  profile.RedisUsername,
-		RedisDB:        profile.RedisDB,
-		RedisTLS:       profile.RedisTLS,
-		IsDefault:      profile.IsDefault,
+		ID:                  profile.ID,
+		Name:                profile.Name,
+		Description:         profile.Description,
+		OwnerSubject:        profile.OwnerSubject,
+		OwnerLabel:          profile.OwnerLabel,
+		ManagementType:      normalizedDatabaseManagementType(profile.ManagementType),
+		Purpose:             normalizedDatabasePurpose(profile.Purpose),
+		CanEdit:             databaseProfileCanEdit(profile),
+		CanDelete:           databaseProfileCanDelete(profile),
+		CanCreateWorkspaces: databaseProfileCanCreateWorkspaces(profile),
+		RedisAddr:           profile.RedisAddr,
+		RedisUsername:       profile.RedisUsername,
+		RedisDB:             profile.RedisDB,
+		RedisTLS:            profile.RedisTLS,
+		IsDefault:           id == defaultID,
 	}
 	if m.catalog != nil {
 		healthByDatabase, err := m.catalog.ListDatabaseHealth(ctx)
@@ -1701,6 +1810,63 @@ func stampWorkspaceSummary(summary *workspaceSummary, profile databaseProfile) {
 	summary.DatabaseCanDelete = databaseProfileCanDelete(profile)
 }
 
+func (m *DatabaseManager) effectiveDefaultDatabaseIDLocked(subject string) string {
+	visibleOrder := make([]string, 0, len(m.order))
+	creatableVisibleOrder := make([]string, 0, len(m.order))
+	for _, id := range m.order {
+		profile, exists := m.profiles[id]
+		if !exists || !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
+		visibleOrder = append(visibleOrder, id)
+		if databaseProfileCanCreateWorkspaces(profile) {
+			creatableVisibleOrder = append(creatableVisibleOrder, id)
+		}
+	}
+	if len(visibleOrder) == 0 {
+		return ""
+	}
+	if len(visibleOrder) == 1 {
+		return visibleOrder[0]
+	}
+	if len(creatableVisibleOrder) == 1 {
+		return creatableVisibleOrder[0]
+	}
+
+	subject = strings.TrimSpace(subject)
+	if subject != "" {
+		for _, id := range creatableVisibleOrder {
+			profile := m.profiles[id]
+			if strings.TrimSpace(profile.OwnerSubject) == subject && profile.IsDefault {
+				return id
+			}
+		}
+	}
+	for _, id := range creatableVisibleOrder {
+		if m.profiles[id].IsDefault {
+			return id
+		}
+	}
+	for _, id := range visibleOrder {
+		if m.profiles[id].IsDefault {
+			return id
+		}
+	}
+	if subject != "" {
+		for _, id := range visibleOrder {
+			profile := m.profiles[id]
+			if strings.TrimSpace(profile.OwnerSubject) == subject &&
+				normalizedDatabaseManagementType(profile.ManagementType) == databaseManagementSystemManaged {
+				return id
+			}
+		}
+	}
+	if len(creatableVisibleOrder) > 0 {
+		return creatableVisibleOrder[0]
+	}
+	return visibleOrder[0]
+}
+
 func stampWorkspaceDetail(detail *workspaceDetail, profile databaseProfile) {
 	detail.DatabaseID = profile.ID
 	detail.DatabaseName = profile.Name
@@ -1722,12 +1888,27 @@ func normalizedDatabaseManagementType(value string) string {
 	}
 }
 
+func normalizedDatabasePurpose(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", databasePurposeGeneral:
+		return databasePurposeGeneral
+	case databasePurposeOnboarding:
+		return databasePurposeOnboarding
+	default:
+		return databasePurposeGeneral
+	}
+}
+
 func databaseProfileCanEdit(profile databaseProfile) bool {
 	return normalizedDatabaseManagementType(profile.ManagementType) != databaseManagementSystemManaged
 }
 
 func databaseProfileCanDelete(profile databaseProfile) bool {
 	return normalizedDatabaseManagementType(profile.ManagementType) != databaseManagementSystemManaged
+}
+
+func databaseProfileCanCreateWorkspaces(profile databaseProfile) bool {
+	return normalizedDatabasePurpose(profile.Purpose) != databasePurposeOnboarding
 }
 
 func ownerSubjectForDatabaseProfile(ctx context.Context, isNew bool, existing databaseProfile) string {
@@ -1763,6 +1944,13 @@ func managementTypeForDatabaseProfile(isNew bool, existing databaseProfile) stri
 		return normalizedDatabaseManagementType(existing.ManagementType)
 	}
 	return databaseManagementUserManaged
+}
+
+func purposeForDatabaseProfile(isNew bool, existing databaseProfile) string {
+	if !isNew {
+		return normalizedDatabasePurpose(existing.Purpose)
+	}
+	return databasePurposeGeneral
 }
 
 func withoutValue(values []string, target string) []string {

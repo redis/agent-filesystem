@@ -200,6 +200,7 @@ export function DatabaseTable({
             const nameLabel = row.original.displayName || row.original.databaseName;
             const id = row.original.id;
             const canEdit = row.original.canEdit;
+            const canSetDefault = row.original.canCreateWorkspaces;
             return (
               <NameStack>
                 <NameLine>
@@ -233,14 +234,16 @@ export function DatabaseTable({
                         : `Set ${nameLabel} as the default database`
                     }
                     title={
-                      isDefault
+                      !canSetDefault
+                        ? `${nameLabel} is reserved for onboarding`
+                        : isDefault
                         ? "Default database for new workspaces"
                         : "Set as default database for new workspaces"
                     }
-                    disabled={isDefault}
+                    disabled={isDefault || !canSetDefault}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (!isDefault) onSetDefaultDatabase(row.original.id);
+                      if (!isDefault && canSetDefault) onSetDefaultDatabase(row.original.id);
                     }}
                   >
                     <StarIcon filled={isDefault} />
@@ -263,9 +266,11 @@ export function DatabaseTable({
                 </IdRow>
                 {!canEdit ? (
                   <ManagedHint>
-                    {row.original.ownerLabel?.trim()
-                      ? `Managed by ${row.original.ownerLabel}`
-                      : "Managed by AFS Cloud"}
+                    {row.original.purpose === "onboarding"
+                      ? "Shared onboarding database · can't host new workspaces"
+                      : row.original.ownerLabel?.trim()
+                        ? `Managed by ${row.original.ownerLabel}`
+                        : "Managed by AFS Cloud"}
                   </ManagedHint>
                 ) : null}
               </NameStack>
@@ -399,7 +404,7 @@ export function DatabaseTable({
               <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
                 <Menu.Content.Item
                   text={row.original.isDefault ? "Current default" : "Set as default"}
-                  disabled={row.original.isDefault}
+                  disabled={row.original.isDefault || !row.original.canCreateWorkspaces}
                   onClick={() => onSetDefaultDatabase(row.original.id)}
                 />
                 <Menu.Content.Item

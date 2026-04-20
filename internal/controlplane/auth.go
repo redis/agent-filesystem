@@ -12,6 +12,7 @@ import (
 	clerk "github.com/clerk/clerk-sdk-go/v2"
 	clerkjwks "github.com/clerk/clerk-sdk-go/v2/jwks"
 	clerkjwt "github.com/clerk/clerk-sdk-go/v2/jwt"
+	clerkuser "github.com/clerk/clerk-sdk-go/v2/user"
 )
 
 type AuthMode string
@@ -52,11 +53,16 @@ type AuthConfig struct {
 }
 
 type AuthIdentity struct {
-	Subject  string
-	Name     string
-	Email    string
-	Groups   []string
-	Provider string
+	Subject           string
+	Name              string
+	Email             string
+	Groups            []string
+	Provider          string
+	TokenID           string
+	ScopedDatabaseID  string
+	ScopedWorkspaceID string
+	ScopedWorkspace   string
+	Readonly          bool
 }
 
 type authRuntimeConfigResponse struct {
@@ -92,6 +98,8 @@ type AuthHandler struct {
 	clerkJWKCacheMu   sync.Mutex
 	clerkJWKCache     map[string]cachedClerkJWK
 	clerkAuthenticate func(*http.Request) (*AuthIdentity, error)
+	clerkDeleteUser   func(context.Context, string) error
+	mcpAuthenticate   func(context.Context, string) (*AuthIdentity, error)
 }
 
 func DefaultAuthConfig() AuthConfig {
@@ -185,6 +193,11 @@ func NewAuthHandler(cfg AuthConfig) (*AuthHandler, error) {
 			clerkConfig := &clerk.ClientConfig{}
 			clerkConfig.Key = clerk.String(cfg.ClerkSecretKey)
 			handler.clerkJWKSClient = clerkjwks.NewClient(clerkConfig)
+			clerkUsers := clerkuser.NewClient(clerkConfig)
+			handler.clerkDeleteUser = func(ctx context.Context, subject string) error {
+				_, err := clerkUsers.Delete(ctx, strings.TrimSpace(subject))
+				return err
+			}
 		}
 		if handler.clerkStaticJWTKey == nil && handler.clerkJWKSClient == nil {
 			return nil, fmt.Errorf("clerk auth requires a secret key or jwt key")
@@ -210,6 +223,13 @@ func LoadAuthHandlerFromEnv() (*AuthHandler, error) {
 		return nil, err
 	}
 	return NewAuthHandler(cfg)
+}
+
+func (a *AuthHandler) AttachMCPTokenAuthenticator(authenticate func(context.Context, string) (*AuthIdentity, error)) {
+	if a == nil {
+		return
+	}
+	a.mcpAuthenticate = authenticate
 }
 
 func (a *AuthHandler) Middleware(next http.Handler) http.Handler {
@@ -287,9 +307,35 @@ func (a *AuthHandler) clerkPublishableKey() string {
 	return strings.TrimSpace(a.cfg.ClerkPublishableKey)
 }
 
+func (a *AuthHandler) CanDeleteIdentity() bool {
+	return a != nil && a.mode() == AuthModeClerk && a.clerkDeleteUser != nil
+}
+
+func (a *AuthHandler) DeleteCurrentIdentity(ctx context.Context) error {
+	if !a.CanDeleteIdentity() {
+		return fmt.Errorf("account deletion requires Clerk account authentication")
+	}
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.Subject) == "" {
+		return ErrUnauthorized
+	}
+	return a.clerkDeleteUser(ctx, identity.Subject)
+}
+
 func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
 	if a == nil || a.mode() == AuthModeNone {
 		return nil, nil
+	}
+
+	if bearer, ok := bearerTokenFromRequest(r); ok && isMCPTokenAuthPath(r.URL.Path) {
+		if a.mcpAuthenticate == nil {
+			return nil, ErrUnauthorized
+		}
+		identity, err := a.mcpAuthenticate(r.Context(), bearer)
+		if err != nil {
+			return nil, ErrUnauthorized
+		}
+		return identity, nil
 	}
 
 	switch a.cfg.Mode {
@@ -414,14 +460,31 @@ func clerkSessionTokenFromRequest(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	if authorization := strings.TrimSpace(r.Header.Get("Authorization")); authorization != "" {
-		return strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
-	}
 	cookie, err := r.Cookie(clerkSessionCookieName)
 	if err != nil {
 		return ""
 	}
 	return strings.TrimSpace(cookie.Value)
+}
+
+func bearerTokenFromRequest(r *http.Request) (string, bool) {
+	if r == nil {
+		return "", false
+	}
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authorization == "" || !strings.HasPrefix(strings.ToLower(authorization), "bearer ") {
+		return "", false
+	}
+	token := strings.TrimSpace(authorization[len("Bearer "):])
+	if token == "" {
+		return "", false
+	}
+	return token, true
+}
+
+func isMCPTokenAuthPath(path string) bool {
+	path = strings.TrimSpace(path)
+	return path == "/mcp" || strings.HasPrefix(path, "/mcp/")
 }
 
 func splitHeaderValues(raw string) []string {

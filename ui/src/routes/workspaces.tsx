@@ -212,8 +212,13 @@ function createWorkspaceDefaults(database?: AFSDatabaseScopeRecord | null) {
   };
 }
 
+function workspaceEligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
+  return databases.filter((database) => database.canCreateWorkspaces);
+}
+
 function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
-  return databases.find((database) => database.isDefault) ?? databases[0] ?? null;
+  const eligible = workspaceEligibleDatabases(databases);
+  return eligible.find((database) => database.isDefault) ?? eligible[0] ?? null;
 }
 
 function createInitialFormState(database?: AFSDatabaseScopeRecord | null): WorkspaceFormState {
@@ -239,6 +244,7 @@ function WorkspacesPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
   const { databases } = useDatabaseScope();
+  const eligibleDatabases = workspaceEligibleDatabases(databases);
   const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
@@ -284,6 +290,9 @@ function WorkspacesPage() {
 
     setForm((current) => {
       const currentDatabase = databases.find((item) => item.id === current.databaseId) ?? preferredDatabase(databases);
+      if (currentDatabase != null && !currentDatabase.canCreateWorkspaces) {
+        return { ...current, ...createWorkspaceDefaults(preferredDatabase(databases)) };
+      }
       const defaults = createWorkspaceDefaults(currentDatabase);
       return { ...current, ...defaults };
     });
@@ -318,7 +327,7 @@ function WorkspacesPage() {
   }
 
   function openCreateDialog() {
-    if (databases.length === 0) {
+    if (eligibleDatabases.length === 0) {
       void navigate({ to: "/databases" });
       return;
     }
@@ -415,7 +424,7 @@ function WorkspacesPage() {
             : null
         }
         toolbarAction={(
-          <Button size="medium" onClick={openCreateDialog}>
+          <Button size="medium" onClick={openCreateDialog} disabled={eligibleDatabases.length === 0}>
             Add workspace
           </Button>
         )}
@@ -554,12 +563,12 @@ function WorkspacesPage() {
                   <Select
                     value={form.databaseId}
                     onChange={(event) => {
-                      const nextDatabase = databases.find((item) => item.id === event.target.value);
+                    const nextDatabase = eligibleDatabases.find((item) => item.id === event.target.value);
                       updateForm("databaseId", event.target.value);
                       updateForm("databaseName", nextDatabase?.databaseName ?? nextDatabase?.displayName ?? "");
                     }}
                   >
-                    {databases.map((database) => (
+                    {eligibleDatabases.map((database) => (
                       <option key={database.id} value={database.id}>
                         {database.displayName || database.databaseName}
                       </option>

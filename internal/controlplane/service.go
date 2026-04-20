@@ -460,6 +460,50 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 	return session, nil
 }
 
+func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, sessionID string, input CreateWorkspaceSessionRequest) (WorkspaceSessionInfo, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return WorkspaceSessionInfo{}, fmt.Errorf("session id is required")
+	}
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, workspace); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	now, err := s.store.Now(ctx)
+	if err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	if err := s.reapExpiredWorkspaceSessions(ctx, workspace, now); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return WorkspaceSessionInfo{}, err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		record = WorkspaceSessionRecord{
+			SessionID: sessionID,
+			Workspace: workspace,
+			StartedAt: now,
+		}
+	}
+	record.ClientKind = strings.TrimSpace(input.ClientKind)
+	record.AFSVersion = strings.TrimSpace(input.AFSVersion)
+	record.Hostname = strings.TrimSpace(input.Hostname)
+	record.OperatingSystem = strings.TrimSpace(input.OperatingSystem)
+	record.LocalPath = strings.TrimSpace(input.LocalPath)
+	record.Readonly = input.Readonly
+	record.State = workspaceSessionStateActive
+	record.LastSeenAt = now
+	record.LeaseExpiresAt = now.Add(workspaceSessionLeaseTTL)
+	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
+		return WorkspaceSessionInfo{}, err
+	}
+	return workspaceSessionInfoFromRecord(record), nil
+}
+
 func (s *Service) ListWorkspaceSessions(ctx context.Context, workspace string) (WorkspaceSessionListResponse, error) {
 	now, err := s.store.Now(ctx)
 	if err != nil {

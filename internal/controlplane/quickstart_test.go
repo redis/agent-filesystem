@@ -3,6 +3,7 @@ package controlplane
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -92,9 +93,12 @@ func TestBootstrapDatabaseProfileFromRedisURL(t *testing.T) {
 	if !profile.RedisTLS {
 		t.Fatal("profile.RedisTLS = false, want true")
 	}
+	if profile.Purpose != databasePurposeOnboarding {
+		t.Fatalf("profile.Purpose = %q, want %q", profile.Purpose, databasePurposeOnboarding)
+	}
 }
 
-func TestQuickstartUsesBootstrappedCloudMetadata(t *testing.T) {
+func TestQuickstartRejectsBootstrappedCloudOnboardingDatabase(t *testing.T) {
 	mr := miniredis.RunT(t)
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "afs.config.json")
@@ -112,21 +116,8 @@ func TestQuickstartUsesBootstrappedCloudMetadata(t *testing.T) {
 	}
 	t.Cleanup(manager.Close)
 
-	response, err := manager.Quickstart(context.Background(), QuickstartRequest{})
-	if err != nil {
-		t.Fatalf("Quickstart() returned error: %v", err)
-	}
-
-	if response.DatabaseID != "afs-cloud" {
-		t.Fatalf("response.DatabaseID = %q, want %q", response.DatabaseID, "afs-cloud")
-	}
-	if response.Workspace.DatabaseName != quickstartCloudDBName {
-		t.Fatalf("response.Workspace.DatabaseName = %q, want %q", response.Workspace.DatabaseName, quickstartCloudDBName)
-	}
-	if response.Workspace.CloudAccount != quickstartCloudDBName {
-		t.Fatalf("response.Workspace.CloudAccount = %q, want %q", response.Workspace.CloudAccount, quickstartCloudDBName)
-	}
-	if response.Workspace.Name != quickstartWorkspaceName {
-		t.Fatalf("response.Workspace.Name = %q, want %q", response.Workspace.Name, quickstartWorkspaceName)
+	_, err = manager.Quickstart(context.Background(), QuickstartRequest{})
+	if err == nil || !strings.Contains(err.Error(), "Getting Started database") {
+		t.Fatalf("Quickstart() error = %v, want onboarding rejection", err)
 	}
 }

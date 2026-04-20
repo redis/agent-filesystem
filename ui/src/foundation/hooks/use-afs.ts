@@ -27,6 +27,7 @@ const FILESYSTEM_QUERY_GC_MS = 5 * 60 * 1000;
 
 export const afsKeys = {
   all: ["afs"] as const,
+  account: () => [...afsKeys.all, "account"] as const,
   databases: () => [...afsKeys.all, "databases"] as const,
   workspaceSummaries: (databaseId: string | null) =>
     [...afsKeys.all, "workspaces", databaseId ?? "all", "summaries"] as const,
@@ -65,6 +66,15 @@ export function databasesQueryOptions() {
   return queryOptions({
     queryKey: afsKeys.databases(),
     queryFn: () => afsApi.listDatabases(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function accountQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.account(),
+    queryFn: () => afsApi.getAccount(),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
   });
@@ -127,6 +137,13 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
 export function useDatabases(enabled = true) {
   return useQuery({
     ...databasesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAccount(enabled = true) {
+  return useQuery({
+    ...accountQueryOptions(),
     enabled,
   });
 }
@@ -222,6 +239,28 @@ export function useSetDefaultDatabaseMutation() {
 
   return useMutation({
     mutationFn: (databaseId: string) => afsApi.setDefaultDatabase(databaseId),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useResetAccountDataMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: () => afsApi.resetAccountData(),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useDeleteAccountMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: () => afsApi.deleteAccount(),
     onSuccess: async () => {
       await invalidate();
     },

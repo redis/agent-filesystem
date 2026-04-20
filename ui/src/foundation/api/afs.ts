@@ -31,6 +31,7 @@ import type {
   ImportLocalInput,
   ImportLocalResponse,
   AFSAuthConfig,
+  AFSAccount,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
@@ -62,6 +63,9 @@ type AFSClient = {
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   getAuthConfig: () => Promise<AFSAuthConfig>;
+  getAccount: () => Promise<AFSAccount>;
+  resetAccountData: () => Promise<AFSAccount>;
+  deleteAccount: () => Promise<AFSAccount>;
   resetDemo: () => AFSState;
 };
 
@@ -269,6 +273,18 @@ type HTTPAuthConfig = {
     email?: string;
     groups?: string[];
   };
+};
+
+type HTTPAccount = {
+  subject?: string;
+  provider: string;
+  can_delete_identity: boolean;
+  can_reset_data: boolean;
+  owned_database_count: number;
+  owned_workspace_count: number;
+  deleted_database_count?: number;
+  deleted_workspace_count?: number;
+  identity_deleted?: boolean;
 };
 
 class HTTPError extends Error {
@@ -1104,6 +1120,24 @@ This workspace was created from the AFS Web UI.
     };
   },
 
+  async getAccount() {
+    return {
+      provider: "none",
+      canDeleteIdentity: false,
+      canResetData: false,
+      ownedDatabaseCount: 0,
+      ownedWorkspaceCount: 0,
+    };
+  },
+
+  async resetAccountData() {
+    throw new Error("Account reset is not available in demo mode.");
+  },
+
+  async deleteAccount() {
+    throw new Error("Account deletion is not available in demo mode.");
+  },
+
   resetDemo() {
     const seeded = cloneInitialAFSState();
     saveState(seeded);
@@ -1395,6 +1429,20 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
   };
 }
 
+function mapAccount(input: HTTPAccount): AFSAccount {
+  return {
+    subject: input.subject,
+    provider: input.provider,
+    canDeleteIdentity: input.can_delete_identity,
+    canResetData: input.can_reset_data,
+    ownedDatabaseCount: input.owned_database_count,
+    ownedWorkspaceCount: input.owned_workspace_count,
+    deletedDatabaseCount: input.deleted_database_count,
+    deletedWorkspaceCount: input.deleted_workspace_count,
+    identityDeleted: input.identity_deleted,
+  };
+}
+
 const httpAFSClient: AFSClient = {
   mode: "http",
 
@@ -1665,6 +1713,22 @@ const httpAFSClient: AFSClient = {
         groups: response.user.groups ?? [],
       },
     } as AFSAuthConfig;
+  },
+
+  async getAccount() {
+    return mapAccount(await requestJSON<HTTPAccount>("/account"));
+  },
+
+  async resetAccountData() {
+    return mapAccount(await requestJSON<HTTPAccount>("/account/developer/reset", {
+      method: "POST",
+    }));
+  },
+
+  async deleteAccount() {
+    return mapAccount(await requestJSON<HTTPAccount>("/account", {
+      method: "DELETE",
+    }));
   },
 
   resetDemo() {

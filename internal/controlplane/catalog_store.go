@@ -50,6 +50,12 @@ type catalogStore interface {
 
 	CreateOnboardingToken(ctx context.Context, item onboardingTokenRecord) error
 	ConsumeOnboardingToken(ctx context.Context, token, consumedAt string) (onboardingTokenRecord, error)
+
+	CreateMCPAccessToken(ctx context.Context, item mcpAccessTokenRecord) error
+	ListMCPAccessTokens(ctx context.Context, databaseID, workspaceID string) ([]mcpAccessTokenRecord, error)
+	GetMCPAccessToken(ctx context.Context, tokenID string) (mcpAccessTokenRecord, error)
+	TouchMCPAccessToken(ctx context.Context, tokenID, lastUsedAt string) error
+	RevokeMCPAccessToken(ctx context.Context, tokenID, databaseID, workspaceID, revokedAt string) error
 }
 
 var _ catalogStore = (*workspaceCatalog)(nil)

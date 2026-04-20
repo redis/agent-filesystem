@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DownloadsRouteImport } from './routes/downloads'
@@ -34,6 +35,11 @@ const WorkspacesRoute = WorkspacesRouteImport.update({
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents_/add': typeof AgentsAddRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/settings'
     | '/signup'
     | '/workspaces'
     | '/agents/add'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/settings'
     | '/signup'
     | '/workspaces'
     | '/agents/add'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/settings'
     | '/signup'
     | '/workspaces'
     | '/agents_/add'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   DownloadsRoute: typeof DownloadsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRouteWithChildren
+  SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AgentsAddRoute: typeof AgentsAddRoute
@@ -249,6 +262,13 @@ declare module '@tanstack/react-router' {
       path: '/signup'
       fullPath: '/signup'
       preLoaderRoute: typeof SignupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -396,6 +416,7 @@ const rootRouteChildren: RootRouteChildren = {
   DownloadsRoute: DownloadsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRouteWithChildren,
+  SettingsRoute: SettingsRoute,
   SignupRoute: SignupRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AgentsAddRoute: AgentsAddRoute,
