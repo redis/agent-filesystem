@@ -21,6 +21,14 @@ type authExchangeResponse struct {
 
 var runBrowserLoginFlow = launchBrowserLoginFlow
 
+func cmdOnboard(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, onboardUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	return cmdAuthLogin(args)
+}
+
 func cmdAuth(args []string) error {
 	if len(args) < 2 {
 		return cmdAuthLogin(nil)
@@ -171,7 +179,7 @@ func cmdAuthStatus(args []string) error {
 	if !hasSavedConfig {
 		printBox(clr(ansiBold, "auth"), []boxRow{
 			{Label: "status", Value: "not signed in"},
-			{Label: "hint", Value: clr(ansiDim, "Run '"+filepath.Base(os.Args[0])+" auth login [--control-plane-url <url>]'")},
+			{Label: "hint", Value: clr(ansiDim, "Run '"+filepath.Base(os.Args[0])+" onboard'")},
 		})
 		return nil
 	}
@@ -194,7 +202,7 @@ func cmdAuthStatus(args []string) error {
 		printBox(clr(ansiBold, "auth"), []boxRow{
 			{Label: "status", Value: "cloud login needs refresh"},
 			{Label: "control plane", Value: cfg.URL},
-			{Label: "hint", Value: clr(ansiDim, "Run '"+filepath.Base(os.Args[0])+" auth login' again to finish browser sign-in.")},
+			{Label: "hint", Value: clr(ansiDim, "Run '"+filepath.Base(os.Args[0])+" onboard' again to finish browser sign-in.")},
 		})
 		return nil
 	}
@@ -226,7 +234,10 @@ Commands:
   login    Open the browser and connect this CLI to AFS Cloud
   logout   Clear the hosted cloud login from this machine
   status   Show current cloud login state
-`, bin, bin)
+
+Shortcut:
+  %s onboard  Preferred first-run browser onboarding flow
+`, bin, bin, bin)
 }
 
 func authLoginUsageText(bin string) string {
@@ -234,6 +245,16 @@ func authLoginUsageText(bin string) string {
   %s auth login --control-plane-url <url> --token <token>
   %s auth login [--control-plane-url <url>] [--workspace <workspace>]
 `, bin, bin)
+}
+
+func onboardUsageText(bin string) string {
+	return fmt.Sprintf(`Usage:
+  %s onboard [--control-plane-url <url>] [--workspace <workspace>]
+
+Examples:
+  %s onboard
+  %s onboard --workspace getting-started
+`, bin, bin, bin)
 }
 
 func authLogoutUsageText(bin string) string {

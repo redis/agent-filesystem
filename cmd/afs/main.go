@@ -47,7 +47,11 @@ func main() {
 			fatal(err)
 		}
 	case "login", "lo":
-		if err := cmdAuthLogin(args[1:]); err != nil {
+		if err := cmdOnboard(args[1:]); err != nil {
+			fatal(err)
+		}
+	case "onboard", "ob":
+		if err := cmdOnboard(args[1:]); err != nil {
 			fatal(err)
 		}
 	case "up", "u":
@@ -109,7 +113,8 @@ Commands:
   setup                Interactive setup
   config ...           Show or change basic Redis and local surface settings
   auth ...             Log into or out of a hosted control plane
-  login                Open the browser and log into AFS Cloud
+  onboard              Preferred browser-first AFS Cloud onboarding
+  login                Alias for 'onboard'
   up [flags]           Start AFS services with optional one-shot overrides
   down                 Stop and unmount
   status               Show current status

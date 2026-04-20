@@ -24,7 +24,7 @@ export function AgentSetupGuide({ compact = false }: Props) {
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
   const isCloud = auth.config.mode === "clerk";
   const step2Cmd = isCloud
-    ? `${cliPath} auth login`
+    ? `${cliPath} onboard`
     : `${cliPath} config --control-plane-url "${controlPlaneUrl}"`;
 
   const mcpConfig = JSON.stringify(

@@ -16,7 +16,7 @@ export type ConnectAgentBannerHandle = {
 };
 
 export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
-  function ConnectAgentBanner({ workspaceId, workspaceName, workspaceLabel, onDismiss }, ref) {
+  function ConnectAgentBanner({ workspaceName, workspaceLabel, onDismiss }, ref) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
   useImperativeHandle(ref, () => ({
@@ -29,7 +29,7 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
   const mountPath = `~/afs/${workspaceName}`;
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
-  const loginCmd = `${cliPath} auth login --control-plane-url "${controlPlaneUrl}" --workspace "${workspaceId}"`;
+  const loginCmd = `${cliPath} onboard`;
   const cliSetup = `${cliPath} up`;
 
   const mcpConfig = JSON.stringify(
@@ -129,7 +129,7 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
             </CopyButton>
           </CodeContainer>
           <StepHint>
-            This opens AFS Cloud in your browser, finishes the login there, and stores the hosted workspace locally.
+            This opens AFS Cloud in your browser, signs you in, and links the CLI to your account. If this is your only workspace, AFS will pick it automatically.
           </StepHint>
 
           <NextButtonRow>

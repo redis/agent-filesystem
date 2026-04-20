@@ -490,7 +490,7 @@ func promptCloudManagedSetup(r *bufio.Reader, out io.Writer, cfg *config) error 
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "  "+clr(ansiDim, "Next: run browser login, then choose a workspace in AFS Cloud."))
-	fmt.Fprintln(out, "  "+clr(ansiDim, "Example: ")+clr(ansiBold, filepath.Base(os.Args[0])+" auth login --control-plane-url \""+cfg.URL+"\""))
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Example: ")+clr(ansiBold, filepath.Base(os.Args[0])+" onboard"))
 	fmt.Fprintln(out)
 	return nil
 }

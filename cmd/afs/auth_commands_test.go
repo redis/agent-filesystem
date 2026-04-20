@@ -269,3 +269,65 @@ func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 		t.Fatalf("browser flow workspace = %q, want %q", seenWorkspace, "ws_demo")
 	}
 }
+
+func TestCmdOnboardUsesBrowserFlowShortcut(t *testing.T) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/exchange" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var input struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Fatalf("Decode(exchange request) returned error: %v", err)
+		}
+		if input.Token != "afs_otk_onboard" {
+			t.Fatalf("token = %q, want %q", input.Token, "afs_otk_onboard")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(authExchangeResponse{
+			DatabaseID:    "afs-cloud",
+			WorkspaceID:   "ws_demo",
+			WorkspaceName: "getting-started",
+			AccessToken:   "afs_cli_onboard",
+		})
+	}))
+	defer server.Close()
+
+	saveTempConfig(t, defaultConfig())
+
+	original := runBrowserLoginFlow
+	t.Cleanup(func() {
+		runBrowserLoginFlow = original
+	})
+
+	var seenURL string
+	var seenWorkspace string
+	runBrowserLoginFlow = func(controlPlaneURL, workspace string) (string, error) {
+		seenURL = controlPlaneURL
+		seenWorkspace = workspace
+		return "afs_otk_onboard", nil
+	}
+
+	if err := cmdOnboard([]string{"--control-plane-url", server.URL}); err != nil {
+		t.Fatalf("cmdOnboard() returned error: %v", err)
+	}
+
+	if seenURL != server.URL {
+		t.Fatalf("browser flow controlPlaneURL = %q, want %q", seenURL, server.URL)
+	}
+	if seenWorkspace != "" {
+		t.Fatalf("browser flow workspace = %q, want empty", seenWorkspace)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.AuthToken != "afs_cli_onboard" {
+		t.Fatalf("AuthToken = %q, want %q", cfg.AuthToken, "afs_cli_onboard")
+	}
+}
