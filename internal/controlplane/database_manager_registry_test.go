@@ -109,8 +109,8 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	if !record.CanCreateWorkspaces {
 		t.Fatal("record.CanCreateWorkspaces = false, want true (free-tier quota gates creation, not the flag)")
 	}
-	if record.OwnerLabel != "Getting Started" {
-		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "Getting Started")
+	if record.OwnerLabel != "Starter Database" {
+		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "Starter Database")
 	}
 
 	profiles, err := manager.catalog.ListDatabaseProfiles(context.Background())

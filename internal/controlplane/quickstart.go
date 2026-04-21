@@ -17,7 +17,7 @@ const (
 	quickstartCheckpoint    = "initial"
 	quickstartSource        = "quickstart"
 	quickstartLocalDBName   = "Local Development"
-	quickstartCloudDBName   = "Getting Started"
+	quickstartCloudDBName   = "Starter Database"
 	quickstartCloudDBID     = "afs-cloud"
 )
 
@@ -172,7 +172,7 @@ func bootstrapDatabaseProfileFromContext(_ context.Context) (databaseProfile, bo
 			ID:             quickstartCloudDBID,
 			Name:           quickstartCloudDBName,
 			Description:    "Managed Redis Cloud data plane for hosted Agent Filesystem.",
-			OwnerLabel:     "Getting Started",
+			OwnerLabel:     "Starter Database",
 			ManagementType: databaseManagementSystemManaged,
 			Purpose:        databasePurposeOnboarding,
 			RedisAddr:      cfg.RedisAddr,

@@ -321,7 +321,7 @@ function WorkspacesPage() {
   const showStarterConnectPanel = starterWorkspace != null &&
     (connectedAgentsByWorkspace[workspaceRowKey(starterWorkspace.id)] ?? 0) === 0;
 
-  // Free-tier quota: shared onboarding DB caps each user at 3 workspaces.
+  // Free-tier quota: the starter database caps each user at 3 workspaces.
   const onboardingDb = databases.find((db) => db.purpose === "onboarding") ?? null;
   const freeTierUsed = onboardingDb
     ? workspaces.filter((ws) => ws.databaseId === onboardingDb.id).length

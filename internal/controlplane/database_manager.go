@@ -1598,7 +1598,7 @@ func (m *DatabaseManager) buildProfileLocked(ctx context.Context, id string, inp
 		return databaseProfile{}, false, fmt.Errorf("database name is required")
 	}
 	if strings.EqualFold(name, quickstartCloudDBName) && strings.TrimSpace(id) != quickstartCloudDBID {
-		return databaseProfile{}, false, fmt.Errorf("database name %q is reserved for the shared onboarding database", quickstartCloudDBName)
+		return databaseProfile{}, false, fmt.Errorf("database name %q is reserved", quickstartCloudDBName)
 	}
 
 	resolvedID := strings.TrimSpace(id)

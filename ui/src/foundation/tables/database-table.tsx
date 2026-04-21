@@ -267,7 +267,7 @@ export function DatabaseTable({
                 {!canEdit ? (
                   <ManagedHint>
                     {row.original.purpose === "onboarding"
-                      ? "Shared onboarding database · can't host new workspaces"
+                      ? "Managed by AFS Cloud"
                       : row.original.ownerLabel?.trim()
                         ? `Managed by ${row.original.ownerLabel}`
                         : "Managed by AFS Cloud"}
