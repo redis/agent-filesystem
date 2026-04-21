@@ -10,22 +10,22 @@ import {
   CrossLinkArrow,
 } from "../../components/doc-kit";
 import { getControlPlaneURL } from "../../foundation/api/afs";
-import { useAuthSession } from "../../foundation/auth-context";
 
 type Props = {
   compact?: boolean;
 };
 
+type Tab = "install" | "mcp";
+type InstallMethod = "curl" | "brew" | "manual";
+
 export function AgentSetupGuide({ compact = false }: Props) {
+  const [tab, setTab] = useState<Tab>("install");
+  const [method, setMethod] = useState<InstallMethod>("curl");
   const [copied, setCopied] = useState<string | null>(null);
-  const auth = useAuthSession();
   const controlPlaneUrl = getControlPlaneURL();
-  const cliPath = `./afs`;
-  const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
-  const isCloud = auth.config.mode === "clerk";
-  const step2Cmd = isCloud
-    ? `${cliPath} onboard`
-    : `${cliPath} config --control-plane-url "${controlPlaneUrl}"`;
+  const installCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
+  const onboardCmd = `afs onboard`;
+  const manualCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o afs && chmod +x afs`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -49,82 +49,149 @@ export function AgentSetupGuide({ compact = false }: Props) {
 
   return (
     <Layout $compact={compact}>
-      <SetupCard>
-        <CardLabel>Recommended</CardLabel>
-        <SetupTitle>Connect via CLI</SetupTitle>
-        <SetupDesc>
-          Use the <InlineCode>afs</InlineCode> CLI to mount a workspace as a
-          local directory. The agent reads and writes files normally — AFS syncs
-          everything to Redis in the background.
-        </SetupDesc>
+      <TabBar role="tablist">
+        <TabItem
+          $active={tab === "install"}
+          role="tab"
+          aria-selected={tab === "install"}
+          onClick={() => setTab("install")}
+        >
+          Install
+        </TabItem>
+        <TabItem
+          $active={tab === "mcp"}
+          role="tab"
+          aria-selected={tab === "mcp"}
+          onClick={() => setTab("mcp")}
+        >
+          MCP config
+        </TabItem>
+      </TabBar>
 
-        <StepLabel>Step 1 — Download the CLI</StepLabel>
-        <SetupDesc>
-          Download the latest compatible <InlineCode>afs</InlineCode> binary for
-          your machine. The command auto-detects OS and CPU architecture.
-        </SetupDesc>
-        <CodeContainer>
-          <CodePre>{downloadCmd}</CodePre>
-          <CopyButton type="button" onClick={() => copyToClipboard(downloadCmd, "download")}>
-            {copied === "download" ? "Copied!" : "Copy"}
-          </CopyButton>
-        </CodeContainer>
+      {tab === "install" ? (
+        <PanelCard>
+          <MethodPills role="tablist">
+            <MethodPill
+              $active={method === "curl"}
+              onClick={() => setMethod("curl")}
+            >
+              curl
+            </MethodPill>
+            <MethodPill
+              $active={method === "brew"}
+              $disabled
+              aria-disabled
+              title="Coming soon"
+              onClick={() => {}}
+            >
+              Homebrew
+              <PillBadge>soon</PillBadge>
+            </MethodPill>
+            <MethodPill
+              $active={method === "manual"}
+              onClick={() => setMethod("manual")}
+            >
+              Manual
+            </MethodPill>
+          </MethodPills>
 
-        <StepDivider />
+          {method === "curl" && (
+            <>
+              <StepNumber>1</StepNumber>
+              <StepTitle>Install the CLI</StepTitle>
+              <StepDesc>
+                One command. Detects your OS and architecture, drops{" "}
+                <InlineCode>afs</InlineCode> into{" "}
+                <InlineCode>~/.afs/bin</InlineCode>, and prints PATH setup if
+                needed.
+              </StepDesc>
+              <CodeContainer>
+                <CodePre>{installCmd}</CodePre>
+                <CopyButton
+                  type="button"
+                  onClick={() => copyToClipboard(installCmd, "install")}
+                >
+                  {copied === "install" ? "Copied!" : "Copy"}
+                </CopyButton>
+              </CodeContainer>
 
-        <StepLabel>
-          Step 2 — {isCloud ? "Sign in to AFS Cloud" : "Point the CLI at this control plane"}
-        </StepLabel>
-        <SetupDesc>
-          {isCloud
-            ? "The CLI opens your browser, you sign in with the same account you're using here, and the CLI receives a short-lived auth token scoped to your account. This also saves the control-plane URL so you don't need to configure it separately."
-            : "Point the CLI at this control plane server. You only need to do this once per machine."}
-        </SetupDesc>
-        <CodeContainer>
-          <CodePre>{step2Cmd}</CodePre>
-          <CopyButton type="button" onClick={() => copyToClipboard(step2Cmd, "step2")}>
-            {copied === "step2" ? "Copied!" : "Copy"}
-          </CopyButton>
-        </CodeContainer>
+              <StepDivider />
 
-        <StepDivider />
+              <StepNumber>2</StepNumber>
+              <StepTitle>Sign in</StepTitle>
+              <StepDesc>
+                Opens a browser window and links this CLI to your account.
+              </StepDesc>
+              <CodeContainer>
+                <CodePre>{onboardCmd}</CodePre>
+                <CopyButton
+                  type="button"
+                  onClick={() => copyToClipboard(onboardCmd, "onboard")}
+                >
+                  {copied === "onboard" ? "Copied!" : "Copy"}
+                </CopyButton>
+              </CodeContainer>
+              <StepHint>
+                Once <InlineCode>afs up</InlineCode> is running, the agent
+                appears on this page with a live status indicator.
+              </StepHint>
+            </>
+          )}
 
-        <StepLabel>Step 3 — Select a workspace and start syncing</StepLabel>
-        <SetupDesc>
-          Pick an existing workspace (or create one) and start the sync agent.
-        </SetupDesc>
-        <CodeContainer>
-          <CodePre>{`# select a workspace and start syncing
-${cliPath} workspace use my-project
-${cliPath} up
-
-# the agent works in ~/afs/my-project/ with normal file I/O`}</CodePre>
-        </CodeContainer>
-        <SetupHint>
-          Once <InlineCode>afs up</InlineCode> is running, the agent appears on
-          the Agents page with a live status indicator.
-        </SetupHint>
-      </SetupCard>
-
-      <SetupCard>
-        <SetupTitle>Connect via MCP</SetupTitle>
-        <SetupDesc>
-          For AI agents that support the Model Context Protocol, add AFS as an
-          MCP server. The agent gets tool-based access to workspaces, files, and
-          checkpoints — no local mount needed.
-        </SetupDesc>
-        <SetupDesc>
-          Add the following to your agent's MCP configuration (e.g.{" "}
-          <InlineCode>claude_desktop_config.json</InlineCode> or{" "}
-          <InlineCode>.claude/settings.json</InlineCode>):
-        </SetupDesc>
-        <CodeContainer>
-          <CodePre>{mcpConfig}</CodePre>
-          <CopyButton type="button" onClick={() => copyToClipboard(mcpConfig, "mcp")}>
-            {copied === "mcp" ? "Copied!" : "Copy"}
-          </CopyButton>
-        </CodeContainer>
-      </SetupCard>
+          {method === "manual" && (
+            <>
+              <StepTitle>Download the binary directly</StepTitle>
+              <StepDesc>
+                Prefer not to pipe a script to bash? Download the{" "}
+                <InlineCode>afs</InlineCode> binary yourself. Make it
+                executable and move it somewhere on your PATH.
+              </StepDesc>
+              <CodeContainer>
+                <CodePre>{manualCmd}</CodePre>
+                <CopyButton
+                  type="button"
+                  onClick={() => copyToClipboard(manualCmd, "manual")}
+                >
+                  {copied === "manual" ? "Copied!" : "Copy"}
+                </CopyButton>
+              </CodeContainer>
+              <StepHint>
+                On macOS you may need to strip the quarantine attribute:{" "}
+                <InlineCode>xattr -d com.apple.quarantine ./afs</InlineCode>.
+              </StepHint>
+            </>
+          )}
+        </PanelCard>
+      ) : (
+        <PanelCard>
+          <StepTitle>Connect via MCP</StepTitle>
+          <StepDesc>
+            For agents that speak the Model Context Protocol (Claude Desktop,
+            Cursor, Windsurf, etc.), add AFS as an MCP server. The agent gets
+            tool-based access to workspaces, files, and checkpoints — no local
+            mount required.
+          </StepDesc>
+          <StepDesc>
+            Add the following to your agent's MCP configuration (e.g.{" "}
+            <InlineCode>claude_desktop_config.json</InlineCode> or{" "}
+            <InlineCode>.claude/settings.json</InlineCode>):
+          </StepDesc>
+          <CodeContainer>
+            <CodePre>{mcpConfig}</CodePre>
+            <CopyButton
+              type="button"
+              onClick={() => copyToClipboard(mcpConfig, "mcp")}
+            >
+              {copied === "mcp" ? "Copied!" : "Copy"}
+            </CopyButton>
+          </CodeContainer>
+          <StepHint>
+            You still need the <InlineCode>afs</InlineCode> CLI installed and
+            signed in (via <InlineCode>afs onboard</InlineCode>) for MCP to
+            authenticate against your workspaces.
+          </StepHint>
+        </PanelCard>
+      )}
 
       <LinksRow>
         <CrossLinkCard as={Link} to="/docs" style={{ flex: 1 }}>
@@ -150,66 +217,136 @@ ${cliPath} up
   );
 }
 
+/* ── Styled components ── */
+
 const Layout = styled.div<{ $compact: boolean }>`
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
   max-width: 720px;
   margin: 0 auto;
   padding: ${({ $compact }) => ($compact ? "0" : "20px 0 0")};
 `;
 
-const SetupCard = styled.div`
+const TabBar = styled.div`
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--afs-line);
+`;
+
+const TabItem = styled.button<{ $active?: boolean }>`
   position: relative;
+  border: none;
+  background: transparent;
+  color: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted)")};
+  font-size: 14px;
+  font-weight: 700;
+  padding: 12px 18px;
+  cursor: pointer;
+  transition: color 120ms ease;
+
+  &:hover {
+    color: var(--afs-accent, #2563eb);
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "transparent")};
+  }
+`;
+
+const PanelCard = styled.div`
   border: 1px solid var(--afs-line);
   border-radius: 16px;
   padding: 24px;
   background: var(--afs-panel-strong);
 `;
 
-const CardLabel = styled.span`
-  position: absolute;
-  top: -9px;
-  left: 20px;
-  padding: 2px 10px;
+const MethodPills = styled.div`
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
   border-radius: 999px;
-  background: var(--afs-accent-soft);
-  color: var(--afs-accent);
-  border: 1px solid var(--afs-accent);
-  font-size: 11px;
+  background: var(--afs-line);
+  margin-bottom: 20px;
+`;
+
+const MethodPill = styled.button<{ $active?: boolean; $disabled?: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: ${(p) => (p.$active ? "var(--afs-panel)" : "transparent")};
+  color: ${(p) =>
+    p.$disabled
+      ? "color-mix(in srgb, var(--afs-muted) 70%, transparent)"
+      : p.$active
+        ? "var(--afs-ink)"
+        : "var(--afs-muted)"};
+  font-size: 13px;
   font-weight: 700;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: ${(p) => (p.$disabled ? "not-allowed" : "pointer")};
+  transition: background 120ms ease, color 120ms ease;
+  box-shadow: ${(p) => (p.$active ? "0 1px 3px rgba(0,0,0,0.06)" : "none")};
+
+  &:hover {
+    color: ${(p) => (p.$disabled ? "inherit" : "var(--afs-ink)")};
+  }
+`;
+
+const PillBadge = styled.span`
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--afs-muted) 18%, transparent);
+  color: var(--afs-muted);
+  font-size: 10px;
+  font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 `;
 
-const SetupTitle = styled.h4`
+const StepNumber = styled.div`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--afs-accent, #2563eb);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+`;
+
+const StepTitle = styled.h4`
   margin: 0 0 8px;
   color: var(--afs-ink);
   font-size: 16px;
   font-weight: 700;
 `;
 
-const SetupDesc = styled.p`
+const StepDesc = styled.p`
   margin: 0 0 12px;
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.65;
 `;
 
-const StepLabel = styled.div`
-  color: var(--afs-ink);
-  font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 8px;
-`;
-
 const StepDivider = styled.div`
   height: 1px;
   background: var(--afs-line);
-  margin: 20px 0;
+  margin: 22px 0 18px;
 `;
 
-const SetupHint = styled.p`
+const StepHint = styled.p`
   margin: 12px 0 0;
   color: var(--afs-muted);
   font-size: 12px;

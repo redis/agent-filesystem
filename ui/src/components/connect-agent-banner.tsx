@@ -31,10 +31,9 @@ export function ConnectAgentBanner({
   const controlPlaneUrl = getControlPlaneURL();
   const displayName = workspaceLabel?.trim() || displayWorkspaceName(workspaceName);
   const mountPath = `~/afs/${canonicalWorkspaceName(workspaceName)}`;
-  const cliPath = `./afs`;
-  const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
-  const loginCmd = `${cliPath} onboard`;
-  const syncCmd = `${cliPath} up`;
+  const downloadCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
+  const loginCmd = `afs onboard`;
+  const syncCmd = `afs up`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -120,10 +119,11 @@ export function ConnectAgentBanner({
           <StepContent>
             {tab === "cli" ? (
               <>
-                <SubStepLabel>1 &mdash; Download the CLI</SubStepLabel>
+                <SubStepLabel>1 &mdash; Install the CLI</SubStepLabel>
                 <StepDescription>
-                  Auto-detects your OS and CPU architecture. Drops{" "}
-                  <code>afs</code> into the current directory.
+                  Detects your OS and architecture, installs{" "}
+                  <code>afs</code> into <code>~/.afs/bin</code>, and prints
+                  PATH setup if needed.
                 </StepDescription>
                 <CodeContainer>
                   <CodePre>{downloadCmd}</CodePre>

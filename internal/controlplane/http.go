@@ -128,7 +128,7 @@ type spaFallbackHandler struct {
 
 func (h *spaFallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Route API requests to the admin mux.
-	if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/healthz" {
+	if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/healthz" || r.URL.Path == "/install.sh" {
 		h.admin.ServeHTTP(w, r)
 		return
 	}
@@ -296,6 +296,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/v1/cli", handleCLIDownload)
+	mux.HandleFunc("/install.sh", handleInstallScript)
 
 	mux.HandleFunc("/v1/quickstart", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
