@@ -10,6 +10,7 @@ import {
   CrossLinkArrow,
 } from "../../components/doc-kit";
 import { getControlPlaneURL } from "../../foundation/api/afs";
+import { useAuthSession } from "../../foundation/auth-context";
 
 type Props = {
   compact?: boolean;
@@ -23,9 +24,13 @@ export function AgentSetupGuide({ compact = false }: Props) {
   const [method, setMethod] = useState<InstallMethod>("curl");
   const [copied, setCopied] = useState<string | null>(null);
   const controlPlaneUrl = getControlPlaneURL();
+  const { config: authConfig } = useAuthSession();
+  const isCloud = authConfig.productMode === "cloud";
   const installCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
-  const onboardCmd = `afs onboard`;
+  const loginCmd = `afs login`;
+  const setupCmd = `afs setup`;
   const manualCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o afs && chmod +x afs`;
+  const manualConfigCmd = `afs login --self-hosted --url ${controlPlaneUrl}`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -104,6 +109,13 @@ export function AgentSetupGuide({ compact = false }: Props) {
                 <InlineCode>afs</InlineCode> into{" "}
                 <InlineCode>~/.afs/bin</InlineCode>, and prints PATH setup if
                 needed.
+                {!isCloud && (
+                  <>
+                    {" "}
+                    Also points the CLI at this control plane (
+                    <InlineCode>{controlPlaneUrl}</InlineCode>) automatically.
+                  </>
+                )}
               </StepDesc>
               <CodeContainer>
                 <CodePre>{installCmd}</CodePre>
@@ -115,26 +127,57 @@ export function AgentSetupGuide({ compact = false }: Props) {
                 </CopyButton>
               </CodeContainer>
 
-              <StepDivider />
+              {isCloud ? (
+                <>
+                  <StepDivider />
 
-              <StepNumber>2</StepNumber>
-              <StepTitle>Sign in</StepTitle>
-              <StepDesc>
-                Opens a browser window and links this CLI to your account.
-              </StepDesc>
-              <CodeContainer>
-                <CodePre>{onboardCmd}</CodePre>
-                <CopyButton
-                  type="button"
-                  onClick={() => copyToClipboard(onboardCmd, "onboard")}
-                >
-                  {copied === "onboard" ? "Copied!" : "Copy"}
-                </CopyButton>
-              </CodeContainer>
-              <StepHint>
-                Once <InlineCode>afs up</InlineCode> is running, the agent
-                appears on this page with a live status indicator.
-              </StepHint>
+                  <StepNumber>2</StepNumber>
+                  <StepTitle>Sign in</StepTitle>
+                  <StepDesc>
+                    Opens a browser window and links this CLI to your account.
+                  </StepDesc>
+                  <CodeContainer>
+                    <CodePre>{loginCmd}</CodePre>
+                    <CopyButton
+                      type="button"
+                      onClick={() => copyToClipboard(loginCmd, "login")}
+                    >
+                      {copied === "login" ? "Copied!" : "Copy"}
+                    </CopyButton>
+                  </CodeContainer>
+                  <StepHint>
+                    Once <InlineCode>afs up</InlineCode> is running, the agent
+                    appears on this page with a live status indicator.
+                  </StepHint>
+                </>
+              ) : (
+                <>
+                  <StepDivider />
+
+                  <StepNumber>2</StepNumber>
+                  <StepTitle>Pick a workspace</StepTitle>
+                  <StepDesc>
+                    <InlineCode>afs setup</InlineCode> lists workspaces on this
+                    control plane and sets a local sync path. A{" "}
+                    <InlineCode>getting-started</InlineCode> workspace is
+                    pre-created on first boot, so you can accept the default
+                    and jump straight to <InlineCode>afs up</InlineCode>.
+                  </StepDesc>
+                  <CodeContainer>
+                    <CodePre>{setupCmd}</CodePre>
+                    <CopyButton
+                      type="button"
+                      onClick={() => copyToClipboard(setupCmd, "setup")}
+                    >
+                      {copied === "setup" ? "Copied!" : "Copy"}
+                    </CopyButton>
+                  </CodeContainer>
+                  <StepHint>
+                    Once <InlineCode>afs up</InlineCode> is running, the agent
+                    appears here with a live status indicator.
+                  </StepHint>
+                </>
+              )}
             </>
           )}
 
@@ -159,6 +202,29 @@ export function AgentSetupGuide({ compact = false }: Props) {
                 On macOS you may need to strip the quarantine attribute:{" "}
                 <InlineCode>xattr -d com.apple.quarantine ./afs</InlineCode>.
               </StepHint>
+
+              {!isCloud && (
+                <>
+                  <StepDivider />
+
+                  <StepTitle>Point the CLI at this control plane</StepTitle>
+                  <StepDesc>
+                    The install script does this automatically; when
+                    downloading manually, run it yourself.
+                  </StepDesc>
+                  <CodeContainer>
+                    <CodePre>{manualConfigCmd}</CodePre>
+                    <CopyButton
+                      type="button"
+                      onClick={() =>
+                        copyToClipboard(manualConfigCmd, "manual-config")
+                      }
+                    >
+                      {copied === "manual-config" ? "Copied!" : "Copy"}
+                    </CopyButton>
+                  </CodeContainer>
+                </>
+              )}
             </>
           )}
         </PanelCard>
@@ -186,9 +252,18 @@ export function AgentSetupGuide({ compact = false }: Props) {
             </CopyButton>
           </CodeContainer>
           <StepHint>
-            You still need the <InlineCode>afs</InlineCode> CLI installed and
-            signed in (via <InlineCode>afs onboard</InlineCode>) for MCP to
-            authenticate against your workspaces.
+            You still need the <InlineCode>afs</InlineCode> CLI installed
+            {isCloud ? (
+              <>
+                {" "}and signed in (via <InlineCode>afs login</InlineCode>)
+                for MCP to authenticate against your workspaces.
+              </>
+            ) : (
+              <>
+                {" "}and pointed at this control plane (the install script
+                handles that) for MCP to reach your workspaces.
+              </>
+            )}
           </StepHint>
         </PanelCard>
       )}
@@ -224,7 +299,6 @@ const Layout = styled.div<{ $compact: boolean }>`
   flex-direction: column;
   gap: 16px;
   max-width: 720px;
-  margin: 0 auto;
   padding: ${({ $compact }) => ($compact ? "0" : "20px 0 0")};
 `;
 
@@ -268,7 +342,8 @@ const PanelCard = styled.div`
 `;
 
 const MethodPills = styled.div`
-  display: inline-flex;
+  display: flex;
+  width: fit-content;
   gap: 6px;
   padding: 4px;
   border-radius: 999px;

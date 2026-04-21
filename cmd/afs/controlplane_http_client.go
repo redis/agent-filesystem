@@ -85,6 +85,12 @@ func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPla
 	return client, client.databaseID, nil
 }
 
+// Ping makes a cheap GET to /healthz. Used to verify a control plane URL
+// during login before persisting it to config.
+func (c *httpControlPlaneClient) Ping(ctx context.Context) error {
+	return c.doJSON(ctx, http.MethodGet, "/healthz", nil, nil, http.StatusOK)
+}
+
 func newAnonymousHTTPControlPlaneClient(baseURL string) (*httpControlPlaneClient, error) {
 	normalized, err := normalizeControlPlaneURL(baseURL)
 	if err != nil {

@@ -23,6 +23,13 @@ func main() {
 		allowOrigin = "*"
 	}
 
+	// The Vercel build is the cloud control plane. Let install.sh and the UI
+	// runtime config report this unless an operator explicitly overrides it
+	// (e.g. for a preview deployment impersonating self-hosted).
+	if strings.TrimSpace(os.Getenv(controlplane.ProductModeEnvVar)) == "" {
+		_ = os.Setenv(controlplane.ProductModeEnvVar, controlplane.ProductModeCloud)
+	}
+
 	// Unpack the embedded CLI bundle (populated at deploy time by prod.sh) and
 	// point the control plane at the extracted directory so /v1/cli can serve
 	// the matching binary on Vercel, where the project filesystem doesn't

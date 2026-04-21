@@ -7,7 +7,35 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/redis/agent-filesystem/internal/version"
 )
+
+// versionStatusRow returns the "version" row for status boxes. Centralised so
+// `status` always shows a consistent version label regardless of running state.
+func versionStatusRow() boxRow {
+	return boxRow{Label: "version", Value: clr(ansiDim, version.String())}
+}
+
+// appendAuthStatusRows appends cloud sign-in / control-plane rows when the
+// user is connected to a control plane. Emits nothing extra for local mode
+// — the existing configStatusRow already describes local config.
+func appendAuthStatusRows(rows []boxRow) []boxRow {
+	bin := filepath.Base(os.Args[0])
+	info, _ := authConnectionInfo(bin)
+	// Skip rows that duplicate what configStatusRow already showed (connection
+	// label is redundant in local mode). Keep "signed in", control-plane URL,
+	// and hint rows.
+	for _, row := range info {
+		switch row.Label {
+		case "connection":
+			continue
+		case "control plane", "signed in", "database", "hint":
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
 
 func userModeLabel(backendName string) string {
 	switch backendName {
@@ -179,10 +207,10 @@ func cmdStatusNotRunning() error {
 
 	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
 	rows := statusRows(cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
-	rows = append(rows,
-		configStatusRow(cfg),
-		boxRow{Label: "start", Value: clr(ansiOrange, "afs up")},
-	)
+	rows = append(rows, configStatusRow(cfg))
+	rows = appendAuthStatusRows(rows)
+	rows = append(rows, versionStatusRow())
+	rows = append(rows, boxRow{Label: "start", Value: clr(ansiOrange, "afs up")})
 	printBox(title, rows)
 	return nil
 }
@@ -199,6 +227,7 @@ func cmdStatusSync(st state) {
 	title := statusTitleForAlive(alive, st.SyncPID)
 	rows := statusRows(workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
 	rows = append(rows, configStatusRow(cfg))
+	rows = appendAuthStatusRows(rows)
 	rows = appendUptimeRows(rows, st)
 	if snap := loadSyncStateForStatus(workspace); snap != nil {
 		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
@@ -206,6 +235,7 @@ func cmdStatusSync(st state) {
 			rows = append(rows, boxRow{Label: "last sync", Value: snap.UpdatedAt.UTC().Format(time.RFC3339)})
 		}
 	}
+	rows = append(rows, versionStatusRow())
 	printBox(title, rows)
 }
 
@@ -237,10 +267,12 @@ func cmdStatusMount(st state) error {
 
 	rows := statusRows(workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
 	rows = append(rows, configStatusRow(cfg))
+	rows = appendAuthStatusRows(rows)
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
 		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})
 	}
+	rows = append(rows, versionStatusRow())
 	printBox(title, rows)
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
 )
 
@@ -105,11 +106,16 @@ func (f *fullReconciler) coldStart(ctx context.Context, onProgress ProgressFunc)
 		return fmt.Errorf("cold start requires a store with Redis connection")
 	}
 
-	fsKey := workspaceRedisKey(f.r.workspace)
 	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
 	if err != nil {
 		return fmt.Errorf("get workspace meta: %w", err)
 	}
+	// Every Redis key for this workspace is hash-tagged by the workspace's
+	// storage ID, which may differ from the user-facing name in cloud /
+	// multi-tenant deployments (e.g. name "getting-started" → storage ID
+	// "ws_f6214eecf58fe5e6"). Using the resolved ID here ensures we read the
+	// actual tree instead of an empty phantom key derived from the name.
+	fsKey := controlplane.WorkspaceStorageID(meta)
 
 	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint, onProgress)
 	if err != nil {

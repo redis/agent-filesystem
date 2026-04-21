@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { SignOutButton } from "@clerk/react";
 import { SideBar } from "@redis-ui/components";
 import {
@@ -17,6 +18,7 @@ import type { NavigationItem } from "./navigation-items";
 import { useAuthSession } from "../foundation/auth-context";
 import { useColorMode } from "../foundation/theme-context";
 import { useDatabaseScope } from "../foundation/database-scope";
+import { afsApi } from "../foundation/api/afs";
 
 const SIDEBAR_LOCALSTORAGE_KEY = "afs_sidebar_open";
 
@@ -46,6 +48,17 @@ export function AppSidebar() {
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Surface the control-plane version in the footer so operators can tell at
+  // a glance which build is serving the UI. One fetch per session is plenty;
+  // version doesn't change without a server restart.
+  const serverVersion = useQuery({
+    queryKey: ["afs", "server", "version"],
+    queryFn: () => afsApi.getServerVersion(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 0,
+  });
 
   const isEmpty = !isLoading && databases.length === 0;
 
@@ -217,6 +230,17 @@ export function AppSidebar() {
                 Terms
               </SideBar.Footer.Link>
               <SideBar.Footer.Text>&copy; 2026 Redis</SideBar.Footer.Text>
+              {serverVersion.data?.version && (
+                <SideBar.Footer.Text
+                  title={
+                    serverVersion.data.commit
+                      ? `commit ${serverVersion.data.commit}${serverVersion.data.buildDate ? ` · ${serverVersion.data.buildDate}` : ""}`
+                      : undefined
+                  }
+                >
+                  afs {serverVersion.data.version}
+                </SideBar.Footer.Text>
+              )}
             </SideBar.Footer.MetaData>
           </>
         </SideBar.Footer>

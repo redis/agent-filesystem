@@ -258,7 +258,7 @@ func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 		return "afs_otk_browser", nil
 	}
 
-	if err := cmdAuth([]string{"auth", "login", "--control-plane-url", server.URL, "--workspace", "ws_demo"}); err != nil {
+	if err := cmdAuth([]string{"auth", "login", "--cloud", "--control-plane-url", server.URL, "--workspace", "ws_demo"}); err != nil {
 		t.Fatalf("cmdAuth(login browser flow) returned error: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestCmdOnboardUsesBrowserFlowShortcut(t *testing.T) {
 		return "afs_otk_onboard", nil
 	}
 
-	if err := cmdOnboard([]string{"--control-plane-url", server.URL}); err != nil {
+	if err := cmdOnboard([]string{"--cloud", "--control-plane-url", server.URL}); err != nil {
 		t.Fatalf("cmdOnboard() returned error: %v", err)
 	}
 

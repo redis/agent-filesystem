@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/redis/agent-filesystem/internal/uistatic"
+	"github.com/redis/agent-filesystem/internal/version"
 )
 
 type saveCheckpointHTTPResponse struct {
@@ -127,7 +128,7 @@ type spaFallbackHandler struct {
 }
 
 func (h *spaFallbackHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Route API requests to the admin mux.
+	// Route API requests to the admin mux. `/v1/` already covers /v1/version.
 	if strings.HasPrefix(r.URL.Path, "/v1/") || r.URL.Path == "/healthz" || r.URL.Path == "/install.sh" {
 		h.admin.ServeHTTP(w, r)
 		return
@@ -191,6 +192,14 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			auth = NewNoAuthHandler()
 		}
 		writeJSON(w, http.StatusOK, auth.RuntimeConfig(r))
+	})
+
+	mux.HandleFunc("/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		writeJSON(w, http.StatusOK, version.Get())
 	})
 
 	mux.HandleFunc("/v1/account", func(w http.ResponseWriter, r *http.Request) {

@@ -299,9 +299,22 @@ afs up`}</code>
           <tbody>
             <tr>
               <td>
+                <InlineCode>afs login</InlineCode>
+              </td>
+              <td>
+                Connect this CLI to a control plane (cloud or self-hosted).
+                Pass <InlineCode>--self-hosted</InlineCode> or{" "}
+                <InlineCode>--cloud</InlineCode> to force a mode.
+              </td>
+            </tr>
+            <tr>
+              <td>
                 <InlineCode>afs setup</InlineCode>
               </td>
-              <td>Interactive first-time configuration</td>
+              <td>
+                Interactive workspace + local path setup. Chains to{" "}
+                <InlineCode>afs login</InlineCode> on a fresh machine.
+              </td>
             </tr>
             <tr>
               <td>

@@ -21,6 +21,7 @@ const defaultAuthConfig: AFSAuthConfig = {
   provider: "none",
   signInRequired: false,
   authenticated: true,
+  productMode: "self-hosted",
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);

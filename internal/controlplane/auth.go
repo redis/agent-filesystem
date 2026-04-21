@@ -71,6 +71,7 @@ type authRuntimeConfigResponse struct {
 	Provider            string           `json:"provider"`
 	SignInRequired      bool             `json:"sign_in_required"`
 	Authenticated       bool             `json:"authenticated"`
+	ProductMode         string           `json:"product_mode"`
 	ClerkPublishableKey string           `json:"clerk_publishable_key,omitempty"`
 	User                *authRuntimeUser `json:"user,omitempty"`
 }
@@ -268,6 +269,7 @@ func (a *AuthHandler) RuntimeConfig(r *http.Request) authRuntimeConfigResponse {
 		Enabled:             a != nil && a.mode() != AuthModeNone,
 		Provider:            string(a.mode()),
 		SignInRequired:      a != nil && a.mode() != AuthModeNone,
+		ProductMode:         ProductModeFromEnv(),
 		ClerkPublishableKey: a.clerkPublishableKey(),
 	}
 	if identity, ok := AuthIdentityFromContext(r.Context()); ok {
@@ -466,7 +468,7 @@ func AuthIdentityFromContext(ctx context.Context) (AuthIdentity, bool) {
 
 func isPublicAuthPath(path string) bool {
 	switch path {
-	case "/healthz", "/v1/auth/config", "/v1/catalog/health", "/v1/auth/exchange", "/v1/cli", "/install.sh":
+	case "/healthz", "/v1/auth/config", "/v1/catalog/health", "/v1/auth/exchange", "/v1/cli", "/v1/version", "/install.sh":
 		return true
 	default:
 		return false

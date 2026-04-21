@@ -195,6 +195,48 @@ func TestAuthConfigEndpointIsPublic(t *testing.T) {
 	}
 }
 
+func TestAuthConfigReportsProductMode(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{Mode: AuthModeNone})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	// Default (unset env var) is self-hosted.
+	t.Setenv(ProductModeEnvVar, "")
+	body := fetchAuthConfig(t, server.URL)
+	if body.ProductMode != ProductModeSelfHosted {
+		t.Errorf("default product_mode = %q, want %q", body.ProductMode, ProductModeSelfHosted)
+	}
+
+	// Explicit cloud opt-in.
+	t.Setenv(ProductModeEnvVar, ProductModeCloud)
+	body = fetchAuthConfig(t, server.URL)
+	if body.ProductMode != ProductModeCloud {
+		t.Errorf("cloud product_mode = %q, want %q", body.ProductMode, ProductModeCloud)
+	}
+}
+
+func fetchAuthConfig(t *testing.T, baseURL string) authRuntimeConfigResponse {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/auth/config")
+	if err != nil {
+		t.Fatalf("GET /v1/auth/config returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var decoded authRuntimeConfigResponse
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		t.Fatalf("decode /v1/auth/config: %v", err)
+	}
+	return decoded
+}
+
 func TestClerkAuthProtectsAdminRoutes(t *testing.T) {
 	manager, _ := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{

@@ -32,7 +32,7 @@ export function ConnectAgentBanner({
   const displayName = workspaceLabel?.trim() || displayWorkspaceName(workspaceName);
   const mountPath = `~/afs/${canonicalWorkspaceName(workspaceName)}`;
   const downloadCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
-  const loginCmd = `afs onboard`;
+  const loginCmd = `afs login`;
   const syncCmd = `afs up`;
 
   const mcpConfig = JSON.stringify(
@@ -175,7 +175,7 @@ export function ConnectAgentBanner({
                 <StepDescription>
                   Prefer an MCP-native agent (Claude Desktop, Cursor,
                   Windsurf)? Add this to your agent's MCP config. You still
-                  need to install the CLI and run <code>afs onboard</code>{" "}
+                  need to install the CLI and run <code>afs login</code>{" "}
                   first.
                 </StepDescription>
                 <CodeContainer>

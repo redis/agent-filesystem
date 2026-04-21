@@ -32,6 +32,7 @@ import type {
   ImportLocalResponse,
   AFSAuthConfig,
   AFSAccount,
+  AFSServerVersion,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
@@ -63,6 +64,7 @@ type AFSClient = {
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   getAuthConfig: () => Promise<AFSAuthConfig>;
+  getServerVersion: () => Promise<AFSServerVersion>;
   getAccount: () => Promise<AFSAccount>;
   resetAccountData: () => Promise<AFSAccount>;
   deleteAccount: () => Promise<AFSAccount>;
@@ -266,6 +268,7 @@ type HTTPAuthConfig = {
   provider: string;
   sign_in_required: boolean;
   authenticated: boolean;
+  product_mode?: string;
   clerk_publishable_key?: string;
   user?: {
     subject: string;
@@ -1117,7 +1120,12 @@ This workspace was created from the AFS Web UI.
       provider: "none",
       signInRequired: false,
       authenticated: true,
+      productMode: "self-hosted",
     };
+  },
+
+  async getServerVersion() {
+    return { version: "demo" } satisfies AFSServerVersion;
   },
 
   async getAccount() {
@@ -1705,6 +1713,7 @@ const httpAFSClient: AFSClient = {
       provider: response.provider,
       signInRequired: response.sign_in_required,
       authenticated: response.authenticated,
+      productMode: response.product_mode === "cloud" ? "cloud" : "self-hosted",
       clerkPublishableKey: response.clerk_publishable_key,
       user: response.user == null ? undefined : {
         subject: response.user.subject,
@@ -1713,6 +1722,15 @@ const httpAFSClient: AFSClient = {
         groups: response.user.groups ?? [],
       },
     } as AFSAuthConfig;
+  },
+
+  async getServerVersion() {
+    const response = await requestJSON<{ version: string; commit?: string; build_date?: string }>("/version");
+    return {
+      version: response.version,
+      commit: response.commit,
+      buildDate: response.build_date,
+    } satisfies AFSServerVersion;
   },
 
   async getAccount() {

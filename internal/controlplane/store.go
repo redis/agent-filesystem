@@ -131,6 +131,14 @@ func NewStore(rdb *redis.Client) *Store {
 }
 
 func workspaceStorageID(meta WorkspaceMeta) string {
+	return WorkspaceStorageID(meta)
+}
+
+// WorkspaceStorageID returns the identifier used as the `{hashtag}` portion
+// of every Redis key for this workspace. Prefers the opaque ID (set by the
+// server for multi-tenant workspaces) and falls back to the name (legacy
+// local-mode workspaces that never had an opaque ID assigned).
+func WorkspaceStorageID(meta WorkspaceMeta) string {
 	if id := strings.TrimSpace(meta.ID); id != "" {
 		return id
 	}

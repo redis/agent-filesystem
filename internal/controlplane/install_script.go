@@ -88,15 +88,27 @@ case ":$PATH:" in
     ;;
 esac
 
+{{if eq .ProductMode "cloud"}}info "Installation complete."
+echo
+echo "Next:"
+echo "    afs login       # sign in and link this CLI to your account"
+echo "    afs up          # start syncing your current workspace"
+{{else}}info "Pointing CLI at ${CONTROL_PLANE}"
+if ! "$target" login --self-hosted --url "$CONTROL_PLANE" >/dev/null 2>&1; then
+  warn "Could not configure the CLI automatically. Run this later:"
+  echo "    afs login --self-hosted --url $CONTROL_PLANE"
+fi
+
 info "Installation complete."
 echo
 echo "Next:"
-echo "    afs onboard     # sign in and link this CLI to your account"
+echo "    afs setup       # pick a workspace and local path"
 echo "    afs up          # start syncing your current workspace"
-`
+{{end}}`
 
 type installScriptData struct {
-	BaseURL string
+	BaseURL     string
+	ProductMode string
 }
 
 func renderInstallScript(r *http.Request) (string, error) {
@@ -105,7 +117,11 @@ func renderInstallScript(r *http.Request) (string, error) {
 		return "", err
 	}
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, installScriptData{BaseURL: installScriptBaseURL(r)}); err != nil {
+	data := installScriptData{
+		BaseURL:     installScriptBaseURL(r),
+		ProductMode: ProductModeFromEnv(),
+	}
+	if err := tmpl.Execute(&buf, data); err != nil {
 		return "", err
 	}
 	return buf.String(), nil

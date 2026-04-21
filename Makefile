@@ -2,6 +2,17 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 NPM ?= npm
 UI_DIR ?= ui
+
+# Version metadata injected via ldflags. Tries git-describe for a tagged
+# release, falls back to the short SHA on a tagless checkout. Appends
+# `-dirty` when the worktree has uncommitted changes. Consumers can override
+# AFS_VERSION at make time to force a specific value, e.g. for CI tagging.
+AFS_VERSION := $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
+AFS_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null)
+AFS_BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+VERSION_LDFLAGS := -X github.com/redis/agent-filesystem/internal/version.Version=$(AFS_VERSION) \
+                   -X github.com/redis/agent-filesystem/internal/version.Commit=$(AFS_COMMIT) \
+                   -X github.com/redis/agent-filesystem/internal/version.BuildDate=$(AFS_BUILD_DATE)
 WEB_DEV_SCRIPT := scripts/web-dev.sh
 UI_NODE_MODULES := $(UI_DIR)/node_modules
 AFS_WEB_SERVER_ADDR ?= 127.0.0.1:8091
@@ -57,14 +68,14 @@ commands: ## Build the afs and afs-control-plane binaries.
 commands: afs afs-control-plane
 
 afs: ## Build the afs CLI binary.
-	go build -o afs ./cmd/afs
+	go build -ldflags "$(VERSION_LDFLAGS)" -o afs ./cmd/afs
 
 afs-control-plane: ## Build the HTTP control-plane binary (with embedded UI).
 afs-control-plane: embed-ui
-	go build -o afs-control-plane ./cmd/afs-control-plane
+	go build -ldflags "$(VERSION_LDFLAGS)" -o afs-control-plane ./cmd/afs-control-plane
 
 afs-control-plane-noui: ## Build the control-plane binary without embedded UI.
-	go build -o afs-control-plane ./cmd/afs-control-plane
+	go build -ldflags "$(VERSION_LDFLAGS)" -o afs-control-plane ./cmd/afs-control-plane
 
 install: ## Symlink ./afs into $(BINDIR).
 install: afs

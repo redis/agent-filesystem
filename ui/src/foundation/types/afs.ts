@@ -11,14 +11,23 @@ export type AFSAuthUser = {
   groups?: string[];
 };
 
+export type AFSProductMode = "cloud" | "self-hosted";
+
 export type AFSAuthConfig = {
   mode: AFSAuthMode;
   enabled: boolean;
   provider: string;
   signInRequired: boolean;
   authenticated: boolean;
+  productMode: AFSProductMode;
   clerkPublishableKey?: string;
   user?: AFSAuthUser;
+};
+
+export type AFSServerVersion = {
+  version: string;
+  commit?: string;
+  buildDate?: string;
 };
 
 export type AFSAccount = {

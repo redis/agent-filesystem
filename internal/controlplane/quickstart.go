@@ -35,6 +35,17 @@ type QuickstartResponse struct {
 	Workspace   workspaceDetail `json:"workspace"`
 }
 
+// SeedGettingStarted ensures a `getting-started` workspace exists on the
+// control plane, creating a default database if needed. It is idempotent and
+// safe to call on every boot: if the workspace already exists (from an
+// earlier boot or a prior Quickstart call), it returns without mutating
+// anything. Intended for self-hosted deployments so a fresh `afs login
+// --self-hosted` lands the user on a usable workspace without manual setup.
+func (m *DatabaseManager) SeedGettingStarted(ctx context.Context) error {
+	_, err := m.Quickstart(ctx, QuickstartRequest{})
+	return err
+}
+
 // Quickstart creates a database connection and a workspace pre-populated with
 // sample content in a single call. It is designed for first-time onboarding.
 func (m *DatabaseManager) Quickstart(ctx context.Context, input QuickstartRequest) (QuickstartResponse, error) {

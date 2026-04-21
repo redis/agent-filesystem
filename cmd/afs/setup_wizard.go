@@ -17,8 +17,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// cmdSetup runs the interactive configuration wizard and writes the config
-// file, but deliberately does not start services.
+// cmdSetup walks the user through workspace selection, mode (sync/mount), and
+// local path configuration. It assumes `afs login` has already connected the
+// CLI to a control plane (cloud or self-hosted) — if not, it invokes the
+// login flow inline so a single `afs setup` on a fresh machine still works.
+// It deliberately does not start services.
 func cmdSetup() error {
 	if st, err := loadState(); err == nil {
 		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
@@ -28,9 +31,6 @@ func cmdSetup() error {
 
 	printBanner()
 
-	fmt.Println("  " + clr(ansiDim, "AFS stores workspace state in Redis and can optionally expose"))
-	fmt.Println("  " + clr(ansiDim, "a mounted filesystem for tools that need one."))
-	fmt.Println()
 	cfg := defaultConfig()
 	firstRun := true
 	if loaded, err := loadConfig(); err == nil {
@@ -39,6 +39,28 @@ func cmdSetup() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+
+	// If the CLI isn't pointed at a control plane yet, run login inline so a
+	// fresh `afs setup` doesn't dead-end. Local-mode configs skip this — they
+	// don't need a control plane and keep the Redis-only flow below.
+	if needsLoginBeforeSetup(cfg) {
+		fmt.Println("  " + clr(ansiDim, "No control plane configured yet — let's connect first."))
+		fmt.Println()
+		if err := cmdLogin(nil); err != nil {
+			return err
+		}
+		reloaded, err := loadConfig()
+		if err != nil {
+			return err
+		}
+		cfg = reloaded
+		firstRun = false
+		fmt.Println()
+	}
+
+	fmt.Println("  " + clr(ansiDim, "AFS stores workspace state in Redis and can optionally expose"))
+	fmt.Println("  " + clr(ansiDim, "a mounted filesystem for tools that need one."))
+	fmt.Println()
 	if firstRun {
 		fmt.Println("  " + clr(ansiBold, "Let's get you set up."))
 	} else {
@@ -172,16 +194,34 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	}
 }
 
+// needsLoginBeforeSetup returns true when the saved config does not yet point
+// at a control plane. Local mode is explicitly exempt — it intentionally has
+// no URL and is a valid "configured" state for setup to proceed against.
+func needsLoginBeforeSetup(cfg config) bool {
+	mode := strings.TrimSpace(cfg.ProductMode)
+	if mode == productModeLocal || mode == legacyProductModeDirect {
+		return false
+	}
+	if mode == productModeSelfHosted || mode == productModeCloud {
+		return strings.TrimSpace(cfg.URL) == ""
+	}
+	// Empty product mode AND empty URL — truly fresh install.
+	return strings.TrimSpace(cfg.URL) == ""
+}
+
 func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
 	// First-run default is sync, so a user who just blows through with Enter
 	// ends up on the recommended path.
 	if strings.TrimSpace(cfg.Mode) == "" {
 		cfg.Mode = modeSync
 	}
-	if err := promptConfigurationSetup(r, out, &cfg); err != nil {
+	if err := promptModeSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
-	if err := promptModeSetup(r, out, &cfg); err != nil {
+	// Configure the backend appropriate for this product mode. `afs login`
+	// already picked cloud vs self-hosted and set cfg.URL, so self-hosted /
+	// cloud modes only need a workspace; local mode still needs Redis details.
+	if err := setupWizardBackend(r, out, &cfg); err != nil {
 		return cfg, err
 	}
 	mode, err := effectiveMode(cfg)
@@ -200,25 +240,43 @@ func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 	return cfg, nil
 }
 
-func promptConfigurationSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	if err := promptConnectionSetup(r, out, cfg); err != nil {
-		return err
-	}
-	return promptBackendSetup(r, out, cfg)
-}
-
-func promptConfigurationSetupForEdit(r *bufio.Reader, out io.Writer, cfg *config) error {
-	if err := promptConnectionSetup(r, out, cfg); err != nil {
-		return err
-	}
+// setupWizardBackend dispatches to the right per-mode setup step. Unlike the
+// older promptBackendSetup it does NOT re-prompt for the control plane URL —
+// that's `afs login`'s job.
+func setupWizardBackend(r *bufio.Reader, out io.Writer, cfg *config) error {
 	connection, err := effectiveProductMode(*cfg)
 	if err != nil {
 		return err
 	}
-	if connection == productModeLocal {
+	switch connection {
+	case productModeLocal:
+		return promptRedisSetup(r, out, cfg)
+	case productModeSelfHosted:
+		return promptWorkspaceSetupWithConfiguredControlPlane(r, out, cfg)
+	case productModeCloud:
+		// Cloud login already set DatabaseID + CurrentWorkspace from the token
+		// exchange, so setup has nothing to ask here.
 		return nil
+	default:
+		return fmt.Errorf("unknown product mode %q", connection)
 	}
-	return promptBackendSetup(r, out, cfg)
+}
+
+// promptConfigurationSetupForEdit is kept for the edit-menu option "Change
+// configuration source". It no longer re-prompts for connection details
+// (cloud vs self-hosted vs local, URL) — that's `afs login`'s job. Instead it
+// points the user at the right command and returns.
+func promptConfigurationSetupForEdit(r *bufio.Reader, out io.Writer, cfg *config) error {
+	bin := filepath.Base(os.Args[0])
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Switching connection"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  Connection mode + control plane URL are now managed by:")
+	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" login --cloud")+clr(ansiDim, "         sign in to AFS Cloud"))
+	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" login --self-hosted")+clr(ansiDim, "   point at your own control plane"))
+	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" auth logout")+clr(ansiDim, "           drop back to local-only mode"))
+	fmt.Fprintln(out)
+	return nil
 }
 
 func setupRedisConnectionLabel(cfg config) string {
@@ -238,51 +296,6 @@ func setupConnectionLabel(cfg config) string {
 		return "unknown"
 	}
 	return productModeDisplayLabel(connection)
-}
-
-func promptConnectionSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "How AFS Is Configured"))
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  AFS can run entirely on this machine, against your own hosted control plane,")
-	fmt.Fprintln(out, "  or against the hosted AFS Cloud control plane.")
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Local")+" "+clr(ansiDim, "   — local-only mode using afs.config.json on this machine"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self Managed")+" "+clr(ansiDim, " — configuration comes from your own control plane"))
-	fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  "+clr(ansiBold, "Cloud Managed")+" "+clr(ansiDim, " — sign in through the hosted AFS Cloud service"))
-	fmt.Fprintln(out)
-
-	current, err := effectiveProductMode(*cfg)
-	if err != nil {
-		current = productModeLocal
-	}
-	def := "1"
-	switch current {
-	case productModeSelfHosted:
-		def = "2"
-	case productModeCloud:
-		def = "3"
-	}
-
-	choice, err := promptString(r, out, "  Choose", def)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintln(out)
-
-	switch strings.TrimSpace(strings.ToLower(choice)) {
-	case "1", "", productModeLocal, legacyProductModeDirect:
-		cfg.ProductMode = productModeLocal
-	case "2", "managed", "selfmanaged", "self managed", "self-managed", productModeSelfHosted, "selfhosted", "self hosted":
-		cfg.ProductMode = productModeSelfHosted
-		cfg.Mode = modeSync
-	case "3", "cloudmanaged", "cloud managed", "cloud-managed", productModeCloud:
-		cfg.ProductMode = productModeCloud
-		cfg.Mode = modeSync
-	default:
-		fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; keeping ")+clr(ansiBold, current))
-		fmt.Fprintln(out)
-	}
-	return nil
 }
 
 func setupLocalModeLabel(cfg config) string {
@@ -401,23 +414,6 @@ func promptRedisSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	return promptWorkspaceSetupWithConfiguredLocalRedis(r, out, cfg)
 }
 
-func promptBackendSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	connection, err := effectiveProductMode(*cfg)
-	if err != nil {
-		return err
-	}
-	switch connection {
-	case productModeLocal:
-		return promptRedisSetup(r, out, cfg)
-	case productModeSelfHosted:
-		return promptControlPlaneSetup(r, out, cfg)
-	case productModeCloud:
-		return promptCloudManagedSetup(r, out, cfg)
-	default:
-		return fmt.Errorf("unknown connection %q", connection)
-	}
-}
-
 func promptWorkspaceSetupWithConfiguredLocalRedis(r *bufio.Reader, out io.Writer, cfg *config) error {
 	store, closeStore, err := connectSetupStore(out, *cfg)
 	if err != nil {
@@ -433,67 +429,6 @@ func promptWorkspaceSetupWithConfiguredLocalRedis(r *bufio.Reader, out io.Writer
 	return nil
 }
 
-func promptControlPlaneSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Control Plane"))
-	fmt.Fprintln(out)
-
-	defaultURL := strings.TrimSpace(cfg.URL)
-	if defaultURL == "" {
-		defaultURL = "http://127.0.0.1:8091"
-	}
-	entered, err := promptString(r, out,
-		"  Control plane URL\n"+
-			"  "+clr(ansiDim, "Example: http://127.0.0.1:8091"), defaultURL)
-	if err != nil {
-		return err
-	}
-	normalized, err := normalizeControlPlaneURL(entered)
-	if err != nil {
-		return err
-	}
-	cfg.URL = normalized
-
-	client, resolvedDatabaseID, closeClient, err := connectSetupControlPlane(out, *cfg)
-	if err != nil {
-		return err
-	}
-	defer closeClient()
-	cfg.DatabaseID = resolvedDatabaseID
-
-	if err := promptWorkspaceSelectionSetup(r, out, cfg, client); err != nil {
-		return err
-	}
-	applySuggestedWorkspaceLocalPath(cfg)
-	return nil
-}
-
-func promptCloudManagedSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "AFS Cloud"))
-	fmt.Fprintln(out)
-
-	defaultURL := strings.TrimSpace(cfg.URL)
-	entered, err := promptString(r, out,
-		"  AFS Cloud URL\n"+
-			"  "+clr(ansiDim, "Example: https://agentfilesystem.vercel.app"), defaultURL)
-	if err != nil {
-		return err
-	}
-	normalized, err := normalizeControlPlaneURL(entered)
-	if err != nil {
-		return err
-	}
-
-	cfg.URL = normalized
-	cfg.DatabaseID = ""
-	cfg.CurrentWorkspace = ""
-	cfg.CurrentWorkspaceID = ""
-
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  "+clr(ansiDim, "Next: run browser login, then choose a workspace in AFS Cloud."))
-	fmt.Fprintln(out, "  "+clr(ansiDim, "Example: ")+clr(ansiBold, filepath.Base(os.Args[0])+" onboard"))
-	fmt.Fprintln(out)
-	return nil
-}
 
 func connectSetupStore(out io.Writer, cfg config) (*afsStore, func(), error) {
 	fmt.Fprintln(out)

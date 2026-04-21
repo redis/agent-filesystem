@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/version"
 )
 
 func main() {
@@ -22,6 +24,18 @@ func main() {
 	}
 	defer manager.Close()
 
+	// On self-hosted boot, ensure a `getting-started` workspace exists so a
+	// fresh `afs login --self-hosted && afs setup` lands the user on a usable
+	// workspace without any manual create step. Idempotent; cloud deploys opt
+	// out via AFS_SEED_GETTING_STARTED=0 (Vercel entrypoint sets this).
+	if controlplane.ShouldSeedGettingStarted() {
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := manager.SeedGettingStarted(seedCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "warn: seed getting-started workspace:", err)
+		}
+		seedCancel()
+	}
+
 	auth, err := controlplane.LoadAuthHandlerFromEnv()
 	if err != nil {
 		fatal(err)
@@ -32,7 +46,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	fmt.Fprintf(os.Stderr, "AFS control plane listening on http://%s\n", *listenAddr)
+	fmt.Fprintf(os.Stderr, "AFS control plane %s — listening on http://%s\n", version.String(), *listenAddr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fatal(err)
 	}
