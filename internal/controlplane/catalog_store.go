@@ -31,6 +31,8 @@ type catalogStore interface {
 	DeleteDatabaseWorkspaces(ctx context.Context, databaseID string) error
 	PruneDatabases(ctx context.Context, keep []string) error
 	ListWorkspaces(ctx context.Context) ([]workspaceSummary, error)
+	ListWorkspaceOwners(ctx context.Context, databaseID string) (map[string]catalogOwnerInfo, error)
+	CountWorkspacesForOwner(ctx context.Context, databaseID, ownerSubject string) (int, error)
 	ResolveWorkspace(ctx context.Context, workspace string) ([]workspaceCatalogRoute, error)
 	ResolveWorkspaceInDatabase(ctx context.Context, databaseID, workspace string) (workspaceCatalogRoute, error)
 

@@ -1438,6 +1438,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusNotImplemented
 	case errors.Is(err, ErrOnboardingTokenInvalid):
 		status = http.StatusUnauthorized
+	case errors.Is(err, ErrFreeTierLimitReached):
+		status = http.StatusPaymentRequired
 	case strings.Contains(strings.ToLower(err.Error()), "already exists"):
 		status = http.StatusConflict
 	case strings.Contains(strings.ToLower(err.Error()), "invalid"),

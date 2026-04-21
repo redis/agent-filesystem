@@ -270,6 +270,30 @@ func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSu
 	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, c.rebind, existingByName, item)
 }
 
+func (c *workspaceCatalog) ListWorkspaceOwners(ctx context.Context, databaseID string) (map[string]catalogOwnerInfo, error) {
+	if c == nil || c.db == nil {
+		return map[string]catalogOwnerInfo{}, nil
+	}
+	return catalogOwnersByName(ctx, c.db, c.rebind, databaseID)
+}
+
+func (c *workspaceCatalog) CountWorkspacesForOwner(ctx context.Context, databaseID, ownerSubject string) (int, error) {
+	if c == nil || c.db == nil {
+		return 0, nil
+	}
+	row := c.db.QueryRowContext(
+		ctx,
+		c.rebind(`SELECT COUNT(*) FROM workspace_catalog WHERE database_id = ? AND owner_subject = ?`),
+		strings.TrimSpace(databaseID),
+		strings.TrimSpace(ownerSubject),
+	)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 func (c *workspaceCatalog) DeleteWorkspace(ctx context.Context, databaseID, workspaceID string) error {
 	_, err := c.execContext(ctx, `DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`, strings.TrimSpace(databaseID), strings.TrimSpace(workspaceID))
 	return err
@@ -451,6 +475,37 @@ func catalogRoutesByName(ctx context.Context, queryer interface {
 	return routes, rows.Err()
 }
 
+type catalogOwnerInfo struct {
+	Subject string
+	Label   string
+}
+
+func catalogOwnersByName(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, rebind func(string) string, databaseID string) (map[string]catalogOwnerInfo, error) {
+	rows, err := queryer.QueryContext(
+		ctx,
+		rebind(`SELECT name, owner_subject, owner_label
+		 FROM workspace_catalog
+		 WHERE database_id = ?`),
+		strings.TrimSpace(databaseID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	owners := make(map[string]catalogOwnerInfo)
+	for rows.Next() {
+		var name, subject, label string
+		if err := rows.Scan(&name, &subject, &label); err != nil {
+			return nil, err
+		}
+		owners[name] = catalogOwnerInfo{Subject: subject, Label: label}
+	}
+	return owners, rows.Err()
+}
+
 func upsertCatalogWorkspaceSummary(
 	ctx context.Context,
 	execer interface {
@@ -620,8 +675,8 @@ const workspaceCatalogUpsertSQL = `INSERT INTO workspace_catalog (
 ON CONFLICT(database_id, workspace_id) DO UPDATE SET
 	name = excluded.name,
 	database_name = excluded.database_name,
-	owner_subject = excluded.owner_subject,
-	owner_label = excluded.owner_label,
+	owner_subject = CASE WHEN excluded.owner_subject = '' THEN workspace_catalog.owner_subject ELSE excluded.owner_subject END,
+	owner_label = CASE WHEN excluded.owner_label = '' THEN workspace_catalog.owner_label ELSE excluded.owner_label END,
 	database_management_type = excluded.database_management_type,
 	cloud_account = excluded.cloud_account,
 	redis_key = excluded.redis_key,

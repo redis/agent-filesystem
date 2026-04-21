@@ -18,6 +18,9 @@ import {
   TextInput,
 } from "../components/afs-kit";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
+import { FreeTierLimitDialog } from "../components/free-tier-limit-dialog";
+
+const FREE_TIER_WORKSPACE_LIMIT = 3;
 import {
   agentsQueryOptions,
   useCreateWorkspaceMutation,
@@ -217,6 +220,11 @@ function workspaceEligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
   return databases.filter((database) => database.canCreateWorkspaces);
 }
 
+function isFreeTierLimitError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("free tier workspace limit");
+}
+
 function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
   const eligible = workspaceEligibleDatabases(databases);
   return eligible.find((database) => database.isDefault) ?? eligible[0] ?? null;
@@ -258,6 +266,7 @@ function WorkspacesPage() {
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceSummary | null>(null);
+  const [freeTierDialogOpen, setFreeTierDialogOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
     createInitialFormState(preferredDatabase(databases)),
@@ -312,6 +321,14 @@ function WorkspacesPage() {
   const showStarterConnectPanel = starterWorkspace != null &&
     (connectedAgentsByWorkspace[workspaceRowKey(starterWorkspace.id)] ?? 0) === 0;
 
+  // Free-tier quota: shared onboarding DB caps each user at 3 workspaces.
+  const onboardingDb = databases.find((db) => db.purpose === "onboarding") ?? null;
+  const freeTierUsed = onboardingDb
+    ? workspaces.filter((ws) => ws.databaseId === onboardingDb.id).length
+    : 0;
+  const onlyHasOnboardingDb = databases.length === 1 && onboardingDb != null;
+  const freeTierExhausted = onlyHasOnboardingDb && freeTierUsed >= FREE_TIER_WORKSPACE_LIMIT;
+
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
@@ -334,6 +351,10 @@ function WorkspacesPage() {
   }
 
   function openCreateDialog() {
+    if (freeTierExhausted) {
+      setFreeTierDialogOpen(true);
+      return;
+    }
     if (eligibleDatabases.length === 0) {
       void navigate({ to: "/databases" });
       return;
@@ -455,9 +476,16 @@ function WorkspacesPage() {
             : null
         }
         toolbarAction={(
-          <Button size="medium" onClick={openCreateDialog} disabled={eligibleDatabases.length === 0}>
-            Add workspace
-          </Button>
+          <ToolbarActions>
+            {onboardingDb != null && (
+              <FreeTierChip $exhausted={freeTierExhausted} title="Free tier: 3 workspaces on AFS Cloud">
+                {freeTierUsed} / {FREE_TIER_WORKSPACE_LIMIT} free
+              </FreeTierChip>
+            )}
+            <Button size="medium" onClick={openCreateDialog}>
+              Add workspace
+            </Button>
+          </ToolbarActions>
         )}
         onOpenWorkspace={openWorkspace}
         onPreviewWorkspace={previewWorkspace}
@@ -559,6 +587,11 @@ function WorkspacesPage() {
                         closeDialog();
                       },
                       onError: (error) => {
+                        if (isFreeTierLimitError(error)) {
+                          closeDialog();
+                          setFreeTierDialogOpen(true);
+                          return;
+                        }
                         setFormError(
                           mutationErrorMessage(
                             error,
@@ -718,6 +751,13 @@ function WorkspacesPage() {
           onClose={() => setOnboardingWorkspace(null)}
         />
       ) : null}
+
+      <FreeTierLimitDialog
+        open={freeTierDialogOpen}
+        used={freeTierUsed}
+        limit={FREE_TIER_WORKSPACE_LIMIT}
+        onClose={() => setFreeTierDialogOpen(false)}
+      />
     </PageStack>
   );
 }
@@ -754,6 +794,28 @@ const FieldHint = styled.span`
   font-size: 12px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;
+`;
+
+const ToolbarActions = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+`;
+
+const FreeTierChip = styled.span<{ $exhausted?: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: ${(p) =>
+    p.$exhausted
+      ? "#fef2f2"
+      : "color-mix(in srgb, var(--afs-accent) 10%, transparent)"};
+  color: ${(p) => (p.$exhausted ? "#b91c1c" : "var(--afs-accent, #2563eb)")};
+  white-space: nowrap;
 `;
 
 const GettingStartedPanel = styled.div`

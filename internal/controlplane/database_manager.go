@@ -88,7 +88,16 @@ const (
 	databaseManagementUserManaged   = "user-managed"
 	databasePurposeGeneral          = "general"
 	databasePurposeOnboarding       = "onboarding"
+
+	// freeTierWorkspaceLimit is the maximum number of workspaces a single user
+	// may own on the shared onboarding database (free tier).
+	freeTierWorkspaceLimit = 3
 )
+
+// ErrFreeTierLimitReached is returned when a user attempts to create a
+// workspace on the shared onboarding database after reaching their free
+// tier quota.
+var ErrFreeTierLimitReached = errors.New("free tier workspace limit reached")
 
 type databaseRuntime struct {
 	cfg     Config
@@ -680,8 +689,8 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	if err != nil {
 		return workspaceDetail{}, err
 	}
-	if !databaseProfileCanCreateWorkspaces(profile) {
-		return workspaceDetail{}, fmt.Errorf("database %q is reserved for onboarding and cannot host new workspaces", profile.Name)
+	if err := m.enforceFreeTierQuotaLocked(ctx, profile); err != nil {
+		return workspaceDetail{}, err
 	}
 	input.DatabaseID = profile.ID
 	input.DatabaseName = profile.Name
@@ -691,6 +700,15 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	detail, err := service.CreateWorkspace(ctx, input)
 	if err != nil {
 		return workspaceDetail{}, err
+	}
+	// On shared databases, attach per-user ownership before the catalog sync
+	// so the new workspace counts toward the requesting user's free-tier
+	// quota (and is visible to them, not other users).
+	if strings.TrimSpace(profile.OwnerSubject) == "" {
+		if subject := authSubjectFromContext(ctx); subject != "" {
+			detail.OwnerSubject = subject
+			detail.OwnerLabel = authIdentityLabelFromContext(ctx)
+		}
 	}
 	if err := m.attachWorkspaceDetailIdentity(ctx, &detail, profile); err != nil {
 		return workspaceDetail{}, err
@@ -703,10 +721,34 @@ func (m *DatabaseManager) CreateResolvedWorkspace(ctx context.Context, input cre
 	if err != nil {
 		return workspaceDetail{}, err
 	}
-	if !databaseProfileCanCreateWorkspaces(profile) {
-		return workspaceDetail{}, fmt.Errorf("database %q is reserved for onboarding and cannot host new workspaces", profile.Name)
-	}
 	return m.CreateWorkspace(ctx, profile.ID, input)
+}
+
+// enforceFreeTierQuotaLocked checks whether the requesting user is allowed to
+// create another workspace on the given database. Shared onboarding databases
+// cap each user at freeTierWorkspaceLimit workspaces. Owned databases have no
+// quota.
+func (m *DatabaseManager) enforceFreeTierQuotaLocked(ctx context.Context, profile databaseProfile) error {
+	if normalizedDatabasePurpose(profile.Purpose) != databasePurposeOnboarding {
+		return nil
+	}
+	if m.catalog == nil {
+		return nil
+	}
+	subject := authSubjectFromContext(ctx)
+	if subject == "" {
+		// Without an authenticated user we can't attribute the quota; let the
+		// request through (legacy/local-dev behaviour).
+		return nil
+	}
+	count, err := m.catalog.CountWorkspacesForOwner(ctx, profile.ID, subject)
+	if err != nil {
+		return err
+	}
+	if count >= freeTierWorkspaceLimit {
+		return ErrFreeTierLimitReached
+	}
+	return nil
 }
 
 func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
@@ -1347,6 +1389,31 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 		}
 		return nil, databaseProfile{}, err
 	}
+
+	// For shared databases (no profile owner), attach per-workspace ownership
+	// from the catalog so subsequent stamping/syncing preserves it. Workspaces
+	// with no existing catalog row are claimed by the requesting user — this
+	// is how new free-tier workspaces become owned at first list.
+	subject := authSubjectFromContext(ctx)
+	sharedDB := strings.TrimSpace(profile.OwnerSubject) == ""
+	if sharedDB && m.catalog != nil {
+		owners, ownerErr := m.catalog.ListWorkspaceOwners(ctx, profile.ID)
+		if ownerErr == nil {
+			for index := range response.Items {
+				name := response.Items[index].Name
+				if existing, ok := owners[name]; ok && strings.TrimSpace(existing.Subject) != "" {
+					response.Items[index].OwnerSubject = existing.Subject
+					response.Items[index].OwnerLabel = existing.Label
+					continue
+				}
+				if subject != "" {
+					response.Items[index].OwnerSubject = subject
+					response.Items[index].OwnerLabel = authIdentityLabelFromContext(ctx)
+				}
+			}
+		}
+	}
+
 	for index := range response.Items {
 		stampWorkspaceSummary(&response.Items[index], profile)
 	}
@@ -1357,6 +1424,17 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 			return nil, databaseProfile{}, err
 		}
 		_ = m.catalog.RecordWorkspaceRefresh(ctx, profile.ID, profile.Name, time.Now().UTC(), nil)
+		// Filter shared-DB results to the requesting user. Owned databases
+		// already enforce visibility at the database level.
+		if sharedDB && subject != "" {
+			filtered := make([]workspaceSummary, 0, len(synced))
+			for _, item := range synced {
+				if strings.TrimSpace(item.OwnerSubject) == subject {
+					filtered = append(filtered, item)
+				}
+			}
+			return filtered, profile, nil
+		}
 		return synced, profile, nil
 	}
 	return response.Items, profile, nil
@@ -1809,8 +1887,14 @@ func uniqueDatabaseIDLocked(existing map[string]databaseProfile, profile databas
 func stampWorkspaceSummary(summary *workspaceSummary, profile databaseProfile) {
 	summary.DatabaseID = profile.ID
 	summary.DatabaseName = profile.Name
-	summary.OwnerSubject = profile.OwnerSubject
-	summary.OwnerLabel = profile.OwnerLabel
+	// For owned databases (user-managed), workspaces inherit the database
+	// owner. For shared databases (no profile owner), preserve any existing
+	// per-workspace owner that the caller already populated (e.g. from the
+	// catalog) so we don't overwrite per-user ownership during list calls.
+	if v := strings.TrimSpace(profile.OwnerSubject); v != "" {
+		summary.OwnerSubject = v
+		summary.OwnerLabel = profile.OwnerLabel
+	}
 	summary.DatabaseManagementType = normalizedDatabaseManagementType(profile.ManagementType)
 	summary.DatabaseCanEdit = databaseProfileCanEdit(profile)
 	summary.DatabaseCanDelete = databaseProfileCanDelete(profile)
@@ -1876,8 +1960,13 @@ func (m *DatabaseManager) effectiveDefaultDatabaseIDLocked(subject string) strin
 func stampWorkspaceDetail(detail *workspaceDetail, profile databaseProfile) {
 	detail.DatabaseID = profile.ID
 	detail.DatabaseName = profile.Name
-	detail.OwnerSubject = profile.OwnerSubject
-	detail.OwnerLabel = profile.OwnerLabel
+	// Same per-user-owner preservation as stampWorkspaceSummary — owned
+	// databases stamp their owner; shared databases keep whatever owner the
+	// caller already attached.
+	if v := strings.TrimSpace(profile.OwnerSubject); v != "" {
+		detail.OwnerSubject = v
+		detail.OwnerLabel = profile.OwnerLabel
+	}
 	detail.DatabaseManagementType = normalizedDatabaseManagementType(profile.ManagementType)
 	detail.DatabaseCanEdit = databaseProfileCanEdit(profile)
 	detail.DatabaseCanDelete = databaseProfileCanDelete(profile)
@@ -1914,7 +2003,13 @@ func databaseProfileCanDelete(profile databaseProfile) bool {
 }
 
 func databaseProfileCanCreateWorkspaces(profile databaseProfile) bool {
-	return normalizedDatabasePurpose(profile.Purpose) != databasePurposeOnboarding
+	// Free-tier quotas are enforced at create time (per-user) rather than as
+	// a blanket block on onboarding databases. The UI uses this flag to
+	// decide whether the "Add workspace" button is enabled, so we always
+	// return true and let the create handler reject quota violations with
+	// ErrFreeTierLimitReached.
+	_ = profile
+	return true
 }
 
 func ownerSubjectForDatabaseProfile(ctx context.Context, isNew bool, existing databaseProfile) string {
@@ -1982,6 +2077,20 @@ func authSubjectFromContext(ctx context.Context) string {
 		return strings.TrimSpace(identity.Subject)
 	}
 	return ""
+}
+
+func authIdentityLabelFromContext(ctx context.Context) string {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok {
+		return ""
+	}
+	if v := strings.TrimSpace(identity.Name); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(identity.Email); v != "" {
+		return v
+	}
+	return strings.TrimSpace(identity.Subject)
 }
 
 func databaseProfileVisibleToSubject(profile databaseProfile, subject string) bool {

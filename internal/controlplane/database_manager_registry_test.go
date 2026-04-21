@@ -106,8 +106,8 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	if record.CanDelete {
 		t.Fatal("record.CanDelete = true, want false")
 	}
-	if record.CanCreateWorkspaces {
-		t.Fatal("record.CanCreateWorkspaces = true, want false")
+	if !record.CanCreateWorkspaces {
+		t.Fatal("record.CanCreateWorkspaces = false, want true (free-tier quota gates creation, not the flag)")
 	}
 	if record.OwnerLabel != "Getting Started" {
 		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "Getting Started")
@@ -167,12 +167,15 @@ func TestManagedDatabaseCannotBeEditedOrDeleted(t *testing.T) {
 		t.Fatalf("DeleteDatabase(managed) error = %v, want managed delete rejection", err)
 	}
 
-	_, err = manager.CreateWorkspace(context.Background(), "afs-cloud", createWorkspaceRequest{
-		Name:   "blocked",
+	// CreateWorkspace on the onboarding database is no longer hard-blocked;
+	// free-tier quota is enforced per-user at create time instead. With no
+	// auth context (and no catalog quota check), an unauthenticated create
+	// should succeed.
+	if _, err = manager.CreateWorkspace(context.Background(), "afs-cloud", createWorkspaceRequest{
+		Name:   "free-tier-allowed",
 		Source: sourceRef{Kind: SourceBlank},
-	})
-	if err == nil || !strings.Contains(err.Error(), "reserved for onboarding") {
-		t.Fatalf("CreateWorkspace(onboarding) error = %v, want onboarding rejection", err)
+	}); err != nil {
+		t.Fatalf("CreateWorkspace(onboarding, no-auth) returned error: %v", err)
 	}
 }
 
