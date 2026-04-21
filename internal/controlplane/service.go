@@ -713,7 +713,12 @@ func (s *Service) listWorkspaceSessionsFromCatalog(ctx context.Context, workspac
 		return nil, false, err
 	}
 	items := make([]workspaceSessionInfo, 0, len(records))
+	now := time.Now().UTC()
 	for _, record := range records {
+		if sessionCatalogRecordLeaseExpired(record, now) {
+			_ = s.catalog.UpsertSession(ctx, staleSessionCatalogRecord(record, now, "expired"))
+			continue
+		}
 		items = append(items, workspaceSessionInfo{
 			SessionID:       record.SessionID,
 			Workspace:       defaultString(record.WorkspaceName, meta.Name),

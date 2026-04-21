@@ -1042,6 +1042,10 @@ func (m *DatabaseManager) ListResolvedWorkspaceSessions(ctx context.Context, wor
 }
 
 func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID string) (workspaceSessionListResponse, error) {
+	if err := m.reconcileListedAgentSessions(ctx, databaseID); err != nil {
+		return workspaceSessionListResponse{}, err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1055,8 +1059,13 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 		return workspaceSessionListResponse{}, err
 	}
 
+	now := time.Now().UTC()
 	items := make([]workspaceSessionInfo, 0, len(records))
 	for _, record := range records {
+		if sessionCatalogRecordLeaseExpired(record, now) {
+			_ = m.catalog.UpsertSession(ctx, staleSessionCatalogRecord(record, now, "expired"))
+			continue
+		}
 		profile, ok := m.profiles[record.DatabaseID]
 		if !ok {
 			continue
@@ -1089,6 +1098,74 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 	}
 
 	return workspaceSessionListResponse{Items: items}, nil
+}
+
+func (m *DatabaseManager) reconcileListedAgentSessions(ctx context.Context, databaseID string) error {
+	m.mu.Lock()
+	catalog := m.catalog
+	profiles := make(map[string]databaseProfile, len(m.profiles))
+	for id, profile := range m.profiles {
+		profiles[id] = profile
+	}
+	m.mu.Unlock()
+
+	if catalog == nil {
+		return nil
+	}
+
+	targetDatabaseID := strings.TrimSpace(databaseID)
+	subject := authSubjectFromContext(ctx)
+	targets, err := catalog.ListSessionReconcileTargets(ctx)
+	if err != nil {
+		return err
+	}
+
+	workspacesByDatabase := make(map[string][]string)
+	for _, target := range targets {
+		resolvedDatabaseID := strings.TrimSpace(target.DatabaseID)
+		workspace := strings.TrimSpace(target.WorkspaceName)
+		if resolvedDatabaseID == "" || workspace == "" {
+			continue
+		}
+		if targetDatabaseID != "" && resolvedDatabaseID != targetDatabaseID {
+			continue
+		}
+		profile, ok := profiles[resolvedDatabaseID]
+		if !ok || !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
+		workspacesByDatabase[resolvedDatabaseID] = append(workspacesByDatabase[resolvedDatabaseID], workspace)
+	}
+
+	databaseIDs := make([]string, 0, len(workspacesByDatabase))
+	for id := range workspacesByDatabase {
+		databaseIDs = append(databaseIDs, id)
+	}
+	sort.Strings(databaseIDs)
+
+	for _, resolvedDatabaseID := range databaseIDs {
+		profile := profiles[resolvedDatabaseID]
+		reconcileAt := time.Now().UTC()
+		service, _, err := m.serviceFor(ctx, resolvedDatabaseID)
+		if err != nil {
+			_ = catalog.RecordSessionReconcile(ctx, resolvedDatabaseID, profile.Name, reconcileAt, err)
+			continue
+		}
+
+		workspaces := workspacesByDatabase[resolvedDatabaseID]
+		sort.Strings(workspaces)
+
+		var reconcileErr error
+		for _, workspace := range workspaces {
+			if _, err := service.ListWorkspaceSessions(ctx, workspace); err != nil {
+				reconcileErr = err
+				break
+			}
+		}
+		_ = catalog.RecordSessionReconcile(ctx, resolvedDatabaseID, profile.Name, reconcileAt, reconcileErr)
+	}
+
+	return nil
 }
 
 func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activityListResponse, error) {

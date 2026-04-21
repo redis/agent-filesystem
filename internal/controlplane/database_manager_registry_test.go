@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
 )
@@ -400,5 +401,109 @@ func TestListAgentSessionsSkipsOrphanedDatabaseRecords(t *testing.T) {
 	}
 	if len(response.Items) != 0 {
 		t.Fatalf("len(ListAgentSessions().Items) = %d, want 0 when session database no longer exists", len(response.Items))
+	}
+}
+
+func TestListAgentSessionsReconcilesDeadSessions(t *testing.T) {
+	manager, databaseID := newTestManager(t)
+	ctx := context.Background()
+
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+
+	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		ClientKind:      "sync",
+		AFSVersion:      "dev",
+		Hostname:        "devbox",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
+	}
+	if _, err := service.HeartbeatWorkspaceSession(ctx, "repo", session.SessionID); err != nil {
+		t.Fatalf("HeartbeatWorkspaceSession() returned error: %v", err)
+	}
+
+	_, storageID, err := service.store.resolveWorkspaceMeta(ctx, "repo")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceMeta() returned error: %v", err)
+	}
+	if err := service.store.rdb.Del(ctx, workspaceSessionLeaseKey(storageID, session.SessionID)).Err(); err != nil {
+		t.Fatalf("Del(workspaceSessionLeaseKey) returned error: %v", err)
+	}
+
+	response, err := manager.ListAgentSessions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListAgentSessions() returned error: %v", err)
+	}
+	if len(response.Items) != 0 {
+		t.Fatalf("len(ListAgentSessions().Items) = %d, want 0 after dead session is reconciled", len(response.Items))
+	}
+
+	record, err := manager.catalog.GetSession(ctx, session.SessionID)
+	if err != nil {
+		t.Fatalf("catalog.GetSession() returned error: %v", err)
+	}
+	if record.State != workspaceSessionStateStale {
+		t.Fatalf("catalog session state = %q, want %q", record.State, workspaceSessionStateStale)
+	}
+	if record.CloseReason != "expired" {
+		t.Fatalf("catalog close_reason = %q, want %q", record.CloseReason, "expired")
+	}
+}
+
+func TestListAgentSessionsHidesExpiredCatalogRowsWithoutLiveSession(t *testing.T) {
+	manager, databaseID := newTestManager(t)
+	ctx := context.Background()
+
+	routes, err := manager.catalog.ResolveWorkspace(ctx, "repo")
+	if err != nil {
+		t.Fatalf("ResolveWorkspace() returned error: %v", err)
+	}
+	if len(routes) != 1 {
+		t.Fatalf("len(ResolveWorkspace()) = %d, want 1", len(routes))
+	}
+
+	expiredAt := time.Now().UTC().Add(-6 * 24 * time.Hour)
+	record := sessionCatalogRecord{
+		SessionID:       "sess-dead-catalog",
+		WorkspaceID:     routes[0].WorkspaceID,
+		DatabaseID:      databaseID,
+		WorkspaceName:   "repo",
+		ClientKind:      "sync",
+		AFSVersion:      "dev",
+		Hostname:        "devbox",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/repo",
+		State:           workspaceSessionStateActive,
+		StartedAt:       expiredAt.Add(-time.Hour).Format(timeRFC3339),
+		LastSeenAt:      expiredAt.Format(timeRFC3339),
+		LeaseExpiresAt:  expiredAt.Format(timeRFC3339),
+		UpdatedAt:       expiredAt.Format(timeRFC3339),
+	}
+	if err := manager.catalog.UpsertSession(ctx, record); err != nil {
+		t.Fatalf("UpsertSession(expired) returned error: %v", err)
+	}
+
+	response, err := manager.ListAgentSessions(ctx, "")
+	if err != nil {
+		t.Fatalf("ListAgentSessions() returned error: %v", err)
+	}
+	if len(response.Items) != 0 {
+		t.Fatalf("len(ListAgentSessions().Items) = %d, want 0 when catalog row lease is expired", len(response.Items))
+	}
+
+	stored, err := manager.catalog.GetSession(ctx, record.SessionID)
+	if err != nil {
+		t.Fatalf("catalog.GetSession() returned error: %v", err)
+	}
+	if stored.State != workspaceSessionStateStale {
+		t.Fatalf("catalog session state = %q, want %q", stored.State, workspaceSessionStateStale)
+	}
+	if stored.CloseReason != "expired" {
+		t.Fatalf("catalog close_reason = %q, want %q", stored.CloseReason, "expired")
 	}
 }

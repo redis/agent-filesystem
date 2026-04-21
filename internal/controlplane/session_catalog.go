@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 type sessionCatalogRecord struct {
@@ -326,6 +327,32 @@ func workspaceSessionCatalogRecord(route workspaceCatalogRoute, meta WorkspaceMe
 		CloseReason:     strings.TrimSpace(closeReason),
 		UpdatedAt:       record.LastSeenAt.UTC().Format(timeRFC3339),
 	}
+}
+
+func sessionCatalogRecordLeaseExpired(record sessionCatalogRecord, now time.Time) bool {
+	leaseText := strings.TrimSpace(record.LeaseExpiresAt)
+	if leaseText == "" {
+		return true
+	}
+	leaseExpiresAt, err := time.Parse(timeRFC3339, leaseText)
+	if err != nil {
+		return true
+	}
+	return !leaseExpiresAt.After(now.UTC())
+}
+
+func staleSessionCatalogRecord(record sessionCatalogRecord, now time.Time, closeReason string) sessionCatalogRecord {
+	nowText := now.UTC().Format(timeRFC3339)
+	record.State = workspaceSessionStateStale
+	record.CloseReason = strings.TrimSpace(closeReason)
+	record.UpdatedAt = nowText
+	if strings.TrimSpace(record.ClosedAt) == "" {
+		record.ClosedAt = nowText
+	}
+	if strings.TrimSpace(record.LeaseExpiresAt) == "" {
+		record.LeaseExpiresAt = nowText
+	}
+	return record
 }
 
 const sessionCatalogUpsertSQL = `INSERT INTO session_catalog (

@@ -26,7 +26,6 @@ function AddAgentPage() {
 
 const Header = styled.div`
   max-width: 720px;
-  margin: 0 auto;
   padding: 0 0 4px;
   display: grid;
   gap: 8px;

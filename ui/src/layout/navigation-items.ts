@@ -1,14 +1,14 @@
 import type { IconType } from "@redis-ui/icons";
 import {
   CloudDownloadIcon,
-  DashboardIcon,
   DatabaseIcon,
   DocumentationIcon,
   FoldersIcon,
   NotificationsIcon,
-  RedisCopilotIcon,
   SupportIcon,
 } from "@redis-ui/icons";
+import { BotIcon } from "../components/bot-icon";
+import { PieChartIcon } from "../components/pie-chart-icon";
 
 export type SidebarPanelId = "root" | "workspaces";
 
@@ -36,9 +36,9 @@ export type NavigationTitleParts = {
 };
 
 export const navigationItems: ReadonlyArray<NavigationItem> = [
-  { kind: "route", label: "Overview", path: "/", icon: DashboardIcon },
+  { kind: "route", label: "Overview", path: "/", icon: PieChartIcon },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: FoldersIcon },
-  { kind: "route", label: "Agents", path: "/agents", icon: RedisCopilotIcon },
+  { kind: "route", label: "Agents", path: "/agents", icon: BotIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
