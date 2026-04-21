@@ -261,7 +261,7 @@ function WorkspacesPage() {
 
   const [importOpen, setImportOpen] = useState(false);
   const [importPath, setImportPath] = useState("");
-  const [importPathAuto, setImportPathAuto] = useState(true);
+  const [importFileCount, setImportFileCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
@@ -346,7 +346,7 @@ function WorkspacesPage() {
     setEditingWorkspaceId(null);
     setFormError(null);
     setImportPath("");
-    setImportPathAuto(true);
+    setImportFileCount(0);
     setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
@@ -364,7 +364,7 @@ function WorkspacesPage() {
     setEditingWorkspaceId(null);
     setFormError(null);
     setImportPath("");
-    setImportPathAuto(true);
+    setImportFileCount(0);
     setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
@@ -380,10 +380,6 @@ function WorkspacesPage() {
   ) {
     setFormError(null);
     setForm((current) => ({ ...current, [key]: value }));
-    if (key === "name" && importPathAuto && dialogMode === "create") {
-      const trimmed = typeof value === "string" ? value.trim() : "";
-      setImportPath(trimmed === "" ? "" : `~/${trimmed}`);
-    }
   }
 
   function mutationErrorMessage(error: unknown, fallback: string) {
@@ -652,58 +648,81 @@ function WorkspacesPage() {
 
               {!isEditing ? (
                 <ImportFilesSection>
-                  <ImportFilesHeader>Import Files</ImportFilesHeader>
+                  <ImportFilesHeader>Seed with files (optional)</ImportFilesHeader>
                   <ImportFilesDescription>
-                    Optionally import files from a local directory. The contents will be scanned
-                    and stored in the workspace.
+                    Pick a local folder to copy into the new workspace. Leave empty to
+                    start with an empty workspace.
                   </ImportFilesDescription>
-                  <Field>
-                    Local directory path
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <TextInput
-                        value={importPath}
-                        onChange={(event) => {
-                          setImportPath(event.target.value);
-                          setImportPathAuto(false);
-                        }}
-                        placeholder="~/code/my-project"
-                        style={{ flex: 1 }}
-                      />
+                  {importPath === "" ? (
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      Import files&hellip;
+                    </Button>
+                  ) : (
+                    <SelectedFolderCard>
+                      <SelectedFolderIcon aria-hidden>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                        </svg>
+                      </SelectedFolderIcon>
+                      <SelectedFolderInfo>
+                        <SelectedFolderName>{importPath}</SelectedFolderName>
+                        <SelectedFolderMeta>
+                          {importFileCount} file{importFileCount === 1 ? "" : "s"} ready to import
+                        </SelectedFolderMeta>
+                      </SelectedFolderInfo>
                       <Button
                         size="medium"
                         variant="secondary-fill"
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                      >
-                        Browse
-                      </Button>
-                      <input
-                        ref={fileInputRef}
-                        type="file"
-                        /* @ts-expect-error webkitdirectory is non-standard */
-                        webkitdirectory=""
-                        directory=""
-                        style={{ display: "none" }}
-                        onChange={(event) => {
-                          const files = event.target.files;
-                          if (files && files.length > 0) {
-                            // Extract the common directory path from the first file
-                            const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
-                            if (path) {
-                              setImportPath(path);
-                              setImportPathAuto(false);
-                            }
+                        onClick={() => {
+                          setImportPath("");
+                          setImportFileCount(0);
+                          if (fileInputRef.current) {
+                            fileInputRef.current.value = "";
                           }
                         }}
-                      />
-                    </div>
-                    {importPathAuto && importPath !== "" ? (
-                      <FieldHint>
-                        Auto-filled from workspace name. Edit to customize.
-                      </FieldHint>
-                    ) : null}
-                  </Field>
+                      >
+                        Remove
+                      </Button>
+                    </SelectedFolderCard>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    /* @ts-expect-error webkitdirectory is non-standard */
+                    webkitdirectory=""
+                    directory=""
+                    style={{ display: "none" }}
+                    onChange={(event) => {
+                      const files = event.target.files;
+                      if (files && files.length > 0) {
+                        const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
+                        if (path) {
+                          setImportPath(path);
+                          setImportFileCount(files.length);
+                        }
+                      }
+                    }}
+                  />
                 </ImportFilesSection>
+              ) : null}
+
+              {!isEditing ? (
+                <ActionPreview>
+                  {importPath === "" ? (
+                    <>Pressing <strong>Add workspace</strong> creates an empty workspace
+                      {form.name.trim() !== "" ? <> named <code>{form.name.trim()}</code></> : null}.</>
+                  ) : (
+                    <>Pressing <strong>Add workspace</strong> creates the workspace and imports{" "}
+                      <strong>{importFileCount}</strong> file{importFileCount === 1 ? "" : "s"} from{" "}
+                      <code>{importPath}</code>.</>
+                  )}
+                </ActionPreview>
               ) : null}
 
               {formError ? <DialogError role="alert">{formError}</DialogError> : null}
@@ -721,15 +740,13 @@ function WorkspacesPage() {
                 <Button disabled={formBusy} size="medium" type="submit">
                   {isEditing
                     ? updateWorkspace.isPending
-                      ? "Saving..."
+                      ? "Saving\u2026"
                       : "Save changes"
                     : importLocal.isPending
-                      ? "Importing..."
+                      ? "Importing\u2026"
                       : createWorkspace.isPending
-                        ? "Adding..."
-                        : importPath.trim() !== ""
-                          ? "Import Files"
-                          : "Add workspace"}
+                        ? "Adding\u2026"
+                        : "Add workspace"}
                 </Button>
               </DialogActions>
             </FormGrid>
@@ -794,6 +811,72 @@ const FieldHint = styled.span`
   font-size: 12px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;
+`;
+
+const SelectedFolderCard = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--afs-line);
+  border-radius: 12px;
+  background: var(--afs-panel);
+`;
+
+const SelectedFolderIcon = styled.div`
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--afs-accent-soft, color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent));
+  color: var(--afs-accent, #2563eb);
+`;
+
+const SelectedFolderInfo = styled.div`
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const SelectedFolderName = styled.span`
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--afs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const SelectedFolderMeta = styled.span`
+  font-size: 12px;
+  color: var(--afs-muted);
+`;
+
+const ActionPreview = styled.p`
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent);
+  color: var(--afs-ink);
+  font-size: 13px;
+  line-height: 1.55;
+
+  strong {
+    font-weight: 700;
+  }
+
+  code {
+    background: var(--afs-line);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--afs-mono, "SF Mono", monospace);
+  }
 `;
 
 const ToolbarActions = styled.div`
