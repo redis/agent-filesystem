@@ -109,11 +109,11 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	if got := strings.TrimSpace(copyLine[databaseIdx:idIdx]); got == "" {
 		t.Fatalf("copy database column empty\nheader: %q\nrow: %q", headerLine, copyLine)
 	}
-	if got, want := strings.TrimSpace(repoLine[idIdx:updatedIdx]), "repo"; got != want {
-		t.Fatalf("repo id column = %q, want %q\nheader: %q\nrow: %q", got, want, headerLine, repoLine)
+	if got := strings.TrimSpace(repoLine[idIdx:updatedIdx]); !strings.HasPrefix(got, "ws_") {
+		t.Fatalf("repo id column = %q, want opaque workspace id\nheader: %q\nrow: %q", got, headerLine, repoLine)
 	}
-	if got, want := strings.TrimSpace(copyLine[idIdx:updatedIdx]), "repo-copy"; got != want {
-		t.Fatalf("copy id column = %q, want %q\nheader: %q\nrow: %q", got, want, headerLine, copyLine)
+	if got := strings.TrimSpace(copyLine[idIdx:updatedIdx]); !strings.HasPrefix(got, "ws_") {
+		t.Fatalf("copy id column = %q, want opaque workspace id\nheader: %q\nrow: %q", got, headerLine, copyLine)
 	}
 
 	if err := cmdWorkspace([]string{"workspace", "delete", "repo-copy"}); err != nil {
@@ -307,7 +307,7 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
 	}
 
-	liveMain, err := client.New(store.rdb, workspaceRedisKey("repo")).Cat(context.Background(), "/main.go")
+	liveMain, err := client.New(store.rdb, rootKey).Cat(context.Background(), "/main.go")
 	if err != nil {
 		t.Fatalf("Cat(/main.go) returned error: %v", err)
 	}
@@ -443,10 +443,11 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
+		CurrentWorkspaceID:   rootKey,
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
 		LocalPath:            filepath.Join(t.TempDir(), "mount"),
-		RedisKey:             workspaceRedisKey("repo"),
+		RedisKey:             rootKey,
 	}
 	if err := saveState(st); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
@@ -531,10 +532,11 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
+		CurrentWorkspaceID:   rootKey,
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
 		LocalPath:            filepath.Join(t.TempDir(), "mount"),
-		RedisKey:             workspaceRedisKey("repo"),
+		RedisKey:             rootKey,
 	}
 	if err := saveState(st); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
@@ -614,10 +616,11 @@ func TestCheckpointCreateUsesActiveMountedWorkspaceWhenConfigUnset(t *testing.T)
 		RedisAddr:            cfg.RedisAddr,
 		RedisDB:              cfg.RedisDB,
 		CurrentWorkspace:     "repo",
+		CurrentWorkspaceID:   rootKey,
 		MountedHeadSavepoint: "initial",
 		MountBackend:         mountBackendNFS,
 		LocalPath:            filepath.Join(t.TempDir(), "mount"),
-		RedisKey:             workspaceRedisKey("repo"),
+		RedisKey:             rootKey,
 	}); err != nil {
 		t.Fatalf("saveState() returned error: %v", err)
 	}

@@ -464,7 +464,7 @@ func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, fun
 	}
 
 	runtimeCfg := resolvedCfg
-	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.CurrentWorkspace = selection.Name
 	runtimeCfg.CurrentWorkspaceID = selection.ID
 	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
 	runtimeCfg.RedisAddr = rewriteManagedRedisAddrForLocalhost(runtimeCfg.URL, session.Redis.RedisAddr)
@@ -475,7 +475,7 @@ func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, fun
 
 	return mountBootstrap{
 		cfg:             runtimeCfg,
-		workspace:       session.Workspace,
+		workspace:       selection.Name,
 		redisKey:        session.RedisKey,
 		headCheckpoint:  session.HeadCheckpointID,
 		initializedRoot: session.Initialized,
@@ -493,7 +493,11 @@ func shouldCleanLegacyMountCache(st state) bool {
 	if workspace == "" {
 		return true
 	}
-	return redisKey != workspaceRedisKey(workspace)
+	ref := strings.TrimSpace(st.CurrentWorkspaceID)
+	if ref == "" {
+		ref = workspace
+	}
+	return redisKey != workspaceRedisKey(ref)
 }
 
 func removeEmptyMountpoint(path string) error {

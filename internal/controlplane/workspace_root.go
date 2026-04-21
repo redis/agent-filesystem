@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"sort"
 	"strconv"
@@ -45,7 +46,14 @@ func WorkspaceRootDirtyKey(workspace string) string {
 }
 
 func WorkspaceRootDirtyState(ctx context.Context, store *Store, workspace string) (dirty bool, known bool, err error) {
-	value, err := store.rdb.Get(ctx, workspaceRootDirtyKey(workspace)).Result()
+	storageID, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	value, err := store.rdb.Get(ctx, workspaceRootDirtyKey(storageID)).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return false, false, nil
@@ -56,39 +64,47 @@ func WorkspaceRootDirtyState(ctx context.Context, store *Store, workspace string
 }
 
 func MarkWorkspaceRootDirty(ctx context.Context, store *Store, workspace string) error {
-	return store.rdb.Set(ctx, workspaceRootDirtyKey(workspace), "1", 0).Err()
+	storageID, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	return store.rdb.Set(ctx, workspaceRootDirtyKey(storageID), "1", 0).Err()
 }
 
 func MarkWorkspaceRootClean(ctx context.Context, store *Store, workspace, headSavepoint string) error {
+	storageID, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	pipe := store.rdb.TxPipeline()
-	pipe.Set(ctx, workspaceRootHeadKey(workspace), headSavepoint, 0)
-	pipe.Set(ctx, workspaceRootDirtyKey(workspace), "0", 0)
-	_, err := pipe.Exec(ctx)
+	pipe.Set(ctx, workspaceRootHeadKey(storageID), headSavepoint, 0)
+	pipe.Set(ctx, workspaceRootDirtyKey(storageID), "0", 0)
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func EnsureWorkspaceRoot(ctx context.Context, store *Store, workspace string) (string, string, bool, error) {
-	meta, err := store.GetWorkspaceMeta(ctx, workspace)
+	meta, storageID, err := store.resolveWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return "", "", false, err
 	}
 
-	exists, err := workspaceRootExists(ctx, store.rdb, workspace, meta.HeadSavepoint)
+	exists, err := workspaceRootExists(ctx, store.rdb, storageID, meta.HeadSavepoint)
 	if err != nil {
 		return "", "", false, err
 	}
 	if exists {
-		return WorkspaceFSKey(workspace), meta.HeadSavepoint, false, nil
+		return WorkspaceFSKey(storageID), meta.HeadSavepoint, false, nil
 	}
 
-	headManifest, err := store.GetManifest(ctx, workspace, meta.HeadSavepoint)
+	headManifest, err := store.GetManifest(ctx, storageID, meta.HeadSavepoint)
 	if err != nil {
 		return "", "", false, err
 	}
-	if err := SyncWorkspaceRoot(ctx, store, workspace, headManifest); err != nil {
+	if err := SyncWorkspaceRoot(ctx, store, storageID, headManifest); err != nil {
 		return "", "", false, err
 	}
-	return WorkspaceFSKey(workspace), meta.HeadSavepoint, true, nil
+	return WorkspaceFSKey(storageID), meta.HeadSavepoint, true, nil
 }
 
 func SyncWorkspaceRoot(ctx context.Context, store *Store, workspace string, m Manifest) error {
@@ -112,7 +128,11 @@ type SyncOptions struct {
 // FS namespace. Callers that have already loaded file bodies (e.g., during
 // import) can pass a BlobProvider to avoid reloading them from Redis.
 func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace string, m Manifest, opts SyncOptions) error {
-	fsKey := WorkspaceFSKey(workspace)
+	storageID, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	fsKey := WorkspaceFSKey(storageID)
 	if !opts.SkipNamespaceReset {
 		if err := resetWorkspaceFSNamespace(ctx, store.rdb, fsKey); err != nil {
 			return err
@@ -130,10 +150,10 @@ func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace s
 			return err
 		}
 	}
-	if err := materializeManifestToWorkspaceFS(ctx, store, workspace, fsKey, m, opts); err != nil {
+	if err := materializeManifestToWorkspaceFS(ctx, store, storageID, fsKey, m, opts); err != nil {
 		return err
 	}
-	return MarkWorkspaceRootClean(ctx, store, workspace, m.Savepoint)
+	return MarkWorkspaceRootClean(ctx, store, storageID, m.Savepoint)
 }
 
 func workspaceRootExists(ctx context.Context, rdb *redis.Client, workspace, headSavepoint string) (bool, error) {

@@ -4,6 +4,14 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogError,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
   EmptyState,
   NoticeBody,
   NoticeCard,
@@ -20,6 +28,7 @@ import {
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
+import { displayWorkspaceName } from "../foundation/workspace-display";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
 import type { AFSWorkspaceView } from "../foundation/types/afs";
@@ -54,6 +63,8 @@ function WorkspaceStudioPage() {
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [userRequestedBanner, setUserRequestedBanner] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isRedirectingAfterDelete, setIsRedirectingAfterDelete] = useState(false);
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
@@ -80,6 +91,15 @@ function WorkspaceStudioPage() {
     setBrowserView(defaultView);
   }, [workspace]);
 
+  useEffect(() => {
+    if (!deleteWorkspace.isSuccess) {
+      return;
+    }
+    setDeleteDialogOpen(false);
+    setIsRedirectingAfterDelete(true);
+    void navigate({ to: "/workspaces", replace: true });
+  }, [deleteWorkspace.isSuccess, navigate]);
+
   function setStudioTab(nextTab: StudioTab) {
     void navigate({
       to: "/workspaces/$workspaceId",
@@ -95,24 +115,26 @@ function WorkspaceStudioPage() {
     if (workspace == null) {
       return;
     }
-    const confirmed = window.confirm(
-      `Delete workspace "${workspace.name}"? This removes it from the workspace registry.`,
-    );
+    setDeleteDialogOpen(true);
+  }
 
-    if (!confirmed) {
+  async function confirmDeleteCurrentWorkspace() {
+    if (workspace == null) {
       return;
     }
 
-    deleteWorkspace.mutate({
-      workspaceId,
-    }, {
-      onSuccess: () => {
-        void navigate({ to: "/workspaces" });
-      },
-    });
+    try {
+      await deleteWorkspace.mutateAsync({ workspaceId });
+    } catch {
+      // keep the dialog open and show the mutation error below
+    }
   }
 
-  if (workspaceQuery.isLoading) {
+  if (
+    workspaceQuery.isLoading
+    || isRedirectingAfterDelete
+    || (workspaceQuery.isError && deleteWorkspace.isSuccess)
+  ) {
     return <Loader data-testid="loader--spinner" />;
   }
 
@@ -141,7 +163,7 @@ function WorkspaceStudioPage() {
     throw new Error("Workspace not found.");
   }
 
-  const workspaceLabel = workspace.name === "getting-started" ? "Getting-started" : workspace.name;
+  const workspaceLabel = displayWorkspaceName(workspace.name);
 
   return (
     <PageStack>
@@ -242,7 +264,7 @@ function WorkspaceStudioPage() {
             Back to Workspaces
           </BreadcrumbButton>
           <BreadcrumbSeparator>/</BreadcrumbSeparator>
-          <BreadcrumbCurrent>{workspace.name}</BreadcrumbCurrent>
+          <BreadcrumbCurrent>{workspaceLabel}</BreadcrumbCurrent>
         </BreadcrumbGroup>
         <StudioActions>
           {hasAgents ? (
@@ -317,6 +339,66 @@ function WorkspaceStudioPage() {
           onDelete={deleteCurrentWorkspace}
           isDeleting={deleteWorkspace.isPending}
         />
+      ) : null}
+
+      {deleteDialogOpen ? (
+        <DialogOverlay
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-workspace-dialog-title"
+          onClick={() => {
+            if (!deleteWorkspace.isPending) {
+              setDeleteDialogOpen(false);
+            }
+          }}
+        >
+          <ConfirmCard onClick={(event) => event.stopPropagation()}>
+            <DialogHeader>
+              <div>
+                <DialogTitle id="delete-workspace-dialog-title">
+                  Delete this workspace?
+                </DialogTitle>
+                <DialogBody>
+                  Delete <strong>{workspaceLabel}</strong> and remove it from the workspace registry.
+                  This action cannot be undone.
+                </DialogBody>
+              </div>
+              <DialogCloseButton
+                type="button"
+                aria-label="Close"
+                onClick={() => {
+                  if (!deleteWorkspace.isPending) {
+                    setDeleteDialogOpen(false);
+                  }
+                }}
+              >
+                ×
+              </DialogCloseButton>
+            </DialogHeader>
+
+            {deleteWorkspace.error instanceof Error ? (
+              <DialogError role="alert">{deleteWorkspace.error.message}</DialogError>
+            ) : null}
+
+            <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>
+              <Button
+                variant="secondary-fill"
+                size="medium"
+                onClick={() => setDeleteDialogOpen(false)}
+                disabled={deleteWorkspace.isPending}
+              >
+                Cancel
+              </Button>
+              <DeleteConfirmButton
+                size="medium"
+                onClick={() => void confirmDeleteCurrentWorkspace()}
+                disabled={deleteWorkspace.isPending}
+              >
+                {deleteWorkspace.isPending ? "Deleting..." : "Delete workspace"}
+              </DeleteConfirmButton>
+            </DialogActions>
+          </ConfirmCard>
+        </DialogOverlay>
       ) : null}
     </PageStack>
   );
@@ -514,4 +596,23 @@ const WelcomeActions = styled.div`
   gap: 12px;
   margin-top: 28px;
   flex-wrap: wrap;
+`;
+
+const ConfirmCard = styled(DialogCard)`
+  max-width: 540px;
+`;
+
+const DeleteConfirmButton = styled(Button)`
+  && {
+    background: ${({ theme }) => theme.semantic.color.background.danger500};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+    box-shadow: none;
+  }
+
+  &&:hover:not(:disabled),
+  &&:focus-visible:not(:disabled) {
+    background: ${({ theme }) => theme.semantic.color.background.danger600};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+    box-shadow: none;
+  }
 `;

@@ -119,7 +119,7 @@ func TestAFSMCPFileWriteLeavesWorkspaceDirtyAndReadReturnsContent(t *testing.T) 
 	if !workspaceMeta.DirtyHint {
 		t.Fatal("expected MCP edit to leave the live workspace dirty")
 	}
-	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey(workspaceMeta.ID)).Result()
 	if err != nil {
 		t.Fatalf("Get(root_dirty) returned error: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
 	if workspaceMeta.DirtyHint {
 		t.Fatal("expected explicit checkpoint to leave the live workspace clean")
 	}
-	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey("repo")).Result()
+	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey(workspaceMeta.ID)).Result()
 	if err != nil {
 		t.Fatalf("Get(root_dirty) returned error: %v", err)
 	}

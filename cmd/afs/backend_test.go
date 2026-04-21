@@ -125,8 +125,8 @@ func TestOpenAFSControlPlaneSelfHostedSingleDatabaseStillWorksWithoutConfiguredD
 	if err != nil {
 		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
 	}
-	if session.Workspace != "repo" {
-		t.Fatalf("session workspace = %q, want %q", session.Workspace, "repo")
+	if !strings.HasPrefix(session.Workspace, "ws_") {
+		t.Fatalf("session workspace = %q, want opaque workspace id", session.Workspace)
 	}
 	if strings.TrimSpace(session.RedisKey) == "" {
 		t.Fatal("expected workspace session to include redis key")
@@ -157,8 +157,8 @@ func TestPrepareSyncBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testi
 	if bootstrap.workspace != secondaryWorkspace {
 		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, secondaryWorkspace)
 	}
-	if bootstrap.redisKey != workspaceRedisKey(secondaryWorkspace) {
-		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(secondaryWorkspace))
+	if bootstrap.redisKey != workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID) {
+		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID))
 	}
 	if bootstrap.cfg.RedisAddr != secondaryRedisAddr {
 		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, secondaryRedisAddr)
@@ -192,8 +192,8 @@ func TestPrepareSyncBootstrapCloudResolvesWorkspaceAcrossDatabases(t *testing.T)
 	if bootstrap.workspace != secondaryWorkspace {
 		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, secondaryWorkspace)
 	}
-	if bootstrap.redisKey != workspaceRedisKey(secondaryWorkspace) {
-		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(secondaryWorkspace))
+	if bootstrap.redisKey != workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID) {
+		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID))
 	}
 	if bootstrap.cfg.RedisAddr != secondaryRedisAddr {
 		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, secondaryRedisAddr)
@@ -289,8 +289,8 @@ func TestPrepareMountBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *test
 	if bootstrap.workspace != secondaryWorkspace {
 		t.Fatalf("bootstrap workspace = %q, want %q", bootstrap.workspace, secondaryWorkspace)
 	}
-	if bootstrap.redisKey != workspaceRedisKey(secondaryWorkspace) {
-		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(secondaryWorkspace))
+	if bootstrap.redisKey != workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID) {
+		t.Fatalf("bootstrap redisKey = %q, want %q", bootstrap.redisKey, workspaceRedisKey(bootstrap.cfg.CurrentWorkspaceID))
 	}
 	if bootstrap.cfg.RedisAddr != secondaryRedisAddr {
 		t.Fatalf("bootstrap RedisAddr = %q, want %q", bootstrap.cfg.RedisAddr, secondaryRedisAddr)

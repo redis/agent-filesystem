@@ -83,6 +83,11 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 	if err != nil {
 		return ImportLocalResponse{}, err
 	}
+	workspaceID, err := newOpaqueWorkspaceID()
+	if err != nil {
+		return ImportLocalResponse{}, err
+	}
+	manifest.Workspace = workspaceID
 
 	description := strings.TrimSpace(input.Description)
 	if description == "" {
@@ -91,6 +96,7 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 
 	meta := WorkspaceMeta{
 		Version:          formatVersion,
+		ID:               workspaceID,
 		Name:             workspace,
 		Description:      description,
 		DatabaseID:       profile.ID,
@@ -110,7 +116,7 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 		Name:         initialCheckpointName,
 		Description:  "Initial import snapshot.",
 		Author:       "afs",
-		Workspace:    workspace,
+		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    fileCount,
@@ -125,10 +131,10 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 	if err := store.PutSavepoint(ctx, checkpoint, manifest); err != nil {
 		return ImportLocalResponse{}, err
 	}
-	if err := SyncWorkspaceRoot(ctx, store, workspace, manifest); err != nil {
+	if err := SyncWorkspaceRoot(ctx, store, workspaceID, manifest); err != nil {
 		return ImportLocalResponse{}, err
 	}
-	if err := store.Audit(ctx, workspace, "import", map[string]any{
+	if err := store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      dirPath,
 		"files":       fileCount,
@@ -138,7 +144,7 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 		return ImportLocalResponse{}, err
 	}
 
-	detail, err := service.getWorkspace(ctx, workspace)
+	detail, err := service.getWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ImportLocalResponse{}, err
 	}

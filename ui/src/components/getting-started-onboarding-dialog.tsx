@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { DialogCloseButton, DialogOverlay } from "./afs-kit";
 import { ConnectAgentBanner } from "./connect-agent-banner";
 import { useScopedAgents } from "../foundation/database-scope";
+import { displayWorkspaceName } from "../foundation/workspace-display";
 
 type OnboardingStage = "success" | "connect";
 
@@ -49,7 +50,7 @@ export function GettingStartedOnboardingDialog({
     return null;
   }
 
-  const workspaceLabel = displayWorkspaceLabel(workspaceName);
+  const workspaceLabel = displayWorkspaceName(workspaceName);
   const agentConnected = (agentsQuery.data ?? []).some(
     (agent) => agent.workspaceId === workspaceId,
   );
@@ -121,14 +122,6 @@ export function GettingStartedOnboardingDialog({
       )}
     </DialogOverlay>
   );
-}
-
-function displayWorkspaceLabel(workspaceName: string) {
-  const trimmed = workspaceName.trim().toLowerCase();
-  if (trimmed === "getting-started" || trimmed.startsWith("getting-started-")) {
-    return "Getting-started";
-  }
-  return workspaceName;
 }
 
 const WorkflowShell = styled.div`

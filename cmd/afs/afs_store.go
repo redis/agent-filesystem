@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
@@ -91,6 +92,18 @@ func (s *afsStore) ensureWorkspaceRoot(ctx context.Context, workspace string) (s
 	return controlplane.EnsureWorkspaceRoot(ctx, s.cp, workspace)
 }
 
+func (s *afsStore) resolveWorkspaceRedisKey(ctx context.Context, workspace string) (string, error) {
+	meta, err := s.getWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return "", err
+	}
+	storageID := strings.TrimSpace(meta.ID)
+	if storageID == "" {
+		storageID = strings.TrimSpace(meta.Name)
+	}
+	return workspaceRedisKey(storageID), nil
+}
+
 func (s *afsStore) syncWorkspaceRoot(ctx context.Context, workspace string, m manifest) error {
 	return s.syncWorkspaceRootWithOptions(ctx, workspace, m, controlplane.SyncOptions{})
 }
@@ -101,7 +114,11 @@ func (s *afsStore) syncWorkspaceRootWithOptions(ctx context.Context, workspace s
 	}
 	searchRDB := newSearchRedisClient(s.rdb)
 	defer searchRDB.Close()
-	_, err := ensureWorkspaceSearchIndex(ctx, searchRDB, workspaceRedisKey(workspace))
+	redisKey, err := s.resolveWorkspaceRedisKey(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	_, err = ensureWorkspaceSearchIndex(ctx, searchRDB, redisKey)
 	return err
 }
 

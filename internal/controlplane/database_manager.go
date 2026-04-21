@@ -653,7 +653,7 @@ func (m *DatabaseManager) GetWorkspace(ctx context.Context, databaseID, workspac
 	if err != nil {
 		return workspaceDetail{}, err
 	}
-	detail, err := service.GetWorkspace(ctx, route.Name)
+	detail, err := service.GetWorkspace(ctx, route.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			_ = m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
@@ -671,7 +671,7 @@ func (m *DatabaseManager) GetResolvedWorkspace(ctx context.Context, workspace st
 	if err != nil {
 		return workspaceDetail{}, err
 	}
-	detail, err := service.GetWorkspace(ctx, route.Name)
+	detail, err := service.GetWorkspace(ctx, route.WorkspaceID)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			_ = m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
@@ -762,7 +762,7 @@ func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, works
 	if strings.TrimSpace(input.CloudAccount) == "" {
 		input.CloudAccount = quickstartCloudAccount(profile)
 	}
-	detail, err := service.UpdateWorkspace(ctx, route.Name, input)
+	detail, err := service.UpdateWorkspace(ctx, route.WorkspaceID, input)
 	if err != nil {
 		return workspaceDetail{}, err
 	}
@@ -783,7 +783,7 @@ func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace
 	if strings.TrimSpace(input.CloudAccount) == "" {
 		input.CloudAccount = quickstartCloudAccount(profile)
 	}
-	detail, err := service.UpdateWorkspace(ctx, route.Name, input)
+	detail, err := service.UpdateWorkspace(ctx, route.WorkspaceID, input)
 	if err != nil {
 		return workspaceDetail{}, err
 	}
@@ -798,7 +798,7 @@ func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, works
 	if err != nil {
 		return err
 	}
-	if err := service.DeleteWorkspace(ctx, route.Name); err != nil {
+	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
 		}
@@ -812,7 +812,7 @@ func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace
 	if err != nil {
 		return err
 	}
-	if err := service.DeleteWorkspace(ctx, route.Name); err != nil {
+	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
 		}
@@ -834,7 +834,7 @@ func (m *DatabaseManager) ListWorkspaceActivity(ctx context.Context, databaseID,
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	return service.ListWorkspaceActivity(ctx, route.Name, limit)
+	return service.ListWorkspaceActivity(ctx, route.WorkspaceID, limit)
 }
 
 func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, workspace string, limit int) (activityListResponse, error) {
@@ -842,7 +842,7 @@ func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, wor
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	return service.ListWorkspaceActivity(ctx, route.Name, limit)
+	return service.ListWorkspaceActivity(ctx, route.WorkspaceID, limit)
 }
 
 func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, workspace, checkpointID string) error {
@@ -850,10 +850,10 @@ func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, wor
 	if err != nil {
 		return err
 	}
-	if err := service.RestoreCheckpoint(ctx, route.Name, checkpointID); err != nil {
+	if err := service.RestoreCheckpoint(ctx, route.WorkspaceID, checkpointID); err != nil {
 		return err
 	}
-	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name)
+	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) RestoreResolvedCheckpoint(ctx context.Context, workspace, checkpointID string) error {
@@ -861,10 +861,10 @@ func (m *DatabaseManager) RestoreResolvedCheckpoint(ctx context.Context, workspa
 	if err != nil {
 		return err
 	}
-	if err := service.RestoreCheckpoint(ctx, route.Name, checkpointID); err != nil {
+	if err := service.RestoreCheckpoint(ctx, route.WorkspaceID, checkpointID); err != nil {
 		return err
 	}
-	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name)
+	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) ListCheckpoints(ctx context.Context, databaseID, workspace string, limit int) ([]checkpointSummary, error) {
@@ -872,7 +872,7 @@ func (m *DatabaseManager) ListCheckpoints(ctx context.Context, databaseID, works
 	if err != nil {
 		return nil, err
 	}
-	return service.ListCheckpoints(ctx, route.Name, limit)
+	return service.ListCheckpoints(ctx, route.WorkspaceID, limit)
 }
 
 func (m *DatabaseManager) ListResolvedCheckpoints(ctx context.Context, workspace string, limit int) ([]checkpointSummary, error) {
@@ -880,7 +880,7 @@ func (m *DatabaseManager) ListResolvedCheckpoints(ctx context.Context, workspace
 	if err != nil {
 		return nil, err
 	}
-	return service.ListCheckpoints(ctx, route.Name, limit)
+	return service.ListCheckpoints(ctx, route.WorkspaceID, limit)
 }
 
 func (m *DatabaseManager) SaveCheckpoint(ctx context.Context, databaseID, workspace string, input SaveCheckpointRequest) (bool, error) {
@@ -888,13 +888,13 @@ func (m *DatabaseManager) SaveCheckpoint(ctx context.Context, databaseID, worksp
 	if err != nil {
 		return false, err
 	}
-	input.Workspace = route.Name
+	input.Workspace = route.WorkspaceID
 	saved, err := service.SaveCheckpoint(ctx, input)
 	if err != nil {
 		return false, err
 	}
 	if saved {
-		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
 			return false, err
 		}
 	}
@@ -906,13 +906,13 @@ func (m *DatabaseManager) SaveResolvedCheckpoint(ctx context.Context, workspace 
 	if err != nil {
 		return false, err
 	}
-	input.Workspace = route.Name
+	input.Workspace = route.WorkspaceID
 	saved, err := service.SaveCheckpoint(ctx, input)
 	if err != nil {
 		return false, err
 	}
 	if saved {
-		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
 			return false, err
 		}
 	}
@@ -924,12 +924,12 @@ func (m *DatabaseManager) SaveResolvedCheckpointFromLive(ctx context.Context, wo
 	if err != nil {
 		return false, fmt.Errorf("resolve workspace %q: %w", workspace, err)
 	}
-	saved, err := service.SaveCheckpointFromLive(ctx, route.Name, checkpointID)
+	saved, err := service.SaveCheckpointFromLive(ctx, route.WorkspaceID, checkpointID)
 	if err != nil {
 		return false, err
 	}
 	if saved {
-		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
 			return false, err
 		}
 	}
@@ -941,12 +941,12 @@ func (m *DatabaseManager) SaveCheckpointFromLive(ctx context.Context, databaseID
 	if err != nil {
 		return false, fmt.Errorf("resolve workspace %q in database %q: %w", workspace, databaseID, err)
 	}
-	saved, err := service.SaveCheckpointFromLive(ctx, route.Name, checkpointID)
+	saved, err := service.SaveCheckpointFromLive(ctx, route.WorkspaceID, checkpointID)
 	if err != nil {
 		return false, err
 	}
 	if saved {
-		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.Name); err != nil {
+		if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
 			return false, err
 		}
 	}
@@ -958,7 +958,7 @@ func (m *DatabaseManager) ForkWorkspace(ctx context.Context, databaseID, sourceW
 	if err != nil {
 		return err
 	}
-	if err := service.ForkWorkspace(ctx, route.Name, newWorkspace); err != nil {
+	if err := service.ForkWorkspace(ctx, route.WorkspaceID, newWorkspace); err != nil {
 		return err
 	}
 	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, newWorkspace)
@@ -969,7 +969,7 @@ func (m *DatabaseManager) ForkResolvedWorkspace(ctx context.Context, sourceWorks
 	if err != nil {
 		return err
 	}
-	if err := service.ForkWorkspace(ctx, route.Name, newWorkspace); err != nil {
+	if err := service.ForkWorkspace(ctx, route.WorkspaceID, newWorkspace); err != nil {
 		return err
 	}
 	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, newWorkspace)
@@ -980,7 +980,7 @@ func (m *DatabaseManager) CreateWorkspaceSession(ctx context.Context, databaseID
 	if err != nil {
 		return workspaceSession{}, err
 	}
-	session, err := service.CreateWorkspaceSession(ctx, route.Name, input)
+	session, err := service.CreateWorkspaceSession(ctx, route.WorkspaceID, input)
 	if err != nil {
 		return workspaceSession{}, err
 	}
@@ -1001,7 +1001,7 @@ func (m *DatabaseManager) UpsertWorkspaceSession(ctx context.Context, databaseID
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
-	return service.UpsertWorkspaceSession(ctx, route.Name, sessionID, input)
+	return service.UpsertWorkspaceSession(ctx, route.WorkspaceID, sessionID, input)
 }
 
 func (m *DatabaseManager) CreateResolvedWorkspaceSession(ctx context.Context, workspace string, input createWorkspaceSessionRequest) (workspaceSession, error) {
@@ -1009,7 +1009,7 @@ func (m *DatabaseManager) CreateResolvedWorkspaceSession(ctx context.Context, wo
 	if err != nil {
 		return workspaceSession{}, err
 	}
-	session, err := service.CreateWorkspaceSession(ctx, route.Name, input)
+	session, err := service.CreateWorkspaceSession(ctx, route.WorkspaceID, input)
 	if err != nil {
 		return workspaceSession{}, err
 	}
@@ -1030,7 +1030,7 @@ func (m *DatabaseManager) ListWorkspaceSessions(ctx context.Context, databaseID,
 	if err != nil {
 		return workspaceSessionListResponse{}, err
 	}
-	return service.ListWorkspaceSessions(ctx, route.Name)
+	return service.ListWorkspaceSessions(ctx, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) ListResolvedWorkspaceSessions(ctx context.Context, workspace string) (workspaceSessionListResponse, error) {
@@ -1038,7 +1038,7 @@ func (m *DatabaseManager) ListResolvedWorkspaceSessions(ctx context.Context, wor
 	if err != nil {
 		return workspaceSessionListResponse{}, err
 	}
-	return service.ListWorkspaceSessions(ctx, route.Name)
+	return service.ListWorkspaceSessions(ctx, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID string) (workspaceSessionListResponse, error) {
@@ -1136,7 +1136,7 @@ func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databas
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
-	return service.HeartbeatWorkspaceSession(ctx, route.Name, sessionID)
+	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID)
 }
 
 func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string) (workspaceSessionInfo, error) {
@@ -1144,7 +1144,7 @@ func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context,
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
-	return service.HeartbeatWorkspaceSession(ctx, route.Name, sessionID)
+	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID)
 }
 
 func (m *DatabaseManager) CloseWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) error {
@@ -1152,7 +1152,7 @@ func (m *DatabaseManager) CloseWorkspaceSession(ctx context.Context, databaseID,
 	if err != nil {
 		return err
 	}
-	return service.CloseWorkspaceSession(ctx, route.Name, sessionID)
+	return service.CloseWorkspaceSession(ctx, route.WorkspaceID, sessionID)
 }
 
 func (m *DatabaseManager) CloseResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
@@ -1160,7 +1160,7 @@ func (m *DatabaseManager) CloseResolvedWorkspaceSession(ctx context.Context, wor
 	if err != nil {
 		return err
 	}
-	return service.CloseWorkspaceSession(ctx, route.Name, sessionID)
+	return service.CloseWorkspaceSession(ctx, route.WorkspaceID, sessionID)
 }
 
 func (m *DatabaseManager) GetTree(ctx context.Context, databaseID, workspace, rawView, rawPath string, depth int) (treeResponse, error) {
@@ -1168,7 +1168,7 @@ func (m *DatabaseManager) GetTree(ctx context.Context, databaseID, workspace, ra
 	if err != nil {
 		return treeResponse{}, err
 	}
-	return service.GetTree(ctx, route.Name, rawView, rawPath, depth)
+	return service.GetTree(ctx, route.WorkspaceID, rawView, rawPath, depth)
 }
 
 func (m *DatabaseManager) GetResolvedTree(ctx context.Context, workspace, rawView, rawPath string, depth int) (treeResponse, error) {
@@ -1176,7 +1176,7 @@ func (m *DatabaseManager) GetResolvedTree(ctx context.Context, workspace, rawVie
 	if err != nil {
 		return treeResponse{}, err
 	}
-	return service.GetTree(ctx, route.Name, rawView, rawPath, depth)
+	return service.GetTree(ctx, route.WorkspaceID, rawView, rawPath, depth)
 }
 
 func (m *DatabaseManager) GetFileContent(ctx context.Context, databaseID, workspace, rawView, rawPath string) (fileContentResponse, error) {
@@ -1184,7 +1184,7 @@ func (m *DatabaseManager) GetFileContent(ctx context.Context, databaseID, worksp
 	if err != nil {
 		return fileContentResponse{}, err
 	}
-	return service.GetFileContent(ctx, route.Name, rawView, rawPath)
+	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
 }
 
 func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace, rawView, rawPath string) (fileContentResponse, error) {
@@ -1192,7 +1192,7 @@ func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace,
 	if err != nil {
 		return fileContentResponse{}, err
 	}
-	return service.GetFileContent(ctx, route.Name, rawView, rawPath)
+	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
 }
 
 func (m *DatabaseManager) serviceFor(ctx context.Context, databaseID string) (*Service, databaseProfile, error) {
@@ -1232,6 +1232,7 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 	if workspace == "" {
 		return nil, databaseProfile{}, workspaceCatalogRoute{}, fmt.Errorf("workspace id is required")
 	}
+	subject := authSubjectFromContext(ctx)
 
 	if m.catalog != nil {
 		routes, err := m.catalog.ResolveWorkspace(ctx, workspace)
@@ -1242,6 +1243,9 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 		for _, route := range routes {
 			profile, ok := m.profiles[route.DatabaseID]
 			if !ok || !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+				continue
+			}
+			if subject != "" && strings.TrimSpace(route.OwnerSubject) != "" && strings.TrimSpace(route.OwnerSubject) != subject {
 				continue
 			}
 			filteredRoutes = append(filteredRoutes, route)
@@ -1289,10 +1293,14 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 		if !exists {
 			continue
 		}
+		meta, err := service.store.GetWorkspaceMeta(ctx, workspace)
+		if err != nil {
+			return nil, databaseProfile{}, workspaceCatalogRoute{}, err
+		}
 		route := workspaceCatalogRoute{
 			DatabaseID:  profile.ID,
-			WorkspaceID: workspace,
-			Name:        workspace,
+			WorkspaceID: workspaceStorageID(meta),
+			Name:        meta.Name,
 		}
 		if matchService == nil {
 			matchService = service
@@ -1400,8 +1408,8 @@ func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, data
 		owners, ownerErr := m.catalog.ListWorkspaceOwners(ctx, profile.ID)
 		if ownerErr == nil {
 			for index := range response.Items {
-				name := response.Items[index].Name
-				if existing, ok := owners[name]; ok && strings.TrimSpace(existing.Subject) != "" {
+				workspaceID := response.Items[index].ID
+				if existing, ok := owners[workspaceID]; ok && strings.TrimSpace(existing.Subject) != "" {
 					response.Items[index].OwnerSubject = existing.Subject
 					response.Items[index].OwnerLabel = existing.Label
 					continue
@@ -1543,12 +1551,28 @@ func (m *DatabaseManager) resolveScopedWorkspace(ctx context.Context, databaseID
 	}
 
 	if m.catalog != nil {
-		route, err := m.catalog.ResolveWorkspaceInDatabase(ctx, profile.ID, workspace)
-		if err == nil {
-			return service, profile, route, nil
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		routes, err := m.catalog.ResolveWorkspace(ctx, workspace)
+		if err != nil {
 			return nil, databaseProfile{}, workspaceCatalogRoute{}, err
+		}
+		filteredRoutes := make([]workspaceCatalogRoute, 0, len(routes))
+		subject := authSubjectFromContext(ctx)
+		for _, route := range routes {
+			if route.DatabaseID != profile.ID {
+				continue
+			}
+			if subject != "" && strings.TrimSpace(route.OwnerSubject) != "" && strings.TrimSpace(route.OwnerSubject) != subject {
+				continue
+			}
+			filteredRoutes = append(filteredRoutes, route)
+		}
+		switch len(filteredRoutes) {
+		case 1:
+			return service, profile, filteredRoutes[0], nil
+		case 0:
+			// Fall back to direct Redis discovery.
+		default:
+			return nil, databaseProfile{}, workspaceCatalogRoute{}, fmt.Errorf("%w: workspace %q is ambiguous in database %q", ErrAmbiguousWorkspace, workspace, profile.ID)
 		}
 	}
 
@@ -1559,16 +1583,26 @@ func (m *DatabaseManager) resolveScopedWorkspace(ctx context.Context, databaseID
 	if !exists {
 		return nil, databaseProfile{}, workspaceCatalogRoute{}, os.ErrNotExist
 	}
+	meta, err := service.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return nil, databaseProfile{}, workspaceCatalogRoute{}, err
+	}
 	return service, profile, workspaceCatalogRoute{
 		DatabaseID:  profile.ID,
-		WorkspaceID: workspace,
-		Name:        workspace,
+		WorkspaceID: workspaceStorageID(meta),
+		Name:        meta.Name,
 	}, nil
 }
 
 func (m *DatabaseManager) attachWorkspaceSummaryIdentity(ctx context.Context, summary *workspaceSummary, profile databaseProfile) error {
 	if summary == nil {
 		return nil
+	}
+	if strings.TrimSpace(summary.OwnerSubject) == "" {
+		if subject := authSubjectFromContext(ctx); subject != "" {
+			summary.OwnerSubject = subject
+			summary.OwnerLabel = authIdentityLabelFromContext(ctx)
+		}
 	}
 	stampWorkspaceSummary(summary, profile)
 	synced, err := m.syncWorkspaceCatalogSummary(ctx, *summary)
@@ -1582,6 +1616,12 @@ func (m *DatabaseManager) attachWorkspaceSummaryIdentity(ctx context.Context, su
 func (m *DatabaseManager) attachWorkspaceDetailIdentity(ctx context.Context, detail *workspaceDetail, profile databaseProfile) error {
 	if detail == nil {
 		return nil
+	}
+	if strings.TrimSpace(detail.OwnerSubject) == "" {
+		if subject := authSubjectFromContext(ctx); subject != "" {
+			detail.OwnerSubject = subject
+			detail.OwnerLabel = authIdentityLabelFromContext(ctx)
+		}
 	}
 	stampWorkspaceDetail(detail, profile)
 	synced, err := m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(*detail))

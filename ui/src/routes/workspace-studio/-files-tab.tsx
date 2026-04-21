@@ -14,6 +14,7 @@ import {
   useWorkspaceTree,
 } from "../../foundation/hooks/use-afs";
 import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../../foundation/types/afs";
+import { displayWorkspaceName } from "../../foundation/workspace-display";
 
 /* ─── Icons ─────────────────────────────────────────────────────────── */
 
@@ -142,7 +143,7 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
               }}
               $isRoot
             >
-              {workspace.name}
+              {displayWorkspaceName(workspace.name)}
             </BreadcrumbLink>
             {pathSegments.map((segment, i) => {
               const fullPath = "/" + pathSegments.slice(0, i + 1).join("/");

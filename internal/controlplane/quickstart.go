@@ -2,9 +2,7 @@ package controlplane
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -194,20 +192,38 @@ func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID
 		return QuickstartResponse{}, fmt.Errorf("quickstart: open service: %w", err)
 	}
 
-	// On a shared onboarding database, scope the workspace name to the subject
-	// so tenants don't collide on "getting-started" in the same Redis.
 	workspaceName := quickstartWorkspaceNameFor(profile, authSubjectFromContext(ctx))
-
-	existing, err := m.GetWorkspace(ctx, databaseID, workspaceName)
-	if err == nil {
-		return QuickstartResponse{
-			DatabaseID:  databaseID,
-			WorkspaceID: existing.Name,
-			Workspace:   existing,
-		}, nil
-	}
-	if !isNotFound(err) {
-		return QuickstartResponse{}, fmt.Errorf("quickstart: check workspace: %w", err)
+	if profile.Purpose == databasePurposeOnboarding && authSubjectFromContext(ctx) != "" {
+		summaries, err := m.ListWorkspaceSummaries(ctx, databaseID)
+		if err != nil {
+			return QuickstartResponse{}, fmt.Errorf("quickstart: list workspaces: %w", err)
+		}
+		for _, item := range summaries.Items {
+			if item.Name != workspaceName {
+				continue
+			}
+			existing, err := m.GetWorkspace(ctx, databaseID, item.ID)
+			if err != nil {
+				return QuickstartResponse{}, fmt.Errorf("quickstart: load workspace: %w", err)
+			}
+			return QuickstartResponse{
+				DatabaseID:  databaseID,
+				WorkspaceID: existing.ID,
+				Workspace:   existing,
+			}, nil
+		}
+	} else {
+		existing, err := m.GetWorkspace(ctx, databaseID, workspaceName)
+		if err == nil {
+			return QuickstartResponse{
+				DatabaseID:  databaseID,
+				WorkspaceID: existing.ID,
+				Workspace:   existing,
+			}, nil
+		}
+		if !isNotFound(err) {
+			return QuickstartResponse{}, fmt.Errorf("quickstart: check workspace: %w", err)
+		}
 	}
 
 	detail, err := createQuickstartWorkspace(ctx, service, profile, workspaceName)
@@ -218,15 +234,13 @@ func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID
 	if err := m.attachWorkspaceDetailIdentity(ctx, &detail, profile); err != nil {
 		return QuickstartResponse{}, err
 	}
+	if _, err := m.syncWorkspaceCatalogSummary(ctx, workspaceSummaryFromDetail(detail)); err != nil {
+		return QuickstartResponse{}, err
+	}
 
-	// Return the workspace name as WorkspaceID so the UI redirect resolves
-	// by name. Opaque catalog IDs aren't stable for onboarding databases
-	// (ListDatabases prunes them on every call to keep cross-tenant metadata
-	// out of the shared sqlite catalog), but resolve-by-name hits Redis
-	// directly and works regardless.
 	return QuickstartResponse{
 		DatabaseID:  databaseID,
-		WorkspaceID: detail.Name,
+		WorkspaceID: detail.ID,
 		Workspace:   detail,
 	}, nil
 }
@@ -241,25 +255,20 @@ func isNotFound(err error) bool {
 	return strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "does not exist")
 }
 
-// quickstartWorkspaceNameFor returns the workspace name to use for a quickstart
-// run on the given database. For shared onboarding databases that serve multiple
-// tenants out of one Redis instance, we derive a per-subject suffix so each
-// account gets its own isolated workspace key (`afs:{name}:workspace:meta`).
 func quickstartWorkspaceNameFor(profile databaseProfile, subject string) string {
-	subject = strings.TrimSpace(subject)
-	if profile.Purpose != databasePurposeOnboarding || subject == "" {
-		return quickstartWorkspaceName
-	}
-	sum := sha256.Sum256([]byte(subject))
-	return quickstartWorkspaceName + "-" + hex.EncodeToString(sum[:])[:8]
+	return quickstartWorkspaceName
 }
 
 // createQuickstartWorkspace builds a workspace pre-populated with sample files.
 func createQuickstartWorkspace(ctx context.Context, service *Service, profile databaseProfile, workspace string) (workspaceDetail, error) {
 	now := time.Now().UTC()
+	workspaceID, err := newOpaqueWorkspaceID()
+	if err != nil {
+		return workspaceDetail{}, err
+	}
 
 	// Build the seed manifest with embedded content.
-	manifest, fileCount, dirCount, totalBytes := buildSeedManifest(workspace, now)
+	manifest, fileCount, dirCount, totalBytes := buildSeedManifest(workspaceID, now)
 
 	manifestHash, err := HashManifest(manifest)
 	if err != nil {
@@ -268,6 +277,7 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 
 	meta := WorkspaceMeta{
 		Version:          formatVersion,
+		ID:               workspaceID,
 		Name:             workspace,
 		Description:      "Sample workspace with example files to explore AFS features.",
 		DatabaseID:       profile.ID,
@@ -287,7 +297,7 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 		Name:         quickstartCheckpoint,
 		Description:  "Initial quickstart snapshot with sample files.",
 		Author:       "afs",
-		Workspace:    workspace,
+		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    fileCount,
@@ -302,10 +312,10 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 	if err := store.PutSavepoint(ctx, checkpoint, manifest); err != nil {
 		return workspaceDetail{}, err
 	}
-	if err := SyncWorkspaceRoot(ctx, store, workspace, manifest); err != nil {
+	if err := SyncWorkspaceRoot(ctx, store, workspaceID, manifest); err != nil {
 		return workspaceDetail{}, err
 	}
-	if err := store.Audit(ctx, workspace, "workspace_create", map[string]any{
+	if err := store.Audit(ctx, workspaceID, "workspace_create", map[string]any{
 		"checkpoint": quickstartCheckpoint,
 		"source":     quickstartSource,
 		"files":      fileCount,
@@ -314,7 +324,7 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 		return workspaceDetail{}, err
 	}
 
-	return service.getWorkspace(ctx, workspace)
+	return service.getWorkspace(ctx, workspaceID)
 }
 
 func quickstartCloudAccount(profile databaseProfile) string {

@@ -280,7 +280,11 @@ func setupAFSGrepTest(t *testing.T) (config, *afsStore, func()) {
 func writeLiveAFSFile(t *testing.T, store *afsStore, workspace, p, content string) {
 	t.Helper()
 
-	if err := client.New(store.rdb, workspace).Echo(context.Background(), p, []byte(content)); err != nil {
+	redisKey, err := store.resolveWorkspaceRedisKey(context.Background(), workspace)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceRedisKey(%s) returned error: %v", workspace, err)
+	}
+	if err := client.New(store.rdb, redisKey).Echo(context.Background(), p, []byte(content)); err != nil {
 		t.Fatalf("Echo(%s) returned error: %v", p, err)
 	}
 }

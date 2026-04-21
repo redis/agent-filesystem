@@ -48,11 +48,11 @@ type ImportLock struct {
 	token     string
 	workspace string
 
-	cancel    context.CancelFunc
-	done      chan struct{}
-	onceStop  sync.Once
-	lostMu    sync.Mutex
-	lost      error
+	cancel   context.CancelFunc
+	done     chan struct{}
+	onceStop sync.Once
+	lostMu   sync.Mutex
+	lost     error
 }
 
 // ImportLockKey returns the Redis key used for the workspace import lock.
@@ -69,7 +69,11 @@ func AcquireImportLock(ctx context.Context, store *Store, workspace string) (*Im
 	}
 	token := hex.EncodeToString(tokenBytes)
 
-	key := ImportLockKey(workspace)
+	lockWorkspace, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	key := ImportLockKey(lockWorkspace)
 	ok, err := store.rdb.SetNX(ctx, key, token, importLockTTL).Result()
 	if err != nil {
 		return nil, err
@@ -83,7 +87,7 @@ func AcquireImportLock(ctx context.Context, store *Store, workspace string) (*Im
 		rdb:       store.rdb,
 		key:       key,
 		token:     token,
-		workspace: workspace,
+		workspace: lockWorkspace,
 		cancel:    cancel,
 		done:      make(chan struct{}),
 	}
@@ -94,7 +98,11 @@ func AcquireImportLock(ctx context.Context, store *Store, workspace string) (*Im
 // CheckImportLock returns ErrImportInProgress if the workspace currently has an
 // active import lock. It is a read-only EXISTS check.
 func CheckImportLock(ctx context.Context, store *Store, workspace string) error {
-	count, err := store.rdb.Exists(ctx, ImportLockKey(workspace)).Result()
+	lockWorkspace, err := store.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	count, err := store.rdb.Exists(ctx, ImportLockKey(lockWorkspace)).Result()
 	if err != nil {
 		return err
 	}

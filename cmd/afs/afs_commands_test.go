@@ -451,11 +451,16 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 	if workspaceMeta.HeadSavepoint != "initial" {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
 	}
+	storageID := workspaceMeta.Name
+	if strings.TrimSpace(workspaceMeta.ID) != "" {
+		storageID = workspaceMeta.ID
+	}
+	redisKey := storageID
 	liveRootKeys, err := store.rdb.Exists(
 		context.Background(),
-		"afs:{repo}:info",
-		"afs:{repo}:inode:1",
-		"afs:{repo}:root_head_savepoint",
+		"afs:{"+redisKey+"}:info",
+		"afs:{"+redisKey+"}:inode:1",
+		"afs:{"+redisKey+"}:root_head_savepoint",
 	).Result()
 	if err != nil {
 		t.Fatalf("Exists(live root keys) returned error: %v", err)
@@ -464,7 +469,7 @@ func TestCmdImportCreatesWorkspaceAndCommandsSucceed(t *testing.T) {
 		t.Fatalf("expected import to initialize live root, got %d live root keys", liveRootKeys)
 	}
 
-	rootHead, err := store.rdb.Get(context.Background(), "afs:{repo}:root_head_savepoint").Result()
+	rootHead, err := store.rdb.Get(context.Background(), "afs:{"+redisKey+"}:root_head_savepoint").Result()
 	if err != nil {
 		t.Fatalf("Get(root_head_savepoint) returned error: %v", err)
 	}

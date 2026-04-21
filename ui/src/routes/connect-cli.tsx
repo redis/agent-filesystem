@@ -7,6 +7,7 @@ import { afsApi } from "../foundation/api/afs";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import { workspaceSummariesQueryOptions, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import { canonicalWorkspaceName, displayWorkspaceName } from "../foundation/workspace-display";
 
 const connectCLISearchSchema = z.object({
   return_to: z.string().url(),
@@ -118,7 +119,7 @@ function ConnectCLIPage() {
           <Title>CLI connected</Title>
           <Description>
             {search.workspace_name?.trim()
-              ? `Your terminal is now linked to ${search.workspace_name}. Return to the terminal and run afs up to sync it locally.`
+              ? `Your terminal is now linked to ${displayWorkspaceName(search.workspace_name)}. Return to the terminal and run afs up to sync it locally.`
               : "Your terminal is now linked. Return to the terminal and run afs up to sync the workspace locally."}
           </Description>
           <SuccessPanel>
@@ -140,7 +141,7 @@ function ConnectCLIPage() {
             ? "Pick a workspace for this terminal. If you have not created one yet, finish onboarding in AFS Cloud first."
             : isGettingStartedName(autoWorkspace.name)
               ? "Connecting this CLI to your getting-started workspace so you can start with sample files right away."
-              : `Preparing browser login for ${autoWorkspace.name}.`}
+              : `Preparing browser login for ${displayWorkspaceName(autoWorkspace.name)}.`}
         </Description>
 
         {returnToError != null ? (
@@ -163,7 +164,7 @@ function ConnectCLIPage() {
             {explicitWorkspaceHint ? (
               <LoadingPanel>
                 <Loader data-testid="loader--spinner" />
-                <p>Looking for {explicitWorkspaceHint}…</p>
+                <p>Looking for {displayWorkspaceName(explicitWorkspaceHint)}…</p>
               </LoadingPanel>
             ) : (
               <Link to={hasCreatableDatabase ? "/workspaces" : "/databases"}>
@@ -184,7 +185,7 @@ function ConnectCLIPage() {
               {workspaces.map((workspace) => (
                 <WorkspaceRow key={workspace.id}>
                   <WorkspaceMeta>
-                    <WorkspaceName>{workspace.name}</WorkspaceName>
+                    <WorkspaceName>{displayWorkspaceName(workspace.name)}</WorkspaceName>
                     <WorkspaceDetails>
                       {workspace.databaseName} · {workspace.fileCount} files · {workspace.checkpointCount} checkpoints
                     </WorkspaceDetails>
@@ -217,7 +218,7 @@ function ConnectCLIPage() {
 }
 
 function isGettingStartedName(name: string) {
-  return name === "getting-started" || name.startsWith("getting-started-");
+  return canonicalWorkspaceName(name) === "getting-started";
 }
 
 function validateReturnTo(raw: string) {

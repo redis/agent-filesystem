@@ -13,7 +13,11 @@ func liveWorkspaceManifest(ctx context.Context, store *afsStore, workspace, save
 	if _, _, _, err := store.ensureWorkspaceRoot(ctx, workspace); err != nil {
 		return manifest{}, nil, err
 	}
-	m, blobs, _, err := buildManifestFromWorkspaceRoot(ctx, store.rdb, workspaceRedisKey(workspace), workspace, savepointID)
+	redisKey, err := store.resolveWorkspaceRedisKey(ctx, workspace)
+	if err != nil {
+		return manifest{}, nil, err
+	}
+	m, blobs, _, err := buildManifestFromWorkspaceRoot(ctx, store.rdb, redisKey, workspace, savepointID)
 	if err != nil {
 		return manifest{}, nil, err
 	}
@@ -166,5 +170,9 @@ func activeMountedLiveWorkspace(workspace string) bool {
 		return false
 	}
 
-	return strings.TrimSpace(st.RedisKey) == workspaceRedisKey(workspace)
+	ref := strings.TrimSpace(st.CurrentWorkspaceID)
+	if ref == "" {
+		ref = workspace
+	}
+	return strings.TrimSpace(st.RedisKey) == workspaceRedisKey(ref)
 }

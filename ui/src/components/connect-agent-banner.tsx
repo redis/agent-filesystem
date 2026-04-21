@@ -3,6 +3,7 @@ import { Button } from "@redis-ui/components";
 import { Link } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
 import { getControlPlaneURL } from "../foundation/api/afs";
+import { canonicalWorkspaceName, displayWorkspaceName } from "../foundation/workspace-display";
 
 type Props = {
   workspaceId: string;
@@ -28,8 +29,8 @@ export function ConnectAgentBanner({
   const hadAgentBefore = useRef(agentConnected);
 
   const controlPlaneUrl = getControlPlaneURL();
-  const displayName = workspaceLabel?.trim() || workspaceName;
-  const mountPath = `~/afs/${workspaceName}`;
+  const displayName = workspaceLabel?.trim() || displayWorkspaceName(workspaceName);
+  const mountPath = `~/afs/${canonicalWorkspaceName(workspaceName)}`;
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
   const loginCmd = `${cliPath} onboard`;

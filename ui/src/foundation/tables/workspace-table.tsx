@@ -8,6 +8,7 @@ import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSWorkspaceSummary } from "../types/afs";
+import { displayWorkspaceName } from "../workspace-display";
 import type { StudioTab } from "../workspace-tabs";
 import * as S from "./workspace-table.styles";
 
@@ -164,7 +165,7 @@ export function WorkspaceTable({
                   onMouseEnter={() => onPreviewWorkspace?.(row.original)}
                   onFocus={() => onPreviewWorkspace?.(row.original)}
                 >
-                  {row.original.name}
+                  {displayWorkspaceName(row.original.name)}
                 </WorkspaceNameButton>
                 <IdRow>
                   <IdText title={id}>{shortenId(id)}</IdText>

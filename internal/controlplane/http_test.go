@@ -431,11 +431,12 @@ func TestHTTPBrowseWorkingCopyView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("manager.serviceFor() returned error: %v", err)
 	}
-	if _, _, _, err := EnsureWorkspaceRoot(ctx, service.store, "repo"); err != nil {
+	redisKey, _, _, err := EnsureWorkspaceRoot(ctx, service.store, "repo")
+	if err != nil {
 		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
 	}
 
-	fsClient := mountclient.New(service.store.rdb, WorkspaceFSKey("repo"))
+	fsClient := mountclient.New(service.store.rdb, redisKey)
 	if err := fsClient.Echo(ctx, "/drafts/notes.txt", []byte("working copy\n")); err != nil {
 		t.Fatalf("Echo() returned error: %v", err)
 	}
@@ -685,14 +686,14 @@ func TestHTTPClientWorkspaceSession(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
 		t.Fatalf("Decode(session) returned error: %v", err)
 	}
-	if session.Workspace != "repo" {
-		t.Fatalf("session workspace = %q, want %q", session.Workspace, "repo")
+	if !strings.HasPrefix(session.Workspace, "ws_") {
+		t.Fatalf("session workspace = %q, want opaque workspace id", session.Workspace)
 	}
 	if session.SessionID == "" {
 		t.Fatal("expected workspace session to include a session id")
 	}
-	if session.RedisKey != WorkspaceFSKey("repo") {
-		t.Fatalf("session redis_key = %q, want %q", session.RedisKey, WorkspaceFSKey("repo"))
+	if session.RedisKey != WorkspaceFSKey(session.Workspace) {
+		t.Fatalf("session redis_key = %q, want %q", session.RedisKey, WorkspaceFSKey(session.Workspace))
 	}
 	if session.Redis.RedisAddr == "" {
 		t.Fatal("expected workspace session to include redis bootstrap info")

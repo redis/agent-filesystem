@@ -59,7 +59,11 @@ func seedWorkspaceMountKey(ctx context.Context, store *afsStore, workspace strin
 }
 
 func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string) (bool, error) {
-	rootManifest, blobs, stats, err := buildManifestFromWorkspaceRoot(ctx, store.rdb, workspaceRedisKey(workspace), workspace, savepointID)
+	redisKey, err := store.resolveWorkspaceRedisKey(ctx, workspace)
+	if err != nil {
+		return false, err
+	}
+	rootManifest, blobs, stats, err := buildManifestFromWorkspaceRoot(ctx, store.rdb, redisKey, workspace, savepointID)
 	if err != nil {
 		return false, err
 	}

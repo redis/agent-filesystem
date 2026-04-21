@@ -47,7 +47,11 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	}
 
 	manifest := input.Manifest
-	manifest.Workspace = workspace
+	workspaceID, err := newOpaqueWorkspaceID()
+	if err != nil {
+		return ImportWorkspaceResponse{}, err
+	}
+	manifest.Workspace = workspaceID
 	manifest.Savepoint = initialCheckpointName
 
 	now := time.Now().UTC()
@@ -55,7 +59,7 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	if err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
-	if err := s.store.SaveBlobs(ctx, workspace, input.Blobs); err != nil {
+	if err := s.store.SaveBlobs(ctx, workspaceID, input.Blobs); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
 
@@ -66,6 +70,7 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 
 	meta := applyWorkspaceMetaDefaults(s.cfg, WorkspaceMeta{
 		Version:          formatVersion,
+		ID:               workspaceID,
 		Name:             workspace,
 		Description:      description,
 		Source:           SourceGitImport,
@@ -81,7 +86,7 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 		Name:         initialCheckpointName,
 		Description:  "Initial import snapshot.",
 		Author:       "afs",
-		Workspace:    workspace,
+		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    input.FileCount,
@@ -95,10 +100,10 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	if err := s.store.PutSavepoint(ctx, checkpoint, manifest); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
-	if err := SyncWorkspaceRoot(ctx, s.store, workspace, manifest); err != nil {
+	if err := SyncWorkspaceRoot(ctx, s.store, workspaceID, manifest); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
-	if err := s.store.Audit(ctx, workspace, "import", map[string]any{
+	if err := s.store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      "client-upload",
 		"files":       input.FileCount,
@@ -108,7 +113,7 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 		return ImportWorkspaceResponse{}, err
 	}
 
-	detail, err := s.getWorkspace(ctx, workspace)
+	detail, err := s.getWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ImportWorkspaceResponse{}, err
 	}

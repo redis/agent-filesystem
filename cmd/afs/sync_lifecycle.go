@@ -57,7 +57,7 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 	}
 
 	runtimeCfg := resolvedCfg
-	runtimeCfg.CurrentWorkspace = session.Workspace
+	runtimeCfg.CurrentWorkspace = selection.Name
 	runtimeCfg.CurrentWorkspaceID = selection.ID
 	runtimeCfg.DatabaseID = strings.TrimSpace(session.DatabaseID)
 	runtimeCfg.RedisAddr = rewriteManagedRedisAddrForLocalhost(runtimeCfg.URL, session.Redis.RedisAddr)
@@ -68,7 +68,7 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 
 	return syncBootstrap{
 		cfg:             runtimeCfg,
-		workspace:       session.Workspace,
+		workspace:       selection.Name,
 		redisKey:        session.RedisKey,
 		headCheckpoint:  session.HeadCheckpointID,
 		initializedRoot: session.Initialized,

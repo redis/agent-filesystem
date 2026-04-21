@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -33,6 +34,7 @@ var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type WorkspaceMeta struct {
 	Version                 int       `json:"version"`
+	ID                      string    `json:"id,omitempty"`
 	Name                    string    `json:"name"`
 	Description             string    `json:"description,omitempty"`
 	DatabaseID              string    `json:"database_id,omitempty"`
@@ -128,6 +130,60 @@ func NewStore(rdb *redis.Client) *Store {
 	return &Store{rdb: rdb}
 }
 
+func workspaceStorageID(meta WorkspaceMeta) string {
+	if id := strings.TrimSpace(meta.ID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(meta.Name)
+}
+
+func workspaceNameIndexKey() string {
+	return "afs:workspace:index:names"
+}
+
+func (s *Store) resolveWorkspaceMeta(ctx context.Context, workspace string) (WorkspaceMeta, string, error) {
+	ref := strings.TrimSpace(workspace)
+	if ref == "" {
+		return WorkspaceMeta{}, "", os.ErrNotExist
+	}
+
+	meta, err := getJSON[WorkspaceMeta](ctx, s.rdb, workspaceMetaKey(ref))
+	if err == nil {
+		return meta, workspaceStorageID(meta), nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return WorkspaceMeta{}, "", err
+	}
+
+	storageID, err := s.rdb.HGet(ctx, workspaceNameIndexKey(), ref).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return WorkspaceMeta{}, "", os.ErrNotExist
+		}
+		return WorkspaceMeta{}, "", err
+	}
+	meta, err = getJSON[WorkspaceMeta](ctx, s.rdb, workspaceMetaKey(storageID))
+	if err != nil {
+		return WorkspaceMeta{}, "", err
+	}
+	return meta, workspaceStorageID(meta), nil
+}
+
+func (s *Store) resolveWorkspaceStorageOrRaw(ctx context.Context, workspace string) (string, error) {
+	ref := strings.TrimSpace(workspace)
+	if ref == "" {
+		return "", os.ErrNotExist
+	}
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, ref)
+	if err == nil {
+		return storageID, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return ref, nil
+	}
+	return "", err
+}
+
 func (s *Store) Now(ctx context.Context) (time.Time, error) {
 	now, err := s.rdb.Time(ctx).Result()
 	if err != nil {
@@ -137,17 +193,24 @@ func (s *Store) Now(ctx context.Context) (time.Time, error) {
 }
 
 func (s *Store) WorkspaceExists(ctx context.Context, workspace string) (bool, error) {
-	count, err := s.rdb.Exists(ctx, workspaceMetaKey(workspace)).Result()
-	if err != nil {
-		return false, err
+	_, _, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err == nil {
+		return true, nil
 	}
-	return count > 0, nil
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (s *Store) DeleteWorkspace(ctx context.Context, workspace string) error {
+	meta, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	var cursor uint64
 	for {
-		keys, next, err := s.rdb.Scan(ctx, cursor, workspacePattern(workspace), 128).Result()
+		keys, next, err := s.rdb.Scan(ctx, cursor, workspacePattern(storageID), 128).Result()
 		if err != nil {
 			return err
 		}
@@ -158,17 +221,47 @@ func (s *Store) DeleteWorkspace(ctx context.Context, workspace string) error {
 		}
 		cursor = next
 		if cursor == 0 {
+			if strings.TrimSpace(meta.ID) != "" {
+				if err := s.rdb.HDel(ctx, workspaceNameIndexKey(), meta.Name).Err(); err != nil {
+					return err
+				}
+			}
 			return nil
 		}
 	}
 }
 
 func (s *Store) PutWorkspaceMeta(ctx context.Context, meta WorkspaceMeta) error {
-	return setJSON(ctx, s.rdb, workspaceMetaKey(meta.Name), meta)
+	storageID := workspaceStorageID(meta)
+	if storageID == "" {
+		return fmt.Errorf("workspace id is required")
+	}
+	previous, err := getJSON[WorkspaceMeta](ctx, s.rdb, workspaceMetaKey(storageID))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if err := setJSON(ctx, s.rdb, workspaceMetaKey(storageID), meta); err != nil {
+		return err
+	}
+	if strings.TrimSpace(meta.ID) != "" {
+		if err := s.rdb.HSet(ctx, workspaceNameIndexKey(), meta.Name, storageID).Err(); err != nil {
+			return err
+		}
+		if strings.TrimSpace(previous.Name) != "" && previous.Name != meta.Name {
+			currentID, err := s.rdb.HGet(ctx, workspaceNameIndexKey(), previous.Name).Result()
+			if err == nil && strings.TrimSpace(currentID) == storageID {
+				if err := s.rdb.HDel(ctx, workspaceNameIndexKey(), previous.Name).Err(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) GetWorkspaceMeta(ctx context.Context, workspace string) (WorkspaceMeta, error) {
-	return getJSON[WorkspaceMeta](ctx, s.rdb, workspaceMetaKey(workspace))
+	meta, _, err := s.resolveWorkspaceMeta(ctx, workspace)
+	return meta, err
 }
 
 func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceMeta, error) {
@@ -199,20 +292,35 @@ func (s *Store) ListWorkspaces(ctx context.Context) ([]WorkspaceMeta, error) {
 }
 
 func (s *Store) PutSavepoint(ctx context.Context, meta SavepointMeta, m Manifest) error {
-	if err := setJSON(ctx, s.rdb, savepointMetaKey(meta.Workspace, meta.ID), meta); err != nil {
+	storageID, err := s.resolveWorkspaceStorageOrRaw(ctx, meta.Workspace)
+	if err != nil {
 		return err
 	}
-	if err := setJSON(ctx, s.rdb, savepointManifestKey(meta.Workspace, meta.ID), m); err != nil {
+	if storageID == "" {
+		return fmt.Errorf("savepoint workspace id is required")
+	}
+	meta.Workspace = storageID
+	if err := setJSON(ctx, s.rdb, savepointMetaKey(storageID, meta.ID), meta); err != nil {
 		return err
 	}
-	return s.rdb.ZAdd(ctx, workspaceSavepointsKey(meta.Workspace), redis.Z{
+	if err := setJSON(ctx, s.rdb, savepointManifestKey(storageID, meta.ID), m); err != nil {
+		return err
+	}
+	return s.rdb.ZAdd(ctx, workspaceSavepointsKey(storageID), redis.Z{
 		Score:  float64(meta.CreatedAt.UTC().UnixMilli()),
 		Member: meta.ID,
 	}).Err()
 }
 
 func (s *Store) SavepointExists(ctx context.Context, workspace, savepoint string) (bool, error) {
-	count, err := s.rdb.Exists(ctx, savepointMetaKey(workspace, savepoint)).Result()
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	count, err := s.rdb.Exists(ctx, savepointMetaKey(storageID, savepoint)).Result()
 	if err != nil {
 		return false, err
 	}
@@ -220,25 +328,37 @@ func (s *Store) SavepointExists(ctx context.Context, workspace, savepoint string
 }
 
 func (s *Store) GetSavepointMeta(ctx context.Context, workspace, savepoint string) (SavepointMeta, error) {
-	return getJSON[SavepointMeta](ctx, s.rdb, savepointMetaKey(workspace, savepoint))
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return SavepointMeta{}, err
+	}
+	return getJSON[SavepointMeta](ctx, s.rdb, savepointMetaKey(storageID, savepoint))
 }
 
 func (s *Store) GetManifest(ctx context.Context, workspace, savepoint string) (Manifest, error) {
-	return getJSON[Manifest](ctx, s.rdb, savepointManifestKey(workspace, savepoint))
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return Manifest{}, err
+	}
+	return getJSON[Manifest](ctx, s.rdb, savepointManifestKey(storageID, savepoint))
 }
 
 func (s *Store) ListSavepoints(ctx context.Context, workspace string, limit int64) ([]SavepointMeta, error) {
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
 	stop := int64(-1)
 	if limit > 0 {
 		stop = limit - 1
 	}
-	ids, err := s.rdb.ZRevRange(ctx, workspaceSavepointsKey(workspace), 0, stop).Result()
+	ids, err := s.rdb.ZRevRange(ctx, workspaceSavepointsKey(storageID), 0, stop).Result()
 	if err != nil {
 		return nil, err
 	}
 	savepoints := make([]SavepointMeta, 0, len(ids))
 	for _, id := range ids {
-		meta, err := s.GetSavepointMeta(ctx, workspace, id)
+		meta, err := getJSON[SavepointMeta](ctx, s.rdb, savepointMetaKey(storageID, id))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
@@ -251,8 +371,12 @@ func (s *Store) ListSavepoints(ctx context.Context, workspace string, limit int6
 }
 
 func (s *Store) SaveBlobs(ctx context.Context, workspace string, blobs map[string][]byte) error {
+	storageID, err := s.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	for blobID, data := range blobs {
-		if err := s.rdb.SetNX(ctx, blobKey(workspace, blobID), data, 0).Err(); err != nil {
+		if err := s.rdb.SetNX(ctx, blobKey(storageID, blobID), data, 0).Err(); err != nil {
 			return err
 		}
 	}
@@ -260,6 +384,10 @@ func (s *Store) SaveBlobs(ctx context.Context, workspace string, blobs map[strin
 }
 
 func (s *Store) AddBlobRefs(ctx context.Context, workspace string, m Manifest, createdAt time.Time) error {
+	storageID, err := s.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	refs := map[string]int64{}
 	for _, entry := range m.Entries {
 		if entry.BlobID == "" {
@@ -268,7 +396,7 @@ func (s *Store) AddBlobRefs(ctx context.Context, workspace string, m Manifest, c
 		refs[entry.BlobID] = entry.Size
 	}
 	for blobID, size := range refs {
-		ref, err := s.getBlobRef(ctx, workspace, blobID)
+		ref, err := s.getBlobRef(ctx, storageID, blobID)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
 				return err
@@ -284,7 +412,7 @@ func (s *Store) AddBlobRefs(ctx context.Context, workspace string, m Manifest, c
 		if ref.Size == 0 {
 			ref.Size = size
 		}
-		if err := setJSON(ctx, s.rdb, blobRefKey(workspace, blobID), ref); err != nil {
+		if err := setJSON(ctx, s.rdb, blobRefKey(storageID, blobID), ref); err != nil {
 			return err
 		}
 	}
@@ -296,7 +424,11 @@ func (s *Store) getBlobRef(ctx context.Context, workspace, blobID string) (blobR
 }
 
 func (s *Store) GetBlob(ctx context.Context, workspace, blobID string) ([]byte, error) {
-	data, err := s.rdb.Get(ctx, blobKey(workspace, blobID)).Bytes()
+	storageID, err := s.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	data, err := s.rdb.Get(ctx, blobKey(storageID, blobID)).Bytes()
 	if err == redis.Nil {
 		return nil, os.ErrNotExist
 	}
@@ -305,9 +437,13 @@ func (s *Store) GetBlob(ctx context.Context, workspace, blobID string) ([]byte, 
 
 func (s *Store) BlobStats(ctx context.Context, workspace string) (BlobStats, error) {
 	stats := BlobStats{}
+	storageID, err := s.resolveWorkspaceStorageOrRaw(ctx, workspace)
+	if err != nil {
+		return stats, err
+	}
 	var cursor uint64
 	for {
-		keys, next, err := s.rdb.Scan(ctx, cursor, blobRefKey(workspace, "*"), 128).Result()
+		keys, next, err := s.rdb.Scan(ctx, cursor, blobRefKey(storageID, "*"), 128).Result()
 		if err != nil {
 			return stats, err
 		}
@@ -330,8 +466,12 @@ func (s *Store) BlobStats(ctx context.Context, workspace string) (BlobStats, err
 }
 
 func (s *Store) MoveWorkspaceHead(ctx context.Context, workspace, savepoint string, updatedAt time.Time) error {
+	meta, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	return s.rdb.Watch(ctx, func(tx *redis.Tx) error {
-		current, err := getJSON[WorkspaceMeta](ctx, tx, workspaceMetaKey(workspace))
+		current, err := getJSON[WorkspaceMeta](ctx, tx, workspaceMetaKey(storageID))
 		if err != nil {
 			return err
 		}
@@ -340,10 +480,10 @@ func (s *Store) MoveWorkspaceHead(ctx context.Context, workspace, savepoint stri
 		current.DirtyHint = false
 
 		_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-			return setJSON(ctx, pipe, workspaceMetaKey(workspace), current)
+			return setJSON(ctx, pipe, workspaceMetaKey(storageID), current)
 		})
 		return err
-	}, workspaceMetaKey(workspace))
+	}, workspaceMetaKey(storageID), workspaceNameIndexKey(), workspaceMetaKey(workspaceStorageID(meta)))
 }
 
 func (s *Store) PutWorkspaceSession(ctx context.Context, record WorkspaceSessionRecord) error {
@@ -353,20 +493,25 @@ func (s *Store) PutWorkspaceSession(ctx context.Context, record WorkspaceSession
 	if record.Workspace == "" {
 		return fmt.Errorf("workspace session workspace is required")
 	}
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, record.Workspace)
+	if err != nil {
+		return err
+	}
 	if record.LeaseExpiresAt.IsZero() {
 		return fmt.Errorf("workspace session lease expiry is required")
 	}
-	if err := setJSON(ctx, s.rdb, workspaceSessionKey(record.Workspace, record.SessionID), record); err != nil {
+	record.Workspace = storageID
+	if err := setJSON(ctx, s.rdb, workspaceSessionKey(storageID, record.SessionID), record); err != nil {
 		return err
 	}
 	ttl := time.Until(record.LeaseExpiresAt)
 	if ttl <= 0 {
 		ttl = time.Second
 	}
-	if err := s.rdb.Set(ctx, workspaceSessionLeaseKey(record.Workspace, record.SessionID), "1", ttl).Err(); err != nil {
+	if err := s.rdb.Set(ctx, workspaceSessionLeaseKey(storageID, record.SessionID), "1", ttl).Err(); err != nil {
 		return err
 	}
-	return s.rdb.ZAdd(ctx, workspaceSessionsKey(record.Workspace), redis.Z{
+	return s.rdb.ZAdd(ctx, workspaceSessionsKey(storageID), redis.Z{
 		Score:  float64(record.LeaseExpiresAt.UTC().UnixMilli()),
 		Member: record.SessionID,
 	}).Err()
@@ -379,36 +524,53 @@ func (s *Store) PutWorkspaceSessionWithTTL(ctx context.Context, record Workspace
 	if record.Workspace == "" {
 		return fmt.Errorf("workspace session workspace is required")
 	}
-	if err := setJSONWithTTL(ctx, s.rdb, workspaceSessionKey(record.Workspace, record.SessionID), record, ttl); err != nil {
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, record.Workspace)
+	if err != nil {
+		return err
+	}
+	record.Workspace = storageID
+	if err := setJSONWithTTL(ctx, s.rdb, workspaceSessionKey(storageID, record.SessionID), record, ttl); err != nil {
 		return err
 	}
 	return nil
 }
 
 func (s *Store) GetWorkspaceSession(ctx context.Context, workspace, sessionID string) (WorkspaceSessionRecord, error) {
-	return getJSON[WorkspaceSessionRecord](ctx, s.rdb, workspaceSessionKey(workspace, sessionID))
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return WorkspaceSessionRecord{}, err
+	}
+	return getJSON[WorkspaceSessionRecord](ctx, s.rdb, workspaceSessionKey(storageID, sessionID))
 }
 
 func (s *Store) RemoveWorkspaceSessionPresence(ctx context.Context, workspace, sessionID string) error {
-	_, err := s.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.ZRem(ctx, workspaceSessionsKey(workspace), sessionID)
-		pipe.Del(ctx, workspaceSessionLeaseKey(workspace, sessionID))
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	_, err = s.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.ZRem(ctx, workspaceSessionsKey(storageID), sessionID)
+		pipe.Del(ctx, workspaceSessionLeaseKey(storageID, sessionID))
 		return nil
 	})
 	return err
 }
 
 func (s *Store) ListWorkspaceSessions(ctx context.Context, workspace string) ([]WorkspaceSessionRecord, error) {
-	sessionIDs, err := s.rdb.ZRevRange(ctx, workspaceSessionsKey(workspace), 0, -1).Result()
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	sessionIDs, err := s.rdb.ZRevRange(ctx, workspaceSessionsKey(storageID), 0, -1).Result()
 	if err != nil {
 		return nil, err
 	}
 	records := make([]WorkspaceSessionRecord, 0, len(sessionIDs))
 	for _, sessionID := range sessionIDs {
-		record, err := s.GetWorkspaceSession(ctx, workspace, sessionID)
+		record, err := getJSON[WorkspaceSessionRecord](ctx, s.rdb, workspaceSessionKey(storageID, sessionID))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				_ = s.RemoveWorkspaceSessionPresence(ctx, workspace, sessionID)
+				_ = s.RemoveWorkspaceSessionPresence(ctx, storageID, sessionID)
 				continue
 			}
 			return nil, err
@@ -422,14 +584,22 @@ func (s *Store) ListWorkspaceSessions(ctx context.Context, workspace string) ([]
 }
 
 func (s *Store) ListExpiredWorkspaceSessionIDs(ctx context.Context, workspace string, now time.Time) ([]string, error) {
-	return s.rdb.ZRangeByScore(ctx, workspaceSessionsKey(workspace), &redis.ZRangeBy{
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	return s.rdb.ZRangeByScore(ctx, workspaceSessionsKey(storageID), &redis.ZRangeBy{
 		Min: "-inf",
 		Max: strconv.FormatInt(now.UTC().UnixMilli(), 10),
 	}).Result()
 }
 
 func (s *Store) WorkspaceSessionLeaseAlive(ctx context.Context, workspace, sessionID string) (bool, error) {
-	count, err := s.rdb.Exists(ctx, workspaceSessionLeaseKey(workspace, sessionID)).Result()
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return false, err
+	}
+	count, err := s.rdb.Exists(ctx, workspaceSessionLeaseKey(storageID, sessionID)).Result()
 	if err != nil {
 		return false, err
 	}
@@ -437,16 +607,20 @@ func (s *Store) WorkspaceSessionLeaseAlive(ctx context.Context, workspace, sessi
 }
 
 func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[string]any) error {
+	meta, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
 	fields := map[string]any{
 		"ts_ms":     strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
-		"workspace": workspace,
+		"workspace": meta.Name,
 		"op":        op,
 	}
 	for key, value := range extra {
 		fields[key] = fmt.Sprint(value)
 	}
 	return s.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: workspaceAuditKey(workspace),
+		Stream: workspaceAuditKey(storageID),
 		Values: fields,
 	}).Err()
 }
@@ -455,7 +629,11 @@ func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([
 	if limit <= 0 {
 		limit = 50
 	}
-	streams, err := s.rdb.XRevRangeN(ctx, workspaceAuditKey(workspace), "+", "-", limit).Result()
+	meta, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	streams, err := s.rdb.XRevRangeN(ctx, workspaceAuditKey(storageID), "+", "-", limit).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +641,7 @@ func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([
 	for _, stream := range streams {
 		record := auditRecord{
 			ID:        stream.ID,
-			Workspace: workspace,
+			Workspace: meta.Name,
 			CreatedAt: time.Now().UTC(),
 			Fields:    map[string]string{},
 		}
@@ -475,7 +653,7 @@ func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([
 				record.CreatedAt = time.UnixMilli(ts).UTC()
 			}
 		}
-		record.Workspace = defaultString(record.Fields["workspace"], workspace)
+		record.Workspace = defaultString(record.Fields["workspace"], meta.Name)
 		record.Op = record.Fields["op"]
 		records = append(records, record)
 	}

@@ -3,6 +3,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -172,12 +174,16 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 
 	now := time.Now().UTC()
 	defaultMeta := controlplane.ApplyWorkspaceMetaDefaults(controlPlaneConfigFromCLI(cfg), workspaceMeta{Name: workspace})
+	workspaceID, err := newCLIWorkspaceID()
+	if err != nil {
+		return err
+	}
 
-	writer := store.newBlobWriter(workspace, now)
+	writer := store.newBlobWriter(workspaceID, now)
 	sink := newImportBlobSink(ctx, writer)
 
 	step := startStep("Building manifest")
-	manifest, stats, err := buildManifestStreaming(sourceDir, workspace, initialSavepoint, ignorer, sink, func(progress importStats) {
+	manifest, stats, err := buildManifestStreaming(sourceDir, workspaceID, initialSavepoint, ignorer, sink, func(progress importStats) {
 		step.update(formatAFSImportProgressLabel("Building manifest", progress, total, step.elapsed()))
 	})
 	if err != nil {
@@ -207,6 +213,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 
 	workspaceMeta := workspaceMeta{
 		Version:          afsFormatVersion,
+		ID:               workspaceID,
 		Name:             workspace,
 		Description:      fmt.Sprintf("Imported from %s.", sourceDir),
 		DatabaseID:       defaultMeta.DatabaseID,
@@ -226,7 +233,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		Name:         initialSavepoint,
 		Description:  "Initial import snapshot.",
 		Author:       "afs",
-		Workspace:    workspace,
+		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
 		CreatedAt:    now,
 		FileCount:    stats.FileCount,
@@ -251,7 +258,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		BlobProvider:       sink.Get,
 		SkipNamespaceReset: true,
 	}
-	if err := store.syncWorkspaceRootWithOptions(ctx, workspace, manifest, syncOpts); err != nil {
+	if err := store.syncWorkspaceRootWithOptions(ctx, workspaceID, manifest, syncOpts); err != nil {
 		step.fail(err.Error())
 		return err
 	}
@@ -261,7 +268,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	// Drop the blob cache now that sync has consumed it.
 	sink.Drop()
 
-	if err := store.audit(ctx, workspace, "import", map[string]any{
+	if err := store.audit(ctx, workspaceID, "import", map[string]any{
 		"savepoint":   initialSavepoint,
 		"files":       stats.FileCount,
 		"dirs":        stats.DirCount,
@@ -285,6 +292,14 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
 	})
 	return nil
+}
+
+func newCLIWorkspaceID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "ws_" + hex.EncodeToString(raw[:]), nil
 }
 
 func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string) error {

@@ -19,9 +19,10 @@ type workspaceCatalog struct {
 }
 
 type workspaceCatalogRoute struct {
-	DatabaseID  string
-	WorkspaceID string
-	Name        string
+	DatabaseID   string
+	WorkspaceID  string
+	Name         string
+	OwnerSubject string
 }
 
 func openWorkspaceCatalog(configPathOverride string) (*workspaceCatalog, error) {
@@ -230,23 +231,23 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 	}
 	defer statement.Close()
 
-	existingByName, err := catalogRoutesByName(ctx, tx, c.rebind, databaseID)
+	existingByIdentity, err := catalogRoutesByIdentity(ctx, tx, c.rebind, databaseID)
 	if err != nil {
 		return nil, err
 	}
-	keepNames := make(map[string]struct{}, len(items))
+	keepIDs := make(map[string]struct{}, len(items))
 	synced := make([]workspaceSummary, 0, len(items))
 	for _, item := range items {
 		item.DatabaseID = strings.TrimSpace(databaseID)
-		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, c.rebind, existingByName, item)
+		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, c.rebind, existingByIdentity, item)
 		if err != nil {
 			return nil, err
 		}
-		keepNames[item.Name] = struct{}{}
+		keepIDs[item.ID] = struct{}{}
 		synced = append(synced, item)
 	}
 
-	if err := deleteCatalogDatabaseRowsNotInNames(ctx, tx, c.rebind, databaseID, keepNames); err != nil {
+	if err := deleteCatalogDatabaseRowsNotInIDs(ctx, tx, c.rebind, databaseID, keepIDs); err != nil {
 		return nil, err
 	}
 
@@ -263,11 +264,11 @@ func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSu
 	}
 	defer statement.Close()
 
-	existingByName, err := catalogRoutesByName(ctx, c.db, c.rebind, item.DatabaseID)
+	existingByIdentity, err := catalogRoutesByIdentity(ctx, c.db, c.rebind, item.DatabaseID)
 	if err != nil {
 		return workspaceSummary{}, err
 	}
-	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, c.rebind, existingByName, item)
+	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, c.rebind, existingByIdentity, item)
 }
 
 func (c *workspaceCatalog) ListWorkspaceOwners(ctx context.Context, databaseID string) (map[string]catalogOwnerInfo, error) {
@@ -389,7 +390,7 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace string) ([]workspaceCatalogRoute, error) {
 	rows, err := c.queryContext(
 		ctx,
-		`SELECT database_id, workspace_id, name
+		`SELECT database_id, workspace_id, name, owner_subject
 		 FROM workspace_catalog
 		 WHERE workspace_id = ? OR name = ?
 		 ORDER BY database_id, workspace_id`,
@@ -404,7 +405,7 @@ func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace strin
 	routes := make([]workspaceCatalogRoute, 0)
 	for rows.Next() {
 		var route workspaceCatalogRoute
-		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name); err != nil {
+		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name, &route.OwnerSubject); err != nil {
 			return nil, err
 		}
 		routes = append(routes, route)
@@ -415,7 +416,7 @@ func (c *workspaceCatalog) ResolveWorkspace(ctx context.Context, workspace strin
 func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, databaseID, workspace string) (workspaceCatalogRoute, error) {
 	rows, err := c.queryContext(
 		ctx,
-		`SELECT database_id, workspace_id, name
+		`SELECT database_id, workspace_id, name, owner_subject
 		 FROM workspace_catalog
 		 WHERE database_id = ? AND (workspace_id = ? OR name = ?)
 		 ORDER BY workspace_id`,
@@ -431,7 +432,7 @@ func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, datab
 	var routes []workspaceCatalogRoute
 	for rows.Next() {
 		var route workspaceCatalogRoute
-		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name); err != nil {
+		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name, &route.OwnerSubject); err != nil {
 			return workspaceCatalogRoute{}, err
 		}
 		routes = append(routes, route)
@@ -449,12 +450,16 @@ func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, datab
 	}
 }
 
-func catalogRoutesByName(ctx context.Context, queryer interface {
+func workspaceCatalogIdentityKey(name, ownerSubject string) string {
+	return strings.TrimSpace(ownerSubject) + "\x1f" + strings.TrimSpace(name)
+}
+
+func catalogRoutesByIdentity(ctx context.Context, queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }, rebind func(string) string, databaseID string) (map[string]workspaceCatalogRoute, error) {
 	rows, err := queryer.QueryContext(
 		ctx,
-		rebind(`SELECT database_id, workspace_id, name
+		rebind(`SELECT database_id, workspace_id, name, owner_subject
 		 FROM workspace_catalog
 		 WHERE database_id = ?`),
 		strings.TrimSpace(databaseID),
@@ -467,10 +472,10 @@ func catalogRoutesByName(ctx context.Context, queryer interface {
 	routes := make(map[string]workspaceCatalogRoute)
 	for rows.Next() {
 		var route workspaceCatalogRoute
-		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name); err != nil {
+		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name, &route.OwnerSubject); err != nil {
 			return nil, err
 		}
-		routes[route.Name] = route
+		routes[workspaceCatalogIdentityKey(route.Name, route.OwnerSubject)] = route
 	}
 	return routes, rows.Err()
 }
@@ -485,7 +490,7 @@ func catalogOwnersByName(ctx context.Context, queryer interface {
 }, rebind func(string) string, databaseID string) (map[string]catalogOwnerInfo, error) {
 	rows, err := queryer.QueryContext(
 		ctx,
-		rebind(`SELECT name, owner_subject, owner_label
+		rebind(`SELECT workspace_id, owner_subject, owner_label
 		 FROM workspace_catalog
 		 WHERE database_id = ?`),
 		strings.TrimSpace(databaseID),
@@ -497,11 +502,11 @@ func catalogOwnersByName(ctx context.Context, queryer interface {
 
 	owners := make(map[string]catalogOwnerInfo)
 	for rows.Next() {
-		var name, subject, label string
-		if err := rows.Scan(&name, &subject, &label); err != nil {
+		var workspaceID, subject, label string
+		if err := rows.Scan(&workspaceID, &subject, &label); err != nil {
 			return nil, err
 		}
-		owners[name] = catalogOwnerInfo{Subject: subject, Label: label}
+		owners[workspaceID] = catalogOwnerInfo{Subject: subject, Label: label}
 	}
 	return owners, rows.Err()
 }
@@ -515,7 +520,7 @@ func upsertCatalogWorkspaceSummary(
 		ExecContext(context.Context, ...any) (sql.Result, error)
 	},
 	rebind func(string) string,
-	existingByName map[string]workspaceCatalogRoute,
+	existingByIdentity map[string]workspaceCatalogRoute,
 	item workspaceSummary,
 ) (workspaceSummary, error) {
 	item.DatabaseID = strings.TrimSpace(item.DatabaseID)
@@ -526,9 +531,10 @@ func upsertCatalogWorkspaceSummary(
 	if item.Name == "" {
 		return workspaceSummary{}, fmt.Errorf("workspace name is required")
 	}
+	identityKey := workspaceCatalogIdentityKey(item.Name, item.OwnerSubject)
 
 	assignedID := strings.TrimSpace(item.ID)
-	if existing, ok := existingByName[item.Name]; ok {
+	if existing, ok := existingByIdentity[identityKey]; ok {
 		assignedID = strings.TrimSpace(existing.WorkspaceID)
 	}
 	if assignedID == "" || assignedID == item.Name {
@@ -539,7 +545,7 @@ func upsertCatalogWorkspaceSummary(
 		}
 	}
 
-	if existing, ok := existingByName[item.Name]; ok && strings.TrimSpace(existing.WorkspaceID) != assignedID {
+	if existing, ok := existingByIdentity[identityKey]; ok && strings.TrimSpace(existing.WorkspaceID) != assignedID {
 		if _, err := execer.ExecContext(
 			ctx,
 			rebind(`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`),
@@ -578,29 +584,29 @@ func upsertCatalogWorkspaceSummary(
 	return item, nil
 }
 
-func deleteCatalogDatabaseRowsNotInNames(
+func deleteCatalogDatabaseRowsNotInIDs(
 	ctx context.Context,
 	execer interface {
 		ExecContext(context.Context, string, ...any) (sql.Result, error)
 	},
 	rebind func(string) string,
 	databaseID string,
-	keepNames map[string]struct{},
+	keepIDs map[string]struct{},
 ) error {
 	databaseID = strings.TrimSpace(databaseID)
-	if len(keepNames) == 0 {
+	if len(keepIDs) == 0 {
 		_, err := execer.ExecContext(ctx, rebind(`DELETE FROM workspace_catalog WHERE database_id = ?`), databaseID)
 		return err
 	}
 
-	placeholders := make([]string, 0, len(keepNames))
-	args := make([]any, 0, len(keepNames)+1)
+	placeholders := make([]string, 0, len(keepIDs))
+	args := make([]any, 0, len(keepIDs)+1)
 	args = append(args, databaseID)
-	for name := range keepNames {
+	for workspaceID := range keepIDs {
 		placeholders = append(placeholders, "?")
-		args = append(args, name)
+		args = append(args, workspaceID)
 	}
-	query := `DELETE FROM workspace_catalog WHERE database_id = ? AND name NOT IN (` + strings.Join(placeholders, ", ") + `)`
+	query := `DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id NOT IN (` + strings.Join(placeholders, ", ") + `)`
 	_, err := execer.ExecContext(ctx, rebind(query), args...)
 	return err
 }

@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -124,11 +123,8 @@ func TestQuickstartCreatesPerSubjectWorkspaceOnOnboardingDatabase(t *testing.T) 
 	if respA.DatabaseID != quickstartCloudDBID {
 		t.Fatalf("Quickstart(alice) DatabaseID = %q, want %q", respA.DatabaseID, quickstartCloudDBID)
 	}
-	if respA.Workspace.Name == quickstartWorkspaceName {
-		t.Fatalf("Quickstart(alice) workspace name = %q, want per-subject suffix", respA.Workspace.Name)
-	}
-	if !strings.HasPrefix(respA.Workspace.Name, quickstartWorkspaceName+"-") {
-		t.Fatalf("Quickstart(alice) workspace name = %q, want prefix %q", respA.Workspace.Name, quickstartWorkspaceName+"-")
+	if respA.Workspace.Name != quickstartWorkspaceName {
+		t.Fatalf("Quickstart(alice) workspace name = %q, want %q", respA.Workspace.Name, quickstartWorkspaceName)
 	}
 
 	ctxB := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{Subject: "user-bob"})
@@ -136,13 +132,15 @@ func TestQuickstartCreatesPerSubjectWorkspaceOnOnboardingDatabase(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Quickstart(bob) returned error: %v", err)
 	}
-	if respB.Workspace.Name == respA.Workspace.Name {
-		t.Fatalf("Quickstart(bob) workspace name = %q, want different from alice", respB.Workspace.Name)
+	if respB.Workspace.Name != quickstartWorkspaceName {
+		t.Fatalf("Quickstart(bob) workspace name = %q, want %q", respB.Workspace.Name, quickstartWorkspaceName)
+	}
+	if respB.WorkspaceID == respA.WorkspaceID {
+		t.Fatalf("Quickstart(bob) workspace id = %q, want different from alice %q", respB.WorkspaceID, respA.WorkspaceID)
 	}
 
-	// Calling Quickstart again for alice should be idempotent — return the
-	// same workspace by name (the opaque catalog ID is intentionally unstable
-	// for onboarding databases, so the response exposes the name as the ID).
+	// Calling Quickstart again for alice should be idempotent and return the
+	// same opaque workspace ID behind the stable getting-started label.
 	respA2, err := manager.Quickstart(ctxA, QuickstartRequest{})
 	if err != nil {
 		t.Fatalf("Quickstart(alice) second call returned error: %v", err)
