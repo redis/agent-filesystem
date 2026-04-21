@@ -10,15 +10,6 @@ import {
   StatLabel,
   StatValue,
 } from "../components/afs-kit";
-import {
-  CodeBlock,
-  InlineCode,
-  CrossLinkCard,
-  CrossLinkText,
-  CrossLinkTitle,
-  CrossLinkDesc,
-  CrossLinkArrow,
-} from "../components/doc-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { LiveTopologyCard } from "../components/live-topology-card";
@@ -177,173 +168,237 @@ function GettingStartedView({
 
   return (
     <PageStack>
-      <EmptyStateLayout>
-        <AgentHeroAnimation />
-        <EmptyStateContent>
-          <ProductName>Agent Filesystem</ProductName>
-          <Headline>
-            {hasDatabase
-              ? "Create your first workspace"
-              : "Fast, durable filesystem workspaces for AI agents, backed by Redis"}
-          </Headline>
-          <Description>
-            {hasDatabase
-              ? "Start with a getting-started workspace pre-populated with sample files, so you can explore AFS in one click."
-              : "Give every AI agent a persistent, checkpointed workspace. Browse files, create recovery points, and track activity — all from one UI."}
-          </Description>
-        </EmptyStateContent>
+      <HeroLayout>
+        <HeroEyebrow>Agent Filesystem</HeroEyebrow>
+        <HeroAnimationWrap>
+          <AgentHeroAnimation />
+        </HeroAnimationWrap>
+        <Headline>
+          A filesystem your AI agents can trust.
+        </Headline>
+        <Description>
+          Give every agent a persistent, checkpointed workspace backed by
+          Redis. Edit files, snapshot state, and replay history &mdash; all
+          from one place.
+        </Description>
 
-        {/* ── Onboarding paths ── */}
-        <OnboardingPaths>
-          <OnboardingCard $primary>
-            <OnboardingCardIcon>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+        <CTABlock>
+          <PrimaryCTA
+            size="large"
+            onClick={handleQuickstart}
+            disabled={quickstartMutation.isPending}
+          >
+            {quickstartMutation.isPending
+              ? "Setting up\u2026"
+              : "Create my first workspace \u2192"}
+          </PrimaryCTA>
+          <CTAHint>
+            {hasDatabase
+              ? "We'll preload sample files so you can explore in seconds."
+              : "Requires Redis running on localhost:6379"}
+          </CTAHint>
+          {quickstartMutation.isError && (
+            <QuickstartError>
+              {quickstartMutation.error?.message?.includes("cannot connect")
+                ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
+                : quickstartMutation.error?.message ?? "Something went wrong."}
+            </QuickstartError>
+          )}
+        </CTABlock>
+
+        <BenefitsGrid>
+          <Benefit>
+            <BenefitIcon>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+                <path d="M3 12a9 3 0 0 0 18 0" />
               </svg>
-            </OnboardingCardIcon>
-            <OnboardingCardTitle>
-              {hasDatabase ? "Create your first workspace" : "Quick Start"}
-            </OnboardingCardTitle>
-            <OnboardingCardDesc>
-              {hasDatabase
-                ? "We'll deploy a getting-started workspace with sample files so you can connect an agent right away."
-                : "Connect to local Redis, create a workspace with sample files, and start exploring — all in one click."}
-            </OnboardingCardDesc>
-            <CTAButton
-              size="large"
-              onClick={handleQuickstart}
-              disabled={quickstartMutation.isPending}
-            >
-              {quickstartMutation.isPending ? "Setting up..." : "Create my first workspace"}
-            </CTAButton>
-            {quickstartMutation.isError && (
-              <QuickstartError>
-                {quickstartMutation.error?.message?.includes("cannot connect")
-                  ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
-                  : quickstartMutation.error?.message ?? "Something went wrong."}
-              </QuickstartError>
-            )}
-            {hasDatabase && (
-              <Link to="/workspaces">
-                <SecondaryButton size="large">Create empty workspace instead</SecondaryButton>
-              </Link>
-            )}
-            {!hasDatabase && (
-              <OnboardingCardHint>
-                Requires Redis running on localhost:6379
-              </OnboardingCardHint>
-            )}
-          </OnboardingCard>
-        </OnboardingPaths>
+            </BenefitIcon>
+            <BenefitTitle>Persistent by default</BenefitTitle>
+            <BenefitDesc>
+              Workspaces live in Redis &mdash; no local state to sync,
+              restore, or lose when you switch machines.
+            </BenefitDesc>
+          </Benefit>
+          <Benefit>
+            <BenefitIcon>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9" />
+                <polyline points="3 4 3 12 11 12" />
+              </svg>
+            </BenefitIcon>
+            <BenefitTitle>Checkpoint &amp; rollback</BenefitTitle>
+            <BenefitDesc>
+              Snapshot before risky changes. Restore the workspace to any
+              previous state in seconds when an agent goes off the rails.
+            </BenefitDesc>
+          </Benefit>
+          <Benefit>
+            <BenefitIcon>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
+              </svg>
+            </BenefitIcon>
+            <BenefitTitle>CLI &amp; MCP ready</BenefitTitle>
+            <BenefitDesc>
+              Mount workspaces locally with one command, or plug them into
+              any MCP-capable agent &mdash; Claude, Cursor, Windsurf.
+            </BenefitDesc>
+          </Benefit>
+        </BenefitsGrid>
 
-        {/* ── Steps ── */}
-        <StepsSection>
-          <StepsSectionTitle>How it works</StepsSectionTitle>
-
-          <StepCard>
-            <StepNumber>01</StepNumber>
-            <StepBody>
-              <StepTitle>Workspace = isolated filesystem</StepTitle>
-              <StepDesc>
-                Each workspace is a self-contained file tree an agent can read, write, and
-                checkpoint. Workspaces are stored entirely in Redis — no local state required.
-              </StepDesc>
-            </StepBody>
-          </StepCard>
-
-          <StepCard>
-            <StepNumber>02</StepNumber>
-            <StepBody>
-              <StepTitle>Checkpoints = instant rollback</StepTitle>
-              <StepDesc>
-                Save a checkpoint before risky operations. If something goes wrong, restore
-                to any previous state in seconds. Think of it as git commits for your workspace.
-              </StepDesc>
-            </StepBody>
-          </StepCard>
-
-          <StepCard>
-            <StepNumber>03</StepNumber>
-            <StepBody>
-              <StepTitle>Connect agents via CLI or MCP</StepTitle>
-              <StepDesc>
-                Mount a workspace as a local directory, or give agents direct access via
-                MCP tools. Either way, every file operation is durable and trackable.
-              </StepDesc>
-              <CodeBlock>
-                <code>{`# mount a workspace locally
-afs workspace use my-project && afs up
-
-# or connect via MCP tools
-{ "mcpServers": { "afs": { "command": "afs", "args": ["mcp"] } } }`}</code>
-              </CodeBlock>
-            </StepBody>
-          </StepCard>
-        </StepsSection>
-
-        {/* ── Learn more ── */}
-        <CrossLinkCard as={Link} to="/agent-guide" style={{ width: "100%" }}>
-          <CrossLinkText>
-            <CrossLinkTitle>Agent Guide</CrossLinkTitle>
-            <CrossLinkDesc>
-              Full reference for MCP tools, CLI commands, workflows, and best practices.
-            </CrossLinkDesc>
-          </CrossLinkText>
-          <CrossLinkArrow>&rarr;</CrossLinkArrow>
-        </CrossLinkCard>
-      </EmptyStateLayout>
+        <FooterLink as={Link} to="/agent-guide">
+          Read the full Agent Guide &rarr;
+        </FooterLink>
+      </HeroLayout>
     </PageStack>
   );
 }
 
 /* ── Styled components ── */
 
-const EmptyStateLayout = styled.div`
+const HeroLayout = styled.div`
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 48px;
-  padding: 40px 0 20px;
-  max-width: 780px;
+  text-align: center;
+  padding: 24px 0 32px;
+  max-width: 880px;
   margin: 0 auto;
 `;
 
-const EmptyStateContent = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  max-width: 560px;
-  text-align: center;
-`;
-
-const ProductName = styled.div`
+const HeroEyebrow = styled.div`
   color: var(--afs-accent);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 `;
 
-const Headline = styled.h2`
-  margin: 0;
+const HeroAnimationWrap = styled.div`
+  margin: 12px 0 8px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+`;
+
+const Headline = styled.h1`
+  margin: 8px 0 12px;
   color: var(--afs-ink);
-  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-size: clamp(2rem, 4.4vw, 2.8rem);
   font-weight: 700;
-  line-height: 1.25;
-  letter-spacing: -0.02em;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  max-width: 18ch;
 `;
 
 const Description = styled.p`
   margin: 0;
   color: var(--afs-muted);
-  font-size: 15px;
-  line-height: 1.65;
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 56ch;
 `;
 
-const CTAButton = styled(Button)`
+const CTABlock = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 8px;
+  width: 100%;
+`;
+
+const PrimaryCTA = styled(Button)`
   && {
-    margin-top: 8px;
+    padding-left: 28px;
+    padding-right: 28px;
+    font-size: 15px;
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--afs-accent) 30%, transparent);
+  }
+`;
+
+const CTAHint = styled.div`
+  color: var(--afs-muted);
+  font-size: 13px;
+`;
+
+const QuickstartError = styled.div`
+  color: #dc2626;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border-radius: 10px;
+  max-width: 480px;
+`;
+
+const BenefitsGrid = styled.div`
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: 100%;
+  margin-top: 40px;
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const Benefit = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  gap: 10px;
+  padding: 22px 22px 24px;
+  border: 1px solid var(--afs-line);
+  border-radius: 16px;
+  background: var(--afs-panel);
+  transition: border-color 180ms ease, transform 180ms ease;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
+    transform: translateY(-2px);
+  }
+`;
+
+const BenefitIcon = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--afs-accent-soft, color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent));
+  color: var(--afs-accent, #2563eb);
+`;
+
+const BenefitTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+`;
+
+const BenefitDesc = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+`;
+
+const FooterLink = styled.a`
+  margin-top: 32px;
+  color: var(--afs-accent, #2563eb);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
   }
 `;
 
@@ -369,150 +424,3 @@ function ClickableStatCard({ onClick, children }: { onClick: () => void; childre
     </ClickableStatCardWrap>
   );
 }
-
-/* ── Steps ── */
-
-const StepsSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  width: 100%;
-`;
-
-const StepsSectionTitle = styled.h3`
-  margin: 0;
-  color: var(--afs-ink);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-`;
-
-const StepCard = styled.div`
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  padding: 20px;
-  background: var(--afs-panel);
-`;
-
-const StepNumber = styled.div`
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--afs-accent);
-  background: var(--afs-accent-soft);
-`;
-
-const StepBody = styled.div`
-  flex: 1;
-  min-width: 0;
-`;
-
-const StepTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.45;
-  margin-bottom: 6px;
-`;
-
-const StepDesc = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.65;
-`;
-
-/* ── Onboarding paths ── */
-
-const OnboardingPaths = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  width: 100%;
-`;
-
-const OnboardingCard = styled.div<{ $primary?: boolean }>`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  border: 1.5px solid ${(p) => (p.$primary ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
-  border-radius: 20px;
-  padding: 32px 28px 28px;
-  background: var(--afs-panel);
-  text-align: center;
-  width: 100%;
-  max-width: 480px;
-  transition: border-color 180ms ease, box-shadow 180ms ease;
-
-  ${(p) =>
-    p.$primary &&
-    `
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent);
-  `}
-`;
-
-const OnboardingCardIcon = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 14px;
-  background: var(--afs-accent-soft, #fef2f1);
-  color: var(--afs-accent, #2563eb);
-`;
-
-const OnboardingCardTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-`;
-
-const OnboardingCardDesc = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.65;
-  max-width: 380px;
-`;
-
-const OnboardingCardHint = styled.div`
-  color: var(--afs-muted);
-  font-size: 12px;
-  opacity: 0.7;
-`;
-
-const QuickstartError = styled.div`
-  color: #dc2626;
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 8px 12px;
-  background: #fef2f2;
-  border-radius: 8px;
-  width: 100%;
-`;
-
-const SecondaryButton = styled(Button)`
-  && {
-    background: transparent;
-    border: 1.5px solid var(--afs-line);
-    color: var(--afs-ink);
-
-    &:hover {
-      border-color: var(--afs-accent, #2563eb);
-      color: var(--afs-accent, #2563eb);
-    }
-  }
-`;

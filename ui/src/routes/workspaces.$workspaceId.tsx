@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
@@ -13,7 +13,6 @@ import {
   Tabs,
 } from "../components/afs-kit";
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
-import { AgentConnectedDialog } from "../components/agent-connected-dialog";
 import {
   useDeleteWorkspaceMutation,
   useWorkspace,
@@ -23,7 +22,7 @@ import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
-import type { AFSAgentSession, AFSWorkspaceView } from "../foundation/types/afs";
+import type { AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
@@ -54,22 +53,14 @@ function WorkspaceStudioPage() {
 
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
   const [bannerDismissed, setBannerDismissed] = useState(false);
-  const [connectedAgent, setConnectedAgent] = useState<AFSAgentSession | null>(null);
-  // Keeps the banner pinned to "What's Next" after the dialog is dismissed.
-  const [showWhatsNext, setShowWhatsNext] = useState(false);
-  const bannerStepRef = useRef<{ jumpToStep: (s: 1 | 2 | 3) => void } | null>(null);
-  // Initialize to current agent state so we only detect *new* connections,
-  // not agents that were already there when the page loaded.
-  const hadAgentsBefore = useRef<boolean | null>(null);
+  const [userRequestedBanner, setUserRequestedBanner] = useState(false);
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
   const hasAgents = (workspace?.agents.length ?? 0) > 0;
-  // Show the banner only during the first-time setup flow (welcome=true in URL),
-  // or when the agent-connected dialog / "What's Next" step is active.
-  const showBanner = workspace != null && !bannerDismissed &&
-    (search.welcome || connectedAgent != null || showWhatsNext);
-  const showWelcomeInterstitial = workspace != null && search.welcome && connectedAgent == null && !showWhatsNext;
+  const showBanner = workspace != null && !bannerDismissed && userRequestedBanner;
+  const showWelcomeInterstitial =
+    workspace != null && search.welcome === true && !userRequestedBanner;
 
   // Always poll while on this page so we detect agent connections promptly.
   useEffect(() => {
@@ -78,22 +69,6 @@ function WorkspaceStudioPage() {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  // Detect first agent connection: hasAgents transitions false → true.
-  // Wait until workspace data is loaded before seeding, so we don't
-  // mistake the loading→loaded transition for a new agent connecting.
-  useEffect(() => {
-    if (workspace == null) return; // Still loading — don't seed yet.
-    if (hadAgentsBefore.current === null) {
-      // First time we have real data — seed with current state, don't trigger.
-      hadAgentsBefore.current = hasAgents;
-      return;
-    }
-    if (hasAgents && !hadAgentsBefore.current) {
-      setConnectedAgent(workspace.agents[0]);
-    }
-    hadAgentsBefore.current = hasAgents;
-  }, [hasAgents, workspace]);
 
   useEffect(() => {
     if (workspace == null) {
@@ -114,16 +89,6 @@ function WorkspaceStudioPage() {
         : { tab: nextTab },
       replace: true,
     });
-  }
-
-  function dismissConnectedDialog() {
-    setConnectedAgent(null);
-    // If the getting-started banner was showing, keep it visible on step 3.
-    if (!bannerDismissed) {
-      setShowWhatsNext(true);
-      // Small delay so the ref is mounted before we call jumpToStep.
-      setTimeout(() => bannerStepRef.current?.jumpToStep(3), 0);
-    }
   }
 
   function deleteCurrentWorkspace() {
@@ -189,41 +154,18 @@ function WorkspaceStudioPage() {
         </NoticeCard>
       ) : null}
 
-      {showBanner ? (
-        <ConnectAgentBanner
-          ref={bannerStepRef}
-          workspaceId={workspaceId}
-          workspaceName={workspace.name}
-          onDismiss={() => {
-            setBannerDismissed(true);
-            setShowWhatsNext(false);
-            // Remove the welcome param from URL if present.
-            if (search.welcome) {
-              void navigate({
-                to: "/workspaces/$workspaceId",
-                params: { workspaceId },
-                search: tab === "browse" ? {} : { tab },
-                replace: true,
-              });
-            }
-          }}
-        />
-      ) : null}
-
       {showWelcomeInterstitial ? (
         <WelcomeInterstitial>
           <WelcomeCard>
-            <WelcomeHeader>
-              <WelcomeIconWrap aria-hidden>
-                <WelcomeIconSpark>✦</WelcomeIconSpark>
-              </WelcomeIconWrap>
-              <WelcomeHeaderCopy>
-                <WelcomeEyebrow>Step 1 of 2 • AFS Cloud</WelcomeEyebrow>
-                <WelcomeTitle>{workspaceLabel} is ready</WelcomeTitle>
-              </WelcomeHeaderCopy>
-            </WelcomeHeader>
+            <WelcomeEyebrow>Step 1 of 2</WelcomeEyebrow>
+            <WelcomeTitle>Workspace Created!</WelcomeTitle>
+            <WorkspaceChip>
+              <ChipDot />
+              <ChipName>{workspaceLabel}</ChipName>
+            </WorkspaceChip>
             <WelcomeBody>
-              Congrats. We created your first workspace, <WelcomeWorkspaceName>{workspaceLabel}</WelcomeWorkspaceName>, inside the shared Getting Started database and loaded it with sample files so you can explore AFS immediately.
+              We loaded your new workspace with sample files so you can
+              explore AFS immediately.
             </WelcomeBody>
             <WelcomeFacts>
               <WelcomeFact>
@@ -234,27 +176,15 @@ function WorkspaceStudioPage() {
                 <WelcomeFactValue>{workspace.folderCount}</WelcomeFactValue>
                 <WelcomeFactLabel>folders ready</WelcomeFactLabel>
               </WelcomeFact>
-              <WelcomeFact>
-                <WelcomeFactValue>{workspace.databaseName}</WelcomeFactValue>
-                <WelcomeFactLabel>connected database</WelcomeFactLabel>
-              </WelcomeFact>
             </WelcomeFacts>
             <WelcomeBody>
-              Next, let&apos;s connect your first agent. Once it&apos;s linked, your agent can sync this workspace locally or use it through MCP.
+              Next, connect your first agent. Once linked, it can sync this
+              workspace locally or access it through MCP.
             </WelcomeBody>
             <WelcomeActions>
               <Button
                 size="large"
-                onClick={() => {
-                  setShowWhatsNext(true);
-                  setTimeout(() => bannerStepRef.current?.jumpToStep(1), 0);
-                }}
-              >
-                Connect my first agent
-              </Button>
-              <Button
-                size="large"
-                kind="ghost"
+                variant="secondary-fill"
                 onClick={() => {
                   void navigate({
                     to: "/workspaces/$workspaceId",
@@ -266,9 +196,38 @@ function WorkspaceStudioPage() {
               >
                 I&apos;ll do this later
               </Button>
+              <Button
+                size="large"
+                onClick={() => {
+                  setUserRequestedBanner(true);
+                  setBannerDismissed(false);
+                  // Hide the interstitial so the banner takes focus.
+                  void navigate({
+                    to: "/workspaces/$workspaceId",
+                    params: { workspaceId },
+                    search: tab === "browse" ? {} : { tab },
+                    replace: true,
+                  });
+                }}
+              >
+                Connect my first agent &rarr;
+              </Button>
             </WelcomeActions>
           </WelcomeCard>
         </WelcomeInterstitial>
+      ) : null}
+
+      {showBanner ? (
+        <ConnectAgentBanner
+          workspaceId={workspaceId}
+          workspaceName={workspace.name}
+          workspaceLabel={workspaceLabel}
+          agentConnected={hasAgents}
+          onDismiss={() => {
+            setBannerDismissed(true);
+            setUserRequestedBanner(false);
+          }}
+        />
       ) : null}
 
       <StudioNavRow>
@@ -357,14 +316,6 @@ function WorkspaceStudioPage() {
           workspace={workspace}
           onDelete={deleteCurrentWorkspace}
           isDeleting={deleteWorkspace.isPending}
-        />
-      ) : null}
-
-      {/* Agent connected pop-up dialog */}
-      {connectedAgent ? (
-        <AgentConnectedDialog
-          agent={connectedAgent}
-          onClose={dismissConnectedDialog}
         />
       ) : null}
     </PageStack>
@@ -467,43 +418,6 @@ const WelcomeCard = styled.div`
   }
 `;
 
-const WelcomeHeader = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 10px;
-
-  @media (max-width: 640px) {
-    align-items: flex-start;
-  }
-`;
-
-const WelcomeHeaderCopy = styled.div`
-  min-width: 0;
-`;
-
-const WelcomeIconWrap = styled.div`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  flex: 0 0 auto;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--afs-accent) 18%, white),
-    color-mix(in srgb, #ffd98f 72%, white)
-  );
-  color: var(--afs-accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--afs-accent) 14%, transparent);
-`;
-
-const WelcomeIconSpark = styled.span`
-  font-size: 22px;
-  line-height: 1;
-`;
-
 const WelcomeEyebrow = styled.div`
   color: var(--afs-accent);
   font-size: 12px;
@@ -513,17 +427,43 @@ const WelcomeEyebrow = styled.div`
 `;
 
 const WelcomeTitle = styled.h2`
-  margin: 10px 0 12px;
+  margin: 10px 0 16px;
   color: var(--afs-ink);
-  font-size: clamp(28px, 4vw, 40px);
-  line-height: 1.05;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+`;
+
+const WorkspaceChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 18px;
+`;
+
+const ChipDot = styled.span`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+`;
+
+const ChipName = styled.span`
+  color: #065f46;
 `;
 
 const WelcomeBody = styled.p`
   margin: 0;
-  max-width: 66ch;
+  max-width: 60ch;
   color: var(--afs-muted);
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.6;
 
   & + & {
@@ -531,31 +471,27 @@ const WelcomeBody = styled.p`
   }
 `;
 
-const WelcomeWorkspaceName = styled.strong`
-  color: var(--afs-ink);
-`;
-
 const WelcomeFacts = styled.div`
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 18px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0;
 
-  @media (max-width: 820px) {
+  @media (max-width: 520px) {
     grid-template-columns: 1fr;
   }
 `;
 
 const WelcomeFact = styled.div`
   border: 1px solid var(--afs-line);
-  border-radius: 18px;
+  border-radius: 14px;
   padding: 14px 16px;
   background: color-mix(in srgb, var(--afs-panel) 72%, white);
 `;
 
 const WelcomeFactValue = styled.div`
   color: var(--afs-ink);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
@@ -574,7 +510,8 @@ const WelcomeFactLabel = styled.div`
 const WelcomeActions = styled.div`
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 28px;
   flex-wrap: wrap;
 `;

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { DialogCloseButton, DialogOverlay } from "./afs-kit";
 import { ConnectAgentBanner } from "./connect-agent-banner";
+import { useScopedAgents } from "../foundation/database-scope";
 
 type OnboardingStage = "success" | "connect";
 
@@ -21,13 +22,13 @@ export function GettingStartedOnboardingDialog({
   open,
   workspaceId,
   workspaceName,
-  databaseName,
   fileCount,
   folderCount,
   initialStage = "success",
   onClose,
 }: Props) {
   const [stage, setStage] = useState<OnboardingStage>(initialStage);
+  const agentsQuery = useScopedAgents();
 
   useEffect(() => {
     if (open) {
@@ -35,11 +36,23 @@ export function GettingStartedOnboardingDialog({
     }
   }, [initialStage, open, workspaceId]);
 
+  // Poll for agent connections while the connect stage is active.
+  useEffect(() => {
+    if (!open || stage !== "connect") return;
+    const interval = setInterval(() => {
+      void agentsQuery.refetch();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [open, stage, agentsQuery]);
+
   if (!open) {
     return null;
   }
 
   const workspaceLabel = displayWorkspaceLabel(workspaceName);
+  const agentConnected = (agentsQuery.data ?? []).some(
+    (agent) => agent.workspaceId === workspaceId,
+  );
 
   return (
     <DialogOverlay
@@ -57,6 +70,7 @@ export function GettingStartedOnboardingDialog({
             workspaceId={workspaceId}
             workspaceName={workspaceName}
             workspaceLabel={workspaceLabel}
+            agentConnected={agentConnected}
             onDismiss={onClose}
           />
         </WorkflowShell>
@@ -66,17 +80,15 @@ export function GettingStartedOnboardingDialog({
             <SuccessCloseButton type="button" aria-label="Close" onClick={onClose}>
               ×
             </SuccessCloseButton>
-            <SuccessHeader>
-              <SuccessIconWrap aria-hidden>
-                <SuccessSpark>✦</SuccessSpark>
-              </SuccessIconWrap>
-              <SuccessHeaderCopy>
-                <SuccessEyebrow>Step 1 of 2 • AFS Cloud</SuccessEyebrow>
-                <SuccessTitle>{workspaceLabel} is ready</SuccessTitle>
-              </SuccessHeaderCopy>
-            </SuccessHeader>
+            <SuccessEyebrow>Step 1 of 2</SuccessEyebrow>
+            <SuccessTitle>Workspace Created!</SuccessTitle>
+            <WorkspaceChip>
+              <ChipDot />
+              <ChipName>{workspaceLabel}</ChipName>
+            </WorkspaceChip>
             <SuccessBody>
-              Congrats. We created your first workspace, <strong>{workspaceLabel}</strong>, and loaded it with sample files so you can explore AFS right away.
+              We created your first workspace and loaded it with sample files
+              so you can explore AFS right away.
             </SuccessBody>
             <SuccessStats>
               <SuccessStat>
@@ -87,20 +99,21 @@ export function GettingStartedOnboardingDialog({
                 <SuccessStatValue>{folderCount ?? 0}</SuccessStatValue>
                 <SuccessStatLabel>folders ready</SuccessStatLabel>
               </SuccessStat>
-              <SuccessStat>
-                <SuccessStatValue>{databaseName?.trim() || "AFS Cloud"}</SuccessStatValue>
-                <SuccessStatLabel>current database</SuccessStatLabel>
-              </SuccessStat>
             </SuccessStats>
             <SuccessBody>
-              Next, connect your first agent. Once it is linked, it can sync this workspace locally or access it through MCP.
+              Next, connect your first agent. Once linked, it can sync this
+              workspace locally or access it through MCP.
             </SuccessBody>
             <SuccessActions>
-              <Button size="large" onClick={() => setStage("connect")}>
-                Connect my first agent
-              </Button>
-              <Button size="large" kind="ghost" onClick={onClose}>
+              <Button
+                size="large"
+                variant="secondary-fill"
+                onClick={onClose}
+              >
                 I&apos;ll do this later
+              </Button>
+              <Button size="large" onClick={() => setStage("connect")}>
+                Connect my first agent &rarr;
               </Button>
             </SuccessActions>
           </SuccessCard>
@@ -125,24 +138,23 @@ const WorkflowShell = styled.div`
 `;
 
 const SuccessShell = styled.div`
-  width: min(760px, 100%);
+  width: min(620px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
 `;
 
 const SuccessCard = styled.div`
   position: relative;
-  border-radius: 28px;
-  padding: 30px;
+  border-radius: 24px;
+  padding: 40px 36px 32px;
   background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 16%, transparent), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(255, 209, 102, 0.18), transparent 34%),
-    linear-gradient(180deg, var(--afs-panel-strong), color-mix(in srgb, var(--afs-bg-soft) 58%, white));
+    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 14%, transparent), transparent 32%),
+    linear-gradient(180deg, var(--afs-panel-strong, var(--afs-panel)), var(--afs-panel));
   border: 1px solid color-mix(in srgb, var(--afs-accent) 16%, var(--afs-line));
-  box-shadow: 0 24px 60px rgba(79, 51, 24, 0.10);
+  box-shadow: 0 24px 60px rgba(8, 6, 13, 0.12);
 
   @media (max-width: 720px) {
-    padding: 22px;
+    padding: 28px 22px 24px;
   }
 `;
 
@@ -150,44 +162,6 @@ const SuccessCloseButton = styled(DialogCloseButton)`
   position: absolute;
   top: 20px;
   right: 20px;
-`;
-
-const SuccessHeader = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-  padding-right: 48px;
-
-  @media (max-width: 640px) {
-    align-items: flex-start;
-  }
-`;
-
-const SuccessHeaderCopy = styled.div`
-  min-width: 0;
-`;
-
-const SuccessIconWrap = styled.div`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  flex: 0 0 auto;
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--afs-accent) 18%, white),
-    color-mix(in srgb, #ffd98f 72%, white)
-  );
-  color: var(--afs-accent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--afs-accent) 14%, transparent);
-`;
-
-const SuccessSpark = styled.span`
-  font-size: 22px;
-  line-height: 1;
 `;
 
 const SuccessEyebrow = styled.div`
@@ -199,17 +173,43 @@ const SuccessEyebrow = styled.div`
 `;
 
 const SuccessTitle = styled.h2`
-  margin: 10px 0 0;
+  margin: 10px 0 16px;
   color: var(--afs-ink);
-  font-size: clamp(28px, 4vw, 40px);
-  line-height: 1.05;
+  font-size: clamp(28px, 4vw, 38px);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+`;
+
+const WorkspaceChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 18px;
+`;
+
+const ChipDot = styled.span`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+`;
+
+const ChipName = styled.span`
+  color: #065f46;
 `;
 
 const SuccessBody = styled.p`
   margin: 0;
-  max-width: 66ch;
+  max-width: 58ch;
   color: var(--afs-muted);
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.6;
 
   & + & {
@@ -220,28 +220,27 @@ const SuccessBody = styled.p`
 const SuccessStats = styled.div`
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 18px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0;
 
-  @media (max-width: 820px) {
+  @media (max-width: 520px) {
     grid-template-columns: 1fr;
   }
 `;
 
 const SuccessStat = styled.div`
   border: 1px solid var(--afs-line);
-  border-radius: 18px;
+  border-radius: 14px;
   padding: 14px 16px;
   background: color-mix(in srgb, var(--afs-panel) 72%, white);
 `;
 
 const SuccessStatValue = styled.div`
   color: var(--afs-ink);
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  word-break: break-word;
 `;
 
 const SuccessStatLabel = styled.div`
@@ -256,7 +255,8 @@ const SuccessStatLabel = styled.div`
 const SuccessActions = styled.div`
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 28px;
   flex-wrap: wrap;
 `;

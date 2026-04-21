@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@redis-ui/components";
 import { Link } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
@@ -8,21 +8,24 @@ type Props = {
   workspaceId: string;
   workspaceName: string;
   workspaceLabel?: string;
+  agentConnected: boolean;
   onDismiss: () => void;
 };
 
-export type ConnectAgentBannerHandle = {
-  jumpToStep: (s: 1 | 2 | 3) => void;
-};
+type Tab = "cli" | "mcp";
+type Step = "connect" | "finished";
 
-export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
-  function ConnectAgentBanner({ workspaceName, workspaceLabel, onDismiss }, ref) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
-
-  useImperativeHandle(ref, () => ({
-    jumpToStep: (s: 1 | 2 | 3) => setStep(s),
-  }));
+export function ConnectAgentBanner({
+  workspaceName,
+  workspaceLabel,
+  agentConnected,
+  onDismiss,
+}: Props) {
+  const [step, setStep] = useState<Step>(agentConnected ? "finished" : "connect");
+  const [tab, setTab] = useState<Tab>("cli");
   const [copied, setCopied] = useState<string | null>(null);
+  const [showConnectedDialog, setShowConnectedDialog] = useState(false);
+  const hadAgentBefore = useRef(agentConnected);
 
   const controlPlaneUrl = getControlPlaneURL();
   const displayName = workspaceLabel?.trim() || workspaceName;
@@ -30,7 +33,7 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
   const cliPath = `./afs`;
   const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o "${cliPath}" && chmod +x "${cliPath}"`;
   const loginCmd = `${cliPath} onboard`;
-  const cliSetup = `${cliPath} up`;
+  const syncCmd = `${cliPath} up`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -45,6 +48,13 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
     2,
   );
 
+  useEffect(() => {
+    if (agentConnected && !hadAgentBefore.current && step === "connect") {
+      setShowConnectedDialog(true);
+    }
+    hadAgentBefore.current = agentConnected;
+  }, [agentConnected, step]);
+
   function copyToClipboard(text: string, label: string) {
     void navigator.clipboard.writeText(text).then(() => {
       setCopied(label);
@@ -52,146 +62,151 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
     });
   }
 
+  function handleConnectedNext() {
+    setShowConnectedDialog(false);
+    setStep("finished");
+  }
+
   return (
     <Banner>
       <BannerHeader>
         <BannerHeaderLeft>
-          <BannerIcon>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-          </BannerIcon>
-          <div>
-            <BannerTitle>Connect an agent to this workspace.</BannerTitle>
-            <BannerSubtitle>
-              Your <strong>{displayName}</strong> workspace is ready with sample files.
-              Follow the steps below to connect an AI agent.
-            </BannerSubtitle>
-          </div>
+          <BannerTitle>
+            {step === "connect" ? "Connect your first agent" : "You're all set!"}
+          </BannerTitle>
+          <BannerSubtitle>
+            {step === "connect" ? (
+              <>
+                Run three commands to link an agent to{" "}
+                <strong>{displayName}</strong>. We'll detect the connection
+                automatically.
+              </>
+            ) : (
+              <>
+                Your agent is connected to <strong>{displayName}</strong>.
+                Here are a few things to try next.
+              </>
+            )}
+          </BannerSubtitle>
         </BannerHeaderLeft>
         <DismissButton type="button" onClick={onDismiss} aria-label="Dismiss">
           &times;
         </DismissButton>
       </BannerHeader>
 
-      <StepNav>
-        <StepNavButton $active={step === 1} onClick={() => setStep(1)}>
-          <StepNavNumber $active={step === 1}>1</StepNavNumber>
-          Run CLI
-        </StepNavButton>
-        <StepNavButton $active={step === 2} onClick={() => setStep(2)}>
-          <StepNavNumber $active={step === 2}>2</StepNavNumber>
-          MCP (optional)
-        </StepNavButton>
-        <StepNavButton $active={step === 3} onClick={() => setStep(3)}>
-          <StepNavNumber $active={step === 3}>3</StepNavNumber>
-          What's next
-        </StepNavButton>
-      </StepNav>
-
-      {step === 1 && (
-        <StepContent>
-          <SubStepLabel>Step 1 — Download the CLI</SubStepLabel>
-          <StepDescription>
-            Download the latest compatible <code>afs</code> CLI for the machine
-            you run this command on. The command auto-detects OS and CPU
-            architecture.
-          </StepDescription>
-          <CodeContainer>
-            <CodePre>{downloadCmd}</CodePre>
-            <CopyButton
-              type="button"
-              onClick={() => copyToClipboard(downloadCmd, "download")}
+      {step === "connect" && (
+        <>
+          <TabBar role="tablist">
+            <TabItem
+              $active={tab === "cli"}
+              onClick={() => setTab("cli")}
+              role="tab"
+              aria-selected={tab === "cli"}
             >
-              {copied === "download" ? "Copied!" : "Copy"}
-            </CopyButton>
-          </CodeContainer>
-          <StepHint>
-            This downloads <code>afs</code> into your current directory, so you
-            can run it immediately as <code>./afs</code>. If you already have a
-            file named <code>afs</code> there, it will be replaced.
-          </StepHint>
-
-          <SubStepDivider />
-
-          <SubStepLabel>Step 2 — Sign in the CLI</SubStepLabel>
-          <StepDescription>
-            Open the browser login flow and connect this workspace to the CLI.
-          </StepDescription>
-          <CodeContainer>
-            <CodePre>{loginCmd}</CodePre>
-            <CopyButton
-              type="button"
-              onClick={() => copyToClipboard(loginCmd, "login")}
+              <TabRecommended>Recommended</TabRecommended>
+              CLI
+            </TabItem>
+            <TabItem
+              $active={tab === "mcp"}
+              onClick={() => setTab("mcp")}
+              role="tab"
+              aria-selected={tab === "mcp"}
             >
-              {copied === "login" ? "Copied!" : "Copy"}
-            </CopyButton>
-          </CodeContainer>
-          <StepHint>
-            This opens AFS Cloud in your browser, signs you in, and links the CLI to your account. If this is your only workspace, AFS will pick it automatically.
-          </StepHint>
+              MCP (alternative)
+            </TabItem>
+          </TabBar>
 
-          <NextButtonRow>
-            <NextButton type="button" onClick={() => setStep(2)}>
-              Next &rarr;
-            </NextButton>
-          </NextButtonRow>
-        </StepContent>
+          <StepContent>
+            {tab === "cli" ? (
+              <>
+                <SubStepLabel>1 &mdash; Download the CLI</SubStepLabel>
+                <StepDescription>
+                  Auto-detects your OS and CPU architecture. Drops{" "}
+                  <code>afs</code> into the current directory.
+                </StepDescription>
+                <CodeContainer>
+                  <CodePre>{downloadCmd}</CodePre>
+                  <CopyButton
+                    type="button"
+                    onClick={() => copyToClipboard(downloadCmd, "download")}
+                  >
+                    {copied === "download" ? "Copied!" : "Copy"}
+                  </CopyButton>
+                </CodeContainer>
+
+                <SubStepDivider />
+
+                <SubStepLabel>2 &mdash; Sign in</SubStepLabel>
+                <StepDescription>
+                  Opens a browser window, signs you in, and links the CLI to
+                  your account.
+                </StepDescription>
+                <CodeContainer>
+                  <CodePre>{loginCmd}</CodePre>
+                  <CopyButton
+                    type="button"
+                    onClick={() => copyToClipboard(loginCmd, "login")}
+                  >
+                    {copied === "login" ? "Copied!" : "Copy"}
+                  </CopyButton>
+                </CodeContainer>
+
+                <SubStepDivider />
+
+                <SubStepLabel>3 &mdash; Sync the workspace</SubStepLabel>
+                <StepDescription>
+                  Mounts the workspace at <code>{mountPath}/</code> so any
+                  agent on this machine can read and write files.
+                </StepDescription>
+                <CodeContainer>
+                  <CodePre>{syncCmd}</CodePre>
+                  <CopyButton
+                    type="button"
+                    onClick={() => copyToClipboard(syncCmd, "sync")}
+                  >
+                    {copied === "sync" ? "Copied!" : "Copy"}
+                  </CopyButton>
+                </CodeContainer>
+              </>
+            ) : (
+              <>
+                <SubStepLabel>MCP configuration</SubStepLabel>
+                <StepDescription>
+                  Prefer an MCP-native agent (Claude Desktop, Cursor,
+                  Windsurf)? Add this to your agent's MCP config. You still
+                  need to install the CLI and run <code>afs onboard</code>{" "}
+                  first.
+                </StepDescription>
+                <CodeContainer>
+                  <CodePre>{mcpConfig}</CodePre>
+                  <CopyButton
+                    type="button"
+                    onClick={() => copyToClipboard(mcpConfig, "mcp")}
+                  >
+                    {copied === "mcp" ? "Copied!" : "Copy"}
+                  </CopyButton>
+                </CodeContainer>
+                <StepHint>
+                  Restart your agent after saving. It will have access to all
+                  workspaces including <strong>{displayName}</strong>.
+                </StepHint>
+              </>
+            )}
+          </StepContent>
+
+          <WaitingBar>
+            <WaitingSpinner aria-hidden />
+            <WaitingText>Waiting for your agent to connect&hellip;</WaitingText>
+          </WaitingBar>
+        </>
       )}
 
-      {step === 2 && (
+      {step === "finished" && (
         <StepContent>
-          <SubStepLabel>Step 3 — Start syncing the workspace</SubStepLabel>
-          <StepDescription>
-            Once you are logged in, sync the workspace to a local directory.
-          </StepDescription>
-          <CodeContainer>
-            <CodePre>{cliSetup}</CodePre>
-            <CopyButton
-              type="button"
-              onClick={() => copyToClipboard(cliSetup, "cli")}
-            >
-              {copied === "cli" ? "Copied!" : "Copy"}
-            </CopyButton>
-          </CodeContainer>
-          <StepHint>
-            The workspace will appear at <code>{mountPath}/</code> on your machine.
-          </StepHint>
-
-          <SubStepDivider />
-
-          <StepDescription>
-            Add this to your agent's MCP configuration (Claude Desktop, Cursor, Windsurf, etc.).
-            The agent gets tools to read, write, checkpoint, and restore workspace files.
-          </StepDescription>
-          <CodeContainer>
-            <CodePre>{mcpConfig}</CodePre>
-            <CopyButton
-              type="button"
-              onClick={() => copyToClipboard(mcpConfig, "mcp")}
-            >
-              {copied === "mcp" ? "Copied!" : "Copy"}
-            </CopyButton>
-          </CodeContainer>
-          <StepHint>
-            After adding, restart your agent. It will have access to all AFS workspaces
-            including <strong>{displayName}</strong>.
-          </StepHint>
-
-          <NextButtonRow>
-            <NextButton type="button" onClick={() => setStep(3)}>
-              Next &rarr;
-            </NextButton>
-          </NextButtonRow>
-        </StepContent>
-      )}
-
-      {step === 3 && (
-        <StepContent>
-          <StepDescription>
-            Once an agent is connected, try these things:
-          </StepDescription>
+          <ConnectedChip>
+            <ChipDot />
+            Agent connected to <strong>{displayName}</strong>
+          </ConnectedChip>
           <NextStepsList>
             <NextStep>
               <NextStepIcon>
@@ -201,10 +216,10 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
                 </svg>
               </NextStepIcon>
               <div>
-                <NextStepTitle>Have the agent edit a file</NextStepTitle>
+                <NextStepTitle>Ask your agent to edit a file</NextStepTitle>
                 <NextStepDesc>
-                  Ask it to modify <code>examples/hello.py</code> — add a new function,
-                  fix a bug, or refactor the code.
+                  Try <code>examples/hello.py</code>. Add a function, fix a
+                  bug, or refactor the code.
                 </NextStepDesc>
               </div>
             </NextStep>
@@ -219,8 +234,8 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
               <div>
                 <NextStepTitle>Create a checkpoint</NextStepTitle>
                 <NextStepDesc>
-                  Save a snapshot before and after changes. If something breaks, restore
-                  instantly.
+                  Snapshot the workspace before risky changes. Restore any
+                  checkpoint in seconds if something breaks.
                 </NextStepDesc>
               </div>
             </NextStep>
@@ -236,22 +251,44 @@ export const ConnectAgentBanner = forwardRef<ConnectAgentBannerHandle, Props>(
               <div>
                 <NextStepTitle>Browse the activity log</NextStepTitle>
                 <NextStepDesc>
-                  Every file operation is tracked. Check the Activity tab to see what
-                  your agent did.
+                  Every read, write, and checkpoint is tracked. See exactly
+                  what your agent did, and when.
                 </NextStepDesc>
               </div>
             </NextStep>
           </NextStepsList>
-          <LearnMoreRow>
+          <FinishedActions>
             <LearnMoreLink as={Link} to="/agent-guide">
-              Read the full Agent Guide &rarr;
+              Read the Agent Guide &rarr;
             </LearnMoreLink>
-          </LearnMoreRow>
+            <Button size="large" onClick={onDismiss}>
+              Close
+            </Button>
+          </FinishedActions>
         </StepContent>
       )}
+
+      {showConnectedDialog ? (
+        <ConnectedOverlay>
+          <ConnectedCard role="alertdialog" aria-modal="true">
+            <ConnectedBigIcon aria-hidden>
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </ConnectedBigIcon>
+            <ConnectedCardTitle>Agent Connected!</ConnectedCardTitle>
+            <ConnectedCardBody>
+              Your agent is linked to <strong>{displayName}</strong>.
+            </ConnectedCardBody>
+            <Button size="large" onClick={handleConnectedNext}>
+              Next &rarr;
+            </Button>
+          </ConnectedCard>
+        </ConnectedOverlay>
+      ) : null}
     </Banner>
   );
-});
+}
 
 /* ── Styled components ── */
 
@@ -260,7 +297,17 @@ const fadeIn = keyframes`
   to   { opacity: 1; transform: translateY(0); }
 `;
 
+const popIn = keyframes`
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
+`;
+
+const spin = keyframes`
+  to { transform: rotate(360deg); }
+`;
+
 const Banner = styled.div`
+  position: relative;
   animation: ${fadeIn} 300ms ease;
   border: 1.5px solid var(--afs-accent, #2563eb);
   border-radius: 16px;
@@ -278,34 +325,21 @@ const BannerHeader = styled.div`
 `;
 
 const BannerHeaderLeft = styled.div`
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-`;
-
-const BannerIcon = styled.div`
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: #ecfdf5;
-  color: #059669;
+  min-width: 0;
 `;
 
 const BannerTitle = styled.div`
   color: var(--afs-ink);
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 700;
   line-height: 1.3;
+  letter-spacing: -0.01em;
 `;
 
 const BannerSubtitle = styled.div`
   color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.5;
+  font-size: 14px;
+  line-height: 1.55;
   margin-top: 4px;
 `;
 
@@ -326,28 +360,26 @@ const DismissButton = styled.button`
   }
 `;
 
-const StepNav = styled.div`
+const TabBar = styled.div`
   display: flex;
   gap: 0;
   border-top: 1px solid var(--afs-line);
   border-bottom: 1px solid var(--afs-line);
+  background: color-mix(in srgb, var(--afs-bg-soft, var(--afs-panel)) 60%, transparent);
 `;
 
-const StepNavButton = styled.button<{ $active?: boolean }>`
-  flex: 1;
-  display: flex;
+const TabItem = styled.button<{ $active?: boolean }>`
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
   border: none;
-  background: ${(p) =>
-    p.$active
-      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent)"
-      : "transparent"};
+  background: ${(p) => (p.$active ? "var(--afs-panel)" : "transparent")};
   color: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted)")};
   font-size: 13px;
-  font-weight: 600;
-  padding: 12px 16px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding: 12px 20px;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
   border-right: 1px solid var(--afs-line);
@@ -356,29 +388,36 @@ const StepNavButton = styled.button<{ $active?: boolean }>`
     border-right: none;
   }
 
+  &::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 2px;
+    background: ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "transparent")};
+  }
+
   &:hover {
-    background: color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent);
     color: var(--afs-accent, #2563eb);
   }
 `;
 
-const StepNavNumber = styled.span<{ $active?: boolean }>`
-  display: flex;
+const TabRecommended = styled.span`
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent);
+  color: var(--afs-accent, #2563eb);
+  font-size: 10px;
   font-weight: 800;
-  background: ${(p) =>
-    p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)"};
-  color: ${(p) => (p.$active ? "#fff" : "var(--afs-muted)")};
-  transition: background 120ms ease, color 120ms ease;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 `;
 
 const StepContent = styled.div`
-  padding: 20px 24px 24px;
+  padding: 22px 24px 24px;
   animation: ${fadeIn} 200ms ease;
 `;
 
@@ -395,35 +434,18 @@ const SubStepDivider = styled.div`
   margin: 20px 0;
 `;
 
-const NextButtonRow = styled.div`
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding-top: 16px;
-  border-top: 1px solid var(--afs-line);
-`;
-
-const NextButton = styled.button`
-  border: none;
-  background: #2563eb;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 20px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: opacity 120ms ease;
-
-  &:hover {
-    opacity: 0.85;
-  }
-`;
-
 const StepDescription = styled.p`
   margin: 0 0 14px;
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.65;
+
+  code {
+    background: var(--afs-line);
+    padding: 2px 5px;
+    border-radius: 4px;
+    font-size: 12.5px;
+  }
 `;
 
 const StepHint = styled.p`
@@ -478,6 +500,56 @@ const CopyButton = styled.button`
   }
 `;
 
+const WaitingBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--afs-line);
+  background: color-mix(in srgb, var(--afs-accent, #2563eb) 5%, transparent);
+`;
+
+const WaitingSpinner = styled.span`
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--afs-accent, #2563eb) 28%, transparent);
+  border-top-color: var(--afs-accent, #2563eb);
+  animation: ${spin} 720ms linear infinite;
+`;
+
+const WaitingText = styled.span`
+  color: var(--afs-accent, #2563eb);
+  font-size: 13px;
+  font-weight: 600;
+`;
+
+const ConnectedChip = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 20px;
+
+  strong {
+    font-weight: 700;
+  }
+`;
+
+const ChipDot = styled.span`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.18);
+`;
+
 const NextStepsList = styled.div`
   display: flex;
   flex-direction: column;
@@ -523,10 +595,15 @@ const NextStepDesc = styled.div`
   }
 `;
 
-const LearnMoreRow = styled.div`
-  margin-top: 20px;
+const FinishedActions = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
   padding-top: 16px;
   border-top: 1px solid var(--afs-line);
+  flex-wrap: wrap;
 `;
 
 const LearnMoreLink = styled.a`
@@ -538,4 +615,57 @@ const LearnMoreLink = styled.a`
   &:hover {
     text-decoration: underline;
   }
+`;
+
+const ConnectedOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--afs-panel) 82%, transparent);
+  backdrop-filter: blur(6px);
+  animation: ${fadeIn} 160ms ease;
+  z-index: 5;
+`;
+
+const ConnectedCard = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  max-width: 360px;
+  padding: 28px 28px 24px;
+  border-radius: 18px;
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line);
+  box-shadow: 0 20px 44px rgba(8, 6, 13, 0.18);
+  animation: ${popIn} 220ms cubic-bezier(0.2, 0.9, 0.32, 1.18);
+`;
+
+const ConnectedBigIcon = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: #ecfdf5;
+  color: #059669;
+`;
+
+const ConnectedCardTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+`;
+
+const ConnectedCardBody = styled.p`
+  margin: 0 0 8px;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.55;
 `;

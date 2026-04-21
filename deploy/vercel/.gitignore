@@ -1,2 +1,5 @@
 .vercel
 .env*.local
+.env.production
+.env.preview
+.env.development
