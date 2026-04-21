@@ -72,10 +72,35 @@ func resolveCLIBinaryForTarget(target cliTarget) (string, func(), error) {
 
 	sourceRoot, ok := findAFSSourceRoot()
 	if !ok {
-		return "", func() {}, fmt.Errorf("CLI binary for %s/%s is not available on this control plane", target.GOOS, target.GOARCH)
+		return "", func() {}, fmt.Errorf(
+			"CLI binary for %s/%s is not available on this control plane (checked: %s)",
+			target.GOOS, target.GOARCH, strings.Join(cliResolverDiagnostics(target), ", "),
+		)
 	}
 
 	return buildCLIBinaryForTarget(sourceRoot, target)
+}
+
+// cliResolverDiagnostics returns a human-readable trail of the paths we tried
+// for the given target. Surfaced in the 404 body so deployment regressions are
+// debuggable without redeploying or adding a new endpoint.
+func cliResolverDiagnostics(target cliTarget) []string {
+	rel := filepath.Join(target.GOOS+"-"+target.GOARCH, target.Filename)
+	out := make([]string, 0, 8)
+	for _, base := range cliArtifactDirCandidates() {
+		base = strings.TrimSpace(base)
+		if base == "" {
+			continue
+		}
+		out = append(out, filepath.Join(base, rel))
+	}
+	if exe, err := executablePath(); err == nil {
+		out = append(out, "exe="+exe)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		out = append(out, "wd="+wd)
+	}
+	return out
 }
 
 func findPrebuiltCLIBinary(target cliTarget) string {
