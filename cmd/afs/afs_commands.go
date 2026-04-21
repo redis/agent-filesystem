@@ -675,8 +675,13 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 	}
 
 	ref := strings.TrimSpace(requested)
-	displayName := selectedWorkspaceName(cfg)
+	configDisplayName := selectedWorkspaceName(cfg)
+	displayName := ""
 	if ref == "" {
+		// No explicit workspace: resolve against the current config. Pass the
+		// config's display name as a fallback to matchWorkspaceSelection so a
+		// stale ID can be repaired via the still-valid name.
+		displayName = configDisplayName
 		// In managed modes, an explicitly configured workspace ID should win
 		// over any inherited runtime state so duplicate-name routing stays
 		// stable across bootstrap and reconnect flows.
@@ -693,6 +698,9 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 		return workspaceSelection{}, fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 	}
 
+	// When the user supplied an explicit workspace, we do NOT fall back to
+	// the currently-selected workspace on a miss — that turned typos into
+	// silent successes.
 	if match, ok, err := matchWorkspaceSelection(ref, displayName, workspaces.Items); err != nil {
 		return workspaceSelection{}, err
 	} else if ok {
@@ -701,8 +709,8 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 
 	if requested == "" {
 		label := ref
-		if displayName != "" {
-			label = displayName
+		if configDisplayName != "" {
+			label = configDisplayName
 		}
 		return workspaceSelection{}, fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", label, filepath.Base(os.Args[0]))
 	}

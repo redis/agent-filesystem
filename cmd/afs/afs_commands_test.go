@@ -363,6 +363,32 @@ func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameErrorIncludesData
 	}
 }
 
+func TestResolveWorkspaceSelectionFromControlPlaneRejectsTypo(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+	// A valid current workspace that exists — the regression was that a
+	// typo'd request silently resolved to this instead of erroring.
+	cfg.CurrentWorkspace = "repo"
+	cfg.CurrentWorkspaceID = "ws_repo"
+
+	_, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_repo", Name: "repo"},
+			},
+		},
+	}, "rpo")
+	if err == nil {
+		t.Fatal("resolveWorkspaceSelectionFromControlPlane(typo) returned nil, want error")
+	}
+	if !strings.Contains(err.Error(), `"rpo"`) || !strings.Contains(err.Error(), "does not exist") {
+		t.Fatalf("error = %q, want message about the typo'd name", err)
+	}
+}
+
 func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *testing.T) {
 	t.Helper()
 
