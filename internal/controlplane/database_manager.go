@@ -1272,12 +1272,6 @@ func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace,
 	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
 }
 
-func (m *DatabaseManager) serviceFor(ctx context.Context, databaseID string) (*Service, databaseProfile, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.serviceForLocked(ctx, databaseID)
-}
-
 func (m *DatabaseManager) resolveWorkspace(ctx context.Context, workspace string) (*Service, databaseProfile, workspaceCatalogRoute, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1302,6 +1296,51 @@ func (m *DatabaseManager) serviceForLocked(ctx context.Context, databaseID strin
 		m.runtimes[databaseID] = runtime
 	}
 	return NewServiceWithCatalog(runtime.cfg, runtime.store, m.catalog, profile.ID, profile.Name), profile, nil
+}
+
+// serviceFor is the mutex-aware counterpart of serviceForLocked: it holds
+// m.mu only for the map reads and, on a runtime cache miss, releases the
+// mutex during the Redis dial so a slow/unreachable backend does not block
+// unrelated callers. Two callers racing for the same first-dial resolve
+// cleanly — the loser closes its extra runtime.
+func (m *DatabaseManager) serviceFor(ctx context.Context, databaseID string) (*Service, databaseProfile, error) {
+	m.mu.Lock()
+	profile, exists := m.profiles[databaseID]
+	if !exists {
+		m.mu.Unlock()
+		return nil, databaseProfile{}, os.ErrNotExist
+	}
+	if !databaseProfileVisibleToSubject(profile, authSubjectFromContext(ctx)) {
+		m.mu.Unlock()
+		return nil, databaseProfile{}, os.ErrNotExist
+	}
+	catalog := m.catalog
+	if runtime, ok := m.runtimes[databaseID]; ok {
+		m.mu.Unlock()
+		return NewServiceWithCatalog(runtime.cfg, runtime.store, catalog, profile.ID, profile.Name), profile, nil
+	}
+	m.mu.Unlock()
+
+	// Cache miss — dial without holding m.mu.
+	opened, err := openDatabaseRuntime(ctx, profile)
+	if err != nil {
+		return nil, databaseProfile{}, err
+	}
+
+	m.mu.Lock()
+	runtime, exists := m.runtimes[databaseID]
+	if exists {
+		// Another goroutine won the race; discard our extra.
+		m.mu.Unlock()
+		if opened.closeFn != nil {
+			opened.closeFn()
+		}
+	} else {
+		m.runtimes[databaseID] = opened
+		runtime = opened
+		m.mu.Unlock()
+	}
+	return NewServiceWithCatalog(runtime.cfg, runtime.store, catalog, profile.ID, profile.Name), profile, nil
 }
 
 func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, workspace string) (*Service, databaseProfile, workspaceCatalogRoute, error) {
@@ -1407,22 +1446,53 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 	}
 }
 
+// perDatabaseListTimeout bounds how long a single database can stall a
+// /v1/workspaces call before we give up on it. 3s is a generous upper bound
+// for a Redis LIST+HMGET pipeline over a WAN connection; anything slower is
+// effectively a dead backend (DNS-unresolvable host, TCP-unreachable peer).
+// Without this bound a single broken database profile would hang the whole
+// fan-out for the full Go DNS resolver timeout (~30s).
+const perDatabaseListTimeout = 3 * time.Second
+
 func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context) (workspaceListResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	subject := authSubjectFromContext(ctx)
 
-	items := make([]workspaceSummary, 0)
+	// Snapshot the visible databases under the manager mutex, then release it
+	// so the actual Redis I/O below does not block unrelated callers (the
+	// stats poller, workspace creates, session reconciles). The old code held
+	// m.mu for the entire fan-out, which serialized every list behind the
+	// slowest backend.
+	m.mu.Lock()
+	visibleIDs := make([]string, 0, len(m.order))
 	for _, id := range m.order {
 		if profile, ok := m.profiles[id]; ok && !databaseProfileVisibleToSubject(profile, subject) {
 			continue
 		}
-		summaries, _, err := m.liveWorkspaceSummariesLocked(ctx, id)
-		if err != nil {
-			continue
-		}
-		items = append(items, summaries...)
+		visibleIDs = append(visibleIDs, id)
 	}
+	m.mu.Unlock()
+
+	var (
+		mu    sync.Mutex
+		items = make([]workspaceSummary, 0)
+		wg    sync.WaitGroup
+	)
+	for _, id := range visibleIDs {
+		wg.Add(1)
+		go func(databaseID string) {
+			defer wg.Done()
+			dbCtx, cancel := context.WithTimeout(ctx, perDatabaseListTimeout)
+			defer cancel()
+			summaries, err := m.liveWorkspaceSummaries(dbCtx, databaseID)
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			items = append(items, summaries...)
+			mu.Unlock()
+		}(id)
+	}
+	wg.Wait()
 
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].UpdatedAt == items[j].UpdatedAt {
@@ -1453,6 +1523,78 @@ func (m *DatabaseManager) refreshWorkspaceCatalog(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// liveWorkspaceSummaries fetches summaries for one database without holding
+// m.mu across Redis I/O. Used by the concurrent fan-out in
+// listAllWorkspaceSummariesByFanout. The catalog writes below
+// (ListWorkspaceOwners, ReplaceDatabaseWorkspaces, RecordWorkspaceRefresh)
+// do not require m.mu — the catalog is initialised once at construction and
+// its own storage backend handles concurrency.
+func (m *DatabaseManager) liveWorkspaceSummaries(ctx context.Context, databaseID string) ([]workspaceSummary, error) {
+	service, profile, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		if m.catalog != nil && !errors.Is(err, os.ErrNotExist) {
+			_ = m.catalog.RecordWorkspaceRefresh(ctx, databaseID, "", time.Time{}, err)
+		}
+		return nil, err
+	}
+	return m.liveWorkspaceSummariesUnlocked(ctx, service, profile)
+}
+
+// liveWorkspaceSummariesUnlocked is the I/O-only tail shared between the
+// locked and unlocked variants. Assumes the caller already resolved the
+// service + profile.
+func (m *DatabaseManager) liveWorkspaceSummariesUnlocked(ctx context.Context, service *Service, profile databaseProfile) ([]workspaceSummary, error) {
+	response, err := service.ListWorkspaceSummaries(ctx)
+	if err != nil {
+		if m.catalog != nil {
+			_ = m.catalog.RecordWorkspaceRefresh(ctx, profile.ID, profile.Name, time.Time{}, err)
+		}
+		return nil, err
+	}
+
+	subject := authSubjectFromContext(ctx)
+	sharedDB := strings.TrimSpace(profile.OwnerSubject) == ""
+	if sharedDB && m.catalog != nil {
+		if owners, ownerErr := m.catalog.ListWorkspaceOwners(ctx, profile.ID); ownerErr == nil {
+			for index := range response.Items {
+				workspaceID := response.Items[index].ID
+				if existing, ok := owners[workspaceID]; ok && strings.TrimSpace(existing.Subject) != "" {
+					response.Items[index].OwnerSubject = existing.Subject
+					response.Items[index].OwnerLabel = existing.Label
+					continue
+				}
+				if subject != "" {
+					response.Items[index].OwnerSubject = subject
+					response.Items[index].OwnerLabel = authIdentityLabelFromContext(ctx)
+				}
+			}
+		}
+	}
+
+	for index := range response.Items {
+		stampWorkspaceSummary(&response.Items[index], profile)
+	}
+	if m.catalog != nil {
+		synced, err := m.catalog.ReplaceDatabaseWorkspaces(ctx, profile.ID, response.Items)
+		if err != nil {
+			_ = m.catalog.RecordWorkspaceRefresh(ctx, profile.ID, profile.Name, time.Time{}, err)
+			return nil, err
+		}
+		_ = m.catalog.RecordWorkspaceRefresh(ctx, profile.ID, profile.Name, time.Now().UTC(), nil)
+		if sharedDB && subject != "" {
+			filtered := make([]workspaceSummary, 0, len(synced))
+			for _, item := range synced {
+				if strings.TrimSpace(item.OwnerSubject) == subject {
+					filtered = append(filtered, item)
+				}
+			}
+			return filtered, nil
+		}
+		return synced, nil
+	}
+	return response.Items, nil
 }
 
 func (m *DatabaseManager) liveWorkspaceSummariesLocked(ctx context.Context, databaseID string) ([]workspaceSummary, databaseProfile, error) {
