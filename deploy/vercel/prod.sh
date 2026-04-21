@@ -142,7 +142,33 @@ touch "$stage_dir/internal/uistatic/dist/.keep"
 # them into cmd/server/cli/<os>-<arch>/afs so the //go:embed directive in
 # cli_embed.go packages them into the server binary, and extractCLIBundle
 # unpacks them at startup into AFS_CLI_ARTIFACT_DIR.
-printf 'cross-compiling afs cli for prod\n' >&2
+# Version metadata. Injected into both the cross-compiled CLI binaries
+# (so `afs --version` reports the real tag on shipped binaries) and into
+# the staged control-plane source tree (so the Vercel build — which runs
+# its own `go build` without our Makefile's ldflags — still picks them up).
+afs_version="$(cd "$repo_root" && git describe --tags --dirty --always 2>/dev/null || echo dev)"
+afs_commit="$(cd "$repo_root" && git rev-parse --short=7 HEAD 2>/dev/null || true)"
+afs_build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+afs_version_pkg="github.com/redis/agent-filesystem/internal/version"
+afs_version_ldflags="-s -w \
+  -X ${afs_version_pkg}.Version=${afs_version} \
+  -X ${afs_version_pkg}.Commit=${afs_commit} \
+  -X ${afs_version_pkg}.BuildDate=${afs_build_date}"
+
+# Bake the same version defaults into the staged source so the Vercel
+# control-plane build picks them up too (Vercel runs `go build` itself
+# and does not honor this script's ldflags for the server side).
+version_file="$stage_dir/internal/version/version.go"
+if [[ -f "$version_file" ]]; then
+  sed -i.bak \
+    -e "s|Version   = \"dev\"|Version   = \"${afs_version}\"|" \
+    -e "s|Commit    = \"\"|Commit    = \"${afs_commit}\"|" \
+    -e "s|BuildDate = \"\"|BuildDate = \"${afs_build_date}\"|" \
+    "$version_file"
+  rm -f "$version_file.bak"
+fi
+
+printf 'cross-compiling afs cli for prod (version %s)\n' "$afs_version" >&2
 cli_targets=(
   "darwin amd64"
   "darwin arm64"
@@ -157,7 +183,7 @@ for target in "${cli_targets[@]}"; do
   (
     cd "$repo_root"
     CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-      go build -trimpath -ldflags="-s -w" \
+      go build -trimpath -ldflags="${afs_version_ldflags}" \
         -o "$out_dir/afs" \
         ./cmd/afs
   )
