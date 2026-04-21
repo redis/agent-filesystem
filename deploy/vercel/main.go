@@ -26,13 +26,15 @@ func main() {
 	// Unpack the embedded CLI bundle (populated at deploy time by prod.sh) and
 	// point the control plane at the extracted directory so /v1/cli can serve
 	// the matching binary on Vercel, where the project filesystem doesn't
-	// include non-Go artifacts by default.
+	// include non-Go artifacts by default. The embed is the source of truth
+	// when it exists, so it overrides any pre-set AFS_CLI_ARTIFACT_DIR.
 	if dir, err := extractCLIBundle(); err != nil {
 		fmt.Fprintln(os.Stderr, "warn: extract CLI bundle:", err)
 	} else if dir != "" {
-		if prior := strings.TrimSpace(os.Getenv("AFS_CLI_ARTIFACT_DIR")); prior == "" {
-			_ = os.Setenv("AFS_CLI_ARTIFACT_DIR", dir)
-		}
+		_ = os.Setenv("AFS_CLI_ARTIFACT_DIR", dir)
+		fmt.Fprintln(os.Stderr, "extracted CLI bundle to", dir)
+	} else {
+		fmt.Fprintln(os.Stderr, "no embedded CLI bundle; /v1/cli will use normal resolver")
 	}
 
 	manager, err := controlplane.OpenDatabaseManager(configPath)
