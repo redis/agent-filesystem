@@ -23,6 +23,18 @@ func main() {
 		allowOrigin = "*"
 	}
 
+	// Unpack the embedded CLI bundle (populated at deploy time by prod.sh) and
+	// point the control plane at the extracted directory so /v1/cli can serve
+	// the matching binary on Vercel, where the project filesystem doesn't
+	// include non-Go artifacts by default.
+	if dir, err := extractCLIBundle(); err != nil {
+		fmt.Fprintln(os.Stderr, "warn: extract CLI bundle:", err)
+	} else if dir != "" {
+		if prior := strings.TrimSpace(os.Getenv("AFS_CLI_ARTIFACT_DIR")); prior == "" {
+			_ = os.Setenv("AFS_CLI_ARTIFACT_DIR", dir)
+		}
+	}
+
 	manager, err := controlplane.OpenDatabaseManager(configPath)
 	if err != nil {
 		fatal(err)
