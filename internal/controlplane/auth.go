@@ -466,7 +466,7 @@ func AuthIdentityFromContext(ctx context.Context) (AuthIdentity, bool) {
 
 func isPublicAuthPath(path string) bool {
 	switch path {
-	case "/healthz", "/v1/auth/config", "/v1/catalog/health", "/v1/auth/exchange", "/v1/cli":
+	case "/healthz", "/v1/auth/config", "/v1/catalog/health", "/v1/auth/exchange", "/v1/cli", "/install.sh":
 		return true
 	default:
 		return false
