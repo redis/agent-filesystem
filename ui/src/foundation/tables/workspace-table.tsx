@@ -101,7 +101,7 @@ export function WorkspaceTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode");
+  const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode", "table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
   useMinuteTick();
 

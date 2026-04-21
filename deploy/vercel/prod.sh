@@ -127,9 +127,39 @@ rsync -a --delete \
 
 cp "$script_dir/main.go" "$stage_dir/cmd/server/main.go"
 
+# Include cmd/afs so the control plane can fall back to a local build if the
+# prebuilt artifact for an OS/arch is missing (prebuilts are generated below).
+rsync -a --delete "$repo_root/cmd/afs" "$stage_dir/cmd/"
+
 rm -rf "$stage_dir/internal/uistatic/dist"
 cp -r "$repo_root/ui/dist" "$stage_dir/internal/uistatic/dist"
 touch "$stage_dir/internal/uistatic/dist/.keep"
+
+# Cross-compile the AFS CLI for the platforms we expect to serve from
+# /v1/cli. On Vercel the running function has no Go toolchain and no source
+# tree, so the control plane can only hand back prebuilt artifacts. We bake
+# them into cli/{os}-{arch}/afs at the deployment root; the resolver picks
+# them up via the working-directory candidate it added for Vercel.
+printf 'cross-compiling afs cli for prod\n' >&2
+cli_targets=(
+  "darwin amd64"
+  "darwin arm64"
+  "linux amd64"
+  "linux arm64"
+)
+for target in "${cli_targets[@]}"; do
+  os="${target%% *}"
+  arch="${target##* }"
+  out_dir="$stage_dir/cli/${os}-${arch}"
+  mkdir -p "$out_dir"
+  (
+    cd "$repo_root"
+    CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
+      go build -trimpath -ldflags="-s -w" \
+        -o "$out_dir/afs" \
+        ./cmd/afs
+  )
+done
 
 if [[ -f "$script_dir/.vercel/project.json" ]]; then
   mkdir -p "$stage_dir/.vercel"

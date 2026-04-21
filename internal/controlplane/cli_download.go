@@ -93,7 +93,7 @@ func findPrebuiltCLIBinary(target cliTarget) string {
 }
 
 func cliArtifactDirCandidates() []string {
-	candidates := make([]string, 0, 4)
+	candidates := make([]string, 0, 6)
 	if env := strings.TrimSpace(os.Getenv("AFS_CLI_ARTIFACT_DIR")); env != "" {
 		candidates = append(candidates, env)
 	}
@@ -103,6 +103,13 @@ func cliArtifactDirCandidates() []string {
 			filepath.Join(exeDir, "cli"),
 			filepath.Join(exeDir, "..", "cli"),
 		)
+	}
+	// Working-directory-relative lookup. On Vercel's Go runtime the function
+	// starts with the deployment root as its working directory, and the
+	// executable lives in a scratch path like /tmp, so neither env nor exeDir
+	// point at our baked-in binaries.
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(wd, "cli"))
 	}
 	candidates = append(candidates, "/opt/afs-cli")
 	return candidates

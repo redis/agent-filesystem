@@ -123,7 +123,7 @@ const DetailValue = styled.span`
 const CardGrid = styled.div`
   display: grid;
   gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(max(25%, 300px), 1fr));
 `;
 
 const AgentCard = styled.button<{ $active: boolean }>`

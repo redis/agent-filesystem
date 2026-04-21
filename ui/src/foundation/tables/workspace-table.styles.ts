@@ -242,17 +242,15 @@ export const ToggleButton = styled.button<{ $active: boolean }>`
 /* ================================================================== */
 
 export const WorkspaceCardGrid = styled.div`
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 22px;
-  justify-content: center;
+  grid-template-columns: repeat(auto-fill, minmax(max(25%, 360px), 1fr));
   padding: 16px 0;
 `;
 
 export const WorkspaceCard = styled.div`
   display: flex;
   flex-direction: column;
-  width: 320px;
   border-radius: 16px;
   background: var(--afs-panel-strong);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
