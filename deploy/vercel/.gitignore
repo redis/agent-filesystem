@@ -3,3 +3,4 @@
 .env.production
 .env.preview
 .env.development
+vercel
