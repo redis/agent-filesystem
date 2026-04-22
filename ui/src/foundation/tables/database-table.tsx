@@ -36,11 +36,6 @@ function formatRate(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function shortenId(id: string): string {
-  if (id.length <= 12) return id;
-  return `${id.slice(0, 12)}…`;
-}
-
 type UsageTier = "ok" | "warn" | "critical";
 
 function tierFor(usageFraction: number): UsageTier {
@@ -256,7 +251,7 @@ export function DatabaseTable({
                 </NameLine>
 
                 <IdRow>
-                  <IdText title={id}>{shortenId(id)}</IdText>
+                  <IdText title={id}>{id}</IdText>
                   <CopyButton
                     type="button"
                     aria-label={`Copy database ID ${id}`}
@@ -483,6 +478,7 @@ const DEFAULT_AMBER = "#f59e0b";
 
 const NameStack = styled.div`
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -506,6 +502,7 @@ const NameIconBox = styled.span`
 const NameLine = styled.div`
   display: inline-flex;
   align-items: center;
+  width: 100%;
   gap: 8px;
   min-width: 0;
 `;
@@ -519,6 +516,8 @@ const NameButton = styled.button`
   font-weight: 700;
   color: var(--afs-ink, #18181b);
   cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   line-height: 1.2;
   max-width: 100%;
@@ -621,24 +620,32 @@ function StarIcon({ filled }: { filled: boolean }) {
 /* ---- Database ID row ---- */
 
 const IdRow = styled.div`
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: 100%;
   gap: 4px;
+  min-width: 0;
   padding-left: 16px; /* align under the name, past the status dot */
 `;
 
 const IdText = styled.span`
+  flex: 1 1 auto;
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 11px;
   color: var(--afs-muted, #71717a);
   letter-spacing: 0;
   line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const CopyButton = styled.button`
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 16px;
   height: 16px;
   padding: 0;
