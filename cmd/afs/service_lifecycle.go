@@ -234,7 +234,7 @@ func cmdDown() error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "AFS stopped"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "afs stopped"), []boxRow{
 		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
 		{Label: "local", Value: st.LocalPath},
 	})

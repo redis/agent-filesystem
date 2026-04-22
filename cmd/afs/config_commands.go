@@ -88,6 +88,8 @@ func cmdConfig(args []string) error {
 	switch args[1] {
 	case "get":
 		return cmdConfigGet(args[2:])
+	case "show":
+		return cmdConfigShow(args[2:])
 	case "set":
 		return cmdConfigSet(args[2:])
 	case "list":
@@ -108,33 +110,27 @@ func cmdConfigSet(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(args) != 2 {
-		return fmt.Errorf("%s", configSetUsageText(filepath.Base(os.Args[0])))
-	}
-	if err := setConfigKey(&cfg, args[0], args[1]); err != nil {
-		return err
-	}
-	if err := prepareConfigForSave(&cfg); err != nil {
-		return err
-	}
-	if err := validateConfiguredMountpoint(cfg); err != nil {
-		return err
-	}
-	if err := saveConfig(cfg); err != nil {
-		return err
+
+	if len(args) == 2 && !strings.HasPrefix(strings.TrimSpace(args[0]), "-") {
+		if err := setConfigKey(&cfg, args[0], args[1]); err != nil {
+			return err
+		}
+		return persistConfigAndReport(cfg, []boxRow{
+			{Label: "key", Value: normalizeConfigKey(args[0])},
+		})
 	}
 
-	value, err := getConfigKey(cfg, args[0])
+	overrides, _, err := parseConfigOverrideFlags("config set", args, false)
 	if err != nil {
 		return err
 	}
-	rows := []boxRow{
-		{Label: "key", Value: normalizeConfigKey(args[0])},
-		{Label: "value", Value: value},
-		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+	if !hasConfigOverrides(overrides) {
+		return fmt.Errorf("%s", configSetUsageText(filepath.Base(os.Args[0])))
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
-	return nil
+	if err := applyConfigOverrides(&cfg, overrides); err != nil {
+		return err
+	}
+	return persistConfigAndReport(cfg, nil)
 }
 
 func cmdConfigGet(args []string) error {
@@ -175,6 +171,46 @@ func cmdConfigGet(args []string) error {
 		{Label: "value", Value: value},
 		{Label: "config", Value: configPathLabel()},
 	})
+	return nil
+}
+
+func cmdConfigShow(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, configShowUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	fs := flag.NewFlagSet("config show", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var jsonOut optionalBool
+	fs.Var(&jsonOut, "json", "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%s", configShowUsageText(filepath.Base(os.Args[0])))
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("%s", configShowUsageText(filepath.Base(os.Args[0])))
+	}
+
+	cfg, hasSavedConfig, err := loadConfigWithPresence()
+	if err != nil {
+		return err
+	}
+	if err := prepareConfigForSave(&cfg); err != nil {
+		return err
+	}
+
+	if jsonOut.set && jsonOut.value {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(cfg)
+	}
+
+	source := "defaults (not yet saved)"
+	if hasSavedConfig {
+		source = "saved"
+	}
+	rows := configSummaryRows(cfg, source)
+	rows = append(rows, boxRow{Label: "config file", Value: configPathLabel()})
+	printBox(clr(ansiBold, "config"), rows)
 	return nil
 }
 
@@ -241,25 +277,9 @@ func cmdConfigUnset(args []string) error {
 	if err := unsetConfigKey(&cfg, args[0]); err != nil {
 		return err
 	}
-	if err := prepareConfigForSave(&cfg); err != nil {
-		return err
-	}
-	if err := validateConfiguredMountpoint(cfg); err != nil {
-		return err
-	}
-	if err := saveConfig(cfg); err != nil {
-		return err
-	}
-	value, err := getConfigKey(cfg, args[0])
-	if err != nil {
-		return err
-	}
-	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), []boxRow{
+	return persistConfigAndReport(cfg, []boxRow{
 		{Label: "key", Value: normalizeConfigKey(args[0])},
-		{Label: "value", Value: value},
-		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 	})
-	return nil
 }
 
 func loadConfigForUp(args []string) (config, error) {
@@ -811,6 +831,7 @@ func configUsageText(bin string) string {
 
 Subcommands:
   get <key> [--json]      Read a config value
+  show [--json]           Show the full saved config
   set <key> <value>       Persist a config value
   list [--json]           List known config values
   unset <key>             Reset a config value to its default
@@ -825,16 +846,24 @@ Common keys:
   mount.readonly
   workspace.current
 
+Legacy shortcuts:
+  Redis connection: --redis-url
+  Configuration source: --config-source
+  Mount backend: --mount-backend
+  Mountpoint: --mountpoint
+
 Workspace selection:
   Use '%s workspace use <workspace>' and related workspace commands.
 
 Examples:
   %s config get redis.url
+  %s config show --json
   %s config set config.source self-managed
+  %s config set --config-source self-hosted --control-plane-url http://127.0.0.1:8091
   %s config set mount.path ~/demo
   %s config unset controlPlane.database
   %s config list
-`, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configGetUsageText(bin string) string {
@@ -854,13 +883,32 @@ List the known AFS config values.
 `, bin)
 }
 
+func configShowUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s config show [--json]
+
+Show the saved AFS config.
+`, bin)
+}
+
 func configSetUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s config set <key> <value>
+  %s config set [flags]
+
+Flags:
+  --redis-url <redis://...|rediss://...>
+  --config-source local|self-hosted|cloud
+  --control-plane-url <http://...|https://...>
+  --control-plane-database <id>
+  --mount-backend auto|none|fuse|nfs
+  --mountpoint <path>
+  --readonly[=true|false]
 
 Examples:
   %s config set redis.url rediss://user:pass@redis.example:6379/4
   %s config set config.source self-managed
+  %s config set --redis-url rediss://user:pass@redis.example:6379/4 --mount-backend nfs --mountpoint ~/demo
   %s config set controlPlane.url http://127.0.0.1:8091
   %s config set mount.backend nfs
   %s config set mount.readonly true
@@ -868,7 +916,9 @@ Examples:
 Notes:
   Keys are case-insensitive.
   Use "self-managed" for the control-plane-backed mode.
-`, bin, bin, bin, bin, bin, bin)
+  Current workspace is not configured here; use '%s workspace use <workspace>'.
+  Existing runtime paths stay available in afs.config.json.
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configUnsetUsageText(bin string) string {
@@ -1063,6 +1113,32 @@ func configListMap(cfg config) map[string]string {
 	}
 	out["config.file"] = configPath()
 	return out
+}
+
+func persistConfigAndReport(cfg config, prefixRows []boxRow) error {
+	if err := prepareConfigForSave(&cfg); err != nil {
+		return err
+	}
+	if err := validateConfiguredMountpoint(cfg); err != nil {
+		return err
+	}
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+
+	rows := append([]boxRow{}, prefixRows...)
+	if len(prefixRows) == 1 && prefixRows[0].Label == "key" {
+		value, err := getConfigKey(cfg, prefixRows[0].Value)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, boxRow{Label: "value", Value: value})
+	} else {
+		rows = append(rows, configSummaryRows(cfg, "saved")...)
+	}
+	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
+	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
+	return nil
 }
 
 func normalizeConfigKey(key string) string {
