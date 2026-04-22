@@ -61,12 +61,7 @@ func launchBrowserLoginFlow(controlPlaneURL, workspace string) (string, error) {
 		}
 	}()
 
-	printBox(clr(ansiBold, "auth"), []boxRow{
-		{Label: "browser", Value: "Opening AFS Cloud login…"},
-		{Label: "control plane", Value: controlPlaneURL},
-		{Label: "login url", Value: loginURL},
-		{Label: "hint", Value: clr(ansiDim, "If the browser does not open, paste the login URL into your browser.")},
-	})
+	printBrowserLoginPrompt(loginURL)
 
 	if err := openBrowser(loginURL); err != nil {
 		fmt.Printf("\n  %s %s\n\n", clr(ansiDim, "▸"), clr(ansiDim, "Could not open the browser automatically. Open the login URL above manually."))
@@ -81,6 +76,14 @@ func launchBrowserLoginFlow(controlPlaneURL, workspace string) (string, error) {
 	case <-timeout.C:
 		return "", fmt.Errorf("browser login timed out after %s", browserLoginTimeout.Round(time.Second))
 	}
+}
+
+func printBrowserLoginPrompt(loginURL string) {
+	fmt.Println()
+	fmt.Println("  " + clr(ansiBold, "Open this login URL in your browser:"))
+	fmt.Println("  " + loginURL)
+	fmt.Println("  " + clr(ansiDim, "If the browser does not open, paste the login URL into your browser."))
+	fmt.Println()
 }
 
 func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLoginResult) http.Handler {

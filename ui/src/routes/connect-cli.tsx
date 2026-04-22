@@ -1,12 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import { afsApi } from "../foundation/api/afs";
+import { useAuthSession } from "../foundation/auth-context";
+import { shouldEnableConnectCLIQueries } from "../foundation/connect-cli";
 import { useDatabaseScope } from "../foundation/database-scope";
-import { queryClient } from "../foundation/query-client";
-import { workspaceSummariesQueryOptions, useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import { useWorkspaceSummaries } from "../foundation/hooks/use-afs";
 import { canonicalWorkspaceName, displayWorkspaceName } from "../foundation/workspace-display";
 
 const connectCLISearchSchema = z.object({
@@ -19,18 +20,16 @@ const connectCLISearchSchema = z.object({
 
 export const Route = createFileRoute("/connect-cli")({
   validateSearch: connectCLISearchSchema,
-  loader: async () => {
-    await queryClient.ensureQueryData({
-      ...workspaceSummariesQueryOptions(null),
-      revalidateIfStale: true,
-    });
-  },
   component: ConnectCLIPage,
 });
 
 function ConnectCLIPage() {
   const search = Route.useSearch();
-  const workspacesQuery = useWorkspaceSummaries(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const auth = useAuthSession();
+  const queriesEnabled = shouldEnableConnectCLIQueries(auth);
+  const workspacesQuery = useWorkspaceSummaries(null, queriesEnabled);
   const { databases } = useDatabaseScope();
   const [error, setError] = useState<string | null>(null);
   const [connectingWorkspaceId, setConnectingWorkspaceId] = useState<string | null>(null);
@@ -84,15 +83,16 @@ function ConnectCLIPage() {
   }
 
   useEffect(() => {
-    if (autoConnectAttempted.current || autoWorkspace == null || workspacesQuery.isLoading || returnToError != null) {
+    if (!queriesEnabled || autoConnectAttempted.current || autoWorkspace == null || workspacesQuery.isLoading || returnToError != null) {
       return;
     }
     autoConnectAttempted.current = true;
     void connectWorkspace(autoWorkspace.id, autoWorkspace.databaseId);
-  }, [autoWorkspace, returnToError, workspacesQuery.isLoading]);
+  }, [autoWorkspace, queriesEnabled, returnToError, workspacesQuery.isLoading]);
 
   useEffect(() => {
     if (
+      !queriesEnabled ||
       autoConnectAttempted.current ||
       explicitWorkspaceHint === "" ||
       autoWorkspace != null ||
@@ -105,7 +105,23 @@ function ConnectCLIPage() {
     setConnectingWorkspaceId(explicitWorkspaceHint);
     setError(null);
     void redirectWithOnboardingToken(() => afsApi.createOnboardingToken(undefined, explicitWorkspaceHint));
-  }, [autoWorkspace, explicitWorkspaceHint, returnToError, workspacesQuery.isLoading]);
+  }, [autoWorkspace, explicitWorkspaceHint, queriesEnabled, returnToError, workspacesQuery.isLoading]);
+
+  useEffect(() => {
+    if (auth.isLoading || !auth.isSignedOut) {
+      return;
+    }
+    const redirect = location.pathname + location.searchStr;
+    void navigate({
+      to: "/login",
+      search: redirect && redirect !== "/" ? { redirect } : undefined,
+      replace: true,
+    });
+  }, [auth.isLoading, auth.isSignedOut, location.pathname, location.searchStr, navigate]);
+
+  if (auth.isLoading || auth.isSignedOut) {
+    return <Loader data-testid="loader--spinner" />;
+  }
 
   if (workspacesQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
