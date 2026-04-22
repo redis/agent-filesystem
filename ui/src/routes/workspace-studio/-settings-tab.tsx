@@ -1,26 +1,104 @@
 import { Button } from "@redis-ui/components";
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 import {
+  DialogActions,
+  DialogError,
+  Field,
+  FormGrid,
   SectionCard,
   SectionGrid,
   SectionHeader,
   SectionTitle,
+  TextInput,
 } from "../../components/afs-kit";
 import type { AFSWorkspaceDetail } from "../../foundation/types/afs";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
+  onSave: (input: { name: string; description: string }) => void | Promise<void>;
+  isSaving: boolean;
+  saveError?: string | null;
   onDelete: () => void;
   isDeleting: boolean;
 };
 
-export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
+export function SettingsTab({
+  workspace,
+  onSave,
+  isSaving,
+  saveError,
+  onDelete,
+  isDeleting,
+}: Props) {
+  const [name, setName] = useState(workspace.name);
+  const [description, setDescription] = useState(workspace.description);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setName(workspace.name);
+    setDescription(workspace.description);
+    setLocalError(null);
+  }, [workspace.id, workspace.name, workspace.description]);
+
+  const normalizedName = name.trim();
+  const normalizedDescription = description.trim();
+  const isDirty = normalizedName !== workspace.name || normalizedDescription !== workspace.description;
+
   return (
     <SectionGrid>
       <SectionCard $span={12}>
         <SectionHeader>
           <SectionTitle title="Workspace details" />
         </SectionHeader>
+
+        <FormGrid
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (normalizedName === "") {
+              setLocalError("Workspace name is required.");
+              return;
+            }
+            setLocalError(null);
+            void onSave({ name: normalizedName, description: normalizedDescription });
+          }}
+        >
+          <Field>
+            Workspace name
+            <TextInput
+              autoFocus
+              value={name}
+              onChange={(event) => {
+                setLocalError(null);
+                setName(event.target.value);
+              }}
+              placeholder="customer-portal"
+            />
+            <FieldHint>Renaming keeps the same stable workspace ID and URL.</FieldHint>
+          </Field>
+
+          <Field>
+            Description
+            <TextInput
+              value={description}
+              onChange={(event) => {
+                setLocalError(null);
+                setDescription(event.target.value);
+              }}
+              placeholder="What this workspace is for, who owns it, and why it exists."
+            />
+          </Field>
+
+          {localError ? <DialogError role="alert">{localError}</DialogError> : null}
+          {saveError ? <DialogError role="alert">{saveError}</DialogError> : null}
+
+          <DialogActions style={{ justifyContent: "flex-end" }}>
+            <Button size="medium" type="submit" disabled={isSaving || !isDirty}>
+              {isSaving ? "Saving..." : "Save changes"}
+            </Button>
+          </DialogActions>
+        </FormGrid>
+
         <MetaTable>
           <tbody>
             <MetaRow>
@@ -45,13 +123,6 @@ export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
                 <MetaValue>{workspace.mountedPath}</MetaValue>
               </MetaRow>
             ) : null}
-            <MetaRow>
-              <MetaLabel>Rename</MetaLabel>
-              <MetaValue>
-                Rename is not supported yet. When names overlap, use the workspace ID in the CLI,
-                for example <MonoValue>afs workspace use {workspace.id}</MonoValue>.
-              </MetaValue>
-            </MetaRow>
           </tbody>
         </MetaTable>
       </SectionCard>
@@ -63,11 +134,7 @@ export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
             Permanently delete this workspace and remove it from the registry.
           </DangerZoneDesc>
         </DangerZoneHeader>
-        <DeleteWorkspaceButton
-          size="large"
-          disabled={isDeleting}
-          onClick={onDelete}
-        >
+        <DeleteWorkspaceButton size="large" disabled={isDeleting} onClick={onDelete}>
           {isDeleting ? "Deleting..." : "Delete workspace"}
         </DeleteWorkspaceButton>
       </DangerZoneCard>
@@ -75,11 +142,10 @@ export function SettingsTab({ workspace, onDelete, isDeleting }: Props) {
   );
 }
 
-/* ─── Styled components ─────────────────────────────────────────────── */
-
 const MetaTable = styled.table`
   width: 100%;
   border-collapse: collapse;
+  margin-top: 8px;
 `;
 
 const MetaRow = styled.tr`
@@ -111,6 +177,13 @@ const MetaValue = styled.td`
 const MonoValue = styled.code`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 13px;
+`;
+
+const FieldHint = styled.span`
+  color: var(--afs-muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
 `;
 
 const DangerZoneCard = styled.div`

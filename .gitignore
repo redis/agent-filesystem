@@ -1,6 +1,3 @@
-*.o
-*.xo
-*.so
 *.dSYM/
 /afs
 /afs-control-plane
@@ -15,31 +12,6 @@ afs.databases.json
 afs.catalog.sqlite*
 ui/.tanstack/
 .claude/
-
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-.eggs/
-*.egg
-
-# Virtual environments
-.venv/
-venv/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
 
 # Python
 __pycache__/

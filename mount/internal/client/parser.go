@@ -5,7 +5,7 @@ import (
 	"strconv"
 )
 
-// StatResult holds parsed FS.STAT response.
+// StatResult holds a parsed stat response.
 type StatResult struct {
 	Inode uint64
 	Type  string // "file", "dir", "symlink"
@@ -18,7 +18,7 @@ type StatResult struct {
 	Atime int64
 }
 
-// LsEntry holds one entry from FS.LS LONG.
+// LsEntry holds one entry from a long directory listing.
 type LsEntry struct {
 	Inode uint64
 	Name  string
@@ -30,7 +30,7 @@ type LsEntry struct {
 	Mtime int64
 }
 
-// InfoResult holds parsed FS.INFO response.
+// InfoResult holds a parsed filesystem info response.
 type InfoResult struct {
 	Files          int64
 	Directories    int64
@@ -46,7 +46,7 @@ type FileLock struct {
 	PID   uint32
 }
 
-// parseStat parses the flat [field, value, ...] array from FS.STAT.
+// parseStat parses a flat [field, value, ...] stat response.
 func parseStat(res []interface{}) (*StatResult, error) {
 	if len(res) < 16 {
 		return nil, fmt.Errorf("unexpected STAT response length: %d", len(res))
@@ -97,7 +97,7 @@ func parseLsLong(res []interface{}) ([]LsEntry, error) {
 	return entries, nil
 }
 
-// parseInfo parses the flat [field, value, ...] array from FS.INFO.
+// parseInfo parses a flat [field, value, ...] info response.
 func parseInfo(res []interface{}) (*InfoResult, error) {
 	if len(res) < 10 {
 		return nil, fmt.Errorf("unexpected INFO response length: %d", len(res))

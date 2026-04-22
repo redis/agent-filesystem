@@ -7,31 +7,25 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/redis/agent-filesystem/internal/version"
 )
 
-// versionStatusRow returns the "version" row for status boxes. Centralised so
-// `status` always shows a consistent version label regardless of running state.
-func versionStatusRow() boxRow {
-	return boxRow{Label: "version", Value: clr(ansiDim, version.String())}
-}
-
-// appendAuthStatusRows appends cloud sign-in / control-plane rows when the
-// user is connected to a control plane. Emits nothing extra for local mode
-// — the existing configStatusRow already describes local config.
+// appendAuthStatusRows appends cloud-auth hint rows when action is needed.
+// We intentionally drop the "signed in: yes" confirmation (it's noise — the
+// cloud database in the core rows already implies success), the control-plane
+// URL (duplicate of configStatusRow), and the cloud database id (already in
+// the core "database" row). Only actionable rows (e.g. "needs refresh")
+// survive.
 func appendAuthStatusRows(rows []boxRow) []boxRow {
 	bin := filepath.Base(os.Args[0])
 	info, _ := authConnectionInfo(bin)
-	// Skip rows that duplicate what configStatusRow already showed (connection
-	// label is redundant in local mode). Keep "signed in", control-plane URL,
-	// and hint rows.
 	for _, row := range info {
 		switch row.Label {
-		case "connection":
-			continue
-		case "control plane", "signed in", "database", "hint":
+		case "hint":
 			rows = append(rows, row)
+		case "signed in":
+			if row.Value != "yes" {
+				rows = append(rows, row)
+			}
 		}
 	}
 	return rows
@@ -64,7 +58,7 @@ func statusRemoteLabel(addr string, db int) string {
 
 func configRemoteLabel(cfg config) string {
 	productMode, err := effectiveProductMode(cfg)
-	if err == nil && productMode != productModeDirect {
+	if err == nil && productMode != productModeLocal {
 		label := strings.TrimSpace(cfg.URL)
 		if label == "" {
 			label = "<control plane url not configured>"
@@ -81,21 +75,30 @@ func configPathLabel() string {
 	return clr(ansiGray, compactDisplayPath(configPath()))
 }
 
-func configStatusRow(cfg config) boxRow {
+// appendConfigRows adds user-facing config metadata rows without overloading
+// "config" to mean both the configuration source and the config file path.
+func appendConfigRows(rows []boxRow, cfg config) []boxRow {
+	if row := configSourceStatusRow(cfg); row.Label != "" {
+		rows = append(rows, row)
+	}
+	return append(rows, boxRow{Label: "config file", Value: configPathLabel()})
+}
+
+func configSourceStatusRow(cfg config) boxRow {
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
-		return boxRow{Label: "config", Value: configPathLabel()}
+		return boxRow{}
 	}
 
 	if productMode == productModeLocal {
-		return boxRow{Label: "config", Value: productModeStatusLabel(productMode) + ": " + configPathLabel()}
+		return boxRow{Label: "config source", Value: productModeDisplayLabel(productMode)}
 	}
 
 	value := strings.TrimSpace(cfg.URL)
 	if value == "" {
 		value = "<control plane url not configured>"
 	}
-	return boxRow{Label: "config", Value: productModeStatusLabel(productMode) + ": " + value}
+	return boxRow{Label: "config source", Value: productModeDisplayLabel(productMode) + ": " + value}
 }
 
 func commandContextRows(cfg config, workspace string) []boxRow {
@@ -109,7 +112,7 @@ func commandContextRows(cfg config, workspace string) []boxRow {
 
 func statusTitle(prefix string, pid int) string {
 	if pid > 0 {
-		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (daemon %d)", pid))
+		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (pid %d)", pid))
 	}
 	return prefix + " " + clr(ansiBold, "AFS Running")
 }
@@ -119,8 +122,10 @@ func localSurfacePath(cfg config) string {
 }
 
 // statusRows returns the consistent core rows: workspace, local, database,
-// and mode. Mount backend is included only for FUSE/NFS.
-func statusRows(workspace, localPath, mode, backendName, redisAddr string, redisDB int) []boxRow {
+// and mode. Mount backend is included only for FUSE/NFS. In cloud mode the
+// database row shows the cloud database id instead of the local Redis
+// endpoint so users see the database they're actually talking to.
+func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr string, redisDB int) []boxRow {
 	var rows []boxRow
 	if ws := strings.TrimSpace(workspace); ws != "" {
 		rows = append(rows, boxRow{Label: "workspace", Value: ws})
@@ -128,12 +133,30 @@ func statusRows(workspace, localPath, mode, backendName, redisAddr string, redis
 	if localPath != "" {
 		rows = append(rows, boxRow{Label: "local", Value: localPath})
 	}
-	rows = append(rows, boxRow{Label: "database", Value: statusRemoteLabel(redisAddr, redisDB)})
+	rows = append(rows, boxRow{Label: "database", Value: databaseStatusLabel(cfg, redisAddr, redisDB)})
 	rows = append(rows, boxRow{Label: "mode", Value: mode})
 	if backendName != "" && backendName != mountBackendNone {
 		rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
 	}
+	if account := strings.TrimSpace(cfg.Account); account != "" {
+		if productMode, _ := effectiveProductMode(cfg); productMode == productModeCloud {
+			rows = append(rows, boxRow{Label: "account", Value: account})
+		}
+	}
 	return rows
+}
+
+// databaseStatusLabel picks the right label for the "database" row: in cloud
+// mode the friendly database id (e.g. "afs-cloud"), otherwise the local
+// Redis endpoint.
+func databaseStatusLabel(cfg config, redisAddr string, redisDB int) string {
+	productMode, _ := effectiveProductMode(cfg)
+	if productMode == productModeCloud {
+		if id := strings.TrimSpace(cfg.DatabaseID); id != "" {
+			return id
+		}
+	}
+	return statusRemoteLabel(redisAddr, redisDB)
 }
 
 // statusTitleForAlive returns a green-check or yellow-circle title with an
@@ -206,10 +229,9 @@ func cmdStatusNotRunning() error {
 	mode, _ := effectiveMode(cfg)
 
 	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
-	rows := statusRows(cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
-	rows = append(rows, configStatusRow(cfg))
+	rows := statusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
+	rows = appendConfigRows(rows, cfg)
 	rows = appendAuthStatusRows(rows)
-	rows = append(rows, versionStatusRow())
 	rows = append(rows, boxRow{Label: "start", Value: clr(ansiOrange, "afs up")})
 	printBox(title, rows)
 	return nil
@@ -225,17 +247,16 @@ func cmdStatusSync(st state) {
 	}
 
 	title := statusTitleForAlive(alive, st.SyncPID)
-	rows := statusRows(workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
-	rows = append(rows, configStatusRow(cfg))
+	rows := statusRows(cfg, workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
+	rows = appendConfigRows(rows, cfg)
 	rows = appendAuthStatusRows(rows)
 	rows = appendUptimeRows(rows, st)
 	if snap := loadSyncStateForStatus(workspace); snap != nil {
 		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
 		if !snap.UpdatedAt.IsZero() {
-			rows = append(rows, boxRow{Label: "last sync", Value: snap.UpdatedAt.UTC().Format(time.RFC3339)})
+			rows = append(rows, boxRow{Label: "last sync", Value: relativeTime(snap.UpdatedAt)})
 		}
 	}
-	rows = append(rows, versionStatusRow())
 	printBox(title, rows)
 }
 
@@ -265,16 +286,37 @@ func cmdStatusMount(st state) error {
 	}
 	title := statusTitleForAlive(alive, st.MountPID)
 
-	rows := statusRows(workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
-	rows = append(rows, configStatusRow(cfg))
+	rows := statusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
+	rows = appendConfigRows(rows, cfg)
 	rows = appendAuthStatusRows(rows)
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
 		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})
 	}
-	rows = append(rows, versionStatusRow())
 	printBox(title, rows)
 	return nil
+}
+
+// relativeTime renders a timestamp like "12s ago", "5m ago", "3h ago", or
+// "2d ago". Past times only — future or zero return absolute fallback.
+func relativeTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Since(t)
+	if d < 0 {
+		return t.UTC().Format(time.RFC3339)
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds ago", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours())/24)
+	}
 }
 
 func printReadyBox(cfg config, backendName, _ string) {
@@ -285,7 +327,7 @@ func printReadyBox(cfg config, backendName, _ string) {
 	if !mounted {
 		title = statusTitle(clr(ansiYellow, "○"), 0)
 	}
-	rows := statusRows(cfg.CurrentWorkspace, localPath, mode, backendName, cfg.RedisAddr, cfg.RedisDB)
+	rows := statusRows(cfg, cfg.CurrentWorkspace, localPath, mode, backendName, cfg.RedisAddr, cfg.RedisDB)
 
 	if cfg.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})

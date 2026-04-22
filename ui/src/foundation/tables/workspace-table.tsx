@@ -1,6 +1,7 @@
 import { Typography } from "@redis-ui/components";
-import { FoldersIcon } from "@redis-ui/icons/monochrome";
+import { FoldersIcon as FoldersIconMono } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
+import { FoldersIcon } from "../../components/lucide-icons";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
@@ -71,7 +72,7 @@ type Props = {
 };
 
 function workspaceRowKey(workspace: AFSWorkspaceSummary) {
-  return workspace.id;
+  return `${workspace.databaseId}:${workspace.id}`;
 }
 
 function compareValues(
@@ -156,7 +157,11 @@ export function WorkspaceTable({
           cell: ({ row }) => {
             const id = row.original.id;
             return (
-              <NameStack>
+              <NameCell>
+                <NameIconBox>
+                  <FoldersIcon customSize={18} />
+                </NameIconBox>
+                <NameStack>
                 <WorkspaceNameButton
                   onClick={(event) => {
                     event.stopPropagation();
@@ -182,6 +187,7 @@ export function WorkspaceTable({
                   </CopyButton>
                 </IdRow>
               </NameStack>
+              </NameCell>
             );
           },
         },
@@ -284,6 +290,7 @@ export function WorkspaceTable({
             <Table
               columns={columns}
               data={filteredRows}
+              getRowId={(row) => workspaceRowKey(row)}
               sorting={sorting}
               manualSorting
               onSortingChange={(nextState) => {
@@ -321,7 +328,7 @@ export function WorkspaceTable({
               >
                 <S.CardTopRow>
                   <S.CardIconBox>
-                    <FoldersIcon size="XL" />
+                    <FoldersIconMono size="XL" />
                   </S.CardIconBox>
                   <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                     <S.CardName>{ws.name}</S.CardName>
@@ -432,6 +439,21 @@ const NameStack = styled.div`
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+`;
+
+const NameCell = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+`;
+
+const NameIconBox = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--afs-muted, #71717a);
 `;
 
 const IdRow = styled.div`

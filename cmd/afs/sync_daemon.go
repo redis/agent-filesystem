@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/client"
+	"github.com/redis/go-redis/v9"
 )
 
 // syncDaemonConfig is everything the daemon needs to operate. The fields are
@@ -29,6 +30,16 @@ type syncDaemonConfig struct {
 	// Chunk-level delta sync knobs. Zero values use defaults.
 	ChunkSize      int // bytes per chunk (default 256 KB)
 	ChunkThreshold int // minimum file size to enable chunked sync (default 1 MB)
+	// Changelog wiring (optional): when all of Rdb, StorageID, and SessionID
+	// are set, the uploader emits one changelog entry per successful op so
+	// live sync writes show up in the Changes tab without requiring an
+	// explicit checkpoint.
+	Rdb          *redis.Client
+	StorageID    string
+	SessionID    string
+	User         string
+	Label        string
+	AgentVersion string
 }
 
 // syncDaemon orchestrates the watcher, reconciler, uploader, downloader, and
@@ -114,6 +125,9 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
+	if cfg.Rdb != nil && strings.TrimSpace(cfg.StorageID) != "" && strings.TrimSpace(cfg.SessionID) != "" {
+		d.uploader.attachChangelog(cfg.Rdb, cfg.StorageID, cfg.SessionID, cfg.User, cfg.Label, cfg.AgentVersion)
+	}
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
 	d.pump = newRemoteSubscriptionPump(cfg.FS, log, stateWriter)
 	return d, nil

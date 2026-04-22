@@ -86,43 +86,112 @@ func cmdConfig(args []string) error {
 		return nil
 	}
 	switch args[1] {
-	case "show":
-		return cmdConfigShow(args[2:])
+	case "get":
+		return cmdConfigGet(args[2:])
 	case "set":
 		return cmdConfigSet(args[2:])
-	case "path":
-		return cmdConfigPath(args[2:])
+	case "list":
+		return cmdConfigList(args[2:])
+	case "unset":
+		return cmdConfigUnset(args[2:])
 	default:
 		return fmt.Errorf("unknown config subcommand %q\n\n%s", args[1], configUsageText(filepath.Base(os.Args[0])))
 	}
 }
 
-func cmdConfigPath(args []string) error {
+func cmdConfigSet(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, configPathUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, configSetUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 0 {
-		return fmt.Errorf("%s", configPathUsageText(filepath.Base(os.Args[0])))
+	cfg, _, err := loadConfigWithPresence()
+	if err != nil {
+		return err
 	}
-	fmt.Println(configPath())
+	if len(args) != 2 {
+		return fmt.Errorf("%s", configSetUsageText(filepath.Base(os.Args[0])))
+	}
+	if err := setConfigKey(&cfg, args[0], args[1]); err != nil {
+		return err
+	}
+	if err := prepareConfigForSave(&cfg); err != nil {
+		return err
+	}
+	if err := validateConfiguredMountpoint(cfg); err != nil {
+		return err
+	}
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+
+	value, err := getConfigKey(cfg, args[0])
+	if err != nil {
+		return err
+	}
+	rows := []boxRow{
+		{Label: "key", Value: normalizeConfigKey(args[0])},
+		{Label: "value", Value: value},
+		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+	}
+	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
 	return nil
 }
 
-func cmdConfigShow(args []string) error {
+func cmdConfigGet(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, configShowUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, configGetUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	fs := flag.NewFlagSet("config show", flag.ContinueOnError)
+	fs := flag.NewFlagSet("config get", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var jsonOut optionalBool
 	fs.Var(&jsonOut, "json", "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%s", configShowUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("%s", configGetUsageText(filepath.Base(os.Args[0])))
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("%s", configGetUsageText(filepath.Base(os.Args[0])))
+	}
+
+	cfg, _, err := loadConfigWithPresence()
+	if err != nil {
+		return err
+	}
+	if err := prepareConfigForSave(&cfg); err != nil {
+		return err
+	}
+
+	key := fs.Arg(0)
+	value, err := getConfigKey(cfg, key)
+	if err != nil {
+		return err
+	}
+	if jsonOut.set && jsonOut.value {
+		enc := json.NewEncoder(os.Stdout)
+		return enc.Encode(map[string]string{normalizeConfigKey(key): stripAnsi(value)})
+	}
+	printBox(clr(ansiBold, "config"), []boxRow{
+		{Label: "key", Value: normalizeConfigKey(key)},
+		{Label: "value", Value: value},
+		{Label: "config", Value: configPathLabel()},
+	})
+	return nil
+}
+
+func cmdConfigList(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, configListUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	fs := flag.NewFlagSet("config list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var jsonOut optionalBool
+	fs.Var(&jsonOut, "json", "emit JSON")
+	if err := fs.Parse(args); err != nil {
+		return fmt.Errorf("%s", configListUsageText(filepath.Base(os.Args[0])))
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("%s", configShowUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("%s", configListUsageText(filepath.Base(os.Args[0])))
 	}
 
 	cfg, hasSavedConfig, err := loadConfigWithPresence()
@@ -136,34 +205,40 @@ func cmdConfigShow(args []string) error {
 	if jsonOut.set && jsonOut.value {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+		return enc.Encode(configListMap(cfg))
 	}
 
 	source := "defaults (not yet saved)"
 	if hasSavedConfig {
 		source = "saved"
 	}
-	rows := configSummaryRows(cfg, source)
-	rows = append(rows, boxRow{Label: "config", Value: configPathLabel()})
+	rows := []boxRow{{Label: "source", Value: source}}
+	for _, entry := range configKeys() {
+		value, err := getConfigKey(cfg, entry)
+		if err != nil {
+			return err
+		}
+		rows = append(rows, boxRow{Label: entry, Value: value})
+	}
+	rows = append(rows, boxRow{Label: "config file", Value: configPathLabel()})
 	printBox(clr(ansiBold, "config"), rows)
 	return nil
 }
 
-func cmdConfigSet(args []string) error {
+func cmdConfigUnset(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, configSetUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, configUnsetUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
+	if len(args) != 1 {
+		return fmt.Errorf("%s", configUnsetUsageText(filepath.Base(os.Args[0])))
+	}
+
 	cfg, _, err := loadConfigWithPresence()
 	if err != nil {
 		return err
 	}
-
-	overrides, jsonOut, err := parseConfigOverrideFlags("config set", args, true)
-	if err != nil {
-		return err
-	}
-	if err := applyConfigOverrides(&cfg, overrides); err != nil {
+	if err := unsetConfigKey(&cfg, args[0]); err != nil {
 		return err
 	}
 	if err := prepareConfigForSave(&cfg); err != nil {
@@ -175,16 +250,15 @@ func cmdConfigSet(args []string) error {
 	if err := saveConfig(cfg); err != nil {
 		return err
 	}
-
-	if jsonOut {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+	value, err := getConfigKey(cfg, args[0])
+	if err != nil {
+		return err
 	}
-
-	rows := configSummaryRows(cfg, "saved")
-	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
-	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
+	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), []boxRow{
+		{Label: "key", Value: normalizeConfigKey(args[0])},
+		{Label: "value", Value: value},
+		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+	})
 	return nil
 }
 
@@ -440,7 +514,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, err
 	}
 
-	missingDatabase := productMode == productModeDirect && (!presence.filePresent || !presence.redisDBPresent)
+	missingDatabase := productMode == productModeLocal && (!presence.filePresent || !presence.redisDBPresent)
 	missingWorkspace := mode != modeNone && strings.TrimSpace(cfg.CurrentWorkspace) == ""
 	missingLocalPath := mode != modeNone && (!presence.filePresent || !presence.localPathPresent || strings.TrimSpace(cfg.LocalPath) == "")
 	if !missingDatabase && !missingWorkspace && !missingLocalPath {
@@ -592,12 +666,12 @@ func parseConfigOverrideFlags(command string, args []string, includeJSON bool) (
 
 func registerConfigOverrideFlags(fs *flag.FlagSet, overrides *configOverrides) {
 	fs.Var(&overrides.redisURL, "redis-url", "redis:// or rediss:// URL")
-	fs.Var(&overrides.connection, "config-source", "local|self-hosted|cloud")
+	fs.Var(&overrides.connection, "config-source", "local|self-managed|cloud")
 	fs.Var(&overrides.connection, "control", "alias for --config-source")
 	fs.Var(&overrides.connection, "connection", "alias for --config-source")
 	fs.Var(&overrides.connection, "product-mode", "alias for --config-source")
 	fs.Var(&overrides.controlPlaneURL, "control-plane-url", "http:// or https:// control plane URL")
-	fs.Var(&overrides.controlPlaneDatabase, "control-plane-database", "database id for self-hosted control plane mode")
+	fs.Var(&overrides.controlPlaneDatabase, "control-plane-database", "database id for self-managed control plane mode")
 	fs.Var(&overrides.mountBackend, "mount-backend", "auto|none|fuse|nfs")
 	fs.Var(&overrides.mountpoint, "mountpoint", "local mountpoint")
 	fs.Var(&overrides.readonly, "readonly", "start readonly")
@@ -732,78 +806,81 @@ func printConfigUsage() {
 }
 
 func configUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s config <subcommand>
 
 Subcommands:
-  show [--json]       Show the current config
-  set [flags...]      Persist config changes non-interactively
-  path                Print the config file path
+  get <key> [--json]      Read a config value
+  set <key> <value>       Persist a config value
+  list [--json]           List known config values
+  unset <key>             Reset a config value to its default
 
-Configurable settings:
-  Redis connection    --redis-url
-  Configuration source --config-source, --control-plane-url, --control-plane-database
-  Filesystem mount    --mount-backend, --mountpoint, --readonly
+Common keys:
+  config.source
+  controlPlane.url
+  controlPlane.database
+  redis.url
+  mount.backend
+  mount.path
+  mount.readonly
+  workspace.current
 
 Workspace selection:
   Use '%s workspace use <workspace>' and related workspace commands.
 
 Examples:
-  %s config show --json
-  %s config set --redis-url rediss://user:pass@redis.example:6379/4
-  %s config set --mount-backend none
-  %s config set --mount-backend nfs --mountpoint ~/demo
-
-Run '%s config set --help' for the full flag list.
+  %s config get redis.url
+  %s config set config.source self-managed
+  %s config set mount.path ~/demo
+  %s config unset controlPlane.database
+  %s config list
 `, bin, bin, bin, bin, bin, bin, bin)
 }
 
-func configShowUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s config show [--json]
+func configGetUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s config get <key> [--json]
 
 Options:
-  --json              Emit the resolved config as JSON
+  --json              Emit JSON output
 `, bin)
 }
 
-func configPathUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s config path
+func configListUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s config list [--json]
 
-Print the config file path AFS is using.
+List the known AFS config values.
 `, bin)
 }
 
 func configSetUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s config set [--json] [flags...]
-
-Basics:
-  --redis-url <redis://...|rediss://...>
-  --config-source local|self-hosted|cloud
-  --control-plane-url <http://...|https://...>
-  --control-plane-database <database-id>
-  --mount-backend auto|none|fuse|nfs
-  --mountpoint <path>
-  --readonly[=true|false]
-
-Output:
-  --json              Print the saved config as JSON after updating it
-
-Notes:
-  Current workspace is not configured here. Use '%s workspace use <workspace>'.
-  Advanced fields like runtime paths stay available in afs.config.json if needed.
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s config set <key> <value>
 
 Examples:
-  %s config set --redis-url rediss://user:pass@redis.example:6379/4
-  %s config set --mount-backend none
-  %s config set --mount-backend nfs --mountpoint ~/demo
-`, bin, bin, bin, bin, bin)
+  %s config set redis.url rediss://user:pass@redis.example:6379/4
+  %s config set config.source self-managed
+  %s config set controlPlane.url http://127.0.0.1:8091
+  %s config set mount.backend nfs
+  %s config set mount.readonly true
+
+Notes:
+  Keys are case-insensitive.
+  Use "self-managed" for the control-plane-backed mode.
+`, bin, bin, bin, bin, bin, bin)
+}
+
+func configUnsetUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s config unset <key>
+
+Reset a config value to its default or empty state.
+`, bin)
 }
 
 func upUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s up [flags]
   %s up <workspace> [<mountpoint>]
 
@@ -815,9 +892,9 @@ Flags:
   --mode <sync|mount>
                       Persist a mode override before starting.
   --control-plane-url <http://...|https://...>
-                      One-shot self-hosted control plane URL override.
+                      One-shot self-managed control plane URL override.
   --control-plane-database <database-id>
-                      One-shot database override for self-hosted mode.
+                      One-shot database override for self-managed mode.
   --redis-url <redis://...|rediss://...>
                       One-shot Redis override for local mode.
   --mount-backend <auto|none|fuse|nfs>
@@ -852,8 +929,12 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		}
 	}
 	if overrides.connection.set {
-		cfg.ProductMode = strings.TrimSpace(overrides.connection.value)
-		if cfg.ProductMode == productModeDirect {
+		mode, err := parseUserFacingConfigSource(overrides.connection.value)
+		if err != nil {
+			return err
+		}
+		cfg.ProductMode = mode
+		if cfg.ProductMode == productModeLocal {
 			cfg.DatabaseID = ""
 			cfg.CurrentWorkspaceID = ""
 		}
@@ -935,7 +1016,7 @@ func configSummaryRows(cfg config, source string) []boxRow {
 	productMode, _ := effectiveProductMode(cfg)
 	rows := []boxRow{
 		{Label: "source", Value: source},
-		{Label: "config source", Value: productMode},
+		{Label: "config source", Value: userFacingConfigSource(cfg)},
 		{Label: "database", Value: publicRedisURL(cfg)},
 		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
 		{Label: "mount", Value: mountValue},
@@ -957,4 +1038,196 @@ func publicRedisURL(cfg config) string {
 		userinfo = url.User(cfg.RedisUsername).String() + "@"
 	}
 	return fmt.Sprintf("%s://%s%s/%d", scheme, userinfo, cfg.RedisAddr, cfg.RedisDB)
+}
+
+func configKeys() []string {
+	return []string{
+		"config.source",
+		"controlPlane.url",
+		"controlPlane.database",
+		"redis.url",
+		"mount.backend",
+		"mount.path",
+		"mount.readonly",
+		"workspace.current",
+	}
+}
+
+func configListMap(cfg config) map[string]string {
+	out := make(map[string]string, len(configKeys()))
+	for _, key := range configKeys() {
+		value, err := getConfigKey(cfg, key)
+		if err == nil {
+			out[key] = stripAnsi(value)
+		}
+	}
+	out["config.file"] = configPath()
+	return out
+}
+
+func normalizeConfigKey(key string) string {
+	key = strings.TrimSpace(key)
+	key = strings.ReplaceAll(key, "_", "")
+	key = strings.ReplaceAll(key, "-", "")
+	key = strings.ReplaceAll(key, " ", "")
+	switch strings.ToLower(key) {
+	case "config.source", "configsource", "connection", "productmode":
+		return "config.source"
+	case "controlplane.url", "controlplaneurl":
+		return "controlPlane.url"
+	case "controlplane.database", "controlplanedatabase", "controlplane.databaseid", "controlplanedatabaseid":
+		return "controlPlane.database"
+	case "redis.url", "redisurl":
+		return "redis.url"
+	case "mount.backend", "mountbackend":
+		return "mount.backend"
+	case "mount.path", "mountpoint", "localpath", "mountpath":
+		return "mount.path"
+	case "mount.readonly", "readonly", "mountreadonly":
+		return "mount.readonly"
+	case "workspace.current", "currentworkspace", "workspace":
+		return "workspace.current"
+	default:
+		return strings.TrimSpace(key)
+	}
+}
+
+func getConfigKey(cfg config, key string) (string, error) {
+	switch normalizeConfigKey(key) {
+	case "config.source":
+		return userFacingConfigSource(cfg), nil
+	case "controlPlane.url":
+		if strings.TrimSpace(cfg.URL) == "" {
+			return clr(ansiDim, "unset"), nil
+		}
+		return cfg.URL, nil
+	case "controlPlane.database":
+		if strings.TrimSpace(cfg.DatabaseID) == "" {
+			return clr(ansiDim, "auto"), nil
+		}
+		return cfg.DatabaseID, nil
+	case "redis.url":
+		return publicRedisURL(cfg), nil
+	case "mount.backend":
+		if strings.TrimSpace(cfg.MountBackend) == "" {
+			return mountBackendNone, nil
+		}
+		return cfg.MountBackend, nil
+	case "mount.path":
+		if strings.TrimSpace(cfg.LocalPath) == "" {
+			return clr(ansiDim, "unset"), nil
+		}
+		return cfg.LocalPath, nil
+	case "mount.readonly":
+		return strconv.FormatBool(cfg.ReadOnly), nil
+	case "workspace.current":
+		return currentWorkspaceLabel(selectedWorkspaceName(cfg)), nil
+	default:
+		return "", fmt.Errorf("unknown config key %q", key)
+	}
+}
+
+func setConfigKey(cfg *config, key, value string) error {
+	key = normalizeConfigKey(key)
+	switch key {
+	case "config.source":
+		mode, err := parseUserFacingConfigSource(value)
+		if err != nil {
+			return err
+		}
+		cfg.ProductMode = mode
+		if mode == productModeLocal {
+			cfg.URL = ""
+			cfg.DatabaseID = ""
+			cfg.AuthToken = ""
+			cfg.Account = ""
+			cfg.CurrentWorkspaceID = ""
+		}
+	case "controlPlane.url":
+		cfg.ProductMode = productModeSelfHosted
+		cfg.URL = strings.TrimSpace(value)
+		cfg.DatabaseID = ""
+		cfg.CurrentWorkspaceID = ""
+	case "controlPlane.database":
+		cfg.DatabaseID = strings.TrimSpace(value)
+	case "redis.url":
+		if err := applyRedisURL(cfg, strings.TrimSpace(value)); err != nil {
+			return err
+		}
+	case "mount.backend":
+		cfg.MountBackend = strings.TrimSpace(value)
+	case "mount.path":
+		cfg.LocalPath = strings.TrimSpace(value)
+	case "mount.readonly":
+		b, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("mount.readonly must be true or false")
+		}
+		cfg.ReadOnly = b
+	case "workspace.current":
+		cfg.CurrentWorkspace = strings.TrimSpace(value)
+		cfg.CurrentWorkspaceID = ""
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	return nil
+}
+
+func unsetConfigKey(cfg *config, key string) error {
+	def := defaultConfig()
+	switch normalizeConfigKey(key) {
+	case "config.source":
+		cfg.ProductMode = def.ProductMode
+		cfg.URL = ""
+		cfg.DatabaseID = ""
+		cfg.AuthToken = ""
+		cfg.Account = ""
+		cfg.CurrentWorkspaceID = ""
+	case "controlPlane.url":
+		cfg.URL = ""
+		cfg.CurrentWorkspaceID = ""
+	case "controlPlane.database":
+		cfg.DatabaseID = ""
+	case "redis.url":
+		cfg.RedisAddr = def.RedisAddr
+		cfg.RedisUsername = ""
+		cfg.RedisPassword = ""
+		cfg.RedisDB = def.RedisDB
+		cfg.RedisTLS = false
+	case "mount.backend":
+		cfg.MountBackend = def.MountBackend
+	case "mount.path":
+		cfg.LocalPath = def.LocalPath
+	case "mount.readonly":
+		cfg.ReadOnly = false
+	case "workspace.current":
+		cfg.CurrentWorkspace = ""
+		cfg.CurrentWorkspaceID = ""
+	default:
+		return fmt.Errorf("unknown config key %q", key)
+	}
+	return nil
+}
+
+func userFacingConfigSource(cfg config) string {
+	mode, _ := effectiveProductMode(cfg)
+	switch mode {
+	case productModeSelfHosted:
+		return "self-managed"
+	default:
+		return mode
+	}
+}
+
+func parseUserFacingConfigSource(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case productModeLocal, "":
+		return productModeLocal, nil
+	case "self-managed", productModeSelfHosted, "selfmanaged":
+		return productModeSelfHosted, nil
+	case productModeCloud:
+		return productModeCloud, nil
+	default:
+		return "", fmt.Errorf("config.source must be one of: local, self-managed, cloud")
+	}
 }

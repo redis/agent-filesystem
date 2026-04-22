@@ -14,7 +14,7 @@ import (
 
 func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSessionRequest {
 	productMode, err := effectiveProductMode(cfg)
-	if err != nil || productMode == productModeDirect {
+	if err != nil || productMode == productModeLocal {
 		return controlplane.CreateWorkspaceSessionRequest{}
 	}
 

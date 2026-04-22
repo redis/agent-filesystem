@@ -6,6 +6,7 @@ import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
 import styled, { keyframes, css } from "styled-components";
+import { BotIcon } from "../../components/lucide-icons";
 import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
 import type { AgentSortField } from "./agents-table-utils";
 import {
@@ -85,6 +86,14 @@ const AgentNameWrap = styled.div`
   display: flex;
   align-items: center;
   gap: 8px;
+`;
+
+const NameIconBox = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--afs-muted, #71717a);
 `;
 
 /* ---- Detail dialog ---- */
@@ -358,6 +367,10 @@ function AgentDetailDialog({
             <DetailValue>{agent.localPath || "Not reported"}</DetailValue>
           </DetailField>
           <DetailField>
+            <DetailLabel>Label</DetailLabel>
+            <DetailValue>{agent.label?.trim() || "Not set"}</DetailValue>
+          </DetailField>
+          <DetailField>
             <DetailLabel>Session ID</DetailLabel>
             <DetailValue style={{ fontSize: 12 }}>{agent.sessionId}</DetailValue>
           </DetailField>
@@ -437,11 +450,33 @@ export function AgentsTable({
             const active = isAgentActive(row.original);
             return (
               <AgentNameWrap>
+                <NameIconBox>
+                  <BotIcon customSize={18} />
+                </NameIconBox>
                 <ActiveDot $active={active} />
                 <S.SingleLineText title={row.original.hostname || "unknown host"}>
                   {row.original.hostname || "unknown host"}
                 </S.SingleLineText>
               </AgentNameWrap>
+            );
+          },
+        },
+        {
+          accessorKey: "label",
+          header: "Label",
+          size: 160,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const label = row.original.label?.trim();
+            if (!label) {
+              return (
+                <Typography.Body component="span" color="secondary">
+                  &mdash;
+                </Typography.Body>
+              );
+            }
+            return (
+              <S.SingleLineText title={label}>{label}</S.SingleLineText>
             );
           },
         },

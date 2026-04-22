@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
+	"github.com/redis/go-redis/v9"
 )
 
 // uploadOpKind enumerates the mutations the uploader can apply to the live
@@ -59,6 +61,14 @@ type uploader struct {
 	maxFileBytes int64
 	readonly   bool
 	log        *syncLogger
+
+	// Changelog emission. Zero values disable — see attachChangelog.
+	rdb          *redis.Client
+	storageID    string
+	sessionID    string
+	user         string
+	label        string
+	agentVersion string
 }
 
 func newUploader(fs client.Client, results chan<- uploadResult, maxFileBytes int64, readonly bool, log *syncLogger) *uploader {
@@ -66,6 +76,80 @@ func newUploader(fs client.Client, results chan<- uploadResult, maxFileBytes int
 		maxFileBytes = 64 * 1024 * 1024
 	}
 	return &uploader{fs: fs, results: results, maxFileBytes: maxFileBytes, readonly: readonly, log: log}
+}
+
+// attachChangelog wires the uploader to emit one controlplane ChangeEntry per
+// successful upload op. Session + workspace storage identity is baked in at
+// start so each entry is attributable without extra plumbing per-op.
+func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user, label, agentVersion string) {
+	u.rdb = rdb
+	u.storageID = storageID
+	u.sessionID = sessionID
+	u.user = user
+	u.label = label
+	u.agentVersion = agentVersion
+}
+
+// emitChange writes one changelog row for op `result`. Called only when the
+// upload landed successfully (no error, no conflict). Safe to call with the
+// changelog unattached — it no-ops.
+func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
+	if u.rdb == nil || u.storageID == "" || u.sessionID == "" {
+		return
+	}
+	if r.Err != nil || r.Conflict {
+		return
+	}
+	entry := controlplane.ChangeEntry{
+		SessionID:    u.sessionID,
+		User:         u.user,
+		Label:        u.label,
+		AgentVersion: u.agentVersion,
+		Path:         r.Op.Path,
+		Source:       controlplane.ChangeSourceAgentSync,
+	}
+	prevSize := int64(0)
+	if r.Op.HasStored {
+		prevSize = r.Op.StoredEntry.Size
+		entry.PrevHash = r.Op.StoredEntry.RemoteHash
+	}
+
+	switch r.Op.Kind {
+	case opUploadFile:
+		entry.Op = controlplane.ChangeOpPut
+		entry.ContentHash = r.Op.LocalHash
+		if r.Op.Chunked {
+			entry.SizeBytes = r.Op.FileSize
+		} else {
+			entry.SizeBytes = int64(len(r.Op.Content))
+		}
+		entry.DeltaBytes = entry.SizeBytes - prevSize
+		entry.Mode = r.Op.Mode
+	case opUploadSymlink:
+		entry.Op = controlplane.ChangeOpSymlink
+		entry.ContentHash = "symlink:" + r.Op.Symlink
+		entry.Mode = r.Op.Mode
+	case opUploadMkdir:
+		entry.Op = controlplane.ChangeOpMkdir
+		entry.Mode = r.Op.Mode
+	case opUploadDelete:
+		if r.Op.HasStored && r.Op.StoredEntry.Type == "dir" {
+			entry.Op = controlplane.ChangeOpRmdir
+		} else {
+			entry.Op = controlplane.ChangeOpDelete
+		}
+		if prevSize > 0 {
+			entry.DeltaBytes = -prevSize
+		}
+	case opUploadChmod:
+		entry.Op = controlplane.ChangeOpChmod
+		entry.Mode = r.Op.Mode
+		entry.ContentHash = r.Op.LocalHash
+	default:
+		return
+	}
+
+	controlplane.WriteChangeEntries(ctx, u.rdb, u.storageID, []controlplane.ChangeEntry{entry})
 }
 
 // run drains in until ctx is cancelled. Each op is processed serially so the
@@ -266,6 +350,10 @@ func (u *uploader) processChmod(ctx context.Context, op uploadOp) {
 }
 
 func (u *uploader) send(r uploadResult) {
+	// Emit the changelog entry before forwarding the result so that a
+	// blocked reconciler channel doesn't stall the changelog write. The
+	// helper is no-op when changelog wiring is unattached.
+	u.emitChange(context.Background(), r)
 	if u.results == nil {
 		return
 	}

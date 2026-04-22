@@ -155,29 +155,9 @@ func TestImportDirectoryImportsIncludedPathsAndSkipsIgnoredOnes(t *testing.T) {
 	}
 }
 
-func TestLoadMigrationIgnoreFallsBackToLegacyOriginalIgnore(t *testing.T) {
-	sourceDir := t.TempDir()
-	writeTestFile(t, filepath.Join(sourceDir, ".rfsignore"), "cache/\n")
-
-	ignorer, err := loadMigrationIgnore(sourceDir)
-	if err != nil {
-		t.Fatalf("loadMigrationIgnore returned error: %v", err)
-	}
-	if ignorer == nil {
-		t.Fatal("expected ignorer to be loaded")
-	}
-	if !ignorer.legacy {
-		t.Fatal("expected legacy ignore file to be marked as legacy")
-	}
-	if filepath.Base(ignorer.path) != ".rfsignore" {
-		t.Fatalf("ignore path = %q, want .rfsignore", ignorer.path)
-	}
-}
-
-func TestLoadMigrationIgnorePrefersAFSIgnore(t *testing.T) {
+func TestLoadMigrationIgnoreUsesAFSIgnore(t *testing.T) {
 	sourceDir := t.TempDir()
 	writeTestFile(t, filepath.Join(sourceDir, ".afsignore"), "cache/\n")
-	writeTestFile(t, filepath.Join(sourceDir, ".rfsignore"), "logs/\n")
 
 	ignorer, err := loadMigrationIgnore(sourceDir)
 	if err != nil {
@@ -185,9 +165,6 @@ func TestLoadMigrationIgnorePrefersAFSIgnore(t *testing.T) {
 	}
 	if ignorer == nil {
 		t.Fatal("expected ignorer to be loaded")
-	}
-	if ignorer.legacy {
-		t.Fatal("expected .afsignore to take precedence over legacy file")
 	}
 	if filepath.Base(ignorer.path) != ".afsignore" {
 		t.Fatalf("ignore path = %q, want .afsignore", ignorer.path)

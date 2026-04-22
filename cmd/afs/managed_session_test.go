@@ -6,7 +6,7 @@ func TestManagedWorkspaceSessionRequestSkipsLocalMode(t *testing.T) {
 	t.Helper()
 
 	req := managedWorkspaceSessionRequest(config{
-		ProductMode: productModeDirect,
+		ProductMode: productModeLocal,
 		LocalPath:   "/tmp/repo",
 	})
 	if req.ClientKind != "" || req.LocalPath != "" || req.Hostname != "" {

@@ -109,7 +109,7 @@ It is not the best primary auth layer for v1 because:
 
 ### Phase 3: CLI handoff
 
-- keep `afs auth` as the entrypoint
+- use `afs login` as the CLI entrypoint
 - if the browser is not signed in, the user signs in first
 - after sign-in, the browser attaches the CLI to the selected workspace
 - exchange the one-time handoff into durable local CLI config

@@ -62,7 +62,7 @@ func cmdUpArgs(args []string) error {
 		return err
 	}
 	switch productMode {
-	case productModeDirect:
+	case productModeLocal:
 		// Direct mode supports the existing sync/mount behavior below.
 	case productModeSelfHosted, productModeCloud:
 		if mode == modeSync {
@@ -126,9 +126,10 @@ func cmdDown() error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println()
-			fmt.Println("  AFS is not running. Nothing to stop.")
-			fmt.Println()
+			printBox(clr(ansiBold, "AFS not running"), []boxRow{
+				{Label: "status", Value: "already stopped"},
+				{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" up")},
+			})
 			return nil
 		}
 		return err
@@ -233,7 +234,10 @@ func cmdDown() error {
 		return err
 	}
 
-	fmt.Printf("\n  %s afs stopped\n\n", clr(ansiDim, "■"))
+	printBox(markerSuccess+" "+clr(ansiBold, "AFS stopped"), []boxRow{
+		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
+		{Label: "local", Value: st.LocalPath},
+	})
 	return nil
 }
 
@@ -334,7 +338,7 @@ func startServices(cfg config) error {
 	}
 
 	store := newAFSStore(rdb)
-	if productMode == productModeDirect {
+	if productMode == productModeLocal {
 		workspaceStep := startStep("Ensuring current workspace")
 		workspace, err = ensureMountWorkspace(ctx, runtimeCfg, store)
 		if err != nil {

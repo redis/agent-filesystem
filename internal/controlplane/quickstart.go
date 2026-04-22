@@ -528,8 +528,8 @@ const seedArchitecture = `# AFS Architecture
 
 ## Three layers
 
-**1. Redis Module** — A native C module providing ` + "`FS.*`" + ` commands.
-One Redis key = one complete filesystem with O(1) path lookups.
+**1. Redis-backed workspace store** — Redis holds workspace metadata,
+manifests, blobs, checkpoints, and activity.
 
 **2. Mount + Sync** — A Go daemon that exposes a Redis-backed workspace
 as a normal directory on your machine. Two modes:

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -457,11 +458,7 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 			{Label: "estimate", Value: "~" + formatStepDuration(estimate)},
 		}
 		if ignorer != nil {
-			value := ignorer.path
-			if ignorer.legacy {
-				value += " (legacy filename)"
-			}
-			rows = append(rows, boxRow{Label: "ignore", Value: value})
+			rows = append(rows, boxRow{Label: "ignore", Value: ignorer.path})
 		} else {
 			rows = append(rows, boxRow{Label: "ignore", Value: clr(ansiDim, "none")})
 		}
@@ -484,7 +481,7 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 		}
 		if editIgnore {
 			ignorePath := filepath.Join(sourceDir, afsIgnoreFilename)
-			if ignorer != nil && !ignorer.legacy {
+			if ignorer != nil {
 				ignorePath = ignorer.path
 			}
 			if err := ensureAFSIgnoreTemplate(ignorePath); err != nil {
@@ -702,7 +699,14 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 	// the currently-selected workspace on a miss — that turned typos into
 	// silent successes.
 	if match, ok, err := matchWorkspaceSelection(ref, displayName, workspaces.Items); err != nil {
-		return workspaceSelection{}, err
+		if requested == "" {
+			label := ref
+			if configDisplayName != "" {
+				label = configDisplayName
+			}
+			return workspaceSelection{}, fmt.Errorf("current workspace %q is ambiguous: %w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", label, err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+		}
+		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	} else if ok {
 		return match, nil
 	}
@@ -784,8 +788,6 @@ func runtimeStateMatchesConfig(cfg config, st state) bool {
 		} else {
 			stateMode = productModeLocal
 		}
-	case legacyProductModeDirect:
-		stateMode = productModeLocal
 	}
 	if stateMode != cfgMode {
 		return false
@@ -817,19 +819,37 @@ func matchWorkspaceSelection(ref, displayName string, workspaces []workspaceSumm
 		return workspaceSelection{}, false, nil
 	}
 
+	idMatches := make([]workspaceSummary, 0, 1)
+	nameMatches := make([]workspaceSummary, 0)
 	for _, workspace := range workspaces {
 		if workspace.ID == ref {
-			return workspaceSelection{ID: workspace.ID, Name: workspace.Name}, true, nil
+			idMatches = append(idMatches, workspace)
+		}
+		if workspace.Name == ref {
+			nameMatches = append(nameMatches, workspace)
 		}
 	}
 
-	matches := make([]workspaceSummary, 0)
-	for _, workspace := range workspaces {
-		if workspace.Name == ref {
-			matches = append(matches, workspace)
-		}
+	switch {
+	case len(nameMatches) > 1:
+		labels := workspaceSelectionLabels(nameMatches)
+		return workspaceSelection{}, false, fmt.Errorf(
+			"workspace %q exists multiple times; use a workspace id instead: %s",
+			ref,
+			strings.Join(labels, ", "),
+		)
+	case len(idMatches) == 1:
+		return workspaceSelection{ID: idMatches[0].ID, Name: idMatches[0].Name}, true, nil
+	case len(idMatches) > 1:
+		labels := workspaceSelectionLabels(idMatches)
+		return workspaceSelection{}, false, fmt.Errorf(
+			"workspace id %q is ambiguous; choose one of: %s",
+			ref,
+			strings.Join(labels, ", "),
+		)
 	}
-	switch len(matches) {
+
+	switch len(nameMatches) {
 	case 0:
 		if displayName != "" && displayName != ref {
 			for _, workspace := range workspaces {
@@ -840,22 +860,28 @@ func matchWorkspaceSelection(ref, displayName string, workspaces []workspaceSumm
 		}
 		return workspaceSelection{}, false, nil
 	case 1:
-		return workspaceSelection{ID: matches[0].ID, Name: matches[0].Name}, true, nil
+		return workspaceSelection{ID: nameMatches[0].ID, Name: nameMatches[0].Name}, true, nil
 	default:
-		ids := make([]string, 0, len(matches))
-		for _, workspace := range matches {
-			label := workspace.ID
-			if databaseName := strings.TrimSpace(workspace.DatabaseName); databaseName != "" {
-				label = fmt.Sprintf("%s (%s)", workspace.ID, databaseName)
-			}
-			ids = append(ids, label)
-		}
-		return workspaceSelection{}, false, fmt.Errorf(
-			"workspace %q exists multiple times; use a workspace id instead: %s",
-			ref,
-			strings.Join(ids, ", "),
-		)
+		return workspaceSelection{}, false, nil
 	}
+}
+
+func workspaceSelectionLabels(matches []workspaceSummary) []string {
+	seen := make(map[string]struct{}, len(matches))
+	labels := make([]string, 0, len(matches))
+	for _, workspace := range matches {
+		label := workspace.ID
+		if databaseName := strings.TrimSpace(workspace.DatabaseName); databaseName != "" {
+			label = fmt.Sprintf("%s (%s)", workspace.ID, databaseName)
+		}
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return labels
 }
 
 func applyWorkspaceSelection(cfg *config, selection workspaceSelection) error {
@@ -869,7 +895,7 @@ func applyWorkspaceSelection(cfg *config, selection workspaceSelection) error {
 	if err != nil {
 		return err
 	}
-	if productMode != productModeDirect {
+	if productMode != productModeLocal {
 		cfg.CurrentWorkspaceID = strings.TrimSpace(selection.ID)
 	}
 	return nil

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/version"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -107,6 +108,7 @@ func startSyncServices(cfg config, foreground bool) error {
 	}
 	defer closeSession()
 	runtimeCfg := bootstrap.cfg
+	ctx = withSessionID(ctx, bootstrap.sessionID)
 	if bootstrap.initializedRoot {
 		prepareStep.succeed(bootstrap.workspace + " (initialized)")
 	} else {
@@ -138,6 +140,10 @@ func startSyncServices(cfg config, foreground bool) error {
 		MaxFileBytes: syncSizeCapBytes(runtimeCfg),
 		Readonly:     runtimeCfg.ReadOnly,
 		Interactive:  foreground,
+		Rdb:          rdb,
+		StorageID:    bootstrap.redisKey,
+		SessionID:    bootstrap.sessionID,
+		AgentVersion: version.String(),
 	})
 	if err != nil {
 		bootStep.fail(err.Error())
@@ -230,7 +236,7 @@ func startSyncServices(cfg config, foreground bool) error {
 
 	daemonStep := startStep("Starting background daemon")
 	var daemonBootstrap *syncDaemonBootstrap
-	if productMode, _ := effectiveProductMode(cfg); productMode != productModeDirect {
+	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
 		daemonBootstrap = &syncDaemonBootstrap{
 			Config:                   runtimeCfg,
 			Workspace:                bootstrap.workspace,
@@ -344,6 +350,7 @@ func runSyncDaemon() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	ctx = withSessionID(ctx, sessionID)
 
 	rdb := redis.NewClient(buildRedisOptions(cfg, 4))
 	defer rdb.Close()
@@ -363,6 +370,10 @@ func runSyncDaemon() error {
 		Store:        store,
 		MaxFileBytes: syncSizeCapBytes(cfg),
 		Readonly:     cfg.ReadOnly,
+		Rdb:          rdb,
+		StorageID:    mountKey,
+		SessionID:    sessionID,
+		AgentVersion: version.String(),
 	})
 	if err != nil {
 		return err
@@ -498,7 +509,7 @@ func validateSyncLocalPath(cfg config, localRoot string) error {
 
 func printSyncReadyBox(cfg config, workspace, localRoot string) {
 	title := statusTitle(markerSuccess, 0)
-	rows := statusRows(workspace, localRoot, modeSync, "", cfg.RedisAddr, cfg.RedisDB)
+	rows := statusRows(cfg, workspace, localRoot, modeSync, "", cfg.RedisAddr, cfg.RedisDB)
 	if cfg.ReadOnly {
 		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
 	}

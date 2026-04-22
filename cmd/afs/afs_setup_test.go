@@ -502,26 +502,25 @@ func TestRunSetupWizardAllowsChangingCurrentWorkspace(t *testing.T) {
 	}
 }
 
-// TestRunSetupWizardEditModePointsUserToLoginForConnectionChange confirms
-// that the "Change configuration source" menu option in edit mode now
-// instructs the user to run `afs login` instead of re-prompting for
-// URL/mode inline. Switching modes is login's job.
-func TestRunSetupWizardEditModePointsUserToLoginForConnectionChange(t *testing.T) {
+// TestRunSetupWizardEditModeSwitchesToLocal confirms that picking "Local"
+// in the Change-configuration-source menu clears cloud/self-hosted state
+// and flips ProductMode to local, without invoking a network-backed login.
+func TestRunSetupWizardEditModeSwitchesToLocal(t *testing.T) {
 	t.Helper()
-
-	server := newSelfHostedControlPlaneServer(t)
 
 	existing := defaultConfig()
 	existing.ProductMode = productModeSelfHosted
-	existing.URL = server.URL
+	existing.URL = "http://afs.test"
 	existing.DatabaseID = "db-local"
+	existing.AuthToken = "tok"
+	existing.Account = "alice@example.com"
 	existing.RedisAddr = "redis.example:6379"
 	existing.CurrentWorkspace = "repo"
 
-	// Edit menu (managed): item 4 = configuration source, 5 = save.
 	reader := bufio.NewReader(bytes.NewBufferString(stringsJoinLines(
 		"4", // configuration source
-		"5", // save and exit
+		"3", // local
+		"6", // save and exit (local mode exposes the extended menu)
 	)))
 	var output bytes.Buffer
 
@@ -529,17 +528,17 @@ func TestRunSetupWizardEditModePointsUserToLoginForConnectionChange(t *testing.T
 	if err != nil {
 		t.Fatalf("runSetupWizard() returned error: %v", err)
 	}
-	// Mode + URL unchanged — the menu option should now redirect the user.
-	if cfg.ProductMode != productModeSelfHosted {
-		t.Fatalf("ProductMode = %q, want %q (login owns mode changes now)", cfg.ProductMode, productModeSelfHosted)
+	if cfg.ProductMode != productModeLocal {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeLocal)
 	}
-	if cfg.URL != server.URL {
-		t.Fatalf("URL = %q, want %q (login owns URL changes now)", cfg.URL, server.URL)
-	}
-	got := output.String()
-	for _, want := range []string{"login --cloud", "login --self-hosted"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected edit-menu config option to mention %q; got:\n%s", want, got)
+	for _, field := range []struct{ name, got string }{
+		{"URL", cfg.URL},
+		{"DatabaseID", cfg.DatabaseID},
+		{"AuthToken", cfg.AuthToken},
+		{"Account", cfg.Account},
+	} {
+		if field.got != "" {
+			t.Fatalf("%s = %q, want empty after switching to local", field.name, field.got)
 		}
 	}
 }

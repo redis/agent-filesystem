@@ -72,7 +72,7 @@ func cmdMCP(args []string) error {
 }
 
 func mcpUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s mcp
 
 Start the Agent Filesystem MCP server over stdio.

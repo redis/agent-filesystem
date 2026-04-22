@@ -38,21 +38,21 @@ func cmdWorkspace(args []string) error {
 	}
 
 	switch args[1] {
-	case "create", "cr":
+	case "create":
 		return cmdWorkspaceCreate(args)
-	case "list", "l", "ls":
+	case "list":
 		return cmdWorkspaceList(args)
-	case "current", "cu":
+	case "current":
 		return cmdWorkspaceCurrent(args)
-	case "use", "u":
+	case "use":
 		return cmdWorkspaceUse(args)
-	case "clone", "cl":
+	case "clone":
 		return cmdWorkspaceClone(args)
-	case "fork", "f":
+	case "fork":
 		return cmdWorkspaceFork(args)
-	case "delete", "d", "rm":
+	case "delete":
 		return cmdWorkspaceDelete(args)
-	case "import", "i":
+	case "import":
 		return cmdWorkspaceImport(args)
 	default:
 		return fmt.Errorf("unknown workspace subcommand %q\n\n%s", args[1], workspaceUsageText(filepath.Base(os.Args[0])))
@@ -66,11 +66,11 @@ func cmdCheckpoint(args []string) error {
 	}
 
 	switch args[1] {
-	case "create", "cr", "save":
+	case "create":
 		return cmdCheckpointCreate(args)
-	case "list", "l", "ls":
+	case "list":
 		return cmdCheckpointList(args)
-	case "restore", "r":
+	case "restore":
 		return cmdCheckpointRestore(args)
 	default:
 		return fmt.Errorf("unknown checkpoint subcommand %q\n\n%s", args[1], checkpointUsageText(filepath.Base(os.Args[0])))
@@ -135,7 +135,7 @@ func cmdWorkspaceCreate(args []string) error {
 	}
 
 	next := filepath.Base(os.Args[0]) + " up " + workspace + " <folder>"
-	if productMode, _ := effectiveProductMode(cfg); productMode != productModeDirect {
+	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
 		next = filepath.Base(os.Args[0]) + " workspace use " + workspace
 	}
 
@@ -1039,7 +1039,7 @@ func workspaceListSelected(cfg config, summary workspaceSummary) bool {
 }
 
 func workspaceUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace <subcommand>
 
 Subcommands:
@@ -1064,7 +1064,7 @@ Run '%s workspace <subcommand> --help' for details.
 }
 
 func workspaceCreateUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace create [--database <database-id|database-name>] <workspace>
 
 Create an empty workspace with an initial checkpoint named "initial".
@@ -1072,7 +1072,7 @@ Create an empty workspace with an initial checkpoint named "initial".
 }
 
 func workspaceListUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace list
 
 List workspaces stored in Redis, along with checkpoint counts and creation time.
@@ -1080,7 +1080,7 @@ List workspaces stored in Redis, along with checkpoint counts and creation time.
 }
 
 func workspaceCurrentUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace current
 
 Show the current workspace selection AFS will use when a workspace argument is omitted.
@@ -1088,15 +1088,16 @@ Show the current workspace selection AFS will use when a workspace argument is o
 }
 
 func workspaceUseUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s workspace use <workspace>
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s workspace use <workspace-name-or-id>
 
 Set the current workspace AFS will use when a workspace argument is omitted.
-`, bin)
+When names collide across databases, use the workspace ID from '%s workspace list'.
+`, bin, bin)
 }
 
 func workspaceCloneUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace clone [workspace] <directory>
 
 Clone a workspace into a local directory at its current saved head.
@@ -1107,7 +1108,7 @@ If [workspace] is omitted, AFS uses the current workspace.
 }
 
 func workspaceForkUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace fork [source-workspace] <new-workspace>
 
 Create a new workspace from the source workspace's current saved head.
@@ -1117,7 +1118,7 @@ If [source-workspace] is omitted, AFS uses the current workspace.
 }
 
 func workspaceDeleteUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace delete <workspace>...
 
 Delete one or more workspaces from Redis and remove their local materialized state.
@@ -1125,7 +1126,7 @@ Delete one or more workspaces from Redis and remove their local materialized sta
 }
 
 func workspaceImportUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace import [--force] [--database <database-id|database-name>] [--mount-at-source] <workspace> <directory>
 
 Import a local directory into a workspace.
@@ -1139,7 +1140,7 @@ Options:
 }
 
 func checkpointUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint <subcommand>
 
 Subcommands:
@@ -1157,7 +1158,7 @@ Run '%s checkpoint <subcommand> --help' for details.
 }
 
 func checkpointListUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint list [workspace]
 
 List checkpoints for a workspace, newest first.
@@ -1165,7 +1166,7 @@ List checkpoints for a workspace, newest first.
 }
 
 func checkpointCreateUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint create [workspace] [checkpoint]
 
 Create a checkpoint from the workspace's current live state.
@@ -1174,7 +1175,7 @@ If [checkpoint] is omitted, AFS generates a timestamped name.
 }
 
 func checkpointRestoreUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint restore [workspace] <checkpoint>
 
 Restore the workspace live state to the selected checkpoint.

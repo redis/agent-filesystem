@@ -1,5 +1,7 @@
 import { cloneInitialAFSState } from "../mocks/afs";
 import type {
+  AFSChangelogEntry,
+  AFSChangelogResponse,
   AFSDatabase,
   AFSDatabaseListResponse,
   AFSAgentSession,
@@ -58,6 +60,7 @@ type AFSClient = {
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
+  listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
@@ -69,6 +72,40 @@ type AFSClient = {
   resetAccountData: () => Promise<AFSAccount>;
   deleteAccount: () => Promise<AFSAccount>;
   resetDemo: () => AFSState;
+};
+
+export type ListChangelogInput = {
+  databaseId?: string;
+  workspaceId: string;
+  sessionId?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  direction?: "asc" | "desc";
+};
+
+type HTTPChangelogEntry = {
+  id: string;
+  occurred_at?: string;
+  session_id?: string;
+  user?: string;
+  label?: string;
+  agent_version?: string;
+  op: string;
+  path: string;
+  prev_path?: string;
+  size_bytes?: number;
+  delta_bytes?: number;
+  content_hash?: string;
+  prev_hash?: string;
+  mode?: number;
+  checkpoint_id?: string;
+  source?: string;
+};
+
+type HTTPChangelogResponse = {
+  entries: HTTPChangelogEntry[];
+  next_cursor?: string;
 };
 
 type HTTPRedisStats = {
@@ -211,6 +248,7 @@ type HTTPWorkspaceSessionInfo = {
   hostname?: string;
   os?: string;
   local_path?: string;
+  label?: string;
   readonly?: boolean;
   state: string;
   started_at: string;
@@ -923,6 +961,7 @@ This workspace was created from the AFS Web UI.
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
+      workspace.name = input.name.trim();
       workspace.description = input.description.trim();
       workspace.cloudAccount = input.cloudAccount?.trim() || workspace.cloudAccount;
       workspace.databaseName = input.databaseName?.trim() || workspace.databaseName;
@@ -1052,6 +1091,11 @@ This workspace was created from the AFS Web UI.
     return allActivityForState(state).filter((event) =>
       databaseId === "" || event.databaseId === databaseId,
     ).slice(0, limit);
+  },
+
+  async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
+    await wait();
+    return { entries: [] };
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
@@ -1316,6 +1360,27 @@ function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   };
 }
 
+function mapChangelogEntry(input: HTTPChangelogEntry): AFSChangelogEntry {
+  return {
+    id: input.id,
+    occurredAt: input.occurred_at,
+    sessionId: input.session_id,
+    user: input.user,
+    label: input.label,
+    agentVersion: input.agent_version,
+    op: input.op,
+    path: input.path,
+    prevPath: input.prev_path,
+    sizeBytes: input.size_bytes,
+    deltaBytes: input.delta_bytes,
+    contentHash: input.content_hash,
+    prevHash: input.prev_hash,
+    mode: input.mode,
+    checkpointId: input.checkpoint_id,
+    source: input.source,
+  };
+}
+
 function mapAgentSession(
   input: HTTPWorkspaceSessionInfo,
   workspaceId: string,
@@ -1334,6 +1399,7 @@ function mapAgentSession(
     hostname: input.hostname ?? "",
     operatingSystem: input.os ?? "",
     localPath: input.local_path ?? "",
+    label: input.label,
     readonly: input.readonly ?? false,
     state: input.state,
     startedAt: input.started_at,
@@ -1577,6 +1643,7 @@ const httpAFSClient: AFSClient = {
       await requestJSON<HTTPWorkspaceDetail>(workspaceBasePath(input.databaseId, input.workspaceId), {
         method: "PUT",
         body: JSON.stringify({
+          name: input.name,
           description: input.description,
           database_name: input.databaseName,
           cloud_account: input.cloudAccount,
@@ -1619,6 +1686,34 @@ const httpAFSClient: AFSClient = {
 
     const response = await requestJSON<HTTPActivityList>(`/activity?limit=${limit}`);
     return response.items.map((item) => mapActivity(item));
+  },
+
+  async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
+    const params = new URLSearchParams();
+    if (input.limit != null && input.limit > 0) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.sessionId) {
+      params.set("session_id", input.sessionId);
+    }
+    if (input.since) {
+      params.set("since", input.since);
+    }
+    if (input.until) {
+      params.set("until", input.until);
+    }
+    if (input.direction) {
+      params.set("direction", input.direction);
+    }
+    const query = params.toString();
+    const base = `${workspaceBasePath(input.databaseId, input.workspaceId)}/changes`;
+    const response = await requestJSON<HTTPChangelogResponse>(
+      query ? `${base}?${query}` : base,
+    );
+    return {
+      entries: (response.entries ?? []).map(mapChangelogEntry),
+      nextCursor: response.next_cursor,
+    };
   },
 
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {

@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { afsApi } from "../api/afs";
+import type { ListChangelogInput } from "../api/afs";
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
@@ -37,6 +38,18 @@ export const afsKeys = {
     [...afsKeys.all, "agents", databaseId ?? "all"] as const,
   activity: (databaseId: string | null, limit: number) =>
     [...afsKeys.all, "activity", databaseId ?? "all", limit] as const,
+  changelog: (input: ListChangelogInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "changes",
+      input.sessionId ?? "all",
+      input.limit ?? 100,
+      input.direction ?? "desc",
+    ] as const,
   workspaceTree: (input: GetWorkspaceTreeInput) =>
     [
       ...afsKeys.all,
@@ -116,6 +129,15 @@ export function activityQueryOptions(databaseId: string | null, limit: number) {
   });
 }
 
+export function changelogQueryOptions(input: ListChangelogInput) {
+  return queryOptions({
+    queryKey: afsKeys.changelog(input),
+    queryFn: () => afsApi.listChangelog(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function workspaceTreeQueryOptions(input: GetWorkspaceTreeInput) {
   return queryOptions({
     queryKey: afsKeys.workspaceTree(input),
@@ -180,6 +202,15 @@ export function useActivity(databaseId: string | null, limit = 50, enabled = tru
     {
       ...activityQueryOptions(databaseId, limit),
       enabled,
+    },
+  );
+}
+
+export function useChangelog(input: ListChangelogInput, enabled = true) {
+  return useQuery(
+    {
+      ...changelogQueryOptions(input),
+      enabled: enabled && input.workspaceId !== "",
     },
   );
 }

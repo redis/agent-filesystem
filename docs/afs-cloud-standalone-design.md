@@ -2,6 +2,10 @@
 
 Date: 2026-04-06
 
+Note: this document is historical context. It predates the removal of
+`afs workspace run` and the rename from `afs auth ...` to the top-level
+`afs login`, `afs logout`, and `afs status` commands.
+
 ## Goal
 
 Adopt the useful parts of the `cloud-context-engine` design for AFS:

@@ -68,6 +68,7 @@ function AgentsPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: agent.workspaceId },
+      search: agent.databaseId ? { databaseId: agent.databaseId } : {},
     });
   }
 

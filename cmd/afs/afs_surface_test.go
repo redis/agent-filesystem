@@ -39,36 +39,33 @@ func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 	}
 }
 
-func TestConfigStatusRowLocalUsesConfigPath(t *testing.T) {
+func TestConfigSourceStatusRowLocalUsesLocalLabel(t *testing.T) {
 	t.Helper()
 
-	row := configStatusRow(config{ProductMode: productModeLocal})
-	if row.Label != "config" {
-		t.Fatalf("configStatusRow(local).Label = %q, want %q", row.Label, "config")
+	row := configSourceStatusRow(config{ProductMode: productModeLocal})
+	if row.Label != "config source" {
+		t.Fatalf("configSourceStatusRow(local).Label = %q, want %q", row.Label, "config source")
 	}
 	value := stripAnsi(row.Value)
-	if !strings.HasPrefix(value, "local: ") {
-		t.Fatalf("configStatusRow(local).Value = %q, want prefix %q", value, "local: ")
-	}
-	if !strings.Contains(value, "afs.config.json") {
-		t.Fatalf("configStatusRow(local).Value = %q, want config path", value)
+	if value != "Local" {
+		t.Fatalf("configSourceStatusRow(local).Value = %q, want %q", value, "Local")
 	}
 }
 
-func TestConfigStatusRowSelfHostedUsesControlPlaneURL(t *testing.T) {
+func TestConfigSourceStatusRowSelfHostedUsesControlPlaneURL(t *testing.T) {
 	t.Helper()
 
-	row := configStatusRow(config{
+	row := configSourceStatusRow(config{
 		ProductMode: productModeSelfHosted,
 		controlPlaneSettings: controlPlaneSettings{
 			URL: "http://127.0.0.1:8091",
 		},
 	})
-	if row.Label != "config" {
-		t.Fatalf("configStatusRow(self-hosted).Label = %q, want %q", row.Label, "config")
+	if row.Label != "config source" {
+		t.Fatalf("configSourceStatusRow(self-hosted).Label = %q, want %q", row.Label, "config source")
 	}
-	if row.Value != "self managed: http://127.0.0.1:8091" {
-		t.Fatalf("configStatusRow(self-hosted).Value = %q, want %q", row.Value, "self managed: http://127.0.0.1:8091")
+	if row.Value != "Self-managed: http://127.0.0.1:8091" {
+		t.Fatalf("configSourceStatusRow(self-hosted).Value = %q, want %q", row.Value, "Self-managed: http://127.0.0.1:8091")
 	}
 }
 
@@ -133,7 +130,7 @@ func TestExecutablePathResolvesSymlinks(t *testing.T) {
 func TestStatusRowsNoMountBackendWhenNone(t *testing.T) {
 	t.Helper()
 
-	rows := statusRows("myws", "/tmp/local", "sync", mountBackendNone, "localhost:6379", 0)
+	rows := statusRows(config{}, "myws", "/tmp/local", "sync", mountBackendNone, "localhost:6379", 0)
 	// Expect: workspace, local, database, mode — no mount backend row.
 	labels := make([]string, len(rows))
 	for i, r := range rows {
@@ -155,7 +152,7 @@ func TestStatusRowsNoMountBackendWhenNone(t *testing.T) {
 func TestStatusRowsIncludesMountBackendForFuse(t *testing.T) {
 	t.Helper()
 
-	rows := statusRows("myws", "/tmp/local", "mount", mountBackendFuse, "localhost:6379", 0)
+	rows := statusRows(config{}, "myws", "/tmp/local", "mount", mountBackendFuse, "localhost:6379", 0)
 	found := false
 	for _, r := range rows {
 		if r.Label == "mount backend" && r.Value == "FUSE" {
@@ -171,7 +168,7 @@ func TestStatusTitleShowsRunningWithPID(t *testing.T) {
 	t.Helper()
 
 	title := statusTitle("●", 12345)
-	want := "AFS Running (daemon 12345)"
+	want := "AFS Running (pid 12345)"
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
 	}
@@ -185,8 +182,8 @@ func TestStatusTitleShowsRunningWithoutPID(t *testing.T) {
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
 	}
-	if strings.Contains(title, "daemon") {
-		t.Fatalf("statusTitle() = %q, should not contain daemon when pid=0", title)
+	if strings.Contains(title, "pid") {
+		t.Fatalf("statusTitle() = %q, should not contain pid when pid=0", title)
 	}
 }
 
@@ -228,8 +225,8 @@ func TestCmdStatusNotRunningShowsSelfHostedConfigURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdStatusNotRunning() returned error: %v", err)
 	}
-	if !strings.Contains(out, "config") || !strings.Contains(out, "self managed: http://127.0.0.1:8091") {
-		t.Fatalf("cmdStatusNotRunning() output = %q, want self managed config row", out)
+	if !strings.Contains(out, "config source") || !strings.Contains(out, "Self-managed: http://127.0.0.1:8091") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want Self-managed config source row", out)
 	}
 	if !strings.Contains(out, "http://127.0.0.1:8091") {
 		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane url", out)
@@ -266,23 +263,6 @@ func TestPrintReadyBoxKeepsVisibleLinesWithinEightyColumns(t *testing.T) {
 		if width := runeWidth(line); width > maxCLIWidth {
 			t.Fatalf("line width = %d, want <= %d: %q", width, maxCLIWidth, stripAnsi(line))
 		}
-	}
-}
-
-func TestCenterBannerTextForOutputCentersTextWithinBannerWidth(t *testing.T) {
-	t.Helper()
-
-	got := stripAnsi(centerBannerTextForOutput(io.Discard, "AFS"))
-	want := bannerIndent + strings.Repeat(" ", (bannerWidth-len("AFS"))/2) + "AFS"
-	if got != want {
-		t.Fatalf("centerBannerTextForOutput(AFS) = %q, want %q", got, want)
-	}
-
-	subtitle := "Agent Filesystem"
-	got = stripAnsi(centerBannerTextForOutput(io.Discard, subtitle))
-	want = bannerIndent + strings.Repeat(" ", (bannerWidth-len(subtitle))/2) + subtitle
-	if got != want {
-		t.Fatalf("centerBannerTextForOutput(subtitle) = %q, want %q", got, want)
 	}
 }
 

@@ -103,6 +103,8 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	if err := SyncWorkspaceRoot(ctx, s.store, workspaceID, manifest); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
+	template := s.buildChangelogTemplate(ctx, workspaceID, initialCheckpointName, ChangeSourceImport)
+	writeChangeEntries(ctx, s.store.rdb, workspaceID, manifestSeedEntries(manifest, template))
 	if err := s.store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      "client-upload",

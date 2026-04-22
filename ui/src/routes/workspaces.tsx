@@ -137,7 +137,7 @@ function ImportDialog({
                   void navigate({
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId: result.workspaceId },
-                    search: { tab: "browse" },
+                    search: { databaseId: result.databaseId, tab: "browse" },
                   });
                 },
                 onError: (err) => {
@@ -242,8 +242,8 @@ function createInitialFormState(database?: AFSDatabaseScopeRecord | null): Works
   };
 }
 
-function workspaceRowKey(workspaceId: string) {
-  return workspaceId;
+function workspaceRowKey(databaseId: string | undefined, workspaceId: string) {
+  return `${databaseId ?? ""}:${workspaceId}`;
 }
 
 function WorkspacesPage() {
@@ -265,6 +265,7 @@ function WorkspacesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [editingWorkspaceDatabaseId, setEditingWorkspaceDatabaseId] = useState<string | null>(null);
   const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceSummary | null>(null);
   const [freeTierDialogOpen, setFreeTierDialogOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -273,7 +274,7 @@ function WorkspacesPage() {
   );
 
   const editingWorkspaceQuery = useWorkspace(
-    null,
+    editingWorkspaceDatabaseId,
     editingWorkspaceId ?? "",
     dialogMode === "edit" && editingWorkspaceId != null,
   );
@@ -311,7 +312,7 @@ function WorkspacesPage() {
 
   const workspaces = workspacesQuery.data;
   const connectedAgentsByWorkspace = agentsQuery.data.reduce<Record<string, number>>((counts, session) => {
-    const key = workspaceRowKey(session.workspaceId);
+    const key = workspaceRowKey(session.databaseId, session.workspaceId);
     counts[key] = (counts[key] ?? 0) + 1;
     return counts;
   }, {});
@@ -319,7 +320,7 @@ function WorkspacesPage() {
     ? workspaces[0]
     : null;
   const showStarterConnectPanel = starterWorkspace != null &&
-    (connectedAgentsByWorkspace[workspaceRowKey(starterWorkspace.id)] ?? 0) === 0;
+    (connectedAgentsByWorkspace[workspaceRowKey(starterWorkspace.databaseId, starterWorkspace.id)] ?? 0) === 0;
 
   // Free-tier quota: the starter database caps each user at 3 workspaces.
   const onboardingDb = databases.find((db) => db.purpose === "onboarding") ?? null;
@@ -344,6 +345,7 @@ function WorkspacesPage() {
   function closeDialog() {
     setDialogMode(null);
     setEditingWorkspaceId(null);
+    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
     setImportPath("");
     setImportFileCount(0);
@@ -362,6 +364,7 @@ function WorkspacesPage() {
 
     setDialogMode("create");
     setEditingWorkspaceId(null);
+    setEditingWorkspaceDatabaseId(null);
     setFormError(null);
     setImportPath("");
     setImportFileCount(0);
@@ -371,6 +374,7 @@ function WorkspacesPage() {
   function openEditDialog(workspace: AFSWorkspaceSummary) {
     setDialogMode("edit");
     setEditingWorkspaceId(workspace.id);
+    setEditingWorkspaceDatabaseId(workspace.databaseId);
     setFormError(null);
   }
 
@@ -393,6 +397,7 @@ function WorkspacesPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: workspace.id },
+      search: { databaseId: workspace.databaseId },
     });
   }
 
@@ -400,6 +405,7 @@ function WorkspacesPage() {
     void router.preloadRoute({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: workspace.id },
+      search: { databaseId: workspace.databaseId },
     });
   }
 
@@ -407,7 +413,10 @@ function WorkspacesPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: workspace.id },
-      search: tab === "browse" ? {} : { tab },
+      search: {
+        databaseId: workspace.databaseId,
+        ...(tab === "browse" ? {} : { tab }),
+      },
     });
   }
 
@@ -421,6 +430,7 @@ function WorkspacesPage() {
     }
 
     deleteWorkspace.mutate({
+      databaseId: workspace.databaseId,
       workspaceId: workspace.id,
     }, {
       onSuccess: () => {
@@ -468,7 +478,7 @@ function WorkspacesPage() {
         connectedAgentsByWorkspace={connectedAgentsByWorkspace}
         deletingWorkspaceKey={
           deleteWorkspace.isPending && deleteWorkspace.variables != null
-            ? workspaceRowKey(deleteWorkspace.variables.workspaceId)
+            ? workspaceRowKey(deleteWorkspace.variables.databaseId, deleteWorkspace.variables.workspaceId)
             : null
         }
         toolbarAction={(
@@ -506,7 +516,7 @@ function WorkspacesPage() {
                 </DialogTitle>
                 <DialogBody>
                   {isEditing
-                    ? "Update workspace metadata. Rename is not supported yet."
+                    ? "Update the workspace name and metadata."
                     : "Add a new workspace and choose which database will host it."}
                 </DialogBody>
               </div>
@@ -525,7 +535,9 @@ function WorkspacesPage() {
                 if (editingWorkspaceId != null) {
                   updateWorkspace.mutate(
                     {
+                      databaseId: editingWorkspaceDatabaseId ?? undefined,
                       workspaceId: editingWorkspaceId,
+                      name: form.name,
                       description: form.description,
                       cloudAccount: form.cloudAccount,
                       databaseName: form.databaseName,
@@ -557,7 +569,7 @@ function WorkspacesPage() {
                         void navigate({
                           to: "/workspaces/$workspaceId",
                           params: { workspaceId: result.workspaceId },
-                          search: { tab: "browse" },
+                          search: { databaseId: result.databaseId, tab: "browse" },
                         });
                       },
                       onError: (error) => {
@@ -604,16 +616,12 @@ function WorkspacesPage() {
                 Name
                 <TextInput
                   autoFocus
-                  disabled={isEditing}
                   value={form.name}
                   onChange={(event) => updateForm("name", event.target.value)}
                   placeholder="customer-portal"
                 />
                 {isEditing ? (
-                  <FieldHint>
-                    Workspace names are immutable today. Use the workspace ID and database name below to
-                    disambiguate duplicates.
-                  </FieldHint>
+                  <FieldHint>Renaming keeps the same stable workspace ID.</FieldHint>
                 ) : null}
               </Field>
 

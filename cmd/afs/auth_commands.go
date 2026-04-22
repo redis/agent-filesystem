@@ -22,57 +22,13 @@ type authExchangeResponse struct {
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
 	AccessToken   string `json:"access_token,omitempty"`
+	Account       string `json:"account,omitempty"`
 }
 
 var runBrowserLoginFlow = launchBrowserLoginFlow
 
-// cmdOnboard is a deprecated alias for cmdLogin. It prints a one-line notice
-// and forwards to the login flow so older docs / UI / muscle memory still work.
-func cmdOnboard(args []string) error {
-	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, loginUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-	fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs onboard` has been renamed to `afs login`; forwarding."))
-	return cmdLogin(args)
-}
-
-// cmdAuth is a deprecated alias for the `afs auth …` group. Each subcommand
-// forwards to its top-level equivalent with a one-line notice. Kept for one
-// release so muscle memory / legacy docs / skills that spelled out
-// `afs auth logout` keep working.
-func cmdAuth(args []string) error {
-	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs auth` is deprecated; use `afs login` / `afs logout` / `afs status` directly."))
-		return cmdLogin(nil)
-	}
-	if isHelpArg(args[1]) {
-		printAuthUsage()
-		return nil
-	}
-
-	bin := filepath.Base(os.Args[0])
-	switch args[1] {
-	case "login":
-		fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs auth login` has been renamed to `afs login`; forwarding."))
-		return cmdLogin(args[2:])
-	case "logout":
-		fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs auth logout` has been renamed to `afs logout`; forwarding."))
-		return cmdLogout(args[2:])
-	case "status":
-		fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs auth status` is now part of `afs status`; forwarding."))
-		return cmdStatus()
-	default:
-		if strings.HasPrefix(args[1], "-") {
-			fmt.Fprintln(os.Stderr, clr(ansiDim, "`afs auth` is deprecated; use `afs login` / `afs logout` / `afs status` directly."))
-			return cmdLogin(args[1:])
-		}
-		return fmt.Errorf("unknown auth subcommand %q\n\nRun `%s login`, `%s logout`, or `%s status` directly.", args[1], bin, bin, bin)
-	}
-}
-
 // cmdLogout clears any cached cloud login and flips the product mode back
-// to local-only. Top-level command; replaces the older `afs auth logout`.
+// to local-only.
 func cmdLogout(args []string) error {
 	return cmdAuthLogout(args)
 }
@@ -177,7 +133,7 @@ func promptLoginMode() (string, error) {
 	fmt.Fprintln(os.Stdout, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Connect to a control plane"))
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Cloud")+"        "+clr(ansiDim, "— sign in to AFS Cloud via browser"))
-	fmt.Fprintln(os.Stdout, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self-hosted")+"  "+clr(ansiDim, "— point this CLI at your own control plane"))
+	fmt.Fprintln(os.Stdout, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self-managed")+"  "+clr(ansiDim, "— point this CLI at your own control plane"))
 	fmt.Fprintln(os.Stdout)
 	choice, err := promptString(r, os.Stdout, "  Choose", "1")
 	if err != nil {
@@ -242,7 +198,7 @@ func runSelfHostedLogin(cfg *config, overrideURL string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "connected to self-hosted control plane"), []boxRow{
+	printBox(markerSuccess+" "+clr(ansiBold, "connected to self-managed control plane"), []boxRow{
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		{},
@@ -290,6 +246,7 @@ func runCloudLogin(cfg *config, overrideURL, overrideToken, workspace string) er
 	cfg.CurrentWorkspaceID = strings.TrimSpace(response.WorkspaceID)
 	cfg.CurrentWorkspace = strings.TrimSpace(response.WorkspaceName)
 	cfg.AuthToken = strings.TrimSpace(response.AccessToken)
+	cfg.Account = strings.TrimSpace(response.Account)
 	cfg.Mode = modeSync
 
 	if err := resolveConfigPaths(cfg); err != nil {
@@ -330,6 +287,7 @@ func cmdAuthLogout(args []string) error {
 	cfg.URL = ""
 	cfg.DatabaseID = ""
 	cfg.AuthToken = ""
+	cfg.Account = ""
 	cfg.CurrentWorkspace = ""
 	cfg.CurrentWorkspaceID = ""
 
@@ -388,31 +346,16 @@ func authConnectionInfo(bin string) ([]boxRow, bool) {
 	return rows, true
 }
 
-func printAuthUsage() {
-	fmt.Fprint(os.Stderr, authUsageText(filepath.Base(os.Args[0])))
-}
-
-func authUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
-  %s auth <command>
-
-`+clr(ansiDim, "Note: `afs auth` is deprecated. Use the top-level commands directly:")+`
-  %s login      Connect this CLI to a control plane
-  %s logout     Drop the cloud login and return to local-only mode
-  %s status     Show connection, workspace, and sync status
-`, bin, bin, bin, bin)
-}
-
 func loginUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s login [--cloud | --self-hosted [--url <url>]]
   %s login --control-plane-url <url> --token <token>
 
 Flags:
   --cloud                   Force cloud mode (browser OAuth)
-  --self-hosted             Force self-hosted mode (URL-only)
+  --self-hosted             Force self-managed mode (URL-only)
   --url, --control-plane-url <url>
-                            Override control plane URL (default %s for self-hosted)
+                            Override control plane URL (default %s for self-managed)
   --token <token>           One-time onboarding token (skips browser)
   --workspace <name|id>     Preferred workspace for cloud login
 
@@ -425,7 +368,7 @@ Examples:
 }
 
 func logoutUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s logout
 
 Clears any cached cloud login from this machine and switches product mode

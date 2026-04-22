@@ -456,7 +456,7 @@ func workspaceCatalogIdentityKey(name, ownerSubject string) string {
 
 func catalogRoutesByIdentity(ctx context.Context, queryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, rebind func(string) string, databaseID string) (map[string]workspaceCatalogRoute, error) {
+}, rebind func(string) string, databaseID string) (map[string][]workspaceCatalogRoute, error) {
 	rows, err := queryer.QueryContext(
 		ctx,
 		rebind(`SELECT database_id, workspace_id, name, owner_subject
@@ -469,13 +469,14 @@ func catalogRoutesByIdentity(ctx context.Context, queryer interface {
 	}
 	defer rows.Close()
 
-	routes := make(map[string]workspaceCatalogRoute)
+	routes := make(map[string][]workspaceCatalogRoute)
 	for rows.Next() {
 		var route workspaceCatalogRoute
 		if err := rows.Scan(&route.DatabaseID, &route.WorkspaceID, &route.Name, &route.OwnerSubject); err != nil {
 			return nil, err
 		}
-		routes[workspaceCatalogIdentityKey(route.Name, route.OwnerSubject)] = route
+		key := workspaceCatalogIdentityKey(route.Name, route.OwnerSubject)
+		routes[key] = append(routes[key], route)
 	}
 	return routes, rows.Err()
 }
@@ -520,7 +521,7 @@ func upsertCatalogWorkspaceSummary(
 		ExecContext(context.Context, ...any) (sql.Result, error)
 	},
 	rebind func(string) string,
-	existingByIdentity map[string]workspaceCatalogRoute,
+	existingByIdentity map[string][]workspaceCatalogRoute,
 	item workspaceSummary,
 ) (workspaceSummary, error) {
 	item.DatabaseID = strings.TrimSpace(item.DatabaseID)
@@ -534,10 +535,12 @@ func upsertCatalogWorkspaceSummary(
 	identityKey := workspaceCatalogIdentityKey(item.Name, item.OwnerSubject)
 
 	assignedID := strings.TrimSpace(item.ID)
-	if existing, ok := existingByIdentity[identityKey]; ok {
-		assignedID = strings.TrimSpace(existing.WorkspaceID)
+	if assignedID == "" {
+		if existing, ok := existingByIdentity[identityKey]; ok && len(existing) > 0 {
+			assignedID = strings.TrimSpace(existing[0].WorkspaceID)
+		}
 	}
-	if assignedID == "" || assignedID == item.Name {
+	if assignedID == "" {
 		var err error
 		assignedID, err = newOpaqueWorkspaceID()
 		if err != nil {
@@ -545,14 +548,19 @@ func upsertCatalogWorkspaceSummary(
 		}
 	}
 
-	if existing, ok := existingByIdentity[identityKey]; ok && strings.TrimSpace(existing.WorkspaceID) != assignedID {
-		if _, err := execer.ExecContext(
-			ctx,
-			rebind(`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`),
-			item.DatabaseID,
-			strings.TrimSpace(existing.WorkspaceID),
-		); err != nil {
-			return workspaceSummary{}, err
+	if existing, ok := existingByIdentity[identityKey]; ok {
+		for _, route := range existing {
+			if strings.TrimSpace(route.WorkspaceID) == assignedID {
+				continue
+			}
+			if _, err := execer.ExecContext(
+				ctx,
+				rebind(`DELETE FROM workspace_catalog WHERE database_id = ? AND workspace_id = ?`),
+				item.DatabaseID,
+				strings.TrimSpace(route.WorkspaceID),
+			); err != nil {
+				return workspaceSummary{}, err
+			}
 		}
 	}
 

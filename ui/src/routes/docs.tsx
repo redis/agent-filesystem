@@ -216,11 +216,6 @@ afs up`}</code>
                 <td>7+</td>
                 <td>Running instance (local or remote)</td>
               </tr>
-              <tr>
-                <td>C compiler</td>
-                <td>gcc or clang</td>
-                <td>Only needed for the optional Redis module</td>
-              </tr>
             </tbody>
           </CmdTable>
         </Step>
@@ -236,7 +231,7 @@ make afs
 # CLI + control plane with embedded UI:
 make commands
 
-# Everything (CLI, control plane, Redis module):
+# Everything active in this repo:
 make`}</code>
           </CodeBlock>
         </Step>

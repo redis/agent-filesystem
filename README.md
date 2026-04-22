@@ -346,7 +346,6 @@ Notes:
 
 - `.afsignore` is only used when importing a directory into AFS
 - the `.afsignore` file itself is imported too, so the workspace keeps its own import rules
-- legacy `.rfsignore` files are still accepted, but `.afsignore` is the preferred name
 
 ## What Gets Stored Where
 
@@ -390,8 +389,9 @@ Other build targets:
 
 ```bash
 make help
-make module
 make mount
+make commands
+make test
 make web-install
 make web-server
 make web-ui
@@ -444,10 +444,10 @@ mount, clone the current saved head into a normal directory:
 This repo includes:
 
 - the `afs` CLI
-- the Redis module
 - mount daemons for local filesystem access
 - the workspace-first MCP server built into `afs`
 - sandbox and web tooling
+- benchmark/helpers under `tests/`
 
 But if you are brand new here, start with:
 

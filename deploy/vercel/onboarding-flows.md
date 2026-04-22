@@ -26,14 +26,14 @@ As of 2026-04-17, the hosted production deploy now has these pieces in place:
 - workspace data plane uses Redis Cloud via `REDIS_URL`
 - first-run hosted bootstrap auto-seeds a managed database profile when the
   catalog is empty
-- `afs auth` / `afs login` can launch a browser flow automatically
+- `afs login` can launch a browser flow automatically
 - `/connect-cli` can create or reuse `getting-started` and hand the CLI back a
   short-lived onboarding token
-- `afs auth login [--control-plane-url <url>] [--workspace <workspace>]`
+- `afs login [--control-plane-url <url>] [--workspace <workspace>]`
   exchanges that browser bootstrap into local CLI config
-- `afs auth logout` and `afs auth status` exist
+- `afs logout` and `afs status` exist
 
-This means the hosted service can now support the initial "run `afs auth`,
+This means the hosted service can now support the initial "run `afs login`,
 finish browser handoff, then run `afs up`" flow.
 
 ## Product Modes
@@ -101,7 +101,7 @@ The developer:
 2. signs in or creates an account
 3. lands in the default `getting-started` workspace
 4. downloads the CLI from the workspace page
-5. runs `afs auth login` or `afs login`
+5. runs `afs login`
 6. finishes the browser handoff
 7. runs `afs up`
 8. starts using AFS
@@ -135,7 +135,7 @@ Long-term, we can decide whether to fully rename the hosted surface or keep
 
 - downloadable CLI artifacts from `/v1/cli`
 - `getting-started` default onboarding in the hosted UI
-- browser-first CLI auth handoff via `afs auth`
+- browser-first CLI auth handoff via `afs login`
 - hosted control plane bootstrapped against Neon + Redis Cloud
 
 ## Remaining Hosted Capabilities

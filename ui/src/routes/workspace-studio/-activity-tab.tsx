@@ -29,7 +29,7 @@ export function ActivityTab({ activity, updatedAt, onTabChange }: Props) {
     <SectionGrid>
       <SectionCard $span={12}>
         <SectionHeader>
-          <SectionTitle title="Workspace activity" />
+          <SectionTitle title="Workspace events" />
           <LastUpdated>Last updated {new Date(updatedAt).toLocaleString()}</LastUpdated>
         </SectionHeader>
         <ActivityTable

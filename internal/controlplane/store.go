@@ -75,6 +75,7 @@ type WorkspaceSessionRecord struct {
 	Hostname        string    `json:"hostname,omitempty"`
 	OperatingSystem string    `json:"os,omitempty"`
 	LocalPath       string    `json:"local_path,omitempty"`
+	Label           string    `json:"label,omitempty"`
 	Readonly        bool      `json:"readonly,omitempty"`
 	State           string    `json:"state"`
 	StartedAt       time.Time `json:"started_at"`

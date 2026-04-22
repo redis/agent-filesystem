@@ -162,6 +162,38 @@ func (c *httpControlPlaneClient) CloseWorkspaceSession(ctx context.Context, work
 	return c.doJSON(ctx, http.MethodDelete, c.clientWorkspacePath(workspace, "sessions", sessionID), nil, nil, http.StatusNoContent)
 }
 
+func (c *httpControlPlaneClient) ListChangelog(ctx context.Context, workspace string, req controlplane.ChangelogListRequest) (controlplane.ChangelogListResponse, error) {
+	databaseID, err := c.requireDatabaseID(ctx)
+	if err != nil {
+		return controlplane.ChangelogListResponse{}, err
+	}
+	rel := c.scopedPathFor(databaseID, "workspaces", workspace, "changes")
+	params := url.Values{}
+	if req.Limit > 0 {
+		params.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if strings.TrimSpace(req.SessionID) != "" {
+		params.Set("session_id", req.SessionID)
+	}
+	if strings.TrimSpace(req.Since) != "" {
+		params.Set("since", req.Since)
+	}
+	if strings.TrimSpace(req.Until) != "" {
+		params.Set("until", req.Until)
+	}
+	if req.Reverse {
+		params.Set("direction", "desc")
+	}
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.ChangelogListResponse
+	if err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK); err != nil {
+		return controlplane.ChangelogListResponse{}, err
+	}
+	return out, nil
+}
+
 func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error) {
 	rel := c.workspacePath(workspace, "checkpoints")
 	if limit > 0 {
@@ -309,6 +341,9 @@ func (c *httpControlPlaneClient) doJSONWithClient(ctx context.Context, httpClien
 	}
 	if strings.TrimSpace(c.authToken) != "" {
 		req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.authToken))
+	}
+	if sid := sessionIDFromContext(ctx); sid != "" {
+		req.Header.Set(controlplane.SessionIDHeader, sid)
 	}
 
 	if httpClient == nil {

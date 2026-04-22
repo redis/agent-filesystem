@@ -38,6 +38,7 @@ type controlPlaneSettings struct {
 	URL        string `json:"url,omitempty"`
 	DatabaseID string `json:"databaseID,omitempty"`
 	AuthToken  string `json:"authToken,omitempty"`
+	Account    string `json:"account,omitempty"`
 }
 
 // config captures the persisted CLI/runtime settings for the AFS surface.

@@ -953,6 +953,33 @@ func (m *DatabaseManager) SaveCheckpointFromLive(ctx context.Context, databaseID
 	return saved, nil
 }
 
+// ListChangelog reads per-session file-change entries for a workspace.
+func (m *DatabaseManager) ListChangelog(ctx context.Context, databaseID, workspace string, req ChangelogListRequest) (ChangelogListResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	return service.ListChangelog(ctx, route.WorkspaceID, req)
+}
+
+// GetSessionChangelogSummary returns the per-session rollup (op counts, delta bytes).
+func (m *DatabaseManager) GetSessionChangelogSummary(ctx context.Context, databaseID, workspace, sessionID string) (SessionChangelogSummary, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return SessionChangelogSummary{}, err
+	}
+	return service.GetSessionChangelogSummary(ctx, route.WorkspaceID, sessionID)
+}
+
+// GetPathLastWriter returns the last-writer metadata for a single path.
+func (m *DatabaseManager) GetPathLastWriter(ctx context.Context, databaseID, workspace, path string) (PathLastWriter, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return PathLastWriter{}, err
+	}
+	return service.GetPathLastWriter(ctx, route.WorkspaceID, path)
+}
+
 func (m *DatabaseManager) ForkWorkspace(ctx context.Context, databaseID, sourceWorkspace, newWorkspace string) error {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, sourceWorkspace)
 	if err != nil {
@@ -1373,13 +1400,20 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 		case 0:
 			// Fall back to a scan so out-of-band changes can still be discovered.
 		default:
+			seen := make(map[string]struct{}, len(filteredRoutes))
 			labels := make([]string, 0, len(filteredRoutes))
 			for _, route := range filteredRoutes {
 				profile := m.profiles[route.DatabaseID]
-				label := route.DatabaseID
+				label := route.WorkspaceID
 				if profile.Name != "" && profile.Name != route.DatabaseID {
-					label = profile.Name + " (" + route.DatabaseID + ")"
+					label = label + " (" + profile.Name + ")"
+				} else if route.DatabaseID != "" {
+					label = label + " (" + route.DatabaseID + ")"
 				}
+				if _, ok := seen[label]; ok {
+					continue
+				}
+				seen[label] = struct{}{}
 				labels = append(labels, label)
 			}
 			sort.Strings(labels)
@@ -1432,13 +1466,20 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 	case 1:
 		return matchService, matchProfile, matchRoute, nil
 	default:
+		seen := make(map[string]struct{}, len(matches))
 		labels := make([]string, 0, len(matches))
 		for _, route := range matches {
 			profile := m.profiles[route.DatabaseID]
-			label := route.DatabaseID
+			label := route.WorkspaceID
 			if profile.Name != "" && profile.Name != profile.ID {
-				label = profile.Name + " (" + profile.ID + ")"
+				label = label + " (" + profile.Name + ")"
+			} else if profile.ID != "" {
+				label = label + " (" + profile.ID + ")"
 			}
+			if _, ok := seen[label]; ok {
+				continue
+			}
+			seen[label] = struct{}{}
 			labels = append(labels, label)
 		}
 		sort.Strings(labels)
@@ -1447,12 +1488,11 @@ func (m *DatabaseManager) resolveWorkspaceServiceLocked(ctx context.Context, wor
 }
 
 // perDatabaseListTimeout bounds how long a single database can stall a
-// /v1/workspaces call before we give up on it. 3s is a generous upper bound
-// for a Redis LIST+HMGET pipeline over a WAN connection; anything slower is
-// effectively a dead backend (DNS-unresolvable host, TCP-unreachable peer).
-// Without this bound a single broken database profile would hang the whole
-// fan-out for the full Go DNS resolver timeout (~30s).
-const perDatabaseListTimeout = 3 * time.Second
+// /v1/workspaces call before we fall back to the catalog snapshot. Hosted
+// Redis can occasionally take a few seconds to answer large list calls, so
+// keep this high enough to avoid transient drops while still preventing one
+// dead backend from hanging the whole page.
+const perDatabaseListTimeout = 5 * time.Second
 
 func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context) (workspaceListResponse, error) {
 	subject := authSubjectFromContext(ctx)
@@ -1472,6 +1512,18 @@ func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context)
 	}
 	m.mu.Unlock()
 
+	catalogFallbacks := map[string][]workspaceSummary{}
+	if m.catalog != nil {
+		if cached, err := m.catalog.ListWorkspaces(ctx); err == nil {
+			for _, item := range cached {
+				if strings.TrimSpace(item.DatabaseID) == "" {
+					continue
+				}
+				catalogFallbacks[item.DatabaseID] = append(catalogFallbacks[item.DatabaseID], item)
+			}
+		}
+	}
+
 	var (
 		mu    sync.Mutex
 		items = make([]workspaceSummary, 0)
@@ -1485,6 +1537,11 @@ func (m *DatabaseManager) listAllWorkspaceSummariesByFanout(ctx context.Context)
 			defer cancel()
 			summaries, err := m.liveWorkspaceSummaries(dbCtx, databaseID)
 			if err != nil {
+				if fallback, ok := catalogFallbacks[databaseID]; ok {
+					mu.Lock()
+					items = append(items, fallback...)
+					mu.Unlock()
+				}
 				return
 			}
 			mu.Lock()

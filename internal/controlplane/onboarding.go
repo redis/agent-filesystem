@@ -32,6 +32,7 @@ type onboardingExchangeResponse struct {
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name"`
 	AccessToken   string `json:"access_token,omitempty"`
+	Account       string `json:"account,omitempty"`
 }
 
 func (m *DatabaseManager) CreateResolvedOnboardingToken(ctx context.Context, workspace string) (onboardingTokenResponse, error) {
@@ -118,6 +119,7 @@ func (m *DatabaseManager) ExchangeOnboardingToken(ctx context.Context, token str
 		WorkspaceID:   record.WorkspaceID,
 		WorkspaceName: record.WorkspaceName,
 		AccessToken:   accessToken,
+		Account:       record.OwnerLabel,
 	}, nil
 }
 

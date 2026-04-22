@@ -22,7 +22,6 @@ func TestSyncIgnoreBaseline(t *testing.T) {
 		{".afs-sync.tmp.foo", true},
 		{".afssync.tmp.bar", true},
 		{".afsignore", true},
-		{".rfsignore", true},
 		{"README.md", false},
 		{"src/main.go", false},
 	}

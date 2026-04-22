@@ -23,6 +23,7 @@ import {
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
 import {
   useDeleteWorkspaceMutation,
+  useUpdateWorkspaceMutation,
   useWorkspace,
   workspaceQueryOptions,
 } from "../foundation/hooks/use-afs";
@@ -35,18 +36,20 @@ import type { AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
+import { ChangesTab } from "./workspace-studio/-changes-tab";
 import { SettingsTab } from "./workspace-studio/-settings-tab";
 
 const workspaceStudioSearchSchema = z.object({
   tab: studioTabSchema.optional(),
   welcome: z.boolean().optional(),
+  databaseId: z.string().optional(),
 });
 
 export const Route = createFileRoute("/workspaces/$workspaceId")({
   validateSearch: workspaceStudioSearchSchema,
-  loader: ({ params }) =>
+  loader: ({ params, search }) =>
     queryClient.ensureQueryData({
-      ...workspaceQueryOptions(null, params.workspaceId),
+      ...workspaceQueryOptions(search?.databaseId ?? null, params.workspaceId),
       revalidateIfStale: true,
     }),
   component: WorkspaceStudioPage,
@@ -55,16 +58,19 @@ export const Route = createFileRoute("/workspaces/$workspaceId")({
 function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
-  const search = Route.useSearch();
+  const search = Route.useSearch() ?? {};
+  const databaseId = search.databaseId ?? null;
   const { unavailableDatabases } = useDatabaseScope();
-  const workspaceQuery = useWorkspace(null, workspaceId);
+  const workspaceQuery = useWorkspace(databaseId, workspaceId);
   const deleteWorkspace = useDeleteWorkspaceMutation();
+  const updateWorkspace = useUpdateWorkspaceMutation();
 
   const [browserView, setBrowserView] = useState<AFSWorkspaceView>("head");
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [userRequestedBanner, setUserRequestedBanner] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isRedirectingAfterDelete, setIsRedirectingAfterDelete] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
@@ -91,23 +97,15 @@ function WorkspaceStudioPage() {
     setBrowserView(defaultView);
   }, [workspace]);
 
-  useEffect(() => {
-    if (!deleteWorkspace.isSuccess) {
-      return;
-    }
-    setDeleteDialogOpen(false);
-    setIsRedirectingAfterDelete(true);
-    void navigate({ to: "/workspaces", replace: true });
-  }, [deleteWorkspace.isSuccess, navigate]);
-
   function setStudioTab(nextTab: StudioTab) {
     void navigate({
       to: "/workspaces/$workspaceId",
-      params: { workspaceId },
-      search: nextTab === "browse"
-        ? {}
-        : { tab: nextTab },
-      replace: true,
+        params: { workspaceId },
+        search: {
+          ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+          ...(nextTab === "browse" ? {} : { tab: nextTab }),
+        },
+        replace: true,
     });
   }
 
@@ -124,9 +122,35 @@ function WorkspaceStudioPage() {
     }
 
     try {
-      await deleteWorkspace.mutateAsync({ workspaceId });
+      setDeleteDialogOpen(false);
+      setIsRedirectingAfterDelete(true);
+      await deleteWorkspace.mutateAsync({ databaseId: databaseId ?? undefined, workspaceId });
+      await navigate({ to: "/workspaces", replace: true });
     } catch {
+      setIsRedirectingAfterDelete(false);
+      setDeleteDialogOpen(true);
       // keep the dialog open and show the mutation error below
+    }
+  }
+
+  async function saveWorkspaceSettings(input: { name: string; description: string }) {
+    if (workspace == null) {
+      return;
+    }
+
+    try {
+      setSaveError(null);
+      await updateWorkspace.mutateAsync({
+        databaseId: databaseId ?? undefined,
+        workspaceId,
+        name: input.name,
+        description: input.description,
+        cloudAccount: workspace.cloudAccount,
+        databaseName: workspace.databaseName,
+        region: workspace.region,
+      });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save workspace changes.");
     }
   }
 
@@ -160,6 +184,9 @@ function WorkspaceStudioPage() {
   }
 
   if (workspace == null) {
+    if (deleteWorkspace.isPending || deleteWorkspace.isSuccess || isRedirectingAfterDelete) {
+      return <Loader data-testid="loader--spinner" />;
+    }
     throw new Error("Workspace not found.");
   }
 
@@ -211,7 +238,10 @@ function WorkspaceStudioPage() {
                   void navigate({
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId },
-                    search: tab === "browse" ? {} : { tab },
+                    search: {
+                      ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+                      ...(tab === "browse" ? {} : { tab }),
+                    },
                     replace: true,
                   });
                 }}
@@ -227,7 +257,10 @@ function WorkspaceStudioPage() {
                   void navigate({
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId },
-                    search: tab === "browse" ? {} : { tab },
+                    search: {
+                      ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+                      ...(tab === "browse" ? {} : { tab }),
+                    },
                     replace: true,
                   });
                 }}
@@ -296,13 +329,16 @@ function WorkspaceStudioPage() {
 
       <Tabs>
         <TabButton $active={tab === "browse"} onClick={() => setStudioTab("browse")}>
-          Browse
+          Browse Files
+        </TabButton>
+        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
+          Changelog
         </TabButton>
         <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
           Checkpoints
         </TabButton>
         <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
-          Activity
+          Events
         </TabButton>
         <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
           Settings
@@ -333,9 +369,19 @@ function WorkspaceStudioPage() {
         />
       ) : null}
 
+      {tab === "changes" ? (
+        <ChangesTab
+          databaseId={workspace.databaseId}
+          workspaceId={workspaceId}
+        />
+      ) : null}
+
       {tab === "settings" ? (
         <SettingsTab
           workspace={workspace}
+          onSave={saveWorkspaceSettings}
+          isSaving={updateWorkspace.isPending}
+          saveError={saveError}
           onDelete={deleteCurrentWorkspace}
           isDeleting={deleteWorkspace.isPending}
         />

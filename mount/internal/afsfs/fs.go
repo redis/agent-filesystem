@@ -1,4 +1,5 @@
-// Package afsfs implements a FUSE filesystem backed by Redis FS.* commands.
+// Package afsfs implements a FUSE filesystem backed by the native Redis
+// workspace client.
 package afsfs
 
 import (

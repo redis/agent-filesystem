@@ -24,18 +24,17 @@ AFS_WEB_UI_PORT ?= 5173
 
 .DEFAULT_GOAL := all
 
-.PHONY: help all module mount commands afs afs-control-plane clean test install uninstall install-skill install-skill-local uninstall-skill-local web-install web-build embed-ui web-server web-ui web-dev
+.PHONY: help all mount commands afs afs-control-plane afs-control-plane-noui clean test install uninstall install-skill install-skill-local uninstall-skill-local web-install web-build embed-ui web-server web-ui web-dev
 
 help: ## Show repo-specific make targets and common variables.
 	@printf '%s\n' 'AFS make targets:'
 	@printf '  %-20s %s\n' 'help' 'Show this help.'
-	@printf '  %-20s %s\n' 'all' 'Build module, mount helpers, and Go commands.'
-	@printf '  %-20s %s\n' 'module' 'Build the Redis module.'
+	@printf '  %-20s %s\n' 'all' 'Build mount helpers and Go commands.'
 	@printf '  %-20s %s\n' 'mount' 'Build the FUSE and NFS mount helpers.'
 	@printf '  %-20s %s\n' 'commands' 'Build the afs and afs-control-plane binaries.'
 	@printf '  %-20s %s\n' 'afs' 'Build the afs CLI binary.'
 	@printf '  %-20s %s\n' 'afs-control-plane' 'Build the HTTP control-plane binary.'
-	@printf '  %-20s %s\n' 'test' 'Run module tests.'
+	@printf '  %-20s %s\n' 'test' 'Run Go unit tests for the active product surfaces.'
 	@printf '  %-20s %s\n' 'clean' 'Remove compiled artifacts.'
 	@printf '  %-20s %s\n' 'install' 'Symlink ./afs into $(BINDIR).'
 	@printf '  %-20s %s\n' 'uninstall' 'Remove the installed afs symlink from $(BINDIR).'
@@ -55,11 +54,8 @@ help: ## Show repo-specific make targets and common variables.
 	@printf '  %-24s %s\n' 'AFS_WEB_UI_PORT=port' 'Port for the Vite dev server.'
 	@printf '\n%s\n' 'Note: GNU make handles `make --help` itself before reading this Makefile, so use `make help` for repo-specific target docs.'
 
-all: ## Build module, mount helpers, and Go commands.
-all: module mount commands
-
-module: ## Build the Redis module.
-	$(MAKE) -C module
+all: ## Build mount helpers and Go commands.
+all: mount commands
 
 mount: ## Build the FUSE and NFS mount helpers.
 	$(MAKE) -C mount
@@ -88,13 +84,12 @@ uninstall: ## Remove the installed afs symlink from $(BINDIR).
 	@echo "Removed $(BINDIR)/afs"
 
 clean: ## Remove compiled artifacts.
-	$(MAKE) -C module clean
 	$(MAKE) -C mount clean
-	$(RM) afs afs-control-plane afs-server fs.so fs.xo path.xo
+	$(RM) afs afs-control-plane afs-server
 
-test: ## Run module tests.
-test: module
-	$(MAKE) -C module test
+test: ## Run Go unit tests for the active product surfaces.
+	go test ./cmd/... ./deploy/... ./internal/...
+	cd mount && go test ./...
 
 $(UI_NODE_MODULES):
 	cd "$(UI_DIR)" && $(NPM) install

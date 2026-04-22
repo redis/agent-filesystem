@@ -1,6 +1,6 @@
 import { Button } from "@redis-ui/components";
 import { useEffect, useMemo, useState } from "react";
-import styled from "styled-components";
+import styled, { keyframes } from "styled-components";
 import {
   EditorArea,
   InlineActions,
@@ -63,6 +63,15 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
     setCurrentPath("/");
     setSelectedPath("");
   }, [browserView]);
+
+  useEffect(() => {
+    if (selectedPath === "") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedPath("");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedPath]);
 
   const treeQuery = useWorkspaceTree(
     {
@@ -237,73 +246,94 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
         )}
       </FileTableContainer>
 
-      {/* ─── File content viewer ─── */}
+      {/* ─── File content viewer (slide-over drawer) ─── */}
       {selectedPath !== "" && (
-        <FileViewerContainer>
-          {selectedFileQuery.isLoading ? (
-            <ViewerMessage>Loading file content...</ViewerMessage>
-          ) : selectedFile == null ? (
-            <ViewerMessage>Could not load file.</ViewerMessage>
-          ) : selectedFile.binary ? (
-            <ViewerContent>
-              <ViewerHeader>
-                <ViewerTitle>{selectedFile.path.split("/").pop()}</ViewerTitle>
-                <MetaRow style={{ margin: 0 }}>
-                  <Tag>{selectedFile.language}</Tag>
-                  <Tag>{formatItemSize(selectedFile.size)}</Tag>
-                  <Tag>binary</Tag>
-                </MetaRow>
-              </ViewerHeader>
-              <ViewerMessage>Binary file — content not shown.</ViewerMessage>
-            </ViewerContent>
-          ) : editable ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                updateFile.mutate({
-                  workspaceId: workspace.id,
-                  path: selectedFile.path,
-                  content: draftContent,
-                });
-              }}
-            >
-              <ViewerContent>
-                <ViewerHeader>
-                  <ViewerHeaderLeft>
+        <DrawerOverlay onClick={() => setSelectedPath("")}>
+          <DrawerPanel onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            {selectedFileQuery.isLoading ? (
+              <>
+                <DrawerHeader>
+                  <DrawerTitleWrap>
+                    <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
+                  </DrawerTitleWrap>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                </DrawerHeader>
+                <ViewerMessage>Loading file content...</ViewerMessage>
+              </>
+            ) : selectedFile == null ? (
+              <>
+                <DrawerHeader>
+                  <DrawerTitleWrap>
+                    <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
+                  </DrawerTitleWrap>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                </DrawerHeader>
+                <ViewerMessage>Could not load file.</ViewerMessage>
+              </>
+            ) : selectedFile.binary ? (
+              <>
+                <DrawerHeader>
+                  <DrawerTitleWrap>
+                    <ViewerTitle>{selectedFile.path.split("/").pop()}</ViewerTitle>
+                    <MetaRow style={{ margin: 0 }}>
+                      <Tag>{selectedFile.language}</Tag>
+                      <Tag>{formatItemSize(selectedFile.size)}</Tag>
+                      <Tag>binary</Tag>
+                    </MetaRow>
+                  </DrawerTitleWrap>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                </DrawerHeader>
+                <ViewerMessage>Binary file — content not shown.</ViewerMessage>
+              </>
+            ) : editable ? (
+              <DrawerForm
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  updateFile.mutate({
+                    workspaceId: workspace.id,
+                    path: selectedFile.path,
+                    content: draftContent,
+                  });
+                }}
+              >
+                <DrawerHeader>
+                  <DrawerTitleWrap>
                     <ViewerTitle>{selectedFile.path.split("/").pop()}</ViewerTitle>
                     <ViewerMeta>
                       {selectedFile.language} · {formatItemSize(selectedFile.size)}
                     </ViewerMeta>
-                  </ViewerHeaderLeft>
+                  </DrawerTitleWrap>
                   <InlineActions>
                     <Button size="medium" type="submit" disabled={updateFile.isPending}>
                       Save
                     </Button>
+                    <DrawerCloseButton type="button" onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
                   </InlineActions>
-                </ViewerHeader>
-                <CodeArea
+                </DrawerHeader>
+                <DrawerCodeArea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
                 />
-              </ViewerContent>
-            </form>
-          ) : (
-            <ViewerContent>
-              <ViewerHeader>
-                <ViewerHeaderLeft>
-                  <ViewerTitle>{selectedFile.path.split("/").pop()}</ViewerTitle>
-                  <ViewerMeta>
-                    {selectedFile.language} · {formatItemSize(selectedFile.size)}
-                  </ViewerMeta>
-                </ViewerHeaderLeft>
-              </ViewerHeader>
-              <CodeArea
-                readOnly
-                value={selectedFile.content ?? selectedFile.target ?? ""}
-              />
-            </ViewerContent>
-          )}
-        </FileViewerContainer>
+              </DrawerForm>
+            ) : (
+              <>
+                <DrawerHeader>
+                  <DrawerTitleWrap>
+                    <ViewerTitle>{selectedFile.path.split("/").pop()}</ViewerTitle>
+                    <ViewerMeta>
+                      {selectedFile.language} · {formatItemSize(selectedFile.size)}
+                    </ViewerMeta>
+                  </DrawerTitleWrap>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                </DrawerHeader>
+                <DrawerCodeArea
+                  readOnly
+                  value={selectedFile.content ?? selectedFile.target ?? ""}
+                />
+              </>
+            )}
+          </DrawerPanel>
+        </DrawerOverlay>
       )}
     </RepoContainer>
   );
@@ -582,36 +612,101 @@ const TableMessage = styled.div`
   background: var(--afs-panel-strong);
 `;
 
-/* ─── File viewer ─── */
+/* ─── File viewer (slide-over drawer) ─── */
 
-const FileViewerContainer = styled.div`
-  margin-top: 16px;
-  border: 1px solid var(--afs-line-strong);
-  border-radius: 8px;
-  overflow: hidden;
+const fadeIn = keyframes`
+  from { opacity: 0; }
+  to { opacity: 1; }
 `;
 
-const ViewerContent = styled.div`
+const slideIn = keyframes`
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+`;
+
+const DrawerOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(8, 6, 13, 0.36);
+  animation: ${fadeIn} 150ms ease-out;
+`;
+
+const DrawerPanel = styled.div`
+  width: min(960px, 60vw);
+  max-width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
+  background: var(--afs-panel-strong);
+  border-left: 1px solid var(--afs-line-strong);
+  box-shadow: -18px 0 40px rgba(8, 6, 13, 0.2);
+  animation: ${slideIn} 180ms ease-out both;
+
+  @media (max-width: 768px) {
+    width: 100%;
+  }
 `;
 
-const ViewerHeader = styled.div`
+const DrawerForm = styled.form`
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+`;
+
+const DrawerHeader = styled.div`
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 12px 16px;
   background: var(--afs-panel);
   border-bottom: 1px solid var(--afs-line);
   flex-wrap: wrap;
 `;
 
-const ViewerHeaderLeft = styled.div`
+const DrawerTitleWrap = styled.div`
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 1;
+`;
+
+const DrawerCloseButton = styled.button`
+  border: none;
+  background: none;
+  color: var(--afs-muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover {
+    background: var(--afs-panel-strong);
+    color: var(--afs-ink);
+  }
+`;
+
+const DrawerCodeArea = styled.textarea`
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  padding: 16px;
+  background: var(--afs-panel-strong);
+  color: var(--afs-ink);
+  font-family: var(--afs-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
 `;
 
 const ViewerTitle = styled.span`
@@ -633,22 +728,3 @@ const ViewerMessage = styled.div`
   background: var(--afs-panel-strong);
 `;
 
-const CodeArea = styled.textarea`
-  width: 100%;
-  min-height: 420px;
-  border: none;
-  border-radius: 0;
-  padding: 16px;
-  background: var(--afs-panel-strong);
-  color: var(--afs-ink);
-  font-family: var(--afs-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  resize: vertical;
-  outline: none;
-  box-sizing: border-box;
-
-  &:focus {
-    background: var(--afs-panel-strong);
-  }
-`;

@@ -190,6 +190,7 @@ type createWorkspaceRequest struct {
 }
 
 type updateWorkspaceRequest struct {
+	Name         string `json:"name"`
 	Description  string `json:"description"`
 	DatabaseName string `json:"database_name"`
 	CloudAccount string `json:"cloud_account"`
@@ -206,6 +207,7 @@ type createWorkspaceSessionRequest struct {
 	Hostname        string `json:"hostname,omitempty"`
 	OperatingSystem string `json:"os,omitempty"`
 	LocalPath       string `json:"local_path,omitempty"`
+	Label           string `json:"label,omitempty"`
 	Readonly        bool   `json:"readonly,omitempty"`
 }
 
@@ -234,6 +236,7 @@ type workspaceSessionInfo struct {
 	Hostname        string `json:"hostname,omitempty"`
 	OperatingSystem string `json:"os,omitempty"`
 	LocalPath       string `json:"local_path,omitempty"`
+	Label           string `json:"label,omitempty"`
 	Readonly        bool   `json:"readonly,omitempty"`
 	State           string `json:"state"`
 	StartedAt       string `json:"started_at"`
@@ -340,6 +343,40 @@ func (s *Service) SaveCheckpoint(ctx context.Context, input SaveCheckpointReques
 	return s.saveCheckpoint(ctx, input)
 }
 
+// ListChangelog reads a page of workspace file-change entries. See
+// ChangelogListRequest for filter options.
+func (s *Service) ListChangelog(ctx context.Context, workspace string, req ChangelogListRequest) (ChangelogListResponse, error) {
+	_, storageID, err := s.store.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	return s.store.ListChangelog(ctx, storageID, req)
+}
+
+// GetSessionChangelogSummary reads the per-session rollup hash.
+func (s *Service) GetSessionChangelogSummary(ctx context.Context, workspace, sessionID string) (SessionChangelogSummary, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return SessionChangelogSummary{}, fmt.Errorf("session id is required")
+	}
+	_, storageID, err := s.store.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return SessionChangelogSummary{}, err
+	}
+	return s.store.GetSessionChangelogSummary(ctx, storageID, sessionID)
+}
+
+// GetPathLastWriter reads the companion path:last hash for a single path.
+func (s *Service) GetPathLastWriter(ctx context.Context, workspace, path string) (PathLastWriter, error) {
+	if strings.TrimSpace(path) == "" {
+		return PathLastWriter{}, fmt.Errorf("path is required")
+	}
+	_, storageID, err := s.store.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return PathLastWriter{}, err
+	}
+	return s.store.GetPathLastWriter(ctx, storageID, path)
+}
+
 // SaveCheckpointFromLive builds a manifest from the live workspace root in
 // Redis and saves it as a new checkpoint. This encapsulates the full server-
 // side flow so that remote clients (self-hosted mode) can create checkpoints
@@ -442,6 +479,7 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 		Hostname:        strings.TrimSpace(input.Hostname),
 		OperatingSystem: strings.TrimSpace(input.OperatingSystem),
 		LocalPath:       strings.TrimSpace(input.LocalPath),
+		Label:           strings.TrimSpace(input.Label),
 		Readonly:        input.Readonly,
 		State:           workspaceSessionStateStarting,
 		StartedAt:       now,
@@ -497,6 +535,9 @@ func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, session
 	record.Hostname = strings.TrimSpace(input.Hostname)
 	record.OperatingSystem = strings.TrimSpace(input.OperatingSystem)
 	record.LocalPath = strings.TrimSpace(input.LocalPath)
+	if label := strings.TrimSpace(input.Label); label != "" {
+		record.Label = label
+	}
 	record.Readonly = input.Readonly
 	record.State = workspaceSessionStateActive
 	record.LastSeenAt = now
@@ -640,6 +681,7 @@ func workspaceSessionInfoFromRecord(record WorkspaceSessionRecord) workspaceSess
 		Hostname:        record.Hostname,
 		OperatingSystem: record.OperatingSystem,
 		LocalPath:       record.LocalPath,
+		Label:           record.Label,
 		Readonly:        record.Readonly,
 		State:           record.State,
 		StartedAt:       record.StartedAt.UTC().Format(time.RFC3339),
@@ -929,8 +971,25 @@ func (s *Service) updateWorkspace(ctx context.Context, workspace string, input u
 	if cloudAccount == "" {
 		return workspaceDetail{}, fmt.Errorf("cloud account is required")
 	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = strings.TrimSpace(meta.Name)
+	}
+	if name != meta.Name {
+		if err := ValidateName("workspace", name); err != nil {
+			return workspaceDetail{}, err
+		}
+		exists, err := s.store.WorkspaceExists(ctx, name)
+		if err != nil {
+			return workspaceDetail{}, err
+		}
+		if exists {
+			return workspaceDetail{}, fmt.Errorf("workspace %q already exists", name)
+		}
+	}
 
 	meta = applyWorkspaceMetaDefaults(s.cfg, meta)
+	meta.Name = name
 	meta.Description = strings.TrimSpace(input.Description)
 	meta.DatabaseName = databaseName
 	meta.CloudAccount = cloudAccount
@@ -942,6 +1001,7 @@ func (s *Service) updateWorkspace(ctx context.Context, workspace string, input u
 		return workspaceDetail{}, err
 	}
 	if err := s.store.Audit(ctx, workspace, "workspace_update", map[string]any{
+		"name":          meta.Name,
 		"database_name": meta.DatabaseName,
 		"cloud_account": meta.CloudAccount,
 		"region":        meta.Region,
@@ -1002,6 +1062,12 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 	if !exists {
 		return os.ErrNotExist
 	}
+	// Capture the current manifest before moving head so we can diff against
+	// the restore target for the changelog.
+	priorManifest, err := s.store.GetManifest(ctx, storageID, meta.HeadSavepoint)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if err := s.store.MoveWorkspaceHead(ctx, storageID, checkpointID, time.Now().UTC()); err != nil {
 		if err == redis.TxFailedErr {
 			return ErrWorkspaceConflict
@@ -1015,6 +1081,8 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 	if err := SyncWorkspaceRoot(ctx, s.store, storageID, manifestValue); err != nil {
 		return err
 	}
+	template := s.buildChangelogTemplate(ctx, storageID, checkpointID, ChangeSourceServerRestore)
+	writeChangeEntries(ctx, s.store.rdb, storageID, manifestDiff(priorManifest, manifestValue, template))
 	return s.store.Audit(ctx, storageID, "checkpoint_restore", map[string]any{
 		"checkpoint": checkpointID,
 		"mode":       "canonical-only",
@@ -1047,6 +1115,9 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 	if manifestEquivalent(headManifest, input.Manifest) {
 		return false, nil
 	}
+
+	changelogTemplate := s.buildChangelogTemplate(ctx, storageID, input.CheckpointID, ChangeSourceCheckpoint)
+	changelogEntries := manifestDiff(headManifest, input.Manifest, changelogTemplate)
 
 	now := time.Now().UTC()
 	manifestHash, err := HashManifest(input.Manifest)
@@ -1131,6 +1202,7 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 					return err
 				}
 			}
+			enqueueChangeEntries(ctx, pipe, storageID, changelogEntries)
 			return nil
 		})
 		return err

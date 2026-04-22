@@ -35,7 +35,8 @@ When connected via MCP, you have access to:
 | Search | Grep across workspace files directly in Redis |
 | Checkpoints | Create snapshots, list history, restore to any point |
 
-The MCP server is workspace-first: file operations are automatically tracked.
+The MCP server is workspace-first: file operations update the live workspace.
+Create checkpoints explicitly when you want a durable restore point.
 
 ## Quick Start
 
@@ -61,8 +62,8 @@ If synced, use normal file tools in the local directory. If using MCP, use the e
 # Via CLI
 echo "# My Project" > ~/afs/my-project/README.md
 
-# Via redis-cli (direct)
-redis-cli FS.ECHO my-project /README.md "# My Project"
+# Via local sync or mount
+echo "# My Project" > ~/afs/my-project/README.md
 ```
 
 ### 4. Create checkpoints

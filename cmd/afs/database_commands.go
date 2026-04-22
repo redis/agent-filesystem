@@ -21,9 +21,9 @@ func cmdDatabase(args []string) error {
 	}
 
 	switch args[1] {
-	case "list", "l", "ls":
+	case "list":
 		return cmdDatabaseList(args)
-	case "use", "u":
+	case "use":
 		return cmdDatabaseUse(args)
 	default:
 		return fmt.Errorf("unknown database subcommand %q\n\n%s", args[1], databaseUsageText(filepath.Base(os.Args[0])))
@@ -135,7 +135,7 @@ func openManagedDatabaseClient(ctx context.Context) (config, *httpControlPlaneCl
 		return config{}, nil, err
 	}
 	if productMode == productModeLocal {
-		return config{}, nil, fmt.Errorf("database commands require a self-hosted control plane\nRun '%s setup' or '%s config set --config-source self-hosted --control-plane-url <url>' first", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+		return config{}, nil, fmt.Errorf("database commands require a self-managed control plane\nRun '%s setup' or '%s config set controlPlane.url <url>' first", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	}
 
 	client, _, err := newHTTPControlPlaneClient(ctx, cfg)
@@ -341,7 +341,7 @@ func databaseListRole(item controlplane.DatabaseRecord) string {
 }
 
 func databaseUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s database <subcommand>
 
 Subcommands:
@@ -351,7 +351,7 @@ Subcommands:
 }
 
 func databaseListUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s database list
 
 List the databases configured in the control plane.
@@ -359,7 +359,7 @@ List the databases configured in the control plane.
 }
 
 func databaseUseUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s database use <database-id|database-name|auto>
 
 Choose which control-plane database new workspaces and imports should use.

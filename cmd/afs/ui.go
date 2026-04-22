@@ -8,20 +8,22 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/redis/agent-filesystem/internal/version"
 )
 
 const (
-	ansiReset   = "\033[0m"
-	ansiBold    = "\033[1m"
-	ansiDim     = "\033[2m"
-	ansiRed     = "\033[31m"
-	ansiGreen   = "\033[32m"
-	ansiYellow  = "\033[33m"
-	ansiCyan    = "\033[36m"
-	ansiWhite   = "\033[37m"
-	ansiBRed    = "\033[91m"
-	ansiBGreen  = "\033[92m"
-	ansiGray    = "\033[90m"
+	ansiReset  = "\033[0m"
+	ansiBold   = "\033[1m"
+	ansiDim    = "\033[2m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
+	ansiCyan   = "\033[36m"
+	ansiWhite  = "\033[37m"
+	ansiBRed   = "\033[91m"
+	ansiBGreen = "\033[92m"
+	ansiGray   = "\033[90m"
 	// ansiOrange is the 256-color amber Claude Code uses for actionable
 	// text (version numbers, command references, "run this next" hints).
 	// We use it for any `afs …` command a box or setup flow is telling the
@@ -50,7 +52,6 @@ var (
 
 const (
 	bannerIndent = "  "
-	bannerWidth  = 40
 	maxCLIWidth  = 80
 	maxBoxWidth  = maxCLIWidth - len(bannerIndent) - 2
 	maxBoxText   = maxBoxWidth - 4
@@ -195,72 +196,11 @@ func padVisibleText(text string, width int) string {
 // ---------------------------------------------------------------------------
 
 func printBanner() {
-	if !colorTerm {
-		fmt.Println()
-		fmt.Println("  AFS")
-		fmt.Println("  Agent Filesystem")
-		fmt.Println()
-		return
-	}
-
-	bar := bannerIndent +
-		ansiGray + "░░░░" +
-		ansiRed + "▒▒▒▒" +
-		ansiBRed + "▓▓▓▓" +
-		ansiBold + ansiWhite + "████████████████" + ansiReset +
-		ansiBRed + "▓▓▓▓" +
-		ansiRed + "▒▒▒▒" +
-		ansiGray + "░░░░" + ansiReset
-
-	lines := []string{
-		"",
-		bar,
-		centerBannerText(clr(ansiBold+ansiWhite, "AFS")),
-		centerBannerText(clr(ansiDim, "Agent Filesystem")),
-		bar,
-		"",
-	}
-
-	for _, line := range lines {
-		fmt.Println(line)
-		if line != "" {
-			time.Sleep(40 * time.Millisecond)
-		}
-	}
+	printBrandHeader(os.Stdout)
 }
 
 func printBannerCompact() {
-	if !colorTerm {
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "  AFS")
-		fmt.Fprintln(os.Stderr, "  Agent Filesystem")
-		fmt.Fprintln(os.Stderr)
-		return
-	}
-	bar := ansiGray + "░░░░" +
-		ansiRed + "▒▒▒▒" +
-		ansiBRed + "▓▓▓▓" +
-		ansiBold + ansiWhite + "████████████████" + ansiReset +
-		ansiBRed + "▓▓▓▓" +
-		ansiRed + "▒▒▒▒" +
-		ansiGray + "░░░░" + ansiReset
-	fmt.Fprintf(os.Stderr, "\n%s%s\n%s\n%s\n%s%s\n\n",
-		bannerIndent, bar,
-		centerBannerTextForOutput(os.Stderr, clr(ansiBold+ansiWhite, "AFS")),
-		centerBannerTextForOutput(os.Stderr, clr(ansiDim, "Agent Filesystem")),
-		bannerIndent, bar)
-}
-
-func centerBannerText(text string) string {
-	return centerBannerTextForOutput(os.Stdout, text)
-}
-
-func centerBannerTextForOutput(out io.Writer, text string) string {
-	padding := (bannerWidth - runeWidth(text)) / 2
-	if padding < 0 {
-		padding = 0
-	}
-	return bannerIndent + strings.Repeat(" ", padding) + text
+	printBrandHeader(os.Stderr)
 }
 
 // ---------------------------------------------------------------------------
@@ -455,10 +395,15 @@ func printBox(title string, rows []boxRow) {
 	if innerWidth > maxBoxWidth {
 		innerWidth = maxBoxWidth
 	}
+	// Make sure the box is at least as wide as the branded top border so the
+	// header gradient and title don't overflow a too-narrow box.
+	if min := brandHeaderMinInnerWidth(); innerWidth < min {
+		innerWidth = min
+	}
 
 	if !colorTerm {
 		fmt.Println()
-		fmt.Println("  Redis Agent Filesystem (AFS)")
+		fmt.Printf("  Redis Agent Filesystem (AFS) %s\n", version.Short())
 		fmt.Println()
 		for _, l := range lines {
 			if l.empty {
@@ -474,18 +419,15 @@ func printBox(title string, rows []boxRow) {
 	b := ansiBorder
 	r := ansiReset
 
-	// Branded top border, centered: ╭──── ░▒▓█ Redis Agent Filesystem (AFS) █▓▒░ ────╮
-	brandText := "Redis Agent Filesystem (AFS)"
-	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiBRed + "█" + ansiReset
-	gradientR := ansiBold + ansiBRed + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
-	brandLabel := gradient + " " + ansiBold + ansiBRed + brandText + ansiReset + " " + gradientR
-	brandVisible := 4 + 1 + len(brandText) + 1 + 4 // ░▒▓█ + space + text + space + █▓▒░
-	totalFill := innerWidth - brandVisible - 2       // 2 for the spaces around brand
+	// Branded top border, centered: ╭──── ░▒▓█ Redis Agent Filesystem (AFS) v0.1.1234 █▓▒░ ────╮
+	brandLabel, brandVisible := brandHeaderLabel()
+	totalFill := innerWidth - brandVisible - 2 // 2 for the spaces around brand
 	if totalFill < 2 {
 		totalFill = 2
 	}
 	leftFill := totalFill / 2
 	rightFill := totalFill - leftFill
+	fmt.Println()
 	fmt.Printf("  %s╭%s %s%s %s%s╮%s\n", b, strings.Repeat("─", leftFill), ansiReset, brandLabel, ansiBorder, strings.Repeat("─", rightFill), r)
 	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
 
@@ -504,6 +446,55 @@ func printBox(title string, rows []boxRow) {
 
 	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
 	fmt.Printf("  %s╰%s╯%s\n", b, strings.Repeat("─", innerWidth), r)
+	fmt.Println()
+}
+
+// brandHeaderLabel returns the colorised brand string used in the box top
+// border, plus its visible width (runes, no ANSI). Width covers the gradient
+// glyphs, the spaces around the title, and the title + version text.
+func brandHeaderLabel() (string, int) {
+	brandText := "Redis Agent Filesystem (AFS)"
+	versionSuffix := strings.TrimSpace(version.Short())
+	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiBRed + "█" + ansiReset
+	gradientR := ansiBold + ansiBRed + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
+	versionPart := ""
+	if versionSuffix != "" {
+		versionPart = " " + ansiDim + versionSuffix + ansiReset
+	}
+	label := gradient + " " + ansiBold + brandText + ansiReset + versionPart + " " + gradientR
+	textWidth := utf8.RuneCountInString(brandText)
+	if versionSuffix != "" {
+		textWidth += 1 + utf8.RuneCountInString(versionSuffix)
+	}
+	visible := 4 + 1 + textWidth + 1 + 4 // ░▒▓█ + space + text + space + █▓▒░
+	return label, visible
+}
+
+// brandHeaderMinInnerWidth is the smallest box inner-width that fits the
+// brand top border without truncating the title. Allows ≥2 dashes of fill on
+// each side of the brand label so the header still looks centered.
+func brandHeaderMinInnerWidth() int {
+	_, brandVisible := brandHeaderLabel()
+	return brandVisible + 2 + 4 // brand + 2 spaces around it + 2 dashes per side
+}
+
+// printBrandHeader emits the brand line every non-box CLI command should
+// start with, matching the gradient + title + version that box-based
+// commands carry inside their top border. Box commands skip this — their
+// box header already covers it.
+func printBrandHeader(w io.Writer) {
+	fmt.Fprint(w, brandHeaderString())
+}
+
+// brandHeaderString returns the same brand line as printBrandHeader, suitable
+// for prepending to multi-line strings (e.g. usage text) so callers can
+// embed it in fmt.Sprintf templates.
+func brandHeaderString() string {
+	if !colorTerm {
+		return fmt.Sprintf("\n  Redis Agent Filesystem (AFS) %s\n\n", version.Short())
+	}
+	label, _ := brandHeaderLabel()
+	return fmt.Sprintf("\n  %s\n\n", label)
 }
 
 // ---------------------------------------------------------------------------

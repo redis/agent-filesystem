@@ -22,7 +22,6 @@ func TestEffectiveProductModeDefaults(t *testing.T) {
 	}{
 		{name: "empty defaults to local", cfg: config{}, want: productModeLocal},
 		{name: "explicit local", cfg: config{ProductMode: productModeLocal}, want: productModeLocal},
-		{name: "legacy direct normalizes to local", cfg: config{ProductMode: legacyProductModeDirect}, want: productModeLocal},
 		{name: "explicit self hosted", cfg: config{ProductMode: productModeSelfHosted}, want: productModeSelfHosted},
 		{name: "explicit cloud", cfg: config{ProductMode: productModeCloud}, want: productModeCloud},
 		{name: "garbage errors", cfg: config{ProductMode: "garbage"}, err: true},

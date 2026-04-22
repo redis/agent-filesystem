@@ -68,7 +68,7 @@ func defaultConfig() config {
 			RedisAddr: "localhost:6379",
 			RedisDB:   0,
 		},
-		ProductMode: productModeDirect,
+		ProductMode: productModeLocal,
 		Mode:        modeSync,
 		LocalPath:   "~/afs",
 		mountSettings: mountSettings{
@@ -103,13 +103,13 @@ func prepareConfigForSave(cfg *config) error {
 	}
 	cfg.ProductMode = productMode
 
-	if productMode == productModeDirect && strings.TrimSpace(cfg.RedisAddr) == "" {
+	if productMode == productModeLocal && strings.TrimSpace(cfg.RedisAddr) == "" {
 		cfg.RedisAddr = def.RedisAddr
 	}
 	if cfg.RedisDB < 0 {
 		return fmt.Errorf("redis db must be >= 0")
 	}
-	if productMode != productModeDirect {
+	if productMode != productModeLocal {
 		controlPlaneURL, err := normalizeControlPlaneURL(cfg.URL)
 		if err != nil {
 			return err
@@ -169,7 +169,7 @@ func prepareConfigForSave(cfg *config) error {
 		cfg.CurrentWorkspace = strings.TrimSpace(cfg.CurrentWorkspace)
 	}
 	cfg.CurrentWorkspaceID = strings.TrimSpace(cfg.CurrentWorkspaceID)
-	if productMode == productModeDirect {
+	if productMode == productModeLocal {
 		cfg.CurrentWorkspaceID = ""
 	}
 
@@ -183,7 +183,7 @@ func prepareConfigForSave(cfg *config) error {
 		return fmt.Errorf("sync.fileSizeCapMB must be >= 0")
 	}
 
-	if productMode == productModeDirect {
+	if productMode == productModeLocal {
 		if _, _, err := splitAddr(cfg.RedisAddr); err != nil {
 			return err
 		}

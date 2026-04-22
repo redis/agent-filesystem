@@ -40,14 +40,16 @@ function ActivityPage() {
     void navigate({
       to: "/workspaces/$workspaceId",
       params: { workspaceId: event.workspaceId },
-      search:
-        event.scope === "savepoint"
+      search: {
+        ...(event.databaseId ? { databaseId: event.databaseId } : {}),
+        ...(event.scope === "savepoint"
           ? { tab: "checkpoints" }
           : event.scope === "file"
             ? { tab: "browse" }
             : event.scope === "workspace"
               ? {}
-              : { tab: "activity" },
+              : { tab: "activity" }),
+      },
     });
   }
 
@@ -57,7 +59,7 @@ function ActivityPage() {
         <NoticeCard $tone="warning" role="status">
           <NoticeTitle>Some databases are unavailable</NoticeTitle>
           <NoticeBody>
-            Activity below is partial while these databases are disconnected:{" "}
+            Events below are partial while these databases are disconnected:{" "}
             {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
           </NoticeBody>
         </NoticeCard>

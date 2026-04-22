@@ -86,6 +86,30 @@ export type AFSActivityEvent = {
   title: string;
 };
 
+export type AFSChangelogEntry = {
+  id: string;
+  occurredAt?: string;
+  sessionId?: string;
+  user?: string;
+  label?: string;
+  agentVersion?: string;
+  op: string;
+  path: string;
+  prevPath?: string;
+  sizeBytes?: number;
+  deltaBytes?: number;
+  contentHash?: string;
+  prevHash?: string;
+  mode?: number;
+  checkpointId?: string;
+  source?: string;
+};
+
+export type AFSChangelogResponse = {
+  entries: AFSChangelogEntry[];
+  nextCursor?: string;
+};
+
 export type AFSAgentSession = {
   sessionId: string;
   workspaceId: string;
@@ -97,6 +121,7 @@ export type AFSAgentSession = {
   hostname: string;
   operatingSystem: string;
   localPath: string;
+  label?: string;
   readonly: boolean;
   state: string;
   startedAt: string;
@@ -263,6 +288,7 @@ export type CreateWorkspaceInput = {
 export type UpdateWorkspaceInput = {
   databaseId?: string;
   workspaceId: string;
+  name: string;
   description: string;
   cloudAccount?: string;
   databaseName?: string;

@@ -175,6 +175,38 @@ func runCatalogStoreContractTests(t *testing.T, openStore func(t *testing.T) cat
 		t.Fatalf("updated workspace id = %q, want %q", repoAUpdated.ID, repoA.ID)
 	}
 
+	legacyRepo, err := store.UpsertWorkspace(ctx, workspaceSummary{
+		ID:               "legacy-repo",
+		Name:             "legacy-repo",
+		DatabaseID:       "db-primary",
+		DatabaseName:     "Primary",
+		RedisKey:         "workspace:legacy-repo",
+		Status:           "ready",
+		FileCount:        1,
+		FolderCount:      0,
+		TotalBytes:       64,
+		CheckpointCount:  1,
+		DraftState:       "clean",
+		LastCheckpointAt: "2026-04-17T06:07:00Z",
+		UpdatedAt:        "2026-04-17T06:08:00Z",
+		Region:           "us-west-2",
+		Source:           sourceBlank,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspace(legacy explicit id) returned error: %v", err)
+	}
+	if legacyRepo.ID != "legacy-repo" {
+		t.Fatalf("legacy workspace id = %q, want %q", legacyRepo.ID, "legacy-repo")
+	}
+
+	legacyRoute, err := store.ResolveWorkspaceInDatabase(ctx, "db-primary", "legacy-repo")
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceInDatabase(db-primary, legacy-repo) returned error: %v", err)
+	}
+	if legacyRoute.WorkspaceID != "legacy-repo" {
+		t.Fatalf("legacy route workspace_id = %q, want %q", legacyRoute.WorkspaceID, "legacy-repo")
+	}
+
 	repoB, err := store.UpsertWorkspace(ctx, workspaceSummary{
 		Name:             "repo",
 		DatabaseID:       "db-secondary",
@@ -259,6 +291,74 @@ func runCatalogStoreContractTests(t *testing.T, openStore func(t *testing.T) cat
 	}
 	if len(workspaces) != 3 {
 		t.Fatalf("len(ListWorkspaces()) = %d, want 3", len(workspaces))
+	}
+
+	workspaceDB, ok := store.(*workspaceCatalog)
+	if !ok {
+		t.Fatalf("catalog store type = %T, want *workspaceCatalog", store)
+	}
+	if _, err := workspaceDB.execContext(
+		ctx,
+		`INSERT INTO workspace_catalog (
+			database_id, workspace_id, name, database_name, owner_subject, owner_label,
+			database_management_type, cloud_account, redis_key, status, file_count,
+			folder_count, total_bytes, checkpoint_count, draft_state, last_checkpoint_at,
+			updated_at, region, source
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"db-primary",
+		"stale-repo-id",
+		"repo",
+		"Primary",
+		"",
+		"",
+		"",
+		"Redis Cloud",
+		"workspace:repo",
+		"ready",
+		30,
+		8,
+		8192,
+		4,
+		"clean",
+		"2026-04-17T06:10:00Z",
+		"2026-04-17T06:11:00Z",
+		"us-west-2",
+		sourceBlank,
+	); err != nil {
+		t.Fatalf("insert stale duplicate workspace row returned error: %v", err)
+	}
+
+	deduped, err := store.UpsertWorkspace(ctx, workspaceSummary{
+		ID:               repoA.ID,
+		Name:             "repo",
+		DatabaseID:       "db-primary",
+		DatabaseName:     "Primary",
+		CloudAccount:     "Redis Cloud",
+		RedisKey:         "workspace:repo",
+		Status:           "ready",
+		FileCount:        30,
+		FolderCount:      8,
+		TotalBytes:       8192,
+		CheckpointCount:  4,
+		DraftState:       "clean",
+		LastCheckpointAt: "2026-04-17T06:10:00Z",
+		UpdatedAt:        "2026-04-17T06:11:00Z",
+		Region:           "us-west-2",
+		Source:           sourceBlank,
+	})
+	if err != nil {
+		t.Fatalf("UpsertWorkspace(repo dedupe) returned error: %v", err)
+	}
+	if deduped.ID != repoA.ID {
+		t.Fatalf("deduped workspace id = %q, want %q", deduped.ID, repoA.ID)
+	}
+
+	routes, err = store.ResolveWorkspace(ctx, "repo")
+	if err != nil {
+		t.Fatalf("ResolveWorkspace(repo) after stale insert returned error: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("len(ResolveWorkspace(repo)) after stale cleanup = %d, want 2", len(routes))
 	}
 
 	if err := store.PruneDatabases(ctx, []string{"db-primary"}); err != nil {

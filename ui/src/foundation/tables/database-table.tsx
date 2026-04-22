@@ -1,6 +1,7 @@
 import { Menu } from "@redis-ui/components";
 import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
+import { DatabaseIcon } from "../../components/lucide-icons";
 import type { ColumnDef } from "@redis-ui/table";
 import { useMemo, useState } from "react";
 import styled, { css, keyframes } from "styled-components";
@@ -202,7 +203,11 @@ export function DatabaseTable({
             const canEdit = row.original.canEdit;
             const canSetDefault = row.original.canCreateWorkspaces;
             return (
-              <NameStack>
+              <NameCell>
+                <NameIconBox>
+                  <DatabaseIcon customSize={18} />
+                </NameIconBox>
+                <NameStack>
                 <NameLine>
                   <LiveDot
                     $active={row.original.isHealthy}
@@ -273,7 +278,8 @@ export function DatabaseTable({
                         : "Managed by AFS Cloud"}
                   </ManagedHint>
                 ) : null}
-              </NameStack>
+                </NameStack>
+              </NameCell>
             );
           },
         },
@@ -480,6 +486,21 @@ const NameStack = styled.div`
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+`;
+
+const NameCell = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+`;
+
+const NameIconBox = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--afs-muted, #71717a);
 `;
 
 const NameLine = styled.div`

@@ -14,11 +14,9 @@ import (
 )
 
 const (
-	productModeLocal        = "local"
-	legacyProductModeDirect = "direct"
-	productModeDirect       = productModeLocal
-	productModeSelfHosted   = "self-hosted"
-	productModeCloud        = "cloud"
+	productModeLocal      = "local"
+	productModeSelfHosted = "self-hosted"
+	productModeCloud      = "cloud"
 )
 
 func productModeDisplayLabel(mode string) string {
@@ -26,9 +24,9 @@ func productModeDisplayLabel(mode string) string {
 	case productModeLocal:
 		return "Local"
 	case productModeSelfHosted:
-		return "Self Managed"
+		return "Self-managed"
 	case productModeCloud:
-		return "Cloud Managed"
+		return "Cloud-managed"
 	default:
 		return mode
 	}
@@ -52,7 +50,7 @@ func effectiveProductMode(cfg config) (string, error) {
 	switch mode {
 	case "":
 		return productModeLocal, nil
-	case productModeLocal, legacyProductModeDirect:
+	case productModeLocal:
 		return productModeLocal, nil
 	case productModeSelfHosted, productModeCloud:
 		return mode, nil
@@ -132,6 +130,7 @@ type afsControlPlane interface {
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)
 	SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error)
 	ForkWorkspace(ctx context.Context, sourceWorkspace, newWorkspace string) error
+	ListChangelog(ctx context.Context, workspace string, req controlplane.ChangelogListRequest) (controlplane.ChangelogListResponse, error)
 }
 
 type afsBackendSession struct {

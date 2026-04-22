@@ -405,6 +405,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/v1/workspaces:import", func(w http.ResponseWriter, r *http.Request) {
+		r = attachChangelogSession(r)
 		if r.Method != http.MethodPost {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			return
@@ -423,6 +424,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/v1/workspaces:import-local", func(w http.ResponseWriter, r *http.Request) {
+		r = attachChangelogSession(r)
 		if r.Method != http.MethodPost {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			return
@@ -552,6 +554,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			}
 		case rest == "workspaces:import-local":
+			r = attachChangelogSession(r)
 			if r.Method != http.MethodPost {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 				return
@@ -568,6 +571,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			}
 			writeJSON(w, http.StatusCreated, response)
 		case rest == "workspaces:import":
+			r = attachChangelogSession(r)
 			if r.Method != http.MethodPost {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 				return
@@ -753,6 +757,16 @@ func newClientMux(manager *DatabaseManager) *http.ServeMux {
 	return mux
 }
 
+// attachChangelogSession enriches r's context with the session ID from the
+// X-AFS-Session-Id header so downstream changelog emission can tag entries.
+func attachChangelogSession(r *http.Request) *http.Request {
+	sessionID := strings.TrimSpace(r.Header.Get(SessionIDHeader))
+	if sessionID == "" {
+		return r
+	}
+	return r.WithContext(WithChangeSessionContext(r.Context(), ChangeSessionContext{SessionID: sessionID}))
+}
+
 func handleWorkspaceRoute(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -760,6 +774,7 @@ func handleWorkspaceRoute(
 	databaseID string,
 	workspacePath string,
 ) {
+	r = attachChangelogSession(r)
 	switch {
 	case strings.HasSuffix(workspacePath, ":save-from-live"):
 		workspace := strings.TrimSuffix(workspacePath, ":save-from-live")
@@ -916,6 +931,63 @@ func handleWorkspaceRoute(
 			return
 		}
 		response, err := manager.ListWorkspaceSessions(r.Context(), databaseID, workspace)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/changes"):
+		workspace := strings.TrimSuffix(workspacePath, "/changes")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		req := ChangelogListRequest{
+			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
+			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
+			Limit:     limit,
+			Reverse:   strings.EqualFold(r.URL.Query().Get("direction"), "desc"),
+		}
+		response, err := manager.ListChangelog(r.Context(), databaseID, workspace, req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.Contains(workspacePath, "/sessions/") && strings.HasSuffix(workspacePath, "/summary"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 4 || parts[1] != "sessions" || parts[3] != "summary" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.GetSessionChangelogSummary(r.Context(), databaseID, parts[0], parts[2])
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/path-last"):
+		workspace := strings.TrimSuffix(workspacePath, "/path-last")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		path := strings.TrimSpace(r.URL.Query().Get("path"))
+		if path == "" {
+			writeError(w, fmt.Errorf("path query parameter is required"))
+			return
+		}
+		response, err := manager.GetPathLastWriter(r.Context(), databaseID, workspace, path)
 		if err != nil {
 			writeError(w, err)
 			return

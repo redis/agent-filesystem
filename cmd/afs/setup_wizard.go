@@ -199,7 +199,7 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 // no URL and is a valid "configured" state for setup to proceed against.
 func needsLoginBeforeSetup(cfg config) bool {
 	mode := strings.TrimSpace(cfg.ProductMode)
-	if mode == productModeLocal || mode == legacyProductModeDirect {
+	if mode == productModeLocal {
 		return false
 	}
 	if mode == productModeSelfHosted || mode == productModeCloud {
@@ -262,21 +262,58 @@ func setupWizardBackend(r *bufio.Reader, out io.Writer, cfg *config) error {
 	}
 }
 
-// promptConfigurationSetupForEdit is kept for the edit-menu option "Change
-// configuration source". It no longer re-prompts for connection details
-// (cloud vs self-hosted vs local, URL) — that's `afs login`'s job. Instead it
-// points the user at the right command and returns.
+// promptConfigurationSetupForEdit lets the user switch between Cloud,
+// Self-Hosted, and Local modes from the setup menu. Cloud/self-hosted reuse
+// the login flow so credentials and workspace are wired up in one step;
+// Local just clears the control-plane fields and returns.
 func promptConfigurationSetupForEdit(r *bufio.Reader, out io.Writer, cfg *config) error {
-	bin := filepath.Base(os.Args[0])
+	current, err := effectiveProductMode(*cfg)
+	if err != nil {
+		current = productModeLocal
+	}
+
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Configuration Source"))
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Switching connection"))
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Currently: ")+clr(ansiBold, productModeDisplayLabel(current)))
 	fmt.Fprintln(out)
-	fmt.Fprintln(out, "  Connection mode + control plane URL are now managed by:")
-	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" login --cloud")+clr(ansiDim, "         sign in to AFS Cloud"))
-	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" login --self-hosted")+clr(ansiDim, "   point at your own control plane"))
-	fmt.Fprintln(out, "    "+clr(ansiOrange, bin+" auth logout")+clr(ansiDim, "           drop back to local-only mode"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Cloud")+"        "+clr(ansiDim, "— sign in to AFS Cloud via browser"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self-managed")+"  "+clr(ansiDim, "— point at your own control plane"))
+	fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  "+clr(ansiBold, "Local")+"        "+clr(ansiDim, "— Redis-only, no control plane"))
 	fmt.Fprintln(out)
-	return nil
+
+	defaultChoice := "1"
+	switch current {
+	case productModeSelfHosted:
+		defaultChoice = "2"
+	case productModeLocal:
+		defaultChoice = "3"
+	}
+
+	choice, err := promptString(r, out, "  Choose", defaultChoice)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+
+	switch strings.TrimSpace(strings.ToLower(choice)) {
+	case "1", "cloud":
+		return runCloudLogin(cfg, "", "", "")
+	case "2", "self", "self-hosted", "selfhosted":
+		return runSelfHostedLogin(cfg, "")
+	case "3", "local":
+		cfg.ProductMode = productModeLocal
+		cfg.URL = ""
+		cfg.DatabaseID = ""
+		cfg.AuthToken = ""
+		cfg.Account = ""
+		fmt.Fprintln(out, "  "+clr(ansiDim, "Switched to local mode."))
+		fmt.Fprintln(out)
+		return nil
+	default:
+		fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; keeping ")+clr(ansiBold, productModeDisplayLabel(current)))
+		fmt.Fprintln(out)
+		return nil
+	}
 }
 
 func setupRedisConnectionLabel(cfg config) string {
@@ -428,7 +465,6 @@ func promptWorkspaceSetupWithConfiguredLocalRedis(r *bufio.Reader, out io.Writer
 	applySuggestedWorkspaceLocalPath(cfg)
 	return nil
 }
-
 
 func connectSetupStore(out io.Writer, cfg config) (*afsStore, func(), error) {
 	fmt.Fprintln(out)
@@ -831,7 +867,7 @@ func promptModeSetup(r *bufio.Reader, out io.Writer, cfg *config) error {
 	}
 
 	if connection == productModeSelfHosted {
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — local-first sync from a self-hosted control plane"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Sync")+" "+clr(ansiDim, "(recommended)  — local-first sync from a self-managed control plane"))
 		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Live Mount")+"     — FUSE/NFS mount using the control plane's live workspace root")
 		fmt.Fprintln(out)
 	}

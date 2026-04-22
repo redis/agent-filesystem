@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	afsDaemonEnv       = "AFS_DAEMON"
-	legacyAFSDaemonEnv = "REDIS_FS_DAEMON"
+	afsDaemonEnv = "AFS_DAEMON"
 )
 
 func main() {
@@ -52,7 +51,7 @@ func main() {
 	}
 
 	// Optional daemon mode: re-exec detached and return in parent.
-	if !*foreground && os.Getenv(afsDaemonEnv) != "1" && os.Getenv(legacyAFSDaemonEnv) != "1" {
+	if !*foreground && os.Getenv(afsDaemonEnv) != "1" {
 		args := make([]string, 0, len(os.Args))
 		for i := 1; i < len(os.Args); i++ {
 			a := os.Args[i]
@@ -68,7 +67,7 @@ func main() {
 		args = append(args, "--foreground=true")
 
 		cmd := exec.Command(os.Args[0], args...)
-		cmd.Env = append(os.Environ(), afsDaemonEnv+"=1", legacyAFSDaemonEnv+"=1")
+		cmd.Env = append(os.Environ(), afsDaemonEnv+"=1")
 		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		if err != nil {
 			log.Fatalf("daemon mode failed opening %s: %v", os.DevNull, err)

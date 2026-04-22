@@ -100,11 +100,11 @@ Scope:
 - add service-layer authorization rules for workspaces, database bindings, and
   session issuance
 - add browser session handling for the web UI
-- implement Authorization Code + PKCE for `afs auth login`
+- implement Authorization Code + PKCE for `afs login`
 - add CLI token storage and profile selection
 - keep tokens out of `afs.config.json`; use OS keychain/keyring with an
   encrypted-file fallback stored separately from config
-- add `afs auth login`, `afs auth logout`, and `afs auth status`
+- add `afs login`, `afs logout`, and `afs status`
 - add `cloudBackend` bootstrap that requires authenticated control-plane access
 - define the initial tenant model:
   - `cloud` is multi-tenant by organization

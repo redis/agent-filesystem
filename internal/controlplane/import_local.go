@@ -134,6 +134,8 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 	if err := SyncWorkspaceRoot(ctx, store, workspaceID, manifest); err != nil {
 		return ImportLocalResponse{}, err
 	}
+	template := service.buildChangelogTemplate(ctx, workspaceID, initialCheckpointName, ChangeSourceImport)
+	writeChangeEntries(ctx, store.rdb, workspaceID, manifestSeedEntries(manifest, template))
 	if err := store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      dirPath,

@@ -178,6 +178,89 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	}
 }
 
+func TestHTTPUpdateWorkspaceRenamesOpaqueWorkspace(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces")
+	if err != nil {
+		t.Fatalf("GET scoped workspaces returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var summaries workspaceListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&summaries); err != nil {
+		t.Fatalf("Decode(workspaces) returned error: %v", err)
+	}
+	if len(summaries.Items) != 1 {
+		t.Fatalf("len(workspaces.items) = %d, want 1", len(summaries.Items))
+	}
+	workspaceID := summaries.Items[0].ID
+	if !strings.HasPrefix(workspaceID, "ws_") {
+		t.Fatalf("workspace id = %q, want opaque ws_* id", workspaceID)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPut,
+		server.URL+"/v1/databases/"+databaseID+"/workspaces/"+workspaceID,
+		strings.NewReader(`{"name":"renamed-repo","description":"Renamed from settings","database_name":"demo-db-us-test-1","cloud_account":"Redis Cloud / Test","region":"us-test-1"}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(PUT update workspace) returned error: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT scoped workspace returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("PUT workspace status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var detail workspaceDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(updated workspace detail) returned error: %v", err)
+	}
+	if detail.ID != workspaceID {
+		t.Fatalf("updated workspace id = %q, want %q", detail.ID, workspaceID)
+	}
+	if detail.Name != "renamed-repo" {
+		t.Fatalf("updated workspace name = %q, want %q", detail.Name, "renamed-repo")
+	}
+	if detail.Description != "Renamed from settings" {
+		t.Fatalf("updated workspace description = %q, want %q", detail.Description, "Renamed from settings")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/" + workspaceID)
+	if err != nil {
+		t.Fatalf("GET renamed workspace by id returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(renamed workspace by id) returned error: %v", err)
+	}
+	if detail.Name != "renamed-repo" {
+		t.Fatalf("renamed workspace name by id = %q, want %q", detail.Name, "renamed-repo")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/renamed-repo")
+	if err != nil {
+		t.Fatalf("GET renamed workspace by name returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(renamed workspace by name) returned error: %v", err)
+	}
+	if detail.ID != workspaceID {
+		t.Fatalf("renamed workspace id by name = %q, want %q", detail.ID, workspaceID)
+	}
+}
+
 func TestHTTPOnboardingTokenExchange(t *testing.T) {
 	t.Helper()
 
@@ -1142,7 +1225,7 @@ func TestHTTPUnscopedWorkspaceCreateUsesDefaultDatabase(t *testing.T) {
 	}
 }
 
-func TestHTTPWorkspaceFirstListSkipsDatabasesThatAreNoLongerReachable(t *testing.T) {
+func TestHTTPWorkspaceFirstListFallsBackToCatalogWhenDatabaseBecomesUnreachable(t *testing.T) {
 	t.Helper()
 
 	manager, _ := newTestManager(t)
@@ -1197,11 +1280,18 @@ func TestHTTPWorkspaceFirstListSkipsDatabasesThatAreNoLongerReachable(t *testing
 	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
 		t.Fatalf("Decode(workspaces) returned error: %v", err)
 	}
-	if len(workspaces.Items) != 1 {
-		t.Fatalf("len(workspaces.items) = %d, want 1", len(workspaces.Items))
+	if len(workspaces.Items) != 2 {
+		t.Fatalf("len(workspaces.items) = %d, want 2", len(workspaces.Items))
 	}
-	if workspaces.Items[0].DatabaseID == secondary.ID {
-		t.Fatalf("stale workspace from unreachable database %q was still listed", secondary.ID)
+	foundSecondary := false
+	for _, item := range workspaces.Items {
+		if item.DatabaseID == secondary.ID {
+			foundSecondary = true
+			break
+		}
+	}
+	if !foundSecondary {
+		t.Fatalf("expected cached workspace from unreachable database %q to remain listed", secondary.ID)
 	}
 }
 

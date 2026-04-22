@@ -1,303 +1,58 @@
 # Agent Filesystem
 
-Agent Filesystem is a Redis module that provides a complete POSIX-like filesystem as a native data type, plus a FUSE mount that exposes it as a regular local directory. One Redis key holds one filesystem volume — directories, files, symlinks, permissions, and all metadata.
+Agent Filesystem is now a workspace-first system for agents. Redis is still the
+canonical store, but the active user surfaces are:
 
-**Why Agent Filesystem:**
-- **Persistence** — data survives process restarts via RDB/AOF
-- **Multi-client access** — any Redis client can read/write the same volume concurrently
-- **Atomic operations** — every FS.* command is atomic, no partial writes
-- **No local disk dependency** — agents can run statelessly; storage lives in Redis
-- **Instant cleanup** — `DEL vol` removes an entire filesystem in one command
+- `afs mcp` for agent clients
+- `afs up --mode sync` for a normal local working directory
+- `afs up --mode mount` for a live Redis-backed mount
+- explicit checkpoints via `afs checkpoint ...`
 
-**Key concept:** one Redis key = one filesystem volume. The key name is the volume name. All paths within a volume are absolute (start with `/`).
+The old direct-command storage surface is retired and should not be used as the
+mental model for this repo.
 
-## Build
+## Fast Start
 
 ```bash
-cd /home/ubuntu/git/agent-filesystem
-make          # builds module/fs.so + mount/agent-filesystem-mount + afs + afs-control-plane
-make module   # builds only the Redis module (module/fs.so)
-make mount    # builds only the FUSE mount binary
-make commands # builds afs + afs-control-plane
+make commands
+./afs setup
+./afs workspace create demo
+./afs workspace use demo
+./afs up --mode sync
+cd ~/afs
 ```
 
-## CLI Commands
-
-The `afs` binary is at the repo root after building.
-
-| Command | Description |
-|---------|-------------|
-| `afs setup` | Interactive first-time wizard — saves config only |
-| `afs up` | Start services from saved config |
-| `afs down` | Stop all services and unmount |
-| `afs status` | Show current status |
-| `afs migrate <dir>` | Import a directory into Redis, honoring `.afsignore` if present |
-
-Use `--config <path>` before any command to override the config file location:
-```bash
-./afs --config /path/to/custom.json up
-```
-
-## Programmatic Setup (for agents)
-
-Skip the interactive wizard by writing the config file directly.
-
-### 1. Build
+## Most Useful Commands
 
 ```bash
-cd /home/ubuntu/git/agent-filesystem && make
-```
-
-### 2. Write config
-
-```bash
-cat > /home/ubuntu/git/agent-filesystem/afs.config.json << 'EOF'
-{
-  "redis": {
-    "addr": "localhost:6379",
-    "password": "",
-    "db": 0
-  },
-  "mode": "sync",
-  "currentWorkspace": "my-workspace",
-  "localPath": "/home/ubuntu/agent-filesystem",
-  "mount": {
-    "backend": "none",
-    "readOnly": false,
-    "allowOther": false,
-    "mountBin": ""
-  },
-  "logs": {
-    "mount": "/tmp/afs-mount.log",
-    "sync": "/tmp/afs-sync.log"
-  },
-  "sync": {
-    "fileSizeCapMB": 100
-  }
-}
-EOF
-```
-
-### 3. Start
-
-```bash
-./afs up
-```
-
-### 4. Verify
-
-```bash
+./afs workspace create <workspace>
+./afs workspace import <workspace> <directory>
+./afs workspace use <workspace>
+./afs workspace list
+./afs workspace fork <workspace> <new-workspace>
+./afs workspace clone <workspace> <directory>
+./afs checkpoint create <workspace> <name>
+./afs checkpoint list <workspace>
+./afs checkpoint restore <workspace> <name>
+./afs grep --workspace <workspace> "pattern"
+./afs up --mode sync
+./afs up --mode mount
 ./afs status
-ls ~/agent-filesystem
+./afs down
+./afs mcp
 ```
 
-## Configuration Reference
+## Working Model
 
-File: `afs.config.json` (next to the `afs` binary in the repo root)
+- Redis stores the live workspace state plus checkpoint history.
+- Sync mode gives you a real local directory that is reconciled with Redis.
+- Mount mode exposes the live workspace directly through NFS/FUSE.
+- MCP talks to the same workspace model without requiring a local directory.
+- File edits update the live workspace immediately; create checkpoints
+  explicitly when you want a durable restore point.
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `redis.addr` | string | `"localhost:6379"` | Redis server address (host:port) |
-| `redis.username` | string | `""` | Optional Redis username |
-| `redis.password` | string | `""` | Redis password (empty = no auth) |
-| `redis.db` | int | `0` | Redis database number |
-| `redis.tls` | bool | `false` | Enable TLS for the Redis connection |
-| `mode` | string | `"sync"` | `sync`, `mount`, or `none` |
-| `currentWorkspace` | string | `""` | Workspace selected by default for `up`, `clone`, and checkpoints |
-| `localPath` | string | `"~/afs"` | Sync root in sync mode or mountpoint in mount mode |
-| `mount.backend` | string | `"none"` | `none`, `fuse`, or `nfs` |
-| `mount.readOnly` | bool | `false` | Start the local surface as read-only |
-| `mount.allowOther` | bool | `false` | Allow other system users to access the mount |
-| `mount.mountBin` | string | auto | Path to `agent-filesystem-mount` when using FUSE |
-| `mount.nfsBin` | string | auto | Path to `agent-filesystem-nfs` when using NFS |
-| `mount.nfsHost` | string | `"127.0.0.1"` | Host for the local NFS export |
-| `mount.nfsPort` | int | `20490` | Port for the local NFS export |
-| `logs.mount` | string | `"/tmp/afs-mount.log"` | Mount daemon log file |
-| `logs.sync` | string | `"/tmp/afs-sync.log"` | Sync daemon log file |
-| `sync.fileSizeCapMB` | int | `100` | Max file size synced through local sync mode |
+## Read Next
 
-### Common config patterns
-
-**Sync mode (recommended):**
-```json
-{
-  "redis": {
-    "addr": "redis.local:6379"
-  },
-  "mode": "sync",
-  "currentWorkspace": "my-workspace",
-  "localPath": "/home/ubuntu/data"
-}
-```
-
-**Live mount mode:**
-```json
-{
-  "redis": {
-    "addr": "redis.local:6379",
-    "password": "secret"
-  },
-  "mode": "mount",
-  "currentWorkspace": "my-workspace",
-  "localPath": "/home/ubuntu/data",
-  "mount": {
-    "backend": "nfs"
-  }
-}
-```
-
-## Runtime State
-
-- Config: `afs.config.json` (repo root, next to the binary)
-- State: `~/.afs/state.json` (runtime PIDs, created/removed automatically)
-
-## FS.* Command Reference
-
-All commands use the pattern: `FS.<CMD> <key> <path> [args...]`
-
-Replace `vol` below with your chosen key name.
-
-### Quick reference
-
-| Unix command | Agent Filesystem equivalent | Notes |
-|---|---|---|
-| `echo "text" > file` | `FS.ECHO vol /file "text"` | Creates parents automatically |
-| `echo "text" >> file` | `FS.ECHO vol /file "text" APPEND` | Also `FS.APPEND` |
-| `cat file` | `FS.CAT vol /file` | Follows symlinks |
-| `touch file` | `FS.TOUCH vol /file` | Creates empty file or updates mtime |
-| `mkdir dir` | `FS.MKDIR vol /dir` | Parent must exist |
-| `mkdir -p a/b/c` | `FS.MKDIR vol /a/b/c PARENTS` | Creates intermediates |
-| `ls dir` | `FS.LS vol /dir` | Returns child names |
-| `ls -l dir` | `FS.LS vol /dir LONG` | Includes type, mode, size, mtime |
-| `rm file` | `FS.RM vol /file` | Works on files, dirs, symlinks |
-| `rm -r dir` | `FS.RM vol /dir RECURSIVE` | Deletes entire subtree |
-| `cp src dst` | `FS.CP vol /src /dst` | Files only without RECURSIVE |
-| `cp -r src dst` | `FS.CP vol /src /dst RECURSIVE` | Deep copy with metadata |
-| `mv src dst` | `FS.MV vol /src /dst` | Moves entire subtrees atomically |
-| `find dir -name "*.txt"` | `FS.FIND vol /dir "*.txt"` | Glob: `*`, `?`, `[a-z]`, `[!x]`, `\` |
-| `find dir -name "*.txt" -type f` | `FS.FIND vol /dir "*.txt" TYPE file` | Filter: file, dir, symlink |
-| `grep -r "pattern" dir` | `FS.GREP vol /dir "*pattern*"` | Glob on each line |
-| `grep -ri "pattern" dir` | `FS.GREP vol /dir "*pattern*" NOCASE` | Case-insensitive |
-| `stat file` | `FS.STAT vol /file` | type, mode, uid, gid, size, times |
-| `test -e file` | `FS.TEST vol /file` | Returns 1 or 0 |
-| `chmod 0755 file` | `FS.CHMOD vol /file 0755` | Octal mode string |
-| `chown uid:gid file` | `FS.CHOWN vol /file uid gid` | Separate uid and gid args |
-| `ln -s target link` | `FS.LN vol /target /link` | Relative or absolute target |
-| `readlink link` | `FS.READLINK vol /link` | Returns raw target string |
-| `tree dir` | `FS.TREE vol /dir` | Nested array structure |
-| `tree -L 2 dir` | `FS.TREE vol /dir DEPTH 2` | Limits recursion depth |
-| `du -sh` / `df` | `FS.INFO vol` | File/dir/symlink counts + total bytes |
-
-### Usage examples
-
-**Write and read:**
-```bash
-redis-cli FS.ECHO vol /hello.txt "Hello, World!"
-redis-cli FS.CAT vol /hello.txt
-```
-
-**Append:**
-```bash
-redis-cli FS.ECHO vol /log.txt "first line" APPEND
-redis-cli FS.ECHO vol /log.txt "second line" APPEND
-```
-
-**Directories:**
-```bash
-redis-cli FS.MKDIR vol /data/projects PARENTS
-redis-cli FS.LS vol /data LONG
-```
-
-**Search by filename:**
-```bash
-redis-cli FS.FIND vol / "*.md"
-redis-cli FS.FIND vol /src "*.go" TYPE file
-```
-
-**Search file contents:**
-```bash
-redis-cli FS.GREP vol / "*TODO*"
-redis-cli FS.GREP vol /src "*error*" NOCASE
-```
-
-**Workspace search via AFS CLI:**
-```bash
-afs grep --workspace vol "TODO auth"
-afs grep --workspace vol --path /logs "disk full"
-afs grep --workspace vol -E "timeout|retry"
-afs grep --workspace vol -l "TODO"
-```
-
-**Copy, move, delete:**
-```bash
-redis-cli FS.CP vol /config.json /config.json.bak
-redis-cli FS.CP vol /src /src-backup RECURSIVE
-redis-cli FS.MV vol /draft.txt /final.txt
-redis-cli FS.RM vol /temp RECURSIVE
-```
-
-**Symlinks:**
-```bash
-redis-cli FS.LN vol /config.json /current-config
-redis-cli FS.READLINK vol /current-config
-```
-
-**Filesystem overview:**
-```bash
-redis-cli FS.INFO vol
-redis-cli FS.TREE vol / DEPTH 2
-```
-
-## Bulk Import via redis-cli
-
-If you need to import files directly via `redis-cli` without the `afs migrate` command:
-
-```bash
-cd /path/to/local/dir && find . -type f | while read -r f; do
-  redis-cli FS.ECHO vol "/${f#./}" "$(cat "$f")"
-done
-```
-
-Optional — preserve permissions:
-```bash
-cd /path/to/local/dir && find . -type f | while read -r f; do
-  path="/${f#./}"
-  redis-cli FS.CHMOD vol "$path" "0$(stat -c '%a' "$f")"
-  redis-cli FS.CHOWN vol "$path" "$(stat -c '%u' "$f")" "$(stat -c '%g' "$f")"
-done
-```
-
-Or use `afs migrate <dir>` which handles import, archiving, and mounting in one step. If the source directory contains a `.afsignore`, matching files and directories are skipped using `.gitignore`-style patterns.
-
-## Volume Management
-
-```bash
-redis-cli DEL vol                     # delete entire filesystem
-redis-cli EXPIRE vol 3600             # auto-expire after 1 hour
-redis-cli SCAN 0 TYPE redis-fs0       # list all filesystem volumes
-redis-cli RENAME staging production   # rename a volume
-```
-
-## Key Differences and Gotchas
-
-1. **All paths must be absolute** — start with `/`. There is no working directory.
-2. **No `cd` or `pwd`** — every command takes the full path explicitly.
-3. **Grep uses glob patterns, not regex** — use `*error*` not `.*error.*`.
-4. **FS.GREP returns triples** — each match is `[filepath, line_number, line]`.
-5. **FS.FIND matches basename only** — `FS.FIND vol / "*.md"` matches `/docs/README.md`.
-6. **FS.ECHO auto-creates parents** — no need to `mkdir -p` before writing.
-7. **Symlinks resolve at read time** — max 40 levels; cycles produce an error.
-8. **Large recursive operations block Redis** — partition across multiple keys for millions of files.
-9. **No streaming reads** — `FS.CAT` returns the entire file at once.
-10. **Permission bits are metadata only** — `FS.CHMOD`/`FS.CHOWN` store values but Redis does not enforce them.
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| `no configuration found` | Run `afs setup` or create `afs.config.json` next to the binary |
-| `module not loaded` | Load with: `redis-cli MODULE LOAD /path/to/module/fs.so` |
-| `cannot connect to Redis` | Start Redis yourself, then point `redis.addr` at that instance |
-| `cannot find agent-filesystem-mount` | Run `make mount` in the repo root |
-| `mount did not become ready` | Check `mountLog` path for errors |
-| `agent-filesystem is already running` | Run `afs down` first |
+- `README.md` for the current product story and setup flow
+- `docs/repo-walkthrough.md` for the current tree layout
+- `skills/agent-filesystem/SKILL.md` for the installable agent skill

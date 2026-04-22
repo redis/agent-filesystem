@@ -98,7 +98,7 @@ This section reflects the repository as it exists today.
 
 ### Not started yet
 
-- browser login and CLI login for AFS Cloud (`afs auth login/logout/status`)
+- browser login and CLI login for AFS Cloud (`afs login/logout/status`)
 - secure token storage and profile management
 - secret-store support for provider credentials
 - Redis Cloud managed provisioning flow
@@ -284,7 +284,7 @@ We should treat them separately from the start.
 
 ### 1. Human auth to AFS Cloud
 
-This is the login experience for the AFS website and for `afs auth login`.
+This is the login experience for the AFS website and for `afs login`.
 
 Recommended design:
 
@@ -314,9 +314,9 @@ Notes:
 
 CLI commands:
 
-- `afs auth login`
-- `afs auth logout`
-- `afs auth status`
+- `afs login`
+- `afs logout`
+- `afs status`
 
 Local storage:
 
@@ -1009,7 +1009,7 @@ Scope:
 - add browser login with Authorization Code + PKCE
 - add local token validation via JWKS or equivalent verifier cache
 - add secure token storage in the CLI
-- implement `afs auth login/logout/status`
+- implement `afs login/logout/status`
 
 Tests:
 

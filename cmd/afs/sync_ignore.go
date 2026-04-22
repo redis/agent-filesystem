@@ -19,29 +19,23 @@ type syncIgnore struct {
 	root    string
 }
 
-// loadSyncIgnore reads .afsignore (or the legacy .rfsignore) from the
-// workspace root, if present. The matcher only fires on root-relative paths;
-// per-directory .afsignore files are a v2 feature.
+// loadSyncIgnore reads .afsignore from the workspace root, if present. The
+// matcher only fires on root-relative paths; per-directory .afsignore files
+// are a v2 feature.
 func loadSyncIgnore(root string) (*syncIgnore, error) {
 	si := &syncIgnore{root: filepath.Clean(root)}
-	candidates := []string{
-		filepath.Join(root, afsIgnoreFilename),
-		filepath.Join(root, legacyOriginalIgnoreFilename),
-	}
-	for _, path := range candidates {
-		if _, err := os.Stat(path); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-			return nil, err
+	path := filepath.Join(root, afsIgnoreFilename)
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return si, nil
 		}
-		matcher, err := ignore.CompileIgnoreFile(path)
-		if err != nil {
-			return nil, err
-		}
-		si.matcher = matcher
-		break
+		return nil, err
 	}
+	matcher, err := ignore.CompileIgnoreFile(path)
+	if err != nil {
+		return nil, err
+	}
+	si.matcher = matcher
 	return si, nil
 }
 
@@ -103,7 +97,7 @@ func isBaselineIgnored(rel string) bool {
 	if strings.Contains(base, ".afssync.tmp.") {
 		return true
 	}
-	if base == afsIgnoreFilename || base == legacyOriginalIgnoreFilename {
+	if base == afsIgnoreFilename {
 		return true
 	}
 	// State + lock files for the daemon, in case the user mounts ~/.afs.

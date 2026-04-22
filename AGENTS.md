@@ -5,10 +5,10 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 ## Build & Test
 
 ```bash
-make                # build module/fs.so + mount/agent-filesystem-mount + mount/agent-filesystem-nfs + afs + afs-control-plane
-make module         # build module/fs.so only
+make                # build mount/agent-filesystem-mount + mount/agent-filesystem-nfs + afs + afs-control-plane
 make mount          # build mount/agent-filesystem-mount + mount/agent-filesystem-nfs
 make commands       # build afs + afs-control-plane
+make test           # run Go unit tests for cmd/, deploy/, internal/, and mount/
 make clean          # remove compiled artifacts
 
 # CLI lifecycle helper:
@@ -21,70 +21,40 @@ make clean          # remove compiled artifacts
 ./afs checkpoint list <workspace>
 ```
 
-Load into Redis for manual testing:
-```bash
-redis-server --loadmodule ./module/fs.so
-# or at runtime:
-redis-cli MODULE LOAD $(pwd)/module/fs.so
-```
-
-Go coverage for the workspace/control-plane app now lives under `cmd/` and `internal/`; run `go test ./cmd/afs ./cmd/afs-control-plane ./internal/...` for automated checks. Module testing is still manual via `redis-cli`.
-
 ## Current Repo Map
 
-This repo now has three active layers:
+This repo now has two active product layers:
 
-- `module/`: the original Redis module that provides the `FS.*` command family.
 - `mount/`: the inode-keyed Go client plus the FUSE and NFS exposure layer.
-- `cmd/` + `internal/` + `ui/`: the newer workspace/checkpoint/control-plane product surface, where Redis stores manifests/blobs/savepoints and AFS materializes local working copies.
+- `cmd/` + `internal/` + `ui/`: the workspace/checkpoint/control-plane product surface, where Redis stores manifests/blobs/savepoints and AFS materializes local working copies.
 
 Useful supporting areas:
 
-- `tests/`: Python integration coverage for the Redis module.
+- `deploy/`: deployment-specific notes and helpers.
+- `plans/` and `tasks/`: working design notes, backlog fragments, and benchmark outputs.
 - `sandbox/`: isolated process runner.
-- `redisclaw/`: Python coding-agent experiment on top of the sandbox and AFS.
+- `scripts/`: helper scripts for local development and benchmarks.
 - `skills/`: installable skill docs for agent use.
+- `tests/`: benchmark helpers and fixtures for the active workspace-first surfaces.
 
 For a file-by-file walkthrough of the current tree, read `docs/repo-walkthrough.md`.
 
-Legacy Python packaging paths such as `agent_filesystem/` and `mcp_server/` are being removed from this repo and should not be treated as active architecture.
+The old Redis module, its Python integration suite, and RedisClaw have been retired and should not be treated as active architecture.
 
-## Low-Level Redis Module Architecture
+## Active Architecture
 
-Agent Filesystem is a native Redis module (C, `-std=c11`) that registers a custom data type (`fsObject`) and an `FS.*` command family. **One Redis key = one complete filesystem.**
+AFS is now workspace-first:
 
-### Data Model
+- Redis is the canonical store for workspace metadata, manifests, blobs, checkpoints, and activity.
+- Sync mode and live mounts are the supported local execution surfaces.
+- `afs mcp` exposes the same workspace model over stdio for agent clients.
+- Checkpoints are explicit. File edits change the live workspace state; they do not auto-create checkpoints.
 
-- **fsObject**: Top-level container holding a `RedisModuleDict` mapping absolute path strings to inodes, plus aggregate counters (file_count, dir_count, symlink_count, total_data_size).
-- **fsInode**: Union-typed node — file (inline content + 256-byte trigram bloom filter), directory (children basename array), or symlink (target string). Every inode carries POSIX metadata (mode, uid, gid, ctime/mtime/atime).
-- **Storage is flat**: paths like `/etc/nginx/nginx.conf` are keys in a single dict, not a tree. Directories track only child basenames. This gives O(1) path lookups.
+The most important implementation seams are:
 
-### Source Files
-
-| File | Purpose |
-|------|---------|
-| `module/fs.c` | All command handlers, RDB persistence, type registration, bloom filter logic |
-| `module/fs.h` | Inode/object struct definitions, type constants |
-| `module/path.c` | Path normalization, parent/basename/join, full glob matching (`*`, `?`, `[a-z]`, `[!x]`, `\` escaping) |
-| `module/path.h` | Path utility declarations |
-| `module/redismodule.h` | Redis module API (vendored header) |
-
-### Key Internals
-
-- **Auto-create / auto-delete**: First write to a key creates it with root `/`; deleting everything removes the key.
-- **Symlink resolution** (`fsResolvePath`): follows up to 40 levels, supports absolute and relative targets.
-- **Binary detection in GREP**: files with NUL bytes in the first 8KB report "Binary file matches" instead of content.
-- **Parent auto-creation** (`fsEnsureParents`): write commands like `FS.ECHO` and `FS.MKDIR PARENTS` recursively create missing ancestor directories.
-- **FS.ECHO APPEND flag**: `FS.ECHO key path content APPEND` appends instead of overwriting, matching the shell `echo >>` pattern. `FS.APPEND` is retained as a backward-compatible alias.
-- **RDB format version 0**: serializes all inodes with path/type/metadata/payload; bloom filters are rebuilt on load, not persisted.
-
-Note: older docs referenced trigram bloom filters in `module/fs.c`, but the current source no longer uses that GREP acceleration path. Treat the current implementation in `module/fs.c` as the source of truth.
-
-### Command Pattern
-
-Every `FS.*` command handler follows the same pattern:
-1. Call `fsGetObject()` to open the key and get/create the `fsObject`
-2. Normalize the path with `fsNormalizePath()`
-3. Look up the inode in the dict
-4. Perform the operation, replicate if write (`RedisModule_ReplicateVerbatim()`)
-5. For writes, call `fsMaybeDeleteKey()` if content was removed
+- `cmd/afs/`: CLI command surface, setup flow, sync lifecycle, local UX.
+- `cmd/afs-control-plane/`: HTTP control plane binary.
+- `internal/controlplane/`: workspace, checkpoint, session, catalog, and HTTP service logic.
+- `internal/worktree/`: manifest scanning and local materialization helpers.
+- `mount/internal/client/`: Redis-backed filesystem client used by FUSE/NFS.
+- `ui/`: TanStack Router + React control-plane UI.

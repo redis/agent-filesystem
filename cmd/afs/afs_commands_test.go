@@ -71,6 +71,10 @@ func (s stubAFSControlPlane) ForkWorkspace(context.Context, string, string) erro
 	return fmt.Errorf("unexpected ForkWorkspace call")
 }
 
+func (s stubAFSControlPlane) ListChangelog(context.Context, string, controlplane.ChangelogListRequest) (controlplane.ChangelogListResponse, error) {
+	return controlplane.ChangelogListResponse{}, fmt.Errorf("unexpected ListChangelog call")
+}
+
 func TestMaterializeWorkspaceWritesTreeAndState(t *testing.T) {
 	t.Helper()
 
@@ -360,6 +364,56 @@ func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameErrorIncludesData
 	}
 	if !strings.Contains(err.Error(), "ws_local (Local Development)") || !strings.Contains(err.Error(), "ws_cloud (Cloud Redis)") {
 		t.Fatalf("resolveWorkspaceSelectionFromControlPlane() error = %q, want ids with database names", err)
+	}
+}
+
+func TestResolveWorkspaceSelectionFromControlPlaneCurrentWorkspaceAmbiguityIncludesRecovery(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+	cfg.CurrentWorkspace = "getting-started"
+
+	_, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_local", Name: "getting-started", DatabaseName: "Local Development"},
+				{ID: "ws_cloud", Name: "getting-started", DatabaseName: "Cloud Redis"},
+			},
+		},
+	}, "")
+	if err == nil {
+		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want current-workspace ambiguity guidance")
+	}
+	if !strings.Contains(err.Error(), `current workspace "getting-started" is ambiguous`) {
+		t.Fatalf("error = %q, want current workspace ambiguity preamble", err)
+	}
+	if !strings.Contains(err.Error(), "workspace use <workspace-id>") {
+		t.Fatalf("error = %q, want recovery command", err)
+	}
+}
+
+func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameDoesNotSilentlyPreferLegacyID(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://afs.test"
+
+	_, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "getting-started", Name: "getting-started", DatabaseName: "Local Development"},
+				{ID: "ws_cloud", Name: "getting-started", DatabaseName: "Cloud Redis"},
+			},
+		},
+	}, "getting-started")
+	if err == nil {
+		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want duplicate-name guidance")
+	}
+	if !strings.Contains(err.Error(), "workspace id instead") {
+		t.Fatalf("error = %q, want duplicate-name guidance instead of implicit legacy-id selection", err)
 	}
 }
 

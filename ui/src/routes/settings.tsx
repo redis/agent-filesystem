@@ -30,7 +30,6 @@ export const Route = createFileRoute("/settings")({
 });
 
 type PendingAction = "delete" | "reset" | null;
-const LEGACY_SAVED_DATABASES_STORAGE_KEY = "afs_saved_databases_v1";
 
 function SettingsPage() {
   const auth = useAuthSession();
@@ -71,7 +70,6 @@ function ClerkSettingsPage() {
   const isWorking = resetMutation.isPending || deleteMutation.isPending;
 
   async function redirectAfterSignOut(target: "/login" | "/signup") {
-    window.localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
     try {
       await clerk.signOut({ redirectUrl: target });
     } catch {
@@ -88,7 +86,6 @@ function ClerkSettingsPage() {
       setActionError(null);
       if (pendingAction === "reset") {
         await resetMutation.mutateAsync();
-        window.localStorage.removeItem(LEGACY_SAVED_DATABASES_STORAGE_KEY);
         setPendingAction(null);
         void navigate({ to: "/" });
         return;

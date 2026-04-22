@@ -11,7 +11,7 @@ import (
 	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
-func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
+func TestCmdLoginPersistsCloudConfig(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,8 +40,8 @@ func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
 
 	saveTempConfig(t, defaultConfig())
 
-	if err := cmdAuth([]string{"auth", "login", "--control-plane-url", server.URL, "--token", "afs_otk_test"}); err != nil {
-		t.Fatalf("cmdAuth(login) returned error: %v", err)
+	if err := cmdLogin([]string{"--control-plane-url", server.URL, "--token", "afs_otk_test"}); err != nil {
+		t.Fatalf("cmdLogin() returned error: %v", err)
 	}
 
 	cfg, err := loadConfig()
@@ -68,7 +68,7 @@ func TestCmdAuthLoginPersistsCloudConfig(t *testing.T) {
 	}
 }
 
-func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
+func TestCmdLogoutClearsCloudConfig(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
@@ -80,8 +80,8 @@ func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	cfg.CurrentWorkspaceID = "ws_demo"
 	saveTempConfig(t, cfg)
 
-	if err := cmdAuth([]string{"auth", "logout"}); err != nil {
-		t.Fatalf("cmdAuth(logout) returned error: %v", err)
+	if err := cmdLogout(nil); err != nil {
+		t.Fatalf("cmdLogout() returned error: %v", err)
 	}
 
 	saved, err := loadConfig()
@@ -96,7 +96,7 @@ func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	}
 }
 
-func TestCmdAuthStatusShowsSignedInCloudState(t *testing.T) {
+func TestCmdStatusShowsSignedInCloudState(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
@@ -109,12 +109,12 @@ func TestCmdAuthStatusShowsSignedInCloudState(t *testing.T) {
 	saveTempConfig(t, cfg)
 
 	out, err := captureStdout(t, func() error {
-		return cmdAuth([]string{"auth", "status"})
+		return cmdStatus()
 	})
 	if err != nil {
-		t.Fatalf("cmdAuth(status) returned error: %v", err)
+		t.Fatalf("cmdStatus() returned error: %v", err)
 	}
-	for _, want := range []string{"signed in", "https://afs.example.com", "getting-started", "afs-cloud"} {
+	for _, want := range []string{"getting-started", "afs-cloud"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("auth status output = %q, want substring %q", out, want)
 		}
@@ -194,8 +194,8 @@ func TestCloudModeUsesPersistedAuthTokenForWorkspaceList(t *testing.T) {
 
 	saveTempConfig(t, defaultConfig())
 
-	if err := cmdAuth([]string{"auth", "login", "--control-plane-url", server.URL, "--token", "afs_otk_test"}); err != nil {
-		t.Fatalf("cmdAuth(login) returned error: %v", err)
+	if err := cmdLogin([]string{"--control-plane-url", server.URL, "--token", "afs_otk_test"}); err != nil {
+		t.Fatalf("cmdLogin() returned error: %v", err)
 	}
 
 	cfg, service, closeFn, err := openAFSControlPlane(context.Background())
@@ -216,7 +216,7 @@ func TestCloudModeUsesPersistedAuthTokenForWorkspaceList(t *testing.T) {
 	}
 }
 
-func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
+func TestCmdLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 	t.Helper()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -258,8 +258,8 @@ func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 		return "afs_otk_browser", nil
 	}
 
-	if err := cmdAuth([]string{"auth", "login", "--cloud", "--control-plane-url", server.URL, "--workspace", "ws_demo"}); err != nil {
-		t.Fatalf("cmdAuth(login browser flow) returned error: %v", err)
+	if err := cmdLogin([]string{"--cloud", "--control-plane-url", server.URL, "--workspace", "ws_demo"}); err != nil {
+		t.Fatalf("cmdLogin() returned error: %v", err)
 	}
 
 	if seenURL != server.URL {
@@ -267,67 +267,5 @@ func TestCmdAuthLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 	}
 	if seenWorkspace != "ws_demo" {
 		t.Fatalf("browser flow workspace = %q, want %q", seenWorkspace, "ws_demo")
-	}
-}
-
-func TestCmdOnboardUsesBrowserFlowShortcut(t *testing.T) {
-	t.Helper()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/auth/exchange" || r.Method != http.MethodPost {
-			http.NotFound(w, r)
-			return
-		}
-		var input struct {
-			Token string `json:"token"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-			t.Fatalf("Decode(exchange request) returned error: %v", err)
-		}
-		if input.Token != "afs_otk_onboard" {
-			t.Fatalf("token = %q, want %q", input.Token, "afs_otk_onboard")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(authExchangeResponse{
-			DatabaseID:    "afs-cloud",
-			WorkspaceID:   "ws_demo",
-			WorkspaceName: "getting-started",
-			AccessToken:   "afs_cli_onboard",
-		})
-	}))
-	defer server.Close()
-
-	saveTempConfig(t, defaultConfig())
-
-	original := runBrowserLoginFlow
-	t.Cleanup(func() {
-		runBrowserLoginFlow = original
-	})
-
-	var seenURL string
-	var seenWorkspace string
-	runBrowserLoginFlow = func(controlPlaneURL, workspace string) (string, error) {
-		seenURL = controlPlaneURL
-		seenWorkspace = workspace
-		return "afs_otk_onboard", nil
-	}
-
-	if err := cmdOnboard([]string{"--cloud", "--control-plane-url", server.URL}); err != nil {
-		t.Fatalf("cmdOnboard() returned error: %v", err)
-	}
-
-	if seenURL != server.URL {
-		t.Fatalf("browser flow controlPlaneURL = %q, want %q", seenURL, server.URL)
-	}
-	if seenWorkspace != "" {
-		t.Fatalf("browser flow workspace = %q, want empty", seenWorkspace)
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig() returned error: %v", err)
-	}
-	if cfg.AuthToken != "afs_cli_onboard" {
-		t.Fatalf("AuthToken = %q, want %q", cfg.AuthToken, "afs_cli_onboard")
 	}
 }

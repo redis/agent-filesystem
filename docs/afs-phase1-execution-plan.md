@@ -2,6 +2,11 @@
 
 Date: 2026-04-05
 
+Note: this document is historical context. It predates the removal of
+`afs workspace run` and should not be treated as the current command contract.
+For the current product surface, prefer `README.md`, `AGENTS.md`, and
+`docs/repo-walkthrough.md`.
+
 ## Goal
 
 Ship the smallest real AFS that feels coherent:

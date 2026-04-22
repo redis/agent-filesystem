@@ -26,7 +26,7 @@ The hard end-state requirement is that BYODB must support the **fully private** 
 Adopt a **split-plane model** with one control plane and multiple data-plane binding types:
 
 - **Control Plane (Cloud):** identity, organizations, workspaces, policy, orchestration, metadata index, audit, billing, API, UI.
-- **Data Plane (Managed or Customer side):** Redis module data, mount process, and optionally a customer-side connector/agent.
+- **Data Plane (Managed or Customer side):** Redis-backed workspace data, the mount process, and optionally a customer-side connector/agent.
 
 The implementation rule is:
 
@@ -64,7 +64,7 @@ For the final hybrid design rule:
 
 ## 3.2 Customer Data Plane
 
-- **Redis + AFS module**
+- **Redis-backed workspace store**
   - Source of truth for filesystem/workspace contents in BYODB mode.
 - **AFS Connector (new service)**
   - Runs in customer environment (desktop daemon, VM, or k8s deployment).
@@ -112,7 +112,7 @@ All three binding types share one logical workspace model and one control-plane 
 ## 4.2 What lives in customer Redis (BYODB)
 
 - Workspace manifests/blobs/savepoints (actual user data)
-- AFS module keyspace objects
+- AFS workspace keyspace objects
 - Any sensitive payload content the customer does not want in cloud
 
 ## 4.3 Optional mirrored index data (derived)

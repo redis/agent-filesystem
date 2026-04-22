@@ -1,14 +1,14 @@
 import type { IconType } from "@redis-ui/icons";
 import {
+  BellIcon,
+  BookOpenIcon,
+  BotIcon,
   CloudDownloadIcon,
   DatabaseIcon,
-  DocumentationIcon,
   FoldersIcon,
-  NotificationsIcon,
-  SupportIcon,
-} from "@redis-ui/icons";
-import { BotIcon } from "../components/bot-icon";
-import { PieChartIcon } from "../components/pie-chart-icon";
+  LifeBuoyIcon,
+  PieChartIcon,
+} from "../components/lucide-icons";
 
 export type SidebarPanelId = "root" | "workspaces";
 
@@ -42,16 +42,16 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
-    label: "Activity",
+    label: "Events",
     path: "/activity",
-    icon: NotificationsIcon,
+    icon: BellIcon,
   },
 ];
 
 export const bottomNavigationItems: ReadonlyArray<NavigationRouteItem> = [
-  { kind: "route", label: "Docs", path: "/docs", icon: DocumentationIcon, title: "Documentation" },
+  { kind: "route", label: "Docs", path: "/docs", icon: BookOpenIcon, title: "Documentation" },
   { kind: "route", label: "Downloads", path: "/downloads", icon: CloudDownloadIcon, title: "Downloads" },
-  { kind: "route", label: "Agent Guide", path: "/agent-guide", icon: SupportIcon, title: "Agent Guide" },
+  { kind: "route", label: "Agent Guide", path: "/agent-guide", icon: LifeBuoyIcon, title: "Agent Guide" },
 ];
 
 function isPathMatch(pathname: string, path: string) {
@@ -104,7 +104,7 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/activity")) {
-    return { page: "Activity", subtitle: "Track workspace changes, agent actions, and system events." };
+    return { page: "Events", subtitle: "Track workspace lifecycle, agent activity, and system events." };
   }
 
   if (pathname.startsWith("/settings")) {

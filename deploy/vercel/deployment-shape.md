@@ -55,8 +55,7 @@ Keep these as supporting build inputs, not standalone Vercel apps:
 
 - `ui/` builds the static assets embedded into the control plane
 - `cmd/afs/` remains the downloadable CLI, not the hosted service
-- `module/` and `mount/` remain local/self-hosted components, not Vercel
-  runtime targets
+- `mount/` remains a local/self-hosted component, not a Vercel runtime target
 
 ## Current Vercel Blocker
 

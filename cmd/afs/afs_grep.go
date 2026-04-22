@@ -269,7 +269,7 @@ func parseGrepArgs(args []string) (grepOptions, error) {
 }
 
 func grepUsageText(bin string) string {
-	return fmt.Sprintf(`Usage:
+	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s grep [flags] <pattern>
   %s grep [flags] -e <pattern>
 
