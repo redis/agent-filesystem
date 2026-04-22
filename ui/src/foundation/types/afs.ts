@@ -89,7 +89,12 @@ export type AFSActivityEvent = {
 export type AFSChangelogEntry = {
   id: string;
   occurredAt?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  databaseId?: string;
+  databaseName?: string;
   sessionId?: string;
+  agentId?: string;
   user?: string;
   label?: string;
   agentVersion?: string;
@@ -116,6 +121,7 @@ export type AFSAgentSession = {
   workspaceName: string;
   databaseId?: string;
   databaseName?: string;
+  agentId?: string;
   clientKind: string;
   afsVersion: string;
   hostname: string;

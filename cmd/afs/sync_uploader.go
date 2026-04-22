@@ -56,17 +56,18 @@ type uploadResult struct {
 
 // uploader runs in its own goroutine, draining ops from the reconciler.
 type uploader struct {
-	fs         client.Client
-	results    chan<- uploadResult
+	fs           client.Client
+	results      chan<- uploadResult
 	maxFileBytes int64
-	readonly   bool
-	log        *syncLogger
+	readonly     bool
+	log          *syncLogger
 
 	// Changelog emission. Zero values disable — see attachChangelog.
 	rdb          *redis.Client
 	storageID    string
 	sessionID    string
 	user         string
+	agentID      string
 	label        string
 	agentVersion string
 }
@@ -81,11 +82,12 @@ func newUploader(fs client.Client, results chan<- uploadResult, maxFileBytes int
 // attachChangelog wires the uploader to emit one controlplane ChangeEntry per
 // successful upload op. Session + workspace storage identity is baked in at
 // start so each entry is attributable without extra plumbing per-op.
-func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user, label, agentVersion string) {
+func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
 	u.rdb = rdb
 	u.storageID = storageID
 	u.sessionID = sessionID
 	u.user = user
+	u.agentID = agentID
 	u.label = label
 	u.agentVersion = agentVersion
 }
@@ -102,6 +104,7 @@ func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
 	}
 	entry := controlplane.ChangeEntry{
 		SessionID:    u.sessionID,
+		AgentID:      u.agentID,
 		User:         u.user,
 		Label:        u.label,
 		AgentVersion: u.agentVersion,

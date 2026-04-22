@@ -18,7 +18,7 @@ func TestUploaderEmitsChangelogEntryPerOp(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 
 	u := newUploader(nil, nil, 0, false, nil)
-	u.attachChangelog(rdb, "ws-123", "sess-abc", "user-1", "feature/auth", "dev")
+	u.attachChangelog(rdb, "ws-123", "sess-abc", "user-1", "agt-sync", "feature/auth", "dev")
 
 	ctx := context.Background()
 
@@ -90,6 +90,9 @@ func TestUploaderEmitsChangelogEntryPerOp(t *testing.T) {
 		}
 		if entry.Values["session_id"] != "sess-abc" {
 			t.Errorf("entry %d session_id = %v, want sess-abc", i, entry.Values["session_id"])
+		}
+		if entry.Values["agent_id"] != "agt-sync" {
+			t.Errorf("entry %d agent_id = %v, want agt-sync", i, entry.Values["agent_id"])
 		}
 		if entry.Values["source"] != controlplane.ChangeSourceAgentSync {
 			t.Errorf("entry %d source = %v, want %s", i, entry.Values["source"], controlplane.ChangeSourceAgentSync)

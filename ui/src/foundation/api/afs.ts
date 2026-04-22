@@ -76,7 +76,7 @@ type AFSClient = {
 
 export type ListChangelogInput = {
   databaseId?: string;
-  workspaceId: string;
+  workspaceId?: string;
   sessionId?: string;
   since?: string;
   until?: string;
@@ -88,6 +88,7 @@ type HTTPChangelogEntry = {
   id: string;
   occurred_at?: string;
   session_id?: string;
+  agent_id?: string;
   user?: string;
   label?: string;
   agent_version?: string;
@@ -243,6 +244,7 @@ type HTTPWorkspaceSessionInfo = {
   workspace_name?: string;
   database_id?: string;
   database_name?: string;
+  agent_id?: string;
   client_kind?: string;
   afs_version?: string;
   hostname?: string;
@@ -1360,11 +1362,24 @@ function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   };
 }
 
-function mapChangelogEntry(input: HTTPChangelogEntry): AFSChangelogEntry {
+function mapChangelogEntry(
+  input: HTTPChangelogEntry,
+  scope?: {
+    workspaceId?: string;
+    workspaceName?: string;
+    databaseId?: string;
+    databaseName?: string;
+  },
+): AFSChangelogEntry {
   return {
     id: input.id,
     occurredAt: input.occurred_at,
+    workspaceId: scope?.workspaceId,
+    workspaceName: scope?.workspaceName,
+    databaseId: scope?.databaseId,
+    databaseName: scope?.databaseName,
     sessionId: input.session_id,
+    agentId: input.agent_id,
     user: input.user,
     label: input.label,
     agentVersion: input.agent_version,
@@ -1394,6 +1409,7 @@ function mapAgentSession(
     workspaceName: input.workspace_name ?? workspaceName,
     databaseId: input.database_id ?? databaseId,
     databaseName: input.database_name ?? databaseName,
+    agentId: input.agent_id,
     clientKind: input.client_kind ?? "",
     afsVersion: input.afs_version ?? "",
     hostname: input.hostname ?? "",
@@ -1514,6 +1530,42 @@ function mapAccount(input: HTTPAccount): AFSAccount {
     deletedDatabaseCount: input.deleted_database_count,
     deletedWorkspaceCount: input.deleted_workspace_count,
     identityDeleted: input.identity_deleted,
+  };
+}
+
+type ChangelogWorkspaceScope = Pick<AFSWorkspaceSummary, "id" | "name" | "databaseId" | "databaseName">;
+
+function changelogSortValue(entry: AFSChangelogEntry): string {
+  return entry.occurredAt ?? entry.id;
+}
+
+function sortChangelogEntries(
+  entries: AFSChangelogEntry[],
+  direction: "asc" | "desc" = "desc",
+): AFSChangelogEntry[] {
+  return [...entries].sort((left, right) => {
+    const comparison = changelogSortValue(left).localeCompare(changelogSortValue(right));
+    return direction === "asc" ? comparison : comparison * -1;
+  });
+}
+
+async function aggregateWorkspaceChangelog(
+  workspaces: ChangelogWorkspaceScope[],
+  direction: "asc" | "desc",
+  loadWorkspaceChanges: (workspace: ChangelogWorkspaceScope) => Promise<AFSChangelogResponse>,
+): Promise<AFSChangelogResponse> {
+  const settled = await Promise.allSettled(workspaces.map((workspace) => loadWorkspaceChanges(workspace)));
+  const entries = settled.flatMap((result) =>
+    result.status === "fulfilled" ? result.value.entries : [],
+  );
+  const firstRejected = settled.find((result) => result.status === "rejected");
+
+  if (entries.length === 0 && firstRejected?.status === "rejected") {
+    throw firstRejected.reason;
+  }
+
+  return {
+    entries: sortChangelogEntries(entries, direction),
   };
 }
 
@@ -1689,6 +1741,32 @@ const httpAFSClient: AFSClient = {
   },
 
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
+    const workspaceId = input.workspaceId?.trim() ?? "";
+    if (workspaceId === "") {
+      const workspaces = await httpAFSClient.listWorkspaceSummaries(input.databaseId ?? "");
+      return aggregateWorkspaceChangelog(
+        workspaces,
+        input.direction ?? "desc",
+        async (workspace) => {
+          const response = await httpAFSClient.listChangelog({
+            ...input,
+            databaseId: workspace.databaseId,
+            workspaceId: workspace.id,
+          });
+          return {
+            ...response,
+            entries: response.entries.map((entry) => ({
+              ...entry,
+              workspaceId: workspace.id,
+              workspaceName: workspace.name,
+              databaseId: workspace.databaseId,
+              databaseName: workspace.databaseName,
+            })),
+          };
+        },
+      );
+    }
+
     const params = new URLSearchParams();
     if (input.limit != null && input.limit > 0) {
       params.set("limit", String(input.limit));
@@ -1706,12 +1784,17 @@ const httpAFSClient: AFSClient = {
       params.set("direction", input.direction);
     }
     const query = params.toString();
-    const base = `${workspaceBasePath(input.databaseId, input.workspaceId)}/changes`;
+    const base = `${workspaceBasePath(input.databaseId, workspaceId)}/changes`;
     const response = await requestJSON<HTTPChangelogResponse>(
       query ? `${base}?${query}` : base,
     );
     return {
-      entries: (response.entries ?? []).map(mapChangelogEntry),
+      entries: (response.entries ?? []).map((entry) =>
+        mapChangelogEntry(entry, {
+          workspaceId,
+          databaseId: input.databaseId,
+        }),
+      ),
       nextCursor: response.next_cursor,
     };
   },

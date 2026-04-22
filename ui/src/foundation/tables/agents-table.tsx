@@ -367,8 +367,12 @@ function AgentDetailDialog({
             <DetailValue>{agent.localPath || "Not reported"}</DetailValue>
           </DetailField>
           <DetailField>
-            <DetailLabel>Label</DetailLabel>
+            <DetailLabel>Agent Name</DetailLabel>
             <DetailValue>{agent.label?.trim() || "Not set"}</DetailValue>
+          </DetailField>
+          <DetailField>
+            <DetailLabel>Agent ID</DetailLabel>
+            <DetailValue style={{ fontSize: 12 }}>{agent.agentId?.trim() || "Not set"}</DetailValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Session ID</DetailLabel>
@@ -463,12 +467,14 @@ export function AgentsTable({
         },
         {
           accessorKey: "label",
-          header: "Label",
+          header: "Agent",
           size: 160,
           enableSorting: true,
           cell: ({ row }) => {
             const label = row.original.label?.trim();
-            if (!label) {
+            const agentId = row.original.agentId?.trim();
+            const display = label || agentId;
+            if (!display) {
               return (
                 <Typography.Body component="span" color="secondary">
                   &mdash;
@@ -476,7 +482,9 @@ export function AgentsTable({
               );
             }
             return (
-              <S.SingleLineText title={label}>{label}</S.SingleLineText>
+              <S.SingleLineText title={[label, agentId].filter(Boolean).join(" · ") || display}>
+                {display}
+              </S.SingleLineText>
             );
           },
         },

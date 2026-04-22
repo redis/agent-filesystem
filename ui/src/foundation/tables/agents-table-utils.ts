@@ -26,6 +26,7 @@ export function matchesAgentSearch(agent: AFSAgentSession, query: string) {
 
   return [
     agent.hostname,
+    agent.agentId,
     agent.localPath,
     agent.label,
     agent.workspaceName,
@@ -45,7 +46,15 @@ export function filterAndSortAgents(
   const query = normalizeSearchValue(search);
   const filteredRows = rows.filter((row) => matchesAgentSearch(row, query));
 
-  return [...filteredRows].sort((left, right) =>
-    compareAgentValues(left[sortBy] ?? "", right[sortBy] ?? "", sortDirection),
-  );
+  return [...filteredRows].sort((left, right) => {
+    const leftValue =
+      sortBy === "label"
+        ? left.label ?? left.agentId ?? left.hostname
+        : left[sortBy] ?? "";
+    const rightValue =
+      sortBy === "label"
+        ? right.label ?? right.agentId ?? right.hostname
+        : right[sortBy] ?? "";
+    return compareAgentValues(leftValue, rightValue, sortDirection);
+  });
 }

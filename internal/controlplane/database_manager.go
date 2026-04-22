@@ -1111,6 +1111,7 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 			WorkspaceName:   record.WorkspaceName,
 			DatabaseID:      record.DatabaseID,
 			DatabaseName:    databaseName,
+			AgentID:         record.AgentID,
 			ClientKind:      record.ClientKind,
 			AFSVersion:      record.AFSVersion,
 			Hostname:        record.Hostname,

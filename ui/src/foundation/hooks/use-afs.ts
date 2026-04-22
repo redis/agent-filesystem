@@ -44,7 +44,7 @@ export const afsKeys = {
       "databases",
       input.databaseId ?? "all",
       "workspaces",
-      input.workspaceId,
+      input.workspaceId ?? "all",
       "changes",
       input.sessionId ?? "all",
       input.limit ?? 100,
@@ -210,7 +210,7 @@ export function useChangelog(input: ListChangelogInput, enabled = true) {
   return useQuery(
     {
       ...changelogQueryOptions(input),
-      enabled: enabled && input.workspaceId !== "",
+      enabled,
     },
   );
 }

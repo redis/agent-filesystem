@@ -44,6 +44,7 @@ const changelogStreamMaxLen = 100000
 // empty/zero values are elided at write time to keep stream entries compact.
 type ChangeEntry struct {
 	SessionID    string // session that caused the change; empty for server-initiated ops
+	AgentID      string // stable agent identity across multiple sessions; optional
 	User         string // authenticated principal (Clerk user, CLI token owner); optional
 	Label        string // human-readable session label; optional
 	AgentVersion string // client afs version; optional
@@ -68,6 +69,9 @@ func (e ChangeEntry) fields() map[string]any {
 	}
 	if e.SessionID != "" {
 		fields["session_id"] = e.SessionID
+	}
+	if e.AgentID != "" {
+		fields["agent_id"] = e.AgentID
 	}
 	if e.User != "" {
 		fields["user"] = e.User
@@ -347,6 +351,10 @@ func ChangeSessionContextFromContext(ctx context.Context) (ChangeSessionContext,
 // from the agent CLI to the control plane.
 const SessionIDHeader = "X-AFS-Session-Id"
 
+// AgentIDHeader is the optional HTTP header carrying a stable caller identity
+// for hosted or custom agent clients that cannot persist CLI config.
+const AgentIDHeader = "X-AFS-Agent-Id"
+
 // ChangelogListRequest parameterizes a changelog read. All fields optional.
 type ChangelogListRequest struct {
 	SessionID string // if set, entries are filtered to this session
@@ -369,6 +377,7 @@ type ChangelogEntryRow struct {
 	ID           string `json:"id"`
 	OccurredAt   string `json:"occurred_at,omitempty"`
 	SessionID    string `json:"session_id,omitempty"`
+	AgentID      string `json:"agent_id,omitempty"`
 	User         string `json:"user,omitempty"`
 	Label        string `json:"label,omitempty"`
 	AgentVersion string `json:"agent_version,omitempty"`
@@ -398,6 +407,7 @@ func rowFromStreamMessage(msg redis.XMessage) ChangelogEntryRow {
 		}
 	}
 	row.SessionID = getField("session_id")
+	row.AgentID = getField("agent_id")
 	row.User = getField("user")
 	row.Label = getField("label")
 	row.AgentVersion = getField("agent_version")
@@ -487,10 +497,10 @@ func (s *Store) ListChangelog(ctx context.Context, storageID string, req Changel
 // SessionChangelogSummary is the HGETALL result from a session summary hash,
 // decoded into the fields the UI actually needs.
 type SessionChangelogSummary struct {
-	SessionID   string         `json:"session_id"`
-	OpCounts    map[string]int `json:"op_counts"`
-	DeltaBytes  int64          `json:"delta_bytes"`
-	LastOpAt    string         `json:"last_op_at,omitempty"`
+	SessionID  string         `json:"session_id"`
+	OpCounts   map[string]int `json:"op_counts"`
+	DeltaBytes int64          `json:"delta_bytes"`
+	LastOpAt   string         `json:"last_op_at,omitempty"`
 }
 
 // GetSessionChangelogSummary reads the per-session rollup hash.
@@ -576,6 +586,7 @@ func (s *Service) buildChangelogTemplate(ctx context.Context, storageID, checkpo
 		// is attributable; just miss the richer label/version fields.
 		return template
 	}
+	template.AgentID = record.AgentID
 	template.Label = record.Label
 	template.AgentVersion = record.AFSVersion
 	return template

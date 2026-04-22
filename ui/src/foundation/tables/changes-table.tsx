@@ -2,6 +2,7 @@ import { Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
+import { shortDateTime } from "../time-format";
 import type { AFSChangelogEntry } from "../types/afs";
 import * as S from "./workspace-table.styles";
 
@@ -12,6 +13,8 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  emptyStateText?: string;
+  onOpenChange?: (entry: AFSChangelogEntry) => void;
 };
 
 function compareValues(
@@ -36,17 +39,13 @@ function formatSignedBytes(n?: number): string {
   return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function shortHash(h?: string): string {
-  if (!h) return "";
-  if (h.length <= 10) return h;
-  return h.slice(0, 8) + "…";
-}
-
 export function ChangesTable({
   rows,
   loading = false,
   error = false,
   errorMessage = "Unable to load changes. Please retry.",
+  emptyStateText = "No changes have been recorded for this workspace yet.",
+  onOpenChange,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<ChangesSortField>("occurredAt");
@@ -69,6 +68,9 @@ export function ChangesTable({
       return [
         row.path,
         row.prevPath ?? "",
+        row.workspaceName ?? "",
+        row.databaseName ?? "",
+        row.agentId ?? "",
         row.sessionId ?? "",
         row.label ?? "",
         row.user ?? "",
@@ -78,8 +80,14 @@ export function ChangesTable({
     });
 
     return [...baseRows].sort((left, right) => {
-      const leftValue = (left[sortBy] ?? "") as string | number;
-      const rightValue = (right[sortBy] ?? "") as string | number;
+      const leftValue =
+        sortBy === "sessionId"
+          ? (left.label ?? left.agentId ?? left.sessionId ?? "")
+          : ((left[sortBy] ?? "") as string | number);
+      const rightValue =
+        sortBy === "sessionId"
+          ? (right.label ?? right.agentId ?? right.sessionId ?? "")
+          : ((right[sortBy] ?? "") as string | number);
       return compareValues(leftValue, rightValue, sortDirection);
     });
   }, [rows, search, opFilter, sortBy, sortDirection]);
@@ -90,8 +98,12 @@ export function ChangesTable({
   );
 
   const columns = useMemo(
-    () =>
-      [
+    () => {
+      const showWorkspaceContext = rows.some(
+        (row) => Boolean(row.workspaceName?.trim()) || Boolean(row.databaseName?.trim()),
+      );
+
+      return [
         {
           accessorKey: "occurredAt",
           header: "When",
@@ -100,13 +112,7 @@ export function ChangesTable({
           cell: ({ row }) => {
             const iso = row.original.occurredAt;
             if (!iso) return "—";
-            const d = new Date(iso);
-            const now = new Date();
-            const isToday = d.toDateString() === now.toDateString();
-            const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-            if (isToday) return time;
-            const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-            return `${date} ${time}`;
+            return shortDateTime(iso);
           },
         },
         {
@@ -136,6 +142,26 @@ export function ChangesTable({
             </S.Stack>
           ),
         },
+        ...(showWorkspaceContext
+          ? [
+              {
+                id: "workspace",
+                header: "Workspace",
+                size: 170,
+                enableSorting: false,
+                cell: ({ row }) => (
+                  <S.Stack>
+                    <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? ""}>
+                      {row.original.workspaceName ?? row.original.workspaceId ?? "—"}
+                    </S.SingleLineText>
+                    <Typography.Body color="secondary" component="span">
+                      {row.original.databaseName ?? row.original.databaseId ?? "—"}
+                    </Typography.Body>
+                  </S.Stack>
+                ),
+              },
+            ]
+          : []),
         {
           accessorKey: "deltaBytes",
           header: "Delta",
@@ -153,14 +179,15 @@ export function ChangesTable({
         },
         {
           accessorKey: "sessionId",
-          header: "Session",
+          header: "Agent",
           size: 120,
           enableSorting: true,
           cell: ({ row }) => {
             const label = row.original.label?.trim();
+            const agentId = row.original.agentId?.trim();
             const sessionId = row.original.sessionId ?? "";
-            const display = label || sessionId.slice(0, 8) || "—";
-            const tooltip = [label, sessionId].filter(Boolean).join(" · ");
+            const display = label || agentId || sessionId.slice(0, 8) || "—";
+            const tooltip = [label, agentId, sessionId].filter(Boolean).join(" · ");
             return (
               <S.SingleLineText title={tooltip || display}>
                 {display}
@@ -168,30 +195,9 @@ export function ChangesTable({
             );
           },
         },
-        {
-          accessorKey: "source",
-          header: "Source",
-          size: 90,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.SingleLineText title={row.original.source ?? ""}>
-              {row.original.source ?? "—"}
-            </S.SingleLineText>
-          ),
-        },
-        {
-          accessorKey: "contentHash",
-          header: "Hash",
-          size: 90,
-          enableSorting: false,
-          cell: ({ row }) => (
-            <Typography.Body component="span" color="secondary" style={{ fontFamily: "monospace", fontSize: 12 }}>
-              {shortHash(row.original.contentHash)}
-            </Typography.Body>
-          ),
-        },
-      ] as ColumnDef<AFSChangelogEntry>[],
-    [],
+      ] as ColumnDef<AFSChangelogEntry>[];
+    },
+    [rows],
   );
 
   return (
@@ -200,7 +206,7 @@ export function ChangesTable({
         <S.SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search by path, session, user..."
+          placeholder="Search by path, agent, user..."
         />
         {ops.length > 1 ? (
           <OpFilter
@@ -214,7 +220,7 @@ export function ChangesTable({
       {loading ? <S.EmptyState>Loading changes...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
-        <S.EmptyState>No changes have been recorded for this workspace yet.</S.EmptyState>
+        <S.EmptyState>{emptyStateText}</S.EmptyState>
       ) : null}
 
       {!loading && !error && filteredRows.length > 0 ? (
@@ -223,8 +229,12 @@ export function ChangesTable({
             <Table
               columns={columns}
               data={filteredRows}
+              getRowId={(row) =>
+                `${row.databaseId ?? "all"}:${row.workspaceId ?? "unknown"}:${row.id}`
+              }
               sorting={sorting}
               manualSorting
+              onRowClick={onOpenChange}
               onSortingChange={(nextState) => {
                 if (nextState.length === 0) {
                   setSortBy("occurredAt");

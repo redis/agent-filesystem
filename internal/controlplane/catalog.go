@@ -83,6 +83,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			workspace_id TEXT NOT NULL,
 			database_id TEXT NOT NULL,
 			workspace_name TEXT NOT NULL DEFAULT '',
+			agent_id TEXT NOT NULL DEFAULT '',
 			client_kind TEXT NOT NULL DEFAULT '',
 			afs_version TEXT NOT NULL DEFAULT '',
 			hostname TEXT NOT NULL DEFAULT '',
@@ -186,6 +187,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS database_management_type TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE session_catalog ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 		}
@@ -205,6 +207,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE workspace_catalog ADD COLUMN database_management_type TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE session_catalog ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 	}

@@ -107,6 +107,37 @@ func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 	}
 }
 
+func TestCmdConfigSetAgentNamePersistsFriendlyAgentName(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	if err := cmdConfig([]string{"config", "set", "agent.name", "Claude Code"}); err != nil {
+		t.Fatalf("cmdConfig(set agent.name) returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.Name != "Claude Code" {
+		t.Fatalf("agent name = %q, want %q", cfg.Name, "Claude Code")
+	}
+
+	value, err := getConfigKey(cfg, "agent.name")
+	if err != nil {
+		t.Fatalf("getConfigKey(agent.name) returned error: %v", err)
+	}
+	if value != "Claude Code" {
+		t.Fatalf("getConfigKey(agent.name) = %q, want %q", value, "Claude Code")
+	}
+}
+
 func TestCmdConfigSetPersistsSelfHostedControlPlaneSettings(t *testing.T) {
 	t.Helper()
 

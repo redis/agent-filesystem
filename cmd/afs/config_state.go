@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -87,6 +89,46 @@ func defaultConfig() config {
 	}
 }
 
+func newAgentID() (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "agt_" + hex.EncodeToString(raw[:]), nil
+}
+
+func defaultAgentName() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(hostname)
+}
+
+func ensureAgentIdentity(cfg *config) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	changed := false
+	if strings.TrimSpace(cfg.ID) != "" {
+		cfg.ID = strings.TrimSpace(cfg.ID)
+	} else {
+		agentID, err := newAgentID()
+		if err != nil {
+			return false, err
+		}
+		cfg.ID = agentID
+		changed = true
+	}
+	if strings.TrimSpace(cfg.Name) != "" {
+		cfg.Name = strings.TrimSpace(cfg.Name)
+	} else if name := defaultAgentName(); name != "" {
+		cfg.Name = name
+		changed = true
+	}
+	return changed, nil
+}
+
 func loadConfigOrDefault() config {
 	cfg, err := loadConfig()
 	if err == nil {
@@ -121,6 +163,8 @@ func prepareConfigForSave(cfg *config) error {
 	if productMode != productModeCloud {
 		cfg.AuthToken = ""
 	}
+	cfg.ID = strings.TrimSpace(cfg.ID)
+	cfg.Name = strings.TrimSpace(cfg.Name)
 
 	if cfg.LocalPath != "" {
 		mp, err := expandPath(cfg.LocalPath)

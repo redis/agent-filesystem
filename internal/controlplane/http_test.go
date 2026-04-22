@@ -380,6 +380,7 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	}
 	callReq.Header.Set("Content-Type", "application/json")
 	callReq.Header.Set("Authorization", "Bearer "+token.Token)
+	callReq.Header.Set(AgentIDHeader, "agt_hosted")
 	callReq.Header.Set("X-AFS-Hostname", "devbox")
 	callReq.Header.Set("X-AFS-Client-Kind", "mcp")
 	callResp, err := http.DefaultClient.Do(callReq)
@@ -428,6 +429,9 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	}
 	if sessions.Items[0].ClientKind != "mcp" {
 		t.Fatalf("agent client_kind = %q, want %q", sessions.Items[0].ClientKind, "mcp")
+	}
+	if sessions.Items[0].AgentID != "agt_hosted" {
+		t.Fatalf("agent agent_id = %q, want %q", sessions.Items[0].AgentID, "agt_hosted")
 	}
 	if sessions.Items[0].WorkspaceName != "repo" {
 		t.Fatalf("agent workspace_name = %q, want %q", sessions.Items[0].WorkspaceName, "repo")
@@ -754,7 +758,7 @@ func TestHTTPClientWorkspaceSession(t *testing.T) {
 	resp, err := http.Post(
 		server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions",
 		"application/json",
-		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
+		strings.NewReader(`{"agent_id":"agt_http","client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
 	)
 	if err != nil {
 		t.Fatalf("POST client workspace session returned error: %v", err)
@@ -796,7 +800,7 @@ func TestHTTPClientWorkspaceSessionHeartbeatAndClose(t *testing.T) {
 	resp, err := http.Post(
 		server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions",
 		"application/json",
-		strings.NewReader(`{"client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
+		strings.NewReader(`{"agent_id":"agt_http","client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
 	)
 	if err != nil {
 		t.Fatalf("POST client workspace session returned error: %v", err)
@@ -824,6 +828,9 @@ func TestHTTPClientWorkspaceSessionHeartbeatAndClose(t *testing.T) {
 	}
 	if len(sessions.Items) != 1 {
 		t.Fatalf("len(session list) = %d, want 1", len(sessions.Items))
+	}
+	if sessions.Items[0].AgentID != "agt_http" {
+		t.Fatalf("listed agent_id = %q, want %q", sessions.Items[0].AgentID, "agt_http")
 	}
 
 	resp, err = http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID+"/heartbeat", "application/json", nil)

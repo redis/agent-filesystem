@@ -6,62 +6,14 @@ import {
   SectionHeader,
   SectionTitle,
 } from "../../components/afs-kit";
+import { computeChangelogTotals, formatChangelogBytes } from "../../foundation/changelog-utils";
 import { ChangesTable } from "../../foundation/tables/changes-table";
 import { useChangelog } from "../../foundation/hooks/use-afs";
-import type { AFSChangelogEntry } from "../../foundation/types/afs";
 
 type Props = {
   databaseId?: string;
   workspaceId: string;
 };
-
-type Totals = {
-  added: number;
-  modified: number;
-  deleted: number;
-  bytesAdded: number;
-  bytesRemoved: number;
-};
-
-function computeTotals(entries: AFSChangelogEntry[]): Totals {
-  let added = 0;
-  let modified = 0;
-  let deleted = 0;
-  let bytesAdded = 0;
-  let bytesRemoved = 0;
-  for (const entry of entries) {
-    switch (entry.op) {
-      case "put":
-      case "symlink":
-      case "mkdir":
-        if (entry.prevHash) {
-          modified += 1;
-        } else {
-          added += 1;
-        }
-        break;
-      case "delete":
-      case "rmdir":
-        deleted += 1;
-        break;
-      case "chmod":
-        modified += 1;
-        break;
-    }
-    const delta = entry.deltaBytes ?? 0;
-    if (delta > 0) bytesAdded += delta;
-    if (delta < 0) bytesRemoved += -delta;
-  }
-  return { added, modified, deleted, bytesAdded, bytesRemoved };
-}
-
-function formatBytes(n: number): string {
-  if (n === 0) return "0 B";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
 
 export function ChangesTab({ databaseId, workspaceId }: Props) {
   const query = useChangelog({
@@ -72,7 +24,7 @@ export function ChangesTab({ databaseId, workspaceId }: Props) {
   });
 
   const entries = query.data?.entries ?? [];
-  const totals = useMemo(() => computeTotals(entries), [entries]);
+  const totals = useMemo(() => computeChangelogTotals(entries), [entries]);
   const hasEntries = entries.length > 0;
 
   return (
@@ -86,9 +38,9 @@ export function ChangesTab({ databaseId, workspaceId }: Props) {
                 <strong>{totals.added}</strong> added ·{" "}
                 <strong>{totals.modified}</strong> modified ·{" "}
                 <strong>{totals.deleted}</strong> deleted ·{" "}
-                <PositiveDelta>+{formatBytes(totals.bytesAdded)}</PositiveDelta>
+                <PositiveDelta>+{formatChangelogBytes(totals.bytesAdded)}</PositiveDelta>
                 {" / "}
-                <NegativeDelta>−{formatBytes(totals.bytesRemoved)}</NegativeDelta>
+                <NegativeDelta>−{formatChangelogBytes(totals.bytesRemoved)}</NegativeDelta>
               </>
             ) : (
               "No changes yet"

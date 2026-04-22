@@ -453,6 +453,15 @@ func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, fun
 	if err != nil {
 		return mountBootstrap{}, func() {}, err
 	}
+	if changed, err := ensureAgentIdentity(&resolvedCfg); err != nil {
+		closeFn()
+		return mountBootstrap{}, func() {}, err
+	} else if changed {
+		if err := saveConfig(resolvedCfg); err != nil {
+			closeFn()
+			return mountBootstrap{}, func() {}, err
+		}
+	}
 
 	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
 	if err != nil {

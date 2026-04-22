@@ -41,11 +41,17 @@ type controlPlaneSettings struct {
 	Account    string `json:"account,omitempty"`
 }
 
+type agentSettings struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+}
+
 // config captures the persisted CLI/runtime settings for the AFS surface.
 // The JSON tags define the on-disk format.
 type config struct {
 	redisConfig          `json:"redis"`
 	controlPlaneSettings `json:"controlPlane,omitempty"`
+	agentSettings        `json:"agent,omitempty"`
 	ProductMode          string `json:"productMode,omitempty"`
 	Mode                 string `json:"mode,omitempty"`
 	CurrentWorkspace     string `json:"currentWorkspace"`

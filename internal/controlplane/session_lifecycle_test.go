@@ -39,6 +39,7 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 	service := NewService(cfg, store)
 
 	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		AgentID:         "agt_devbox",
 		ClientKind:      "sync",
 		Hostname:        "devbox",
 		OperatingSystem: "darwin",
@@ -57,6 +58,9 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 	}
 	if len(sessions.Items) != 1 {
 		t.Fatalf("len(ListWorkspaceSessions().Items) = %d, want 1", len(sessions.Items))
+	}
+	if sessions.Items[0].AgentID != "agt_devbox" {
+		t.Fatalf("listed agent_id = %q, want %q", sessions.Items[0].AgentID, "agt_devbox")
 	}
 	if sessions.Items[0].State != workspaceSessionStateStarting {
 		t.Fatalf("session state = %q, want %q", sessions.Items[0].State, workspaceSessionStateStarting)
@@ -197,6 +201,7 @@ func TestServiceWorkspaceSessionCatalogLifecycle(t *testing.T) {
 
 	service := NewServiceWithCatalog(cfg, store, catalog, "redis-test", "test")
 	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		AgentID:         "agt_catalog",
 		ClientKind:      "sync",
 		Hostname:        "devbox",
 		OperatingSystem: "darwin",
@@ -212,6 +217,9 @@ func TestServiceWorkspaceSessionCatalogLifecycle(t *testing.T) {
 	}
 	if catalogRecord.WorkspaceID != summary.ID {
 		t.Fatalf("catalog workspace_id = %q, want %q", catalogRecord.WorkspaceID, summary.ID)
+	}
+	if catalogRecord.AgentID != "agt_catalog" {
+		t.Fatalf("catalog agent_id = %q, want %q", catalogRecord.AgentID, "agt_catalog")
 	}
 	if catalogRecord.State != workspaceSessionStateStarting {
 		t.Fatalf("catalog state = %q, want %q", catalogRecord.State, workspaceSessionStateStarting)

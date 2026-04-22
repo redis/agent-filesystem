@@ -43,6 +43,15 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 	if err != nil {
 		return syncBootstrap{}, func() {}, err
 	}
+	if changed, err := ensureAgentIdentity(&resolvedCfg); err != nil {
+		closeFn()
+		return syncBootstrap{}, func() {}, err
+	} else if changed {
+		if err := saveConfig(resolvedCfg); err != nil {
+			closeFn()
+			return syncBootstrap{}, func() {}, err
+		}
+	}
 
 	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
 	if err != nil {
@@ -143,6 +152,8 @@ func startSyncServices(cfg config, foreground bool) error {
 		Rdb:          rdb,
 		StorageID:    bootstrap.redisKey,
 		SessionID:    bootstrap.sessionID,
+		AgentID:      runtimeCfg.ID,
+		Label:        runtimeCfg.Name,
 		AgentVersion: version.String(),
 	})
 	if err != nil {
@@ -373,6 +384,8 @@ func runSyncDaemon() error {
 		Rdb:          rdb,
 		StorageID:    mountKey,
 		SessionID:    sessionID,
+		AgentID:      cfg.ID,
+		Label:        cfg.Name,
 		AgentVersion: version.String(),
 	})
 	if err != nil {

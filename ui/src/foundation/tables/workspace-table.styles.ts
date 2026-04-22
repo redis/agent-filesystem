@@ -13,7 +13,14 @@ export const TableViewport = styled.div`
   overflow: auto;
 
   table {
-    width: 100% !important;
+    table-layout: auto !important;
+    width: max-content !important;
+    min-width: 100% !important;
+  }
+
+  thead th,
+  tbody td {
+    width: auto !important;
   }
 
   thead th {

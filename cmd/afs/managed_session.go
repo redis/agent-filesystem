@@ -28,10 +28,12 @@ func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSess
 	}
 	return controlplane.CreateWorkspaceSessionRequest{
 		ClientKind:      clientKind,
+		AgentID:         strings.TrimSpace(cfg.ID),
 		AFSVersion:      "dev",
 		Hostname:        strings.TrimSpace(hostname),
 		OperatingSystem: runtime.GOOS,
 		LocalPath:       strings.TrimSpace(cfg.LocalPath),
+		Label:           strings.TrimSpace(cfg.Name),
 		Readonly:        cfg.ReadOnly,
 	}
 }

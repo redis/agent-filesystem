@@ -70,6 +70,7 @@ type SavepointMeta struct {
 type WorkspaceSessionRecord struct {
 	SessionID       string    `json:"session_id"`
 	Workspace       string    `json:"workspace"`
+	AgentID         string    `json:"agent_id,omitempty"`
 	ClientKind      string    `json:"client_kind,omitempty"`
 	AFSVersion      string    `json:"afs_version,omitempty"`
 	Hostname        string    `json:"hostname,omitempty"`

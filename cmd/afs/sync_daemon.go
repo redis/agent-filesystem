@@ -19,14 +19,14 @@ import (
 // grouped by concern: the workspace and root path, the Redis client, and
 // optional knobs (size cap, debounce, readonly).
 type syncDaemonConfig struct {
-	Workspace      string
-	LocalRoot      string // absolute, will be created if missing
-	FS             client.Client
-	Store          *afsStore
-	MaxFileBytes   int64
+	Workspace       string
+	LocalRoot       string // absolute, will be created if missing
+	FS              client.Client
+	Store           *afsStore
+	MaxFileBytes    int64
 	WatcherDebounce time.Duration
-	Readonly       bool
-	Interactive    bool // when true, log every file event to stderr
+	Readonly        bool
+	Interactive     bool // when true, log every file event to stderr
 	// Chunk-level delta sync knobs. Zero values use defaults.
 	ChunkSize      int // bytes per chunk (default 256 KB)
 	ChunkThreshold int // minimum file size to enable chunked sync (default 1 MB)
@@ -38,6 +38,7 @@ type syncDaemonConfig struct {
 	StorageID    string
 	SessionID    string
 	User         string
+	AgentID      string
 	Label        string
 	AgentVersion string
 }
@@ -48,16 +49,16 @@ type syncDaemon struct {
 	cfg syncDaemonConfig
 	log *syncLogger
 
-	stateWriter   *stateWriter
-	reconciler    *reconciler
-	uploader      *uploader
-	downloader    *downloader
-	pump          *remoteSubscriptionPump
-	watcher       *syncWatcher
-	full          *fullReconciler
-	echo          *echoSuppressor
-	conflict      *conflictNamer
-	ignore        *syncIgnore
+	stateWriter *stateWriter
+	reconciler  *reconciler
+	uploader    *uploader
+	downloader  *downloader
+	pump        *remoteSubscriptionPump
+	watcher     *syncWatcher
+	full        *fullReconciler
+	echo        *echoSuppressor
+	conflict    *conflictNamer
+	ignore      *syncIgnore
 
 	wg     sync.WaitGroup
 	cancel context.CancelFunc
@@ -126,7 +127,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	if cfg.Rdb != nil && strings.TrimSpace(cfg.StorageID) != "" && strings.TrimSpace(cfg.SessionID) != "" {
-		d.uploader.attachChangelog(cfg.Rdb, cfg.StorageID, cfg.SessionID, cfg.User, cfg.Label, cfg.AgentVersion)
+		d.uploader.attachChangelog(cfg.Rdb, cfg.StorageID, cfg.SessionID, cfg.User, cfg.AgentID, cfg.Label, cfg.AgentVersion)
 	}
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
 	d.pump = newRemoteSubscriptionPump(cfg.FS, log, stateWriter)

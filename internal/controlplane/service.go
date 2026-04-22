@@ -202,6 +202,7 @@ type restoreCheckpointRequest struct {
 }
 
 type createWorkspaceSessionRequest struct {
+	AgentID         string `json:"agent_id,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`
 	Hostname        string `json:"hostname,omitempty"`
@@ -231,6 +232,7 @@ type workspaceSessionInfo struct {
 	WorkspaceName   string `json:"workspace_name,omitempty"`
 	DatabaseID      string `json:"database_id,omitempty"`
 	DatabaseName    string `json:"database_name,omitempty"`
+	AgentID         string `json:"agent_id,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`
 	Hostname        string `json:"hostname,omitempty"`
@@ -474,6 +476,7 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 	record := WorkspaceSessionRecord{
 		SessionID:       sessionID,
 		Workspace:       workspace,
+		AgentID:         strings.TrimSpace(input.AgentID),
 		ClientKind:      strings.TrimSpace(input.ClientKind),
 		AFSVersion:      strings.TrimSpace(input.AFSVersion),
 		Hostname:        strings.TrimSpace(input.Hostname),
@@ -531,6 +534,7 @@ func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, session
 		}
 	}
 	record.ClientKind = strings.TrimSpace(input.ClientKind)
+	record.AgentID = strings.TrimSpace(input.AgentID)
 	record.AFSVersion = strings.TrimSpace(input.AFSVersion)
 	record.Hostname = strings.TrimSpace(input.Hostname)
 	record.OperatingSystem = strings.TrimSpace(input.OperatingSystem)
@@ -665,7 +669,8 @@ func ManifestBlobRefs(m Manifest) map[string]int64 {
 }
 
 func shouldTrackWorkspaceSession(input createWorkspaceSessionRequest) bool {
-	return strings.TrimSpace(input.ClientKind) != "" ||
+	return strings.TrimSpace(input.AgentID) != "" ||
+		strings.TrimSpace(input.ClientKind) != "" ||
 		strings.TrimSpace(input.Hostname) != "" ||
 		strings.TrimSpace(input.OperatingSystem) != "" ||
 		strings.TrimSpace(input.LocalPath) != "" ||
@@ -676,6 +681,7 @@ func workspaceSessionInfoFromRecord(record WorkspaceSessionRecord) workspaceSess
 	return workspaceSessionInfo{
 		SessionID:       record.SessionID,
 		Workspace:       record.Workspace,
+		AgentID:         record.AgentID,
 		ClientKind:      record.ClientKind,
 		AFSVersion:      record.AFSVersion,
 		Hostname:        record.Hostname,
@@ -764,6 +770,7 @@ func (s *Service) listWorkspaceSessionsFromCatalog(ctx context.Context, workspac
 		items = append(items, workspaceSessionInfo{
 			SessionID:       record.SessionID,
 			Workspace:       defaultString(record.WorkspaceName, meta.Name),
+			AgentID:         record.AgentID,
 			ClientKind:      record.ClientKind,
 			AFSVersion:      record.AFSVersion,
 			Hostname:        record.Hostname,

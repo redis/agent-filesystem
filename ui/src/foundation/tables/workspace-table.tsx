@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
+import { shortDateTime } from "../time-format";
 import type { AFSWorkspaceSummary } from "../types/afs";
 import { displayWorkspaceName } from "../workspace-display";
 import type { StudioTab } from "../workspace-tabs";
@@ -22,18 +23,6 @@ type WorkspaceSortField =
   | "updatedAt";
 
 type RowWorkspaceSortField = Exclude<WorkspaceSortField, "connectedAgents">;
-
-/** Short date like "4/16 5:04p" */
-function shortDateTime(iso: string): string {
-  const d = new Date(iso);
-  const month = d.getMonth() + 1;
-  const day = d.getDate();
-  let hours = d.getHours();
-  const minutes = d.getMinutes();
-  const ampm = hours >= 12 ? "p" : "a";
-  hours = hours % 12 || 12;
-  return `${month}/${day} ${hours}:${minutes.toString().padStart(2, "0")}${ampm}`;
-}
 
 /** Spelled-out relative time: "5 seconds ago", "2 minutes ago", "3 hours ago", "4 days ago" */
 function relativeTimeAgo(iso: string): string {
@@ -173,7 +162,7 @@ export function WorkspaceTable({
                   {displayWorkspaceName(row.original.name)}
                 </WorkspaceNameButton>
                 <IdRow>
-                  <IdText title={id}>{shortenId(id)}</IdText>
+                  <IdText title={id}>{id}</IdText>
                   <CopyButton
                     type="button"
                     aria-label={`Copy workspace ID ${id}`}
@@ -418,11 +407,6 @@ const WorkspaceTableViewport = styled(S.DenseTableViewport)`
   }
 `;
 
-function shortenId(id: string): string {
-  if (id.length <= 18) return id;
-  return `${id.slice(0, 18)}…`;
-}
-
 const SizeCell = styled.span`
   font-size: 13px;
   color: var(--afs-ink, #18181b);
@@ -436,6 +420,7 @@ const DetailsMuted = styled.span`
 
 const NameStack = styled.div`
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
@@ -457,16 +442,23 @@ const NameIconBox = styled.span`
 `;
 
 const IdRow = styled.div`
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: 100%;
   gap: 4px;
+  min-width: 0;
 `;
 
 const IdText = styled.span`
+  flex: 1 1 auto;
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 11px;
   color: var(--afs-muted, #71717a);
   line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const DatabaseName = styled.span`
@@ -482,6 +474,7 @@ const CopyButton = styled.button`
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 16px;
   height: 16px;
   padding: 0;
@@ -559,7 +552,13 @@ const UpdatedDate = styled.span`
 
 const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
   && {
+    flex: 1 1 auto;
     font-weight: 700;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 `;
 

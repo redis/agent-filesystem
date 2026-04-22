@@ -14,6 +14,7 @@ type sessionCatalogRecord struct {
 	WorkspaceID     string
 	DatabaseID      string
 	WorkspaceName   string
+	AgentID         string
 	ClientKind      string
 	AFSVersion      string
 	Hostname        string
@@ -70,6 +71,7 @@ func (c *workspaceCatalog) UpsertSession(ctx context.Context, item sessionCatalo
 		strings.TrimSpace(item.WorkspaceID),
 		strings.TrimSpace(item.DatabaseID),
 		strings.TrimSpace(item.WorkspaceName),
+		strings.TrimSpace(item.AgentID),
 		strings.TrimSpace(item.ClientKind),
 		strings.TrimSpace(item.AFSVersion),
 		strings.TrimSpace(item.Hostname),
@@ -98,6 +100,7 @@ func (c *workspaceCatalog) ListSessionsForWorkspace(ctx context.Context, workspa
 			workspace_id,
 			database_id,
 			workspace_name,
+			agent_id,
 			client_kind,
 			afs_version,
 			hostname,
@@ -133,6 +136,7 @@ func (c *workspaceCatalog) ListSessionsForWorkspace(ctx context.Context, workspa
 			&item.WorkspaceID,
 			&item.DatabaseID,
 			&item.WorkspaceName,
+			&item.AgentID,
 			&item.ClientKind,
 			&item.AFSVersion,
 			&item.Hostname,
@@ -182,6 +186,7 @@ func (c *workspaceCatalog) ListSessions(ctx context.Context, databaseID string) 
 			workspace_id,
 			database_id,
 			workspace_name,
+			agent_id,
 			client_kind,
 			afs_version,
 			hostname,
@@ -222,6 +227,7 @@ func (c *workspaceCatalog) ListSessions(ctx context.Context, databaseID string) 
 			&item.WorkspaceID,
 			&item.DatabaseID,
 			&item.WorkspaceName,
+			&item.AgentID,
 			&item.ClientKind,
 			&item.AFSVersion,
 			&item.Hostname,
@@ -255,6 +261,7 @@ func (c *workspaceCatalog) GetSession(ctx context.Context, sessionID string) (se
 			workspace_id,
 			database_id,
 			workspace_name,
+			agent_id,
 			client_kind,
 			afs_version,
 			hostname,
@@ -280,6 +287,7 @@ func (c *workspaceCatalog) GetSession(ctx context.Context, sessionID string) (se
 		&item.WorkspaceID,
 		&item.DatabaseID,
 		&item.WorkspaceName,
+		&item.AgentID,
 		&item.ClientKind,
 		&item.AFSVersion,
 		&item.Hostname,
@@ -313,6 +321,7 @@ func workspaceSessionCatalogRecord(route workspaceCatalogRoute, meta WorkspaceMe
 		WorkspaceID:     route.WorkspaceID,
 		DatabaseID:      route.DatabaseID,
 		WorkspaceName:   defaultString(route.Name, meta.Name),
+		AgentID:         record.AgentID,
 		ClientKind:      record.ClientKind,
 		AFSVersion:      record.AFSVersion,
 		Hostname:        record.Hostname,
@@ -360,6 +369,7 @@ const sessionCatalogUpsertSQL = `INSERT INTO session_catalog (
 	workspace_id,
 	database_id,
 	workspace_name,
+	agent_id,
 	client_kind,
 	afs_version,
 	hostname,
@@ -373,11 +383,12 @@ const sessionCatalogUpsertSQL = `INSERT INTO session_catalog (
 	closed_at,
 	close_reason,
 	updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
 	workspace_id = excluded.workspace_id,
 	database_id = excluded.database_id,
 	workspace_name = excluded.workspace_name,
+	agent_id = excluded.agent_id,
 	client_kind = excluded.client_kind,
 	afs_version = excluded.afs_version,
 	hostname = excluded.hostname,

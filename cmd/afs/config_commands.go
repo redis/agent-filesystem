@@ -908,6 +908,7 @@ Flags:
 Examples:
   %s config set redis.url rediss://user:pass@redis.example:6379/4
   %s config set config.source self-managed
+  %s config set agent.name "Claude Code"
   %s config set --redis-url rediss://user:pass@redis.example:6379/4 --mount-backend nfs --mountpoint ~/demo
   %s config set controlPlane.url http://127.0.0.1:8091
   %s config set mount.backend nfs
@@ -918,7 +919,7 @@ Notes:
   Use "self-managed" for the control-plane-backed mode.
   Current workspace is not configured here; use '%s workspace use <workspace>'.
   Existing runtime paths stay available in afs.config.json.
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configUnsetUsageText(bin string) string {
@@ -1068,6 +1069,7 @@ func configSummaryRows(cfg config, source string) []boxRow {
 		{Label: "source", Value: source},
 		{Label: "config source", Value: userFacingConfigSource(cfg)},
 		{Label: "database", Value: publicRedisURL(cfg)},
+		{Label: "agent", Value: agentConfigLabel(cfg)},
 		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
 		{Label: "mount", Value: mountValue},
 		{Label: "readonly", Value: strconv.FormatBool(cfg.ReadOnly)},
@@ -1093,6 +1095,7 @@ func publicRedisURL(cfg config) string {
 func configKeys() []string {
 	return []string{
 		"config.source",
+		"agent.name",
 		"controlPlane.url",
 		"controlPlane.database",
 		"redis.url",
@@ -1149,6 +1152,8 @@ func normalizeConfigKey(key string) string {
 	switch strings.ToLower(key) {
 	case "config.source", "configsource", "connection", "productmode":
 		return "config.source"
+	case "agent.name", "agentname":
+		return "agent.name"
 	case "controlplane.url", "controlplaneurl":
 		return "controlPlane.url"
 	case "controlplane.database", "controlplanedatabase", "controlplane.databaseid", "controlplanedatabaseid":
@@ -1177,6 +1182,11 @@ func getConfigKey(cfg config, key string) (string, error) {
 			return clr(ansiDim, "unset"), nil
 		}
 		return cfg.URL, nil
+	case "agent.name":
+		if strings.TrimSpace(cfg.Name) == "" {
+			return clr(ansiDim, "unset"), nil
+		}
+		return cfg.Name, nil
 	case "controlPlane.database":
 		if strings.TrimSpace(cfg.DatabaseID) == "" {
 			return clr(ansiDim, "auto"), nil
@@ -1224,6 +1234,8 @@ func setConfigKey(cfg *config, key, value string) error {
 		cfg.URL = strings.TrimSpace(value)
 		cfg.DatabaseID = ""
 		cfg.CurrentWorkspaceID = ""
+	case "agent.name":
+		cfg.Name = strings.TrimSpace(value)
 	case "controlPlane.database":
 		cfg.DatabaseID = strings.TrimSpace(value)
 	case "redis.url":
@@ -1262,6 +1274,8 @@ func unsetConfigKey(cfg *config, key string) error {
 	case "controlPlane.url":
 		cfg.URL = ""
 		cfg.CurrentWorkspaceID = ""
+	case "agent.name":
+		cfg.Name = ""
 	case "controlPlane.database":
 		cfg.DatabaseID = ""
 	case "redis.url":
@@ -1306,4 +1320,15 @@ func parseUserFacingConfigSource(value string) (string, error) {
 	default:
 		return "", fmt.Errorf("config.source must be one of: local, self-managed, cloud")
 	}
+}
+
+func agentConfigLabel(cfg config) string {
+	name := strings.TrimSpace(cfg.Name)
+	if name == "" {
+		return clr(ansiDim, "unset")
+	}
+	if id := strings.TrimSpace(cfg.ID); id != "" {
+		return fmt.Sprintf("%s (%s)", name, id)
+	}
+	return name
 }

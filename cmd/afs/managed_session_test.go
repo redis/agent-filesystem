@@ -19,8 +19,18 @@ func TestManagedWorkspaceSessionRequestUsesManagedMetadata(t *testing.T) {
 
 	req := managedWorkspaceSessionRequest(config{
 		ProductMode: productModeSelfHosted,
-		LocalPath:   "/tmp/repo",
+		agentSettings: agentSettings{
+			ID:   "agt_test123",
+			Name: "Rowan's Agent",
+		},
+		LocalPath: "/tmp/repo",
 	})
+	if req.AgentID != "agt_test123" {
+		t.Fatalf("AgentID = %q, want %q", req.AgentID, "agt_test123")
+	}
+	if req.Label != "Rowan's Agent" {
+		t.Fatalf("Label = %q, want %q", req.Label, "Rowan's Agent")
+	}
 	if req.ClientKind != "sync" {
 		t.Fatalf("ClientKind = %q, want %q", req.ClientKind, "sync")
 	}
