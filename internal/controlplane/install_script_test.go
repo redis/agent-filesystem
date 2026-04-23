@@ -9,14 +9,14 @@ import (
 func TestRenderInstallScriptInjectsRequestOrigin(t *testing.T) {
 	t.Setenv(ProductModeEnvVar, ProductModeCloud)
 	req := httptest.NewRequest("GET", "/install.sh", nil)
-	req.Host = "redis-afs.com"
+	req.Host = "afs.cloud"
 	req.Header.Set("X-Forwarded-Proto", "https")
 
 	body, err := renderInstallScript(req)
 	if err != nil {
 		t.Fatalf("renderInstallScript returned error: %v", err)
 	}
-	if !strings.Contains(body, `CONTROL_PLANE="https://redis-afs.com"`) {
+	if !strings.Contains(body, `CONTROL_PLANE="https://afs.cloud"`) {
 		t.Fatalf("install script missing baked control plane; got:\n%s", body)
 	}
 	for _, want := range []string{
@@ -86,7 +86,7 @@ func TestInstallScriptSelfHostedAutoConfigures(t *testing.T) {
 func TestInstallScriptCloudShowsLoginPrompt(t *testing.T) {
 	t.Setenv(ProductModeEnvVar, ProductModeCloud)
 	req := httptest.NewRequest("GET", "/install.sh", nil)
-	req.Host = "agentfilesystem.ai"
+	req.Host = "afs.cloud"
 	req.Header.Set("X-Forwarded-Proto", "https")
 
 	body, err := renderInstallScript(req)

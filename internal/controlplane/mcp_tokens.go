@@ -206,33 +206,49 @@ func (m *DatabaseManager) ListAllMCPAccessTokens(ctx context.Context) ([]mcpAcce
 }
 
 func (m *DatabaseManager) RevokeResolvedMCPAccessToken(ctx context.Context, workspace, tokenID string) error {
-	if m == nil || m.catalog == nil {
-		return fmt.Errorf("mcp token storage is unavailable")
-	}
-	subject := authSubjectFromContext(ctx)
-	_, profile, route, err := m.resolveWorkspace(ctx, workspace)
-	if err != nil {
-		return err
-	}
-	if !databaseProfileVisibleToSubject(profile, subject) {
-		return os.ErrNotExist
-	}
-	return m.catalog.RevokeMCPAccessToken(ctx, strings.TrimSpace(tokenID), profile.ID, route.WorkspaceID, time.Now().UTC().Format(timeRFC3339))
+	return m.revokeTokenByID(ctx, "", workspace, tokenID)
 }
 
 func (m *DatabaseManager) RevokeMCPAccessToken(ctx context.Context, databaseID, workspace, tokenID string) error {
+	return m.revokeTokenByID(ctx, databaseID, workspace, tokenID)
+}
+
+// revokeTokenByID revokes a token using the token record as the source of truth,
+// so orphaned tokens whose workspace was deleted can still be removed. The optional
+// databaseID and workspace are scope hints from the URL and must agree with the
+// stored token record when provided.
+func (m *DatabaseManager) revokeTokenByID(ctx context.Context, databaseID, workspace, tokenID string) error {
 	if m == nil || m.catalog == nil {
 		return fmt.Errorf("mcp token storage is unavailable")
 	}
-	subject := authSubjectFromContext(ctx)
-	_, profile, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return os.ErrNotExist
+	}
+	record, err := m.catalog.GetMCPAccessToken(ctx, tokenID)
 	if err != nil {
 		return err
 	}
-	if !databaseProfileVisibleToSubject(profile, subject) {
+	if strings.TrimSpace(record.RevokedAt) != "" {
 		return os.ErrNotExist
 	}
-	return m.catalog.RevokeMCPAccessToken(ctx, strings.TrimSpace(tokenID), profile.ID, route.WorkspaceID, time.Now().UTC().Format(timeRFC3339))
+	if scoped := strings.TrimSpace(databaseID); scoped != "" && scoped != record.DatabaseID {
+		return os.ErrNotExist
+	}
+	if scoped := strings.TrimSpace(workspace); scoped != "" && scoped != record.WorkspaceID && scoped != record.WorkspaceName {
+		return os.ErrNotExist
+	}
+	m.mu.Lock()
+	profile, profileExists := m.profiles[record.DatabaseID]
+	m.mu.Unlock()
+	subject := authSubjectFromContext(ctx)
+	if !profileExists || !databaseProfileVisibleToSubject(profile, subject) {
+		return os.ErrNotExist
+	}
+	if subject != "" && strings.TrimSpace(record.OwnerSubject) != "" && strings.TrimSpace(record.OwnerSubject) != subject {
+		return os.ErrNotExist
+	}
+	return m.catalog.RevokeMCPAccessToken(ctx, tokenID, record.DatabaseID, record.WorkspaceID, time.Now().UTC().Format(timeRFC3339))
 }
 
 func (m *DatabaseManager) AuthenticateMCPAccessToken(ctx context.Context, rawToken string) (mcpAccessTokenRecord, error) {

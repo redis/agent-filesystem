@@ -10,8 +10,8 @@ import (
 
 // installScriptTemplate is the source of /install.sh. It points the downloader
 // at the same control plane that served the script, so whichever domain the
-// user curls (redis-afs.com, agentfilesystem.ai, localhost:8091) is where the
-// binary comes from.
+// user curls (afs.cloud, localhost:8091, or a self-managed host) is where
+// the binary comes from.
 const installScriptTemplate = `#!/usr/bin/env bash
 #
 # Agent Filesystem CLI installer

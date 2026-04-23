@@ -13,6 +13,7 @@ import {
 import styled from "styled-components";
 import { CreateMCPAccessDialog } from "../features/agents/CreateMCPAccessDialog";
 import { LocalMCPAccessDialog } from "../features/agents/LocalMCPAccessDialog";
+import { MCPEmptyState } from "../components/mcp-empty-state";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 import {
@@ -126,29 +127,39 @@ function MCPPage() {
       {allTokensQuery.error instanceof Error ? (
         <DialogError role="alert">{allTokensQuery.error.message}</DialogError>
       ) : null}
-      <MCPServersTable
-        rows={filteredTokens}
-        loading={allTokensQuery.isLoading}
-        error={allTokensQuery.isError}
-        workspaceNameById={workspaceNameById}
-        databaseNameById={databaseNameById}
-        revoking={revokeMCPAccessToken.isPending}
-        onRevoke={(token) => void revokeToken(token)}
-        toolbarAction={(
-          <HeaderActions>
-            <Button
-              size="medium"
-              variant="secondary-fill"
-              onClick={() => setLocalOpen(true)}
-            >
-              Local MCP
-            </Button>
-            <Button size="medium" onClick={() => setCreateOpen(true)}>
-              Add MCP
-            </Button>
-          </HeaderActions>
-        )}
-      />
+      {!allTokensQuery.isLoading
+        && !allTokensQuery.isError
+        && !isFiltered
+        && filteredTokens.length === 0 ? (
+        <MCPEmptyState
+          onAddMCP={() => setCreateOpen(true)}
+          onAddLocalMCP={() => setLocalOpen(true)}
+        />
+      ) : (
+        <MCPServersTable
+          rows={filteredTokens}
+          loading={allTokensQuery.isLoading}
+          error={allTokensQuery.isError}
+          workspaceNameById={workspaceNameById}
+          databaseNameById={databaseNameById}
+          revoking={revokeMCPAccessToken.isPending}
+          onRevoke={(token) => void revokeToken(token)}
+          toolbarAction={(
+            <HeaderActions>
+              <Button
+                size="medium"
+                variant="secondary-fill"
+                onClick={() => setLocalOpen(true)}
+              >
+                Local MCP
+              </Button>
+              <Button size="medium" onClick={() => setCreateOpen(true)}>
+                Add MCP
+              </Button>
+            </HeaderActions>
+          )}
+        />
+      )}
 
       <CreateMCPAccessDialog
         isOpen={createOpen}

@@ -113,6 +113,7 @@ function MCPServerDetailDialog({
   onRevoke: (token: AFSMCPToken) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const workspaceName =
     token.workspaceName || workspaceNameById?.get(token.workspaceId) || token.workspaceId;
   const configSnippet = buildHostedMCPTemplate(workspaceName);
@@ -194,19 +195,48 @@ function MCPServerDetailDialog({
           </ConfigActions>
         </ConfigBlock>
 
-        <DialogFooterRow>
-          <RemoveButton
-            size="medium"
-            type="button"
-            disabled={revoking}
-            onClick={() => onRevoke(token)}
-          >
-            {revoking ? "Removing..." : "Remove MCP server"}
-          </RemoveButton>
-          <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
-            Close
-          </Button>
-        </DialogFooterRow>
+        {confirmingRevoke ? (
+          <ConfirmRevokePanel role="alertdialog" aria-live="polite">
+            <ConfirmRevokeTitle>Remove this MCP server?</ConfirmRevokeTitle>
+            <ConfirmRevokeBody>
+              Any agent using this token will immediately lose access to{" "}
+              <strong>{workspaceName}</strong>. This can&rsquo;t be undone.
+            </ConfirmRevokeBody>
+            <ConfirmRevokeActions>
+              <Button
+                size="medium"
+                type="button"
+                variant="secondary-fill"
+                onClick={() => setConfirmingRevoke(false)}
+                disabled={revoking}
+              >
+                Cancel
+              </Button>
+              <RemoveButton
+                size="medium"
+                type="button"
+                disabled={revoking}
+                onClick={() => onRevoke(token)}
+              >
+                {revoking ? "Removing..." : "Yes, remove"}
+              </RemoveButton>
+            </ConfirmRevokeActions>
+          </ConfirmRevokePanel>
+        ) : (
+          <DialogFooterRow>
+            <RemoveButton
+              size="medium"
+              type="button"
+              disabled={revoking}
+              onClick={() => setConfirmingRevoke(true)}
+            >
+              Remove MCP server
+            </RemoveButton>
+            <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
+              Close
+            </Button>
+          </DialogFooterRow>
+        )}
       </DialogCard>
     </DialogOverlay>
   );
@@ -556,6 +586,38 @@ const DialogFooterRow = styled.div`
   align-items: center;
   gap: 12px;
   margin-top: 24px;
+`;
+
+const ConfirmRevokePanel = styled.div`
+  margin-top: 24px;
+  padding: 16px 18px;
+  border: 1px solid rgba(220, 38, 38, 0.28);
+  border-radius: 14px;
+  background: rgba(239, 68, 68, 0.06);
+`;
+
+const ConfirmRevokeTitle = styled.div`
+  color: var(--afs-ink);
+  font-size: 14px;
+  font-weight: 700;
+`;
+
+const ConfirmRevokeBody = styled.p`
+  margin: 6px 0 0;
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.55;
+`;
+
+const ConfirmRevokeActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+
+  @media (max-width: 600px) {
+    flex-direction: column-reverse;
+  }
 `;
 
 const RemoveButton = styled(Button)`

@@ -5,6 +5,7 @@ Add short, concrete notes here when you hit a repo-specific sharp edge that futu
 ## Build & Runtime
 
 - If UI assets matter, do not rely on plain `go build ./cmd/afs-control-plane`. Use a path that rebuilds embedded UI assets such as `make afs-control-plane`, `make web-build`, or `make embed-ui`.
+- `cmd/afs/auth_commands.go` treats cloud-vs-self-managed login as a hostname allowlist problem. When the public cloud domain changes, update that list alongside the default cloud URL or `afs login --url <new-cloud-host>` will silently route users into the self-managed flow.
 
 ## Git & Shell
 

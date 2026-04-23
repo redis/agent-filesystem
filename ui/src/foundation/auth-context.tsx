@@ -5,6 +5,8 @@ import type { PropsWithChildren } from "react";
 import { afsApi } from "./api/afs";
 import type { AFSAuthConfig } from "./types/afs";
 
+const AFS_CLOUD_HOST = "afs.cloud";
+
 type AuthContextValue = {
   config: AFSAuthConfig;
   isLoading: boolean;
@@ -102,6 +104,25 @@ function ClerkAuthBridge(props: PropsWithChildren<{ config: AFSAuthConfig }>) {
   );
 }
 
+function decodeClerkFrontendHost(publishableKey?: string): string | null {
+  const key = publishableKey?.trim();
+  if (!key) {
+    return null;
+  }
+  const parts = key.split("_", 3);
+  if (parts.length < 3) {
+    return null;
+  }
+  try {
+    const normalized = parts[2].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = atob(padded);
+    return decoded.replace(/\$$/, "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider(props: PropsWithChildren) {
   const authQuery = useQuery({
     queryKey: ["afs", "auth", "config"],
@@ -125,7 +146,9 @@ export function AuthProvider(props: PropsWithChildren) {
   if (config.mode === "clerk" && config.clerkPublishableKey?.trim()) {
     return (
       <ClerkProvider publishableKey={config.clerkPublishableKey}>
-        <ClerkAuthBridge config={config}>{props.children}</ClerkAuthBridge>
+        <ClerkAuthBridge config={config}>
+          {props.children}
+        </ClerkAuthBridge>
       </ClerkProvider>
     );
   }

@@ -13,9 +13,14 @@ import (
 )
 
 const (
-	defaultCloudControlPlaneURL      = "https://agentfilesystem.ai"
+	defaultCloudControlPlaneURL      = "https://afs.cloud"
 	defaultSelfHostedControlPlaneURL = "http://127.0.0.1:8091"
 )
+
+var knownCloudControlPlaneHosts = []string{
+	"afs.cloud",
+	"agentfilesystem.vercel.app",
+}
 
 type authExchangeResponse struct {
 	DatabaseID    string `json:"database_id"`
@@ -124,7 +129,12 @@ func looksLikeSelfHostedURL(raw string) bool {
 	if raw == "" {
 		return false
 	}
-	return !strings.Contains(raw, "agentfilesystem.ai") && !strings.Contains(raw, "agentfilesystem.vercel.app")
+	for _, host := range knownCloudControlPlaneHosts {
+		if strings.Contains(raw, host) {
+			return false
+		}
+	}
+	return true
 }
 
 func promptLoginMode() (string, error) {
