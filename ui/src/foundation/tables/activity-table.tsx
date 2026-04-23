@@ -12,6 +12,7 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  hideTypeColumn?: boolean;
   onOpenActivity: (event: AFSActivityEvent) => void;
 };
 
@@ -33,6 +34,7 @@ export function ActivityTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load activity. Please retry.",
+  hideTypeColumn = false,
   onOpenActivity,
 }: Props) {
   const [search, setSearch] = useState("");
@@ -73,72 +75,75 @@ export function ActivityTable({
     [sortBy, sortDirection],
   );
 
-  const columns = useMemo(
-    () =>
-      [
-        {
-          accessorKey: "createdAt",
-          header: "When",
-          size: 56,
-          enableSorting: true,
-          cell: ({ row }) => {
-            const d = new Date(row.original.createdAt);
-            const now = new Date();
-            const isToday = d.toDateString() === now.toDateString();
-            const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-            if (isToday) return time;
-            const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-            return `${date} ${time}`;
-          },
+  const columns = useMemo(() => {
+    const cols: ColumnDef<AFSActivityEvent>[] = [
+      {
+        accessorKey: "createdAt",
+        header: "When",
+        size: 56,
+        enableSorting: true,
+        cell: ({ row }) => {
+          const d = new Date(row.original.createdAt);
+          const now = new Date();
+          const isToday = d.toDateString() === now.toDateString();
+          const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+          if (isToday) return time;
+          const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+          return `${date} ${time}`;
         },
-        {
-          accessorKey: "title",
-          header: "Activity",
-          size: 160,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <Typography.Body component="strong">{row.original.title}</Typography.Body>
-              <Typography.Body color="secondary" component="span">
-                {row.original.detail}
-              </Typography.Body>
-            </S.Stack>
-          ),
-        },
-        {
-          accessorKey: "workspaceName",
-          header: "Workspace",
-          size: 80,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
-              {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
-            </S.SingleLineText>
-          ),
-        },
-        {
-          accessorKey: "actor",
-          header: "Actor",
-          size: 60,
-          enableSorting: true,
-        },
-        {
-          accessorKey: "scope",
-          header: "Type",
-          size: 50,
-          enableSorting: true,
-          cell: ({ row }) => (
-            <S.SingleLineText title={`${row.original.scope} · ${row.original.kind}`}>
-              {row.original.scope} · {row.original.kind}
-            </S.SingleLineText>
-          ),
-        },
-      ] as ColumnDef<AFSActivityEvent>[],
-    [],
-  );
+      },
+      {
+        accessorKey: "title",
+        header: "Activity",
+        size: 160,
+        enableSorting: true,
+        cell: ({ row }) => (
+          <S.Stack>
+            <Typography.Body component="strong">{row.original.title}</Typography.Body>
+            <Typography.Body color="secondary" component="span">
+              {row.original.detail}
+            </Typography.Body>
+          </S.Stack>
+        ),
+      },
+      {
+        accessorKey: "workspaceName",
+        header: "Workspace",
+        size: 80,
+        enableSorting: true,
+        cell: ({ row }) => (
+          <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
+            {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
+          </S.SingleLineText>
+        ),
+      },
+      {
+        accessorKey: "actor",
+        header: "Actor",
+        size: 60,
+        enableSorting: true,
+      },
+    ];
+
+    if (!hideTypeColumn) {
+      cols.push({
+        accessorKey: "scope",
+        header: "Type",
+        size: 50,
+        enableSorting: true,
+        cell: ({ row }) => (
+          <S.SingleLineText title={`${row.original.scope} · ${row.original.kind}`}>
+            {row.original.scope} · {row.original.kind}
+          </S.SingleLineText>
+        ),
+      });
+    }
+
+    return cols;
+  }, [hideTypeColumn]);
 
   return (
-    <>
+    <S.TableBlock>
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
@@ -179,6 +184,6 @@ export function ActivityTable({
           </S.DenseTableViewport>
         </S.TableCard>
       ) : null}
-    </>
+    </S.TableBlock>
   );
 }

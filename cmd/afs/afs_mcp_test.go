@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -93,6 +95,15 @@ func TestAFSMCPFileWriteLeavesWorkspaceDirtyAndReadReturnsContent(t *testing.T) 
 	if _, ok := writePayload["checkpoint"]; ok {
 		t.Fatalf("file_write checkpoint = %#v, want no implicit checkpoint", writePayload["checkpoint"])
 	}
+	if got := writePayload["operation"]; got != "write" {
+		t.Fatalf("file_write operation = %#v, want %q", got, "write")
+	}
+	if got := writePayload["kind"]; got != "file" {
+		t.Fatalf("file_write kind = %#v, want %q", got, "file")
+	}
+	if got := writePayload["size"]; got != float64(len("# TODO\n- item 1\n")) {
+		t.Fatalf("file_write size = %#v, want %d", got, len("# TODO\n- item 1\n"))
+	}
 
 	readResult := server.callTool(context.Background(), "file_read", map[string]any{
 		"path": "/notes/todo.md",
@@ -133,6 +144,7 @@ func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
 
 	server, closeFn := setupAFSMCPTestServer(t)
 	defer closeFn()
+	server.profile = controlplane.MCPProfileWorkspaceRWCheckpoint
 
 	writeResult := server.callTool(context.Background(), "file_write", map[string]any{
 		"path":    "/notes/todo.md",
@@ -271,6 +283,168 @@ func TestAFSMCPFileGrepUsesCurrentWorkspace(t *testing.T) {
 	}
 	if len(matches) != 2 {
 		t.Fatalf("grep matches len = %d, want 2", len(matches))
+	}
+}
+
+func TestAFSMCPFileGlobFindsFiles(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/readme.md",
+		"content": "# readme\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(readme) returned error: %v", err)
+	}
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/notes.txt",
+		"content": "notes\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(notes) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_glob", map[string]any{
+		"path":    "/docs",
+		"pattern": "*.md",
+		"kind":    "file",
+	})
+	if result.IsError {
+		t.Fatalf("file_glob returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(glob) returned error: %v", err)
+	}
+	items, ok := payload["items"].([]any)
+	if !ok {
+		t.Fatalf("glob items missing: %#v", payload)
+	}
+	if len(items) != 1 {
+		t.Fatalf("glob items len = %d, want 1", len(items))
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("glob first item = %#v, want map", items[0])
+	}
+	if got := first["path"]; got != "/docs/readme.md" {
+		t.Fatalf("glob path = %#v, want %q", got, "/docs/readme.md")
+	}
+}
+
+func TestAFSMCPFileReplaceRequiresDisambiguationForMultipleMatches(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/app.txt",
+		"content": "hello\nhello\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(app.txt) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_replace", map[string]any{
+		"path": "/app.txt",
+		"old":  "hello",
+		"new":  "hi",
+	})
+	if !result.IsError {
+		t.Fatalf("file_replace expected ambiguity error, got %+v", result)
+	}
+}
+
+func TestAFSMCPFileReplaceSupportsStartLineGuards(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/app.txt",
+		"content": "hello\nhello\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(app.txt) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_replace", map[string]any{
+		"path":                 "/app.txt",
+		"old":                  "hello",
+		"new":                  "hi",
+		"start_line":           2,
+		"expected_occurrences": 1,
+	})
+	if result.IsError {
+		t.Fatalf("file_replace returned error result: %+v", result)
+	}
+
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/app.txt",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read returned error result: %+v", readResult)
+	}
+	var payload map[string]any
+	if err := decodeStructuredContent(readResult.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(read) returned error: %v", err)
+	}
+	if got := payload["content"]; got != "hello\nhi\n" {
+		t.Fatalf("file_read content = %#v, want %q", got, "hello\nhi\n")
+	}
+}
+
+func TestAFSMCPFilePatchAppliesStructuredEdits(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	initial := "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n"
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/main.go",
+		"content": initial,
+	}); err != nil {
+		t.Fatalf("toolFileWrite(main.go) returned error: %v", err)
+	}
+
+	sum := sha256.Sum256([]byte(initial))
+	result := server.callTool(context.Background(), "file_patch", map[string]any{
+		"path":            "/main.go",
+		"expected_sha256": hex.EncodeToString(sum[:]),
+		"patches": []map[string]any{
+			{
+				"op":         "replace",
+				"old":        "println(\"hello\")",
+				"new":        "println(\"hello, world\")",
+				"start_line": 4,
+			},
+			{
+				"op":         "insert",
+				"start_line": 2,
+				"new":        "import \"fmt\"\n",
+			},
+		},
+	})
+	if result.IsError {
+		t.Fatalf("file_patch returned error result: %+v", result)
+	}
+
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/main.go",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read returned error result: %+v", readResult)
+	}
+	var payload map[string]any
+	if err := decodeStructuredContent(readResult.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(read) returned error: %v", err)
+	}
+	want := "package main\n\nimport \"fmt\"\nfunc main() {\n\tprintln(\"hello, world\")\n}\n"
+	if got := payload["content"]; got != want {
+		t.Fatalf("file_read content = %#v, want %q", got, want)
 	}
 }
 

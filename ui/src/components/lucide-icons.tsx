@@ -10,6 +10,8 @@ import {
   Folders,
   LifeBuoy,
   PieChart,
+  Plug,
+  Sparkles,
 } from "lucide-react";
 
 type LucideIcon = ComponentType<SVGProps<SVGSVGElement> & { size?: number | string; strokeWidth?: number }>;
@@ -59,3 +61,5 @@ export const BellIcon = makeLucideIcon(Bell, "Bell");
 export const BookOpenIcon = makeLucideIcon(BookOpen, "Book");
 export const CloudDownloadIcon = makeLucideIcon(CloudDownload, "Cloud download");
 export const LifeBuoyIcon = makeLucideIcon(LifeBuoy, "Life buoy");
+export const SparklesIcon = makeLucideIcon(Sparkles, "Sparkles");
+export const PlugIcon = makeLucideIcon(Plug, "Plug");

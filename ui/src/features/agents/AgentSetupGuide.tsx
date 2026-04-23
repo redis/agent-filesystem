@@ -37,7 +37,7 @@ export function AgentSetupGuide({ compact = false }: Props) {
       mcpServers: {
         "agent-filesystem": {
           command: "afs",
-          args: ["mcp"],
+          args: ["mcp", "--workspace", "my-workspace", "--profile", "workspace-rw"],
         },
       },
     },
@@ -61,7 +61,7 @@ export function AgentSetupGuide({ compact = false }: Props) {
           aria-selected={tab === "install"}
           onClick={() => setTab("install")}
         >
-          Install
+          Install CLI
         </TabItem>
         <TabItem
           $active={tab === "mcp"}
@@ -107,8 +107,8 @@ export function AgentSetupGuide({ compact = false }: Props) {
               <StepDesc>
                 One command. Detects your OS and architecture, drops{" "}
                 <InlineCode>afs</InlineCode> into{" "}
-                <InlineCode>~/.afs/bin</InlineCode>, and prints PATH setup if
-                needed.
+                <InlineCode>~/.afs/bin</InlineCode>, and adds that directory to
+                your shell PATH automatically when needed.
                 {!isCloud && (
                   <>
                     {" "}
@@ -233,12 +233,14 @@ export function AgentSetupGuide({ compact = false }: Props) {
           <StepTitle>Connect via MCP</StepTitle>
           <StepDesc>
             For agents that speak the Model Context Protocol (Claude Desktop,
-            Cursor, Windsurf, etc.), add AFS as an MCP server. The agent gets
-            tool-based access to workspaces, files, and checkpoints — no local
-            mount required.
+            Cursor, Windsurf, etc.), add AFS as an MCP server. The default MCP
+            flow is workspace-bound and file-focused, so agents get the file
+            tools they need without a broad management surface.
           </StepDesc>
           <StepDesc>
-            Add the following to your agent's MCP configuration (e.g.{" "}
+            Add the following to your agent's MCP configuration, then replace{" "}
+            <InlineCode>my-workspace</InlineCode> with the workspace you want
+            to expose (e.g.{" "}
             <InlineCode>claude_desktop_config.json</InlineCode> or{" "}
             <InlineCode>.claude/settings.json</InlineCode>):
           </StepDesc>

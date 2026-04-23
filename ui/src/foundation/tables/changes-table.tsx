@@ -1,4 +1,4 @@
-import { Typography } from "@redis-ui/components";
+import { Select, Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
@@ -201,7 +201,7 @@ export function ChangesTable({
   );
 
   return (
-    <>
+    <S.TableBlock>
       <S.HeadingWrap style={{ padding: 0, gap: 12, display: "flex", flexWrap: "wrap", alignItems: "center" }}>
         <S.SearchInput
           value={search}
@@ -251,7 +251,7 @@ export function ChangesTable({
           </S.DenseTableViewport>
         </S.TableCard>
       ) : null}
-    </>
+    </S.TableBlock>
   );
 }
 
@@ -264,26 +264,22 @@ function OpFilter({
   ops: string[];
   onChange: (next: string) => void;
 }) {
+  const options = useMemo(
+    () => [
+      { value: "all", label: "All ops" },
+      ...ops.map((op) => ({ value: op, label: op })),
+    ],
+    [ops],
+  );
+
   return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      style={{
-        padding: "6px 10px",
-        borderRadius: 8,
-        border: "1px solid var(--afs-line, #e4e4e7)",
-        background: "var(--afs-panel)",
-        color: "var(--afs-ink, #18181b)",
-        fontSize: 13,
-        fontWeight: 600,
-      }}
-    >
-      <option value="all">All ops</option>
-      {ops.map((op) => (
-        <option key={op} value={op}>
-          {op}
-        </option>
-      ))}
-    </select>
+    <div style={{ minWidth: 160 }}>
+      <Select
+        options={options}
+        value={value}
+        onChange={(next) => onChange(next as string)}
+        placeholder="All ops"
+      />
+    </div>
   );
 }

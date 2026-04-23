@@ -15,8 +15,8 @@ function AddAgentPage() {
         <Title>Connect a new agent</Title>
         <Subtitle>
           Follow the steps below to download the AFS CLI or register your agent
-          via the Model Context Protocol. Once connected, the agent appears on
-          the Agents page in real time.
+          via the Model Context Protocol. The MCP path is workspace-bound by
+          default, and connected agents appear on the Agents page in real time.
         </Subtitle>
       </Header>
       <AgentSetupGuide />

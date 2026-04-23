@@ -1,0 +1,7 @@
+{
+  "name": "afs-team-rules",
+  "version": "0.1.0",
+  "description": "Shared team coding rules backed by an Agent Filesystem workspace. Every developer's Claude Code reads the same /rules/*.md files live — update once, everyone's agent sees it on the next tool call.",
+  "author": "Agent Filesystem",
+  "homepage": "https://github.com/your-org/agent-filesystem/tree/main/examples/plugins/afs-team-rules"
+}

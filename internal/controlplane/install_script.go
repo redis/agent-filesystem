@@ -24,6 +24,7 @@ set -euo pipefail
 CONTROL_PLANE="{{.BaseURL}}"
 INSTALL_DIR="${AFS_INSTALL_DIR:-$HOME/.afs/bin}"
 BIN_NAME="afs"
+CLI_CMD="afs"
 
 info()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn()  { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
@@ -57,6 +58,71 @@ tmp_file=$(mktemp)
 cleanup() { rm -f "$tmp_file"; }
 trap cleanup EXIT
 
+path_line_for_shell() {
+  case "$1" in
+    fish)
+      printf 'fish_add_path -m "%s"\n' "$INSTALL_DIR"
+      ;;
+    *)
+      printf 'export PATH="%s:$PATH"\n' "$INSTALL_DIR"
+      ;;
+  esac
+}
+
+profile_file_for_shell() {
+  case "$1" in
+    zsh)
+      printf '%s\n' "$HOME/.zshrc"
+      ;;
+    bash)
+      if [ "$os" = "darwin" ]; then
+        if [ -f "$HOME/.bash_profile" ] || [ ! -f "$HOME/.bashrc" ]; then
+          printf '%s\n' "$HOME/.bash_profile"
+        else
+          printf '%s\n' "$HOME/.bashrc"
+        fi
+      else
+        if [ -f "$HOME/.bashrc" ] || [ ! -f "$HOME/.bash_profile" ]; then
+          printf '%s\n' "$HOME/.bashrc"
+        else
+          printf '%s\n' "$HOME/.bash_profile"
+        fi
+      fi
+      ;;
+    fish)
+      printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+configure_shell_path() {
+  shell_name="${SHELL##*/}"
+  if [ -z "$shell_name" ]; then
+    shell_name="bash"
+  fi
+
+  profile_file=$(profile_file_for_shell "$shell_name") || return 1
+  path_line=$(path_line_for_shell "$shell_name")
+
+  mkdir -p "$(dirname "$profile_file")"
+
+  if [ -f "$profile_file" ] && grep -Fqx "$path_line" "$profile_file"; then
+    info "$INSTALL_DIR is already configured in $profile_file"
+    return 0
+  fi
+
+  {
+    printf '\n'
+    printf '# Added by Agent Filesystem installer\n'
+    printf '%s\n' "$path_line"
+  } >> "$profile_file"
+
+  info "Added $INSTALL_DIR to PATH in $profile_file"
+}
+
 info "Downloading from ${CONTROL_PLANE}/v1/cli"
 if ! curl -fSL --progress-bar -o "$tmp_file" "${CONTROL_PLANE}/v1/cli?os=${os}&arch=${arch}"; then
   fail "Download failed. Check your network connection and try again."
@@ -75,35 +141,41 @@ trap - EXIT
 
 info "Installed to $target"
 
-# PATH check.
+# PATH setup.
 case ":$PATH:" in
-  *":$INSTALL_DIR:"*) ;;
+  *":$INSTALL_DIR:"*)
+    info "$INSTALL_DIR is already on PATH"
+    ;;
   *)
-    echo
-    warn "$INSTALL_DIR is not on your PATH."
-    echo "    Add this line to your ~/.bashrc or ~/.zshrc:"
-    echo
-    echo "        export PATH=\"$INSTALL_DIR:\$PATH\""
-    echo
+    CLI_CMD="$target"
+    if configure_shell_path; then
+      export PATH="$INSTALL_DIR:$PATH"
+      info "Open a new shell to use afs by name. Using $target for the next steps."
+    else
+      echo
+      warn "Could not update your shell profile automatically."
+      echo "    Add $INSTALL_DIR to your PATH manually if needed."
+      echo
+    fi
     ;;
 esac
 
 {{if eq .ProductMode "cloud"}}info "Installation complete."
 echo
 echo "Next:"
-echo "    afs login       # sign in and link this CLI to your account"
-echo "    afs up          # start syncing your current workspace"
+echo "    $CLI_CMD login       # sign in and link this CLI to your account"
+echo "    $CLI_CMD up          # start syncing your current workspace"
 {{else}}info "Pointing CLI at ${CONTROL_PLANE}"
 if ! "$target" login --self-hosted --url "$CONTROL_PLANE" >/dev/null 2>&1; then
   warn "Could not configure the CLI automatically. Run this later:"
-  echo "    afs login --self-hosted --url $CONTROL_PLANE"
+  echo "    $CLI_CMD login --self-hosted --url $CONTROL_PLANE"
 fi
 
 info "Installation complete."
 echo
 echo "Next:"
-echo "    afs setup       # pick a workspace and local path"
-echo "    afs up          # start syncing your current workspace"
+echo "    $CLI_CMD setup       # pick a workspace and local path"
+echo "    $CLI_CMD up          # start syncing your current workspace"
 {{end}}`
 
 type installScriptData struct {

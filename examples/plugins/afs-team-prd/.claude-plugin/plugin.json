@@ -1,0 +1,7 @@
+{
+  "name": "afs-team-prd",
+  "version": "0.1.0",
+  "description": "A shared, live PRD / spec workspace for a team. Multiple developers' Claude Code instances collaborate on the same /prd.md, track inflight work under /inflight/<dev>/, log completed items in /done/, and append open questions to /questions.md.",
+  "author": "Agent Filesystem",
+  "homepage": "https://github.com/your-org/agent-filesystem/tree/main/examples/plugins/afs-team-prd"
+}

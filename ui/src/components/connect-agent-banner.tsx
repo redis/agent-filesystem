@@ -34,13 +34,12 @@ export function ConnectAgentBanner({
   const downloadCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
   const loginCmd = `afs login`;
   const syncCmd = `afs up`;
-
-  const mcpConfig = JSON.stringify(
+  const mcpLocalConfig = JSON.stringify(
     {
       mcpServers: {
-        "agent-filesystem": {
+        [`afs-${canonicalWorkspaceName(workspaceName)}`]: {
           command: "afs",
-          args: ["mcp"],
+          args: ["mcp", "--workspace", workspaceName, "--profile", "workspace-rw"],
         },
       },
     },
@@ -122,8 +121,8 @@ export function ConnectAgentBanner({
                 <SubStepLabel>1 &mdash; Install the CLI</SubStepLabel>
                 <StepDescription>
                   Detects your OS and architecture, installs{" "}
-                  <code>afs</code> into <code>~/.afs/bin</code>, and prints
-                  PATH setup if needed.
+                  <code>afs</code> into <code>~/.afs/bin</code>, and adds that
+                  directory to your shell PATH automatically when needed.
                 </StepDescription>
                 <CodeContainer>
                   <CodePre>{downloadCmd}</CodePre>
@@ -179,17 +178,18 @@ export function ConnectAgentBanner({
                   first.
                 </StepDescription>
                 <CodeContainer>
-                  <CodePre>{mcpConfig}</CodePre>
+                  <CodePre>{mcpLocalConfig}</CodePre>
                   <CopyButton
                     type="button"
-                    onClick={() => copyToClipboard(mcpConfig, "mcp")}
+                    onClick={() => copyToClipboard(mcpLocalConfig, "mcp")}
                   >
                     {copied === "mcp" ? "Copied!" : "Copy"}
                   </CopyButton>
                 </CodeContainer>
                 <StepHint>
-                  Restart your agent after saving. It will have access to all
-                  workspaces including <strong>{displayName}</strong>.
+                  Restart your agent after saving. This config locks MCP access
+                  to <strong>{displayName}</strong> with the standard
+                  read/write workspace profile.
                 </StepHint>
               </>
             )}

@@ -13,6 +13,7 @@ import {
   useWorkspaceFileContent,
   useWorkspaceTree,
 } from "../../foundation/hooks/use-afs";
+import { getWorkspaceBrowserViewOptions } from "../../foundation/workspace-browser-views";
 import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../../foundation/types/afs";
 import { displayWorkspaceName } from "../../foundation/workspace-display";
 
@@ -122,7 +123,7 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
     return currentPath.split("/").filter(Boolean);
   }, [currentPath]);
 
-  const viewOptions = useMemo(() => browserViewOptions(workspace), [workspace]);
+  const viewOptions = useMemo(() => getWorkspaceBrowserViewOptions(workspace), [workspace]);
 
   return (
     <RepoContainer>
@@ -340,26 +341,6 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
 }
 
 /* ─── Helpers ───────────────────────────────────────────────────────── */
-
-function browserViewOptions(workspace: AFSWorkspaceDetail) {
-  const options: Array<{ value: AFSWorkspaceView; label: string }> = [];
-
-  if (workspace.capabilities.browseWorkingCopy) {
-    options.push({ value: "working-copy", label: "working-copy" });
-  }
-  if (workspace.capabilities.browseHead) {
-    options.push({ value: "head", label: "head" });
-  }
-  if (workspace.capabilities.browseCheckpoints) {
-    for (const sp of workspace.savepoints) {
-      options.push({
-        value: `checkpoint:${sp.id}`,
-        label: sp.name,
-      });
-    }
-  }
-  return options;
-}
 
 function parentPath(value: string) {
   if (value === "/" || value === "") return "/";
@@ -727,4 +708,3 @@ const ViewerMessage = styled.div`
   font-size: 14px;
   background: var(--afs-panel-strong);
 `;
-

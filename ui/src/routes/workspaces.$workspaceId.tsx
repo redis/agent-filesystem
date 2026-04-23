@@ -21,14 +21,17 @@ import {
   Tabs,
 } from "../components/afs-kit";
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
+import { useAuthSession } from "../foundation/auth-context";
 import {
   useDeleteWorkspaceMutation,
+  useMCPAccessTokens,
   useUpdateWorkspaceMutation,
   useWorkspace,
   workspaceQueryOptions,
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
+import { getDefaultWorkspaceBrowserView } from "../foundation/workspace-browser-views";
 import { displayWorkspaceName } from "../foundation/workspace-display";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
@@ -57,11 +60,14 @@ export const Route = createFileRoute("/workspaces/$workspaceId")({
 
 function WorkspaceStudioPage() {
   const navigate = useNavigate();
+  const auth = useAuthSession();
   const { workspaceId } = Route.useParams();
   const search = Route.useSearch() ?? {};
   const databaseId = search.databaseId ?? null;
   const { unavailableDatabases } = useDatabaseScope();
   const workspaceQuery = useWorkspace(databaseId, workspaceId);
+  const mcpAccessReady = !auth.isLoading && auth.isAuthenticated;
+  const mcpTokensQuery = useMCPAccessTokens(databaseId, workspaceId, mcpAccessReady);
   const deleteWorkspace = useDeleteWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
 
@@ -93,8 +99,7 @@ function WorkspaceStudioPage() {
       return;
     }
 
-    const defaultView = workspace.capabilities.browseWorkingCopy ? "working-copy" : "head";
-    setBrowserView(defaultView);
+    setBrowserView(getDefaultWorkspaceBrowserView(workspace));
   }, [workspace]);
 
   function setStudioTab(nextTab: StudioTab) {
@@ -384,6 +389,16 @@ function WorkspaceStudioPage() {
           saveError={saveError}
           onDelete={deleteCurrentWorkspace}
           isDeleting={deleteWorkspace.isPending}
+          mcpTokens={mcpTokensQuery.data ?? []}
+          onOpenMCPConsole={() => {
+            void navigate({
+              to: "/mcp",
+              search: {
+                workspaceId,
+                ...(databaseId ? { databaseId } : {}),
+              },
+            });
+          }}
         />
       ) : null}
 

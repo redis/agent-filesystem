@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "team-rules": {
+      "command": "afs",
+      "args": [
+        "mcp",
+        "--workspace",
+        "team-rules",
+        "--profile",
+        "workspace-ro"
+      ]
+    }
+  }
+}

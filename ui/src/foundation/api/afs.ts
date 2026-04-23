@@ -5,7 +5,9 @@ import type {
   AFSDatabase,
   AFSDatabaseListResponse,
   AFSAgentSession,
+  AFSMCPToken,
   CreateSavepointInput,
+  CreateMCPTokenInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
   GetWorkspaceTreeInput,
@@ -65,6 +67,10 @@ type AFSClient = {
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
+  listAllMCPAccessTokens: () => Promise<AFSMCPToken[]>;
+  listMCPAccessTokens: (databaseId: string | undefined, workspaceId: string) => Promise<AFSMCPToken[]>;
+  createMCPAccessToken: (input: CreateMCPTokenInput) => Promise<AFSMCPToken>;
+  revokeMCPAccessToken: (databaseId: string | undefined, workspaceId: string, tokenId: string) => Promise<void>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   getAuthConfig: () => Promise<AFSAuthConfig>;
   getServerVersion: () => Promise<AFSServerVersion>;
@@ -222,6 +228,7 @@ type HTTPWorkspaceDetail = {
   source: AFSWorkspaceSource;
   created_at: string;
   updated_at: string;
+  draft_state: string;
   head_checkpoint_id: string;
   tags?: string[];
   file_count: number;
@@ -300,6 +307,21 @@ type HTTPOnboardingTokenResponse = {
   workspace_id: string;
   workspace_name: string;
   expires_at: string;
+};
+
+type HTTPMCPToken = {
+  id: string;
+  name?: string;
+  database_id: string;
+  workspace_id: string;
+  workspace_name?: string;
+  profile?: string;
+  readonly?: boolean;
+  token?: string;
+  created_at: string;
+  last_used_at?: string;
+  expires_at?: string;
+  revoked_at?: string;
 };
 
 type HTTPAuthConfig = {
@@ -428,6 +450,7 @@ function demoCapabilities(): AFSWorkspaceCapabilities {
 
 function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
   const normalized: AFSWorkspace = clone(workspace);
+  normalized.draftState = workspace.draftState || "clean";
   normalized.fileCount = workspace.fileCount;
   normalized.folderCount = workspace.folderCount;
   normalized.totalBytes = workspace.totalBytes;
@@ -918,6 +941,7 @@ This workspace was created from the AFS Web UI.
         source: input.source,
         createdAt,
         updatedAt: createdAt,
+        draftState: "clean",
         headSavepointId: initialSavepoint.id,
         tags: [(input.region?.trim() || ""), sourceLabel(input.source)],
         files: baseFiles,
@@ -963,8 +987,12 @@ This workspace was created from the AFS Web UI.
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
         throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
       }
-      workspace.name = input.name.trim();
-      workspace.description = input.description.trim();
+      if (input.name !== undefined) {
+        workspace.name = input.name.trim();
+      }
+      if (input.description !== undefined) {
+        workspace.description = input.description.trim();
+      }
       workspace.cloudAccount = input.cloudAccount?.trim() || workspace.cloudAccount;
       workspace.databaseName = input.databaseName?.trim() || workspace.databaseName;
       workspace.region = input.region?.trim() || workspace.region;
@@ -1009,6 +1037,7 @@ This workspace was created from the AFS Web UI.
         file.content = input.content;
         file.modifiedAt = modifiedAt;
       }
+      workspace.draftState = "dirty";
       workspace.capabilities = demoCapabilities();
       touchWorkspace(workspace);
       workspace.activity.unshift(
@@ -1041,6 +1070,7 @@ This workspace was created from the AFS Web UI.
         workspace.files,
       );
       workspace.savepoints.unshift(savepoint);
+      workspace.draftState = "clean";
       workspace.headSavepointId = savepoint.id;
       workspace.updatedAt = savepoint.createdAt;
       workspace.checkpointCount = workspace.savepoints.length;
@@ -1069,6 +1099,7 @@ This workspace was created from the AFS Web UI.
       }
       const savepoint = requireSavepoint(workspace, input.savepointId);
       workspace.files = clone(savepoint.filesSnapshot);
+      workspace.draftState = "clean";
       workspace.headSavepointId = savepoint.id;
       touchWorkspace(workspace);
       workspace.activity.unshift(
@@ -1153,6 +1184,22 @@ This workspace was created from the AFS Web UI.
 
   async createOnboardingToken(_databaseId: string | undefined, _workspaceId: string) {
     throw new Error("Onboarding tokens are not available in demo mode.");
+  },
+
+  async listMCPAccessTokens() {
+    throw new Error("MCP tokens are not available in demo mode.");
+  },
+
+  async listAllMCPAccessTokens() {
+    throw new Error("MCP tokens are not available in demo mode.");
+  },
+
+  async createMCPAccessToken() {
+    throw new Error("MCP tokens are not available in demo mode.");
+  },
+
+  async revokeMCPAccessToken() {
+    throw new Error("MCP tokens are not available in demo mode.");
   },
 
   async importLocal() {
@@ -1466,6 +1513,7 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     source: input.source,
     createdAt: input.created_at,
     updatedAt: input.updated_at,
+    draftState: input.draft_state,
     headSavepointId: input.head_checkpoint_id,
     tags: input.tags ?? [],
     fileCount: input.file_count,
@@ -1535,8 +1583,106 @@ function mapAccount(input: HTTPAccount): AFSAccount {
 
 type ChangelogWorkspaceScope = Pick<AFSWorkspaceSummary, "id" | "name" | "databaseId" | "databaseName">;
 
-function changelogSortValue(entry: AFSChangelogEntry): string {
-  return entry.occurredAt ?? entry.id;
+type GlobalChangelogCursor = {
+  version: 1;
+  direction: "asc" | "desc";
+  id: string;
+  databaseId?: string;
+  workspaceId?: string;
+};
+
+const GLOBAL_CHANGELOG_CURSOR_PREFIX = "global-changelog:v1:";
+
+function parseStreamID(id: string): { ms: number; seq: number } | null {
+  const match = /^(\d+)-(\d+)$/.exec(id.trim());
+  if (match == null) {
+    return null;
+  }
+  const ms = Number(match[1]);
+  const seq = Number(match[2]);
+  if (!Number.isFinite(ms) || !Number.isFinite(seq)) {
+    return null;
+  }
+  return { ms, seq };
+}
+
+function compareStreamIDs(left: string, right: string): number {
+  const parsedLeft = parseStreamID(left);
+  const parsedRight = parseStreamID(right);
+  if (parsedLeft != null && parsedRight != null) {
+    if (parsedLeft.ms !== parsedRight.ms) {
+      return parsedLeft.ms - parsedRight.ms;
+    }
+    if (parsedLeft.seq !== parsedRight.seq) {
+      return parsedLeft.seq - parsedRight.seq;
+    }
+    return 0;
+  }
+  return left.localeCompare(right);
+}
+
+function compareChangelogIdentity(
+  left: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
+  right: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
+): number {
+  const idComparison = compareStreamIDs(left.id, right.id);
+  if (idComparison !== 0) {
+    return idComparison;
+  }
+
+  const databaseComparison = (left.databaseId ?? "").localeCompare(right.databaseId ?? "");
+  if (databaseComparison !== 0) {
+    return databaseComparison;
+  }
+
+  return (left.workspaceId ?? "").localeCompare(right.workspaceId ?? "");
+}
+
+function encodeGlobalChangelogCursor(
+  entry: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
+  direction: "asc" | "desc",
+): string {
+  return `${GLOBAL_CHANGELOG_CURSOR_PREFIX}${encodeURIComponent(JSON.stringify({
+    version: 1,
+    direction,
+    id: entry.id,
+    databaseId: entry.databaseId,
+    workspaceId: entry.workspaceId,
+  } satisfies GlobalChangelogCursor))}`;
+}
+
+function decodeGlobalChangelogCursor(cursor?: string): GlobalChangelogCursor | null {
+  if (cursor == null || !cursor.startsWith(GLOBAL_CHANGELOG_CURSOR_PREFIX)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(
+      decodeURIComponent(cursor.slice(GLOBAL_CHANGELOG_CURSOR_PREFIX.length)),
+    ) as Partial<GlobalChangelogCursor>;
+    if (parsed.version !== 1 || (parsed.direction !== "asc" && parsed.direction !== "desc")) {
+      return null;
+    }
+    if (typeof parsed.id !== "string" || parsed.id.trim() === "") {
+      return null;
+    }
+    return {
+      version: 1,
+      direction: parsed.direction,
+      id: parsed.id,
+      databaseId: parsed.databaseId,
+      workspaceId: parsed.workspaceId,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function entryIsBeyondGlobalCursor(
+  entry: AFSChangelogEntry,
+  cursor: GlobalChangelogCursor,
+): boolean {
+  const comparison = compareChangelogIdentity(entry, cursor);
+  return cursor.direction === "asc" ? comparison > 0 : comparison < 0;
 }
 
 function sortChangelogEntries(
@@ -1544,18 +1690,22 @@ function sortChangelogEntries(
   direction: "asc" | "desc" = "desc",
 ): AFSChangelogEntry[] {
   return [...entries].sort((left, right) => {
-    const comparison = changelogSortValue(left).localeCompare(changelogSortValue(right));
+    const comparison = compareChangelogIdentity(left, right);
     return direction === "asc" ? comparison : comparison * -1;
   });
 }
 
 async function aggregateWorkspaceChangelog(
   workspaces: ChangelogWorkspaceScope[],
-  direction: "asc" | "desc",
+  input: ListChangelogInput,
   loadWorkspaceChanges: (workspace: ChangelogWorkspaceScope) => Promise<AFSChangelogResponse>,
 ): Promise<AFSChangelogResponse> {
+  const direction = input.direction ?? "desc";
+  const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
+  const pageCursor = direction === "asc" ? input.since : input.until;
+  const globalCursor = decodeGlobalChangelogCursor(pageCursor);
   const settled = await Promise.allSettled(workspaces.map((workspace) => loadWorkspaceChanges(workspace)));
-  const entries = settled.flatMap((result) =>
+  let entries = settled.flatMap((result) =>
     result.status === "fulfilled" ? result.value.entries : [],
   );
   const firstRejected = settled.find((result) => result.status === "rejected");
@@ -1564,8 +1714,18 @@ async function aggregateWorkspaceChangelog(
     throw firstRejected.reason;
   }
 
+  if (globalCursor != null) {
+    entries = entries.filter((entry) => entryIsBeyondGlobalCursor(entry, globalCursor));
+  }
+
+  const pageEntries = sortChangelogEntries(entries, direction).slice(0, limit);
+
   return {
-    entries: sortChangelogEntries(entries, direction),
+    entries: pageEntries,
+    nextCursor:
+      pageEntries.length === limit
+        ? encodeGlobalChangelogCursor(pageEntries[pageEntries.length - 1], direction)
+        : undefined,
   };
 }
 
@@ -1743,15 +1903,21 @@ const httpAFSClient: AFSClient = {
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId === "") {
+      const direction = input.direction ?? "desc";
+      const pageCursor = direction === "asc" ? input.since : input.until;
+      const globalCursor = decodeGlobalChangelogCursor(pageCursor);
+      const workspaceCursor = globalCursor?.id ?? pageCursor;
       const workspaces = await httpAFSClient.listWorkspaceSummaries(input.databaseId ?? "");
       return aggregateWorkspaceChangelog(
         workspaces,
-        input.direction ?? "desc",
+        input,
         async (workspace) => {
           const response = await httpAFSClient.listChangelog({
             ...input,
             databaseId: workspace.databaseId,
             workspaceId: workspace.id,
+            since: direction === "asc" ? workspaceCursor : input.since,
+            until: direction === "desc" ? workspaceCursor : input.until,
           });
           return {
             ...response,
@@ -1789,7 +1955,7 @@ const httpAFSClient: AFSClient = {
       query ? `${base}?${query}` : base,
     );
     return {
-      entries: (response.entries ?? []).map((entry) =>
+      entries: response.entries.map((entry) =>
         mapChangelogEntry(entry, {
           workspaceId,
           databaseId: input.databaseId,
@@ -1856,6 +2022,78 @@ const httpAFSClient: AFSClient = {
       workspaceName: response.workspace_name,
       expiresAt: response.expires_at,
     };
+  },
+
+  async listAllMCPAccessTokens() {
+    const response = await requestJSON<{ items: HTTPMCPToken[] }>("/mcp-tokens");
+    return response.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      databaseId: item.database_id,
+      workspaceId: item.workspace_id,
+      workspaceName: item.workspace_name,
+      profile: (item.profile?.trim() || "workspace-rw") as AFSMCPToken["profile"],
+      readonly: Boolean(item.readonly),
+      token: item.token,
+      createdAt: item.created_at,
+      lastUsedAt: item.last_used_at,
+      expiresAt: item.expires_at,
+      revokedAt: item.revoked_at,
+    }));
+  },
+
+  async listMCPAccessTokens(databaseId: string | undefined, workspaceId: string) {
+    const response = await requestJSON<{ items: HTTPMCPToken[] }>(
+      `${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens`,
+    );
+    return response.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      databaseId: item.database_id,
+      workspaceId: item.workspace_id,
+      workspaceName: item.workspace_name,
+      profile: (item.profile?.trim() || "workspace-rw") as AFSMCPToken["profile"],
+      readonly: Boolean(item.readonly),
+      token: item.token,
+      createdAt: item.created_at,
+      lastUsedAt: item.last_used_at,
+      expiresAt: item.expires_at,
+      revokedAt: item.revoked_at,
+    }));
+  },
+
+  async createMCPAccessToken(input: CreateMCPTokenInput) {
+    const response = await requestJSON<HTTPMCPToken>(
+      `${workspaceBasePath(input.databaseId, input.workspaceId)}/mcp-tokens`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          name: input.name,
+          profile: input.profile,
+          expires_at: input.expiresAt,
+        }),
+      },
+    );
+    return {
+      id: response.id,
+      name: response.name,
+      databaseId: response.database_id,
+      workspaceId: response.workspace_id,
+      workspaceName: response.workspace_name,
+      profile: (response.profile?.trim() || input.profile) as AFSMCPToken["profile"],
+      readonly: Boolean(response.readonly),
+      token: response.token,
+      createdAt: response.created_at,
+      lastUsedAt: response.last_used_at,
+      expiresAt: response.expires_at,
+      revokedAt: response.revoked_at,
+    };
+  },
+
+  async revokeMCPAccessToken(databaseId: string | undefined, workspaceId: string, tokenId: string) {
+    await requestJSON<void>(`${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+      method: "DELETE",
+    });
   },
 
   async importLocal(input: ImportLocalInput) {

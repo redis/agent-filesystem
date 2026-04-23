@@ -26,6 +26,7 @@ type mcpAccessTokenRecord struct {
 	DatabaseID    string `json:"database_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	Profile       string `json:"profile,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
 	SecretHash    string `json:"-"`
 	CreatedAt     string `json:"created_at"`
@@ -40,6 +41,7 @@ type mcpAccessTokenResponse struct {
 	DatabaseID    string `json:"database_id"`
 	WorkspaceID   string `json:"workspace_id"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	Profile       string `json:"profile,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
 	Token         string `json:"token,omitempty"`
 	CreatedAt     string `json:"created_at"`
@@ -50,6 +52,7 @@ type mcpAccessTokenResponse struct {
 
 type createMCPAccessTokenRequest struct {
 	Name      string `json:"name"`
+	Profile   string `json:"profile,omitempty"`
 	Readonly  bool   `json:"readonly,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
@@ -96,6 +99,14 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 		return mcpAccessTokenResponse{}, err
 	}
 	now := time.Now().UTC()
+	profileInput := strings.TrimSpace(input.Profile)
+	if profileInput == "" && input.Readonly {
+		profileInput = MCPProfileWorkspaceRO
+	}
+	profile, err := NormalizeMCPProfile(profileInput)
+	if err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
 	record := mcpAccessTokenRecord{
 		ID:            tokenID,
 		Name:          strings.TrimSpace(input.Name),
@@ -104,7 +115,8 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 		DatabaseID:    strings.TrimSpace(databaseID),
 		WorkspaceID:   strings.TrimSpace(workspaceID),
 		WorkspaceName: strings.TrimSpace(workspaceName),
-		Readonly:      input.Readonly,
+		Profile:       profile,
+		Readonly:      MCPProfileIsReadonly(profile),
 		SecretHash:    hashMCPAccessTokenSecret(secret),
 		CreatedAt:     now.Format(timeRFC3339),
 	}
@@ -158,6 +170,39 @@ func (m *DatabaseManager) ListMCPAccessTokens(ctx context.Context, databaseID, w
 		return nil, err
 	}
 	return mcpAccessTokenResponses(items), nil
+}
+
+func (m *DatabaseManager) ListAllMCPAccessTokens(ctx context.Context) ([]mcpAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return nil, fmt.Errorf("mcp token storage is unavailable")
+	}
+	subject := authSubjectFromContext(ctx)
+	items, err := m.catalog.ListAllMCPAccessTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	profiles, err := m.catalog.ListDatabaseProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	visibleDatabases := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		if databaseProfileVisibleToSubject(profile, subject) {
+			visibleDatabases[strings.TrimSpace(profile.ID)] = struct{}{}
+		}
+	}
+	filtered := make([]mcpAccessTokenRecord, 0, len(items))
+	for _, item := range items {
+		if _, ok := visibleDatabases[strings.TrimSpace(item.DatabaseID)]; !ok {
+			continue
+		}
+		ownerSubject := strings.TrimSpace(item.OwnerSubject)
+		if subject != "" && ownerSubject != "" && ownerSubject != subject {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return mcpAccessTokenResponses(filtered), nil
 }
 
 func (m *DatabaseManager) RevokeResolvedMCPAccessToken(ctx context.Context, workspace, tokenID string) error {
@@ -232,6 +277,7 @@ func mcpAccessTokenResponseFromRecord(record mcpAccessTokenRecord) mcpAccessToke
 		DatabaseID:    record.DatabaseID,
 		WorkspaceID:   record.WorkspaceID,
 		WorkspaceName: record.WorkspaceName,
+		Profile:       record.Profile,
 		Readonly:      record.Readonly,
 		CreatedAt:     record.CreatedAt,
 		LastUsedAt:    record.LastUsedAt,
@@ -250,7 +296,15 @@ func mcpAccessTokenResponses(records []mcpAccessTokenRecord) []mcpAccessTokenRes
 
 func (m *DatabaseManager) requireOwnedSubject(ctx context.Context) (string, string, error) {
 	identity, ok := AuthIdentityFromContext(ctx)
-	if !ok || strings.TrimSpace(identity.Subject) == "" {
+	if !ok {
+		// Self-managed installs with auth disabled do not attach an identity and
+		// still need to mint workspace-scoped MCP tokens.
+		return "", "", nil
+	}
+	if strings.TrimSpace(identity.Subject) == "" {
+		if strings.TrimSpace(identity.Provider) == "" || strings.TrimSpace(identity.Provider) == string(AuthModeNone) {
+			return "", "", nil
+		}
 		return "", "", ErrUnauthorized
 	}
 	return strings.TrimSpace(identity.Subject), firstNonEmpty(identity.Name, identity.Email, identity.Subject), nil

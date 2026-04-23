@@ -1,5 +1,7 @@
 import {
+  infiniteQueryOptions,
   queryOptions,
+  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
@@ -17,6 +19,7 @@ import type {
   UpdateWorkspaceFileInput,
   QuickstartInput,
   ImportLocalInput,
+  CreateMCPTokenInput,
 } from "../types/afs";
 
 const LIVE_QUERY_STALE_MS = 10_000;
@@ -25,6 +28,8 @@ const AGENT_QUERY_STALE_MS = 5_000;
 const AGENT_QUERY_GC_MS = 5 * 60 * 1000;
 const FILESYSTEM_QUERY_STALE_MS = 30_000;
 const FILESYSTEM_QUERY_GC_MS = 5 * 60 * 1000;
+
+type InfiniteChangelogInput = Omit<ListChangelogInput, "since" | "until">;
 
 export const afsKeys = {
   all: ["afs"] as const,
@@ -46,6 +51,20 @@ export const afsKeys = {
       "workspaces",
       input.workspaceId ?? "all",
       "changes",
+      input.sessionId ?? "all",
+      input.limit ?? 100,
+      input.direction ?? "desc",
+      input.since ?? "",
+      input.until ?? "",
+    ] as const,
+  changelogFeed: (input: InfiniteChangelogInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId ?? "all",
+      "changes-feed",
       input.sessionId ?? "all",
       input.limit ?? 100,
       input.direction ?? "desc",
@@ -73,6 +92,9 @@ export const afsKeys = {
       input.view,
       input.path,
     ] as const,
+  mcpTokens: (databaseId: string | null, workspaceId: string) =>
+    [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
+  allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -138,6 +160,23 @@ export function changelogQueryOptions(input: ListChangelogInput) {
   });
 }
 
+export function changelogInfiniteQueryOptions(input: InfiniteChangelogInput) {
+  return infiniteQueryOptions({
+    queryKey: afsKeys.changelogFeed(input),
+    queryFn: ({ pageParam }) =>
+      afsApi.listChangelog({
+        ...input,
+        ...((input.direction ?? "desc") === "asc"
+          ? { since: typeof pageParam === "string" ? pageParam : undefined }
+          : { until: typeof pageParam === "string" ? pageParam : undefined }),
+      }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function workspaceTreeQueryOptions(input: GetWorkspaceTreeInput) {
   return queryOptions({
     queryKey: afsKeys.workspaceTree(input),
@@ -153,6 +192,24 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
     queryFn: () => afsApi.getWorkspaceFileContent(input),
     staleTime: FILESYSTEM_QUERY_STALE_MS,
     gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function mcpTokensQueryOptions(databaseId: string | null, workspaceId: string) {
+  return queryOptions({
+    queryKey: afsKeys.mcpTokens(databaseId, workspaceId),
+    queryFn: () => afsApi.listMCPAccessTokens(databaseId ?? undefined, workspaceId),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function allMCPAccessTokensQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.allMcpTokens(),
+    queryFn: () => afsApi.listAllMCPAccessTokens(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
   });
 }
 
@@ -188,6 +245,20 @@ export function useWorkspace(databaseId: string | null, workspaceId: string, ena
   );
 }
 
+export function useMCPAccessTokens(databaseId: string | null, workspaceId: string, enabled = true) {
+  return useQuery({
+    ...mcpTokensQueryOptions(databaseId, workspaceId),
+    enabled,
+  });
+}
+
+export function useAllMCPAccessTokens(enabled = true) {
+  return useQuery({
+    ...allMCPAccessTokensQueryOptions(),
+    enabled,
+  });
+}
+
 export function useAgents(databaseId: string | null, enabled = true) {
   return useQuery(
     {
@@ -213,6 +284,13 @@ export function useChangelog(input: ListChangelogInput, enabled = true) {
       enabled,
     },
   );
+}
+
+export function useInfiniteChangelog(input: InfiniteChangelogInput, enabled = true) {
+  return useInfiniteQuery({
+    ...changelogInfiniteQueryOptions(input),
+    enabled,
+  });
 }
 
 export function useWorkspaceTree(input: GetWorkspaceTreeInput, enabled = true) {
@@ -250,6 +328,35 @@ export function useSaveDatabaseMutation() {
     mutationFn: (input: SaveDatabaseInput) => afsApi.saveDatabase(input),
     onSuccess: async () => {
       await invalidate();
+    },
+  });
+}
+
+export function useCreateMCPAccessTokenMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateMCPTokenInput) => afsApi.createMCPAccessToken(input),
+    onSuccess: (token, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: afsKeys.mcpTokens(variables.databaseId ?? null, variables.workspaceId),
+      });
+      void queryClient.invalidateQueries({ queryKey: afsKeys.allMcpTokens() });
+      void queryClient.invalidateQueries({ queryKey: afsKeys.agents(variables.databaseId ?? null) });
+    },
+  });
+}
+
+export function useRevokeMCPAccessTokenMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { databaseId?: string; workspaceId: string; tokenId: string }) =>
+      afsApi.revokeMCPAccessToken(input.databaseId, input.workspaceId, input.tokenId),
+    onSuccess: (_, variables) => {
+      void queryClient.invalidateQueries({
+        queryKey: afsKeys.mcpTokens(variables.databaseId ?? null, variables.workspaceId),
+      });
+      void queryClient.invalidateQueries({ queryKey: afsKeys.allMcpTokens() });
+      void queryClient.invalidateQueries({ queryKey: afsKeys.agents(variables.databaseId ?? null) });
     },
   });
 }

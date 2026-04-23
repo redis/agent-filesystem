@@ -22,6 +22,7 @@ import (
 const (
 	ChangeSourceCheckpoint    = "checkpoint"
 	ChangeSourceAgentSync     = "agent_sync"
+	ChangeSourceMCP           = "mcp"
 	ChangeSourceServerRestore = "server_restore"
 	ChangeSourceImport        = "import"
 )
@@ -359,7 +360,7 @@ const AgentIDHeader = "X-AFS-Agent-Id"
 type ChangelogListRequest struct {
 	SessionID string // if set, entries are filtered to this session
 	Since     string // entry ID to read after (exclusive) — start of the range
-	Until     string // entry ID to read up to (inclusive) — end of the range
+	Until     string // entry ID to read up to (exclusive) — end of the range
 	Limit     int    // hard cap on entries returned; default 100, max 1000
 	Reverse   bool   // if true, read newest-first via XREVRANGE
 }
@@ -448,13 +449,17 @@ func (s *Store) ListChangelog(ctx context.Context, storageID string, req Changel
 		limit = 1000
 	}
 	stream := changelogStreamKey(storageID)
-	start := req.Since
-	end := req.Until
-	if start == "" {
-		start = "-"
+	// Since/Until are exclusive cursors (the "(" prefix tells Redis streams to
+	// exclude the given ID). Using exclusive bounds means the cursor returned
+	// in NextCursor can be passed back verbatim for the next page without
+	// re-emitting the row it points at.
+	start := "-"
+	end := "+"
+	if req.Since != "" {
+		start = "(" + req.Since
 	}
-	if end == "" {
-		end = "+"
+	if req.Until != "" {
+		end = "(" + req.Until
 	}
 	// Over-fetch when filtering by session so we have enough rows after filter.
 	fetch := int64(limit)

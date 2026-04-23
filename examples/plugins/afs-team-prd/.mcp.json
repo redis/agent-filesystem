@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "team-prd": {
+      "command": "afs",
+      "args": [
+        "mcp",
+        "--workspace",
+        "team-prd",
+        "--profile",
+        "workspace-rw"
+      ]
+    }
+  }
+}

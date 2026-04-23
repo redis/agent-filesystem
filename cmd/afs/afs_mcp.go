@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -21,9 +24,11 @@ import (
 const afsMCPProtocolVersion = "2024-11-05"
 
 type afsMCPServer struct {
-	cfg     config
-	store   *afsStore
-	service *controlplane.Service
+	cfg             config
+	store           *afsStore
+	service         *controlplane.Service
+	profile         string
+	workspaceLocked string
 }
 
 type mcpFileListItem struct {
@@ -47,14 +52,73 @@ type mcpGrepCount struct {
 	Count int    `json:"count"`
 }
 
+type mcpFilePatchOp struct {
+	Op            string `json:"op"`
+	StartLine     *int   `json:"start_line,omitempty"`
+	EndLine       *int   `json:"end_line,omitempty"`
+	Old           string `json:"old,omitempty"`
+	New           string `json:"new,omitempty"`
+	ContextBefore string `json:"context_before,omitempty"`
+	ContextAfter  string `json:"context_after,omitempty"`
+}
+
+type mcpFilePatchInput struct {
+	Workspace      string           `json:"workspace,omitempty"`
+	Path           string           `json:"path"`
+	ExpectedSHA256 string           `json:"expected_sha256,omitempty"`
+	Patches        []mcpFilePatchOp `json:"patches"`
+}
+
+type mcpTextMatch struct {
+	Start     int
+	End       int
+	StartLine int
+	EndLine   int
+}
+
+func (s *afsMCPServer) effectiveProfile() string {
+	profile, err := controlplane.NormalizeMCPProfile(s.profile)
+	if err != nil {
+		return controlplane.MCPProfileWorkspaceRW
+	}
+	return profile
+}
+
+func (s *afsMCPServer) effectiveWorkspaceLock() string {
+	if strings.TrimSpace(s.workspaceLocked) != "" {
+		return strings.TrimSpace(s.workspaceLocked)
+	}
+	if controlplane.MCPProfileIsWorkspaceBound(s.effectiveProfile()) {
+		return selectedWorkspaceName(s.cfg)
+	}
+	return ""
+}
+
 func cmdMCP(args []string) error {
 	bin := filepath.Base(os.Args[0])
 	if len(args) > 1 && isHelpArg(args[1]) {
 		fmt.Fprint(os.Stderr, mcpUsageText(bin))
 		return nil
 	}
-	if len(args) != 1 {
-		return fmt.Errorf("%s", mcpUsageText(bin))
+	workspaceFlag := ""
+	profileFlag := ""
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--workspace":
+			if i+1 >= len(args) {
+				return fmt.Errorf("missing value for --workspace\n\n%s", mcpUsageText(bin))
+			}
+			workspaceFlag = strings.TrimSpace(args[i+1])
+			i++
+		case "--profile":
+			if i+1 >= len(args) {
+				return fmt.Errorf("missing value for --profile\n\n%s", mcpUsageText(bin))
+			}
+			profileFlag = strings.TrimSpace(args[i+1])
+			i++
+		default:
+			return fmt.Errorf("unknown mcp flag %q\n\n%s", args[i], mcpUsageText(bin))
+		}
 	}
 
 	cfg, store, closeStore, err := openAFSStore(context.Background())
@@ -62,20 +126,40 @@ func cmdMCP(args []string) error {
 		return err
 	}
 	defer closeStore()
+	profile, err := controlplane.NormalizeMCPProfile(profileFlag)
+	if err != nil {
+		return err
+	}
+	workspaceLocked := strings.TrimSpace(workspaceFlag)
+	if workspaceLocked == "" && controlplane.MCPProfileIsWorkspaceBound(profile) {
+		workspaceLocked, err = resolveWorkspaceName(context.Background(), cfg, store, "")
+		if err != nil {
+			return fmt.Errorf("workspace-bound mcp profile %q requires a selected workspace: %w", profile, err)
+		}
+	}
 
 	server := &afsMCPServer{
-		cfg:     cfg,
-		store:   store,
-		service: controlPlaneServiceFromStore(cfg, store),
+		cfg:             cfg,
+		store:           store,
+		service:         controlPlaneServiceFromStore(cfg, store),
+		profile:         profile,
+		workspaceLocked: workspaceLocked,
 	}
 	return server.protocolServer().Serve(context.Background(), os.Stdin, os.Stdout)
 }
 
 func mcpUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s mcp
+  %s mcp [--workspace <name>] [--profile <profile>]
 
 Start the Agent Filesystem MCP server over stdio.
+
+Profiles:
+  workspace-ro              Workspace-bound read-only file tools
+  workspace-rw              Workspace-bound read/write file tools (default)
+  workspace-rw-checkpoint   Workspace-bound file tools plus checkpoints
+  admin-ro                  Broad read-only MCP surface
+  admin-rw                  Broad read/write MCP surface
 
 This command is meant to be launched by an MCP client, for example:
 
@@ -83,7 +167,7 @@ This command is meant to be launched by an MCP client, for example:
     "mcpServers": {
       "afs": {
         "command": "/absolute/path/to/%s",
-        "args": ["mcp"]
+        "args": ["mcp", "--workspace", "my-workspace", "--profile", "workspace-rw"]
       }
     }
   }
@@ -91,11 +175,17 @@ This command is meant to be launched by an MCP client, for example:
 }
 
 func (s *afsMCPServer) protocolServer() *mcpproto.Server {
+	instructions := "Workspace-first Agent Filesystem MCP server."
+	if controlplane.MCPProfileIsWorkspaceBound(s.effectiveProfile()) {
+		instructions = fmt.Sprintf("Workspace-bound Agent Filesystem MCP server for %s with profile %s. Use file tools only within the locked workspace.", s.effectiveWorkspaceLock(), s.effectiveProfile())
+	} else {
+		instructions = fmt.Sprintf("Agent Filesystem admin MCP server with profile %s.", s.effectiveProfile())
+	}
 	return &mcpproto.Server{
 		ProtocolVersion: afsMCPProtocolVersion,
 		Name:            "afs",
 		Version:         "0.1.0",
-		Instructions:    "Workspace-first Agent Filesystem MCP server. Use workspace/file/checkpoint tools instead of raw Redis FS commands.",
+		Instructions:    instructions,
 		Provider:        s,
 	}
 }
@@ -105,7 +195,7 @@ func (s *afsMCPServer) serve(ctx context.Context, r io.Reader, w io.Writer) erro
 }
 
 func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
-	return []mcpproto.Tool{
+	tools := []mcpproto.Tool{
 		{
 			Name:        "afs_status",
 			Description: "Show the current AFS configuration and selected workspace",
@@ -192,79 +282,98 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_read",
-			Description: "Read a file or symlink from a workspace",
+			Description: "Read a file or symlink from a workspace. Use this for whole-file reads when you need the complete current contents. Do not use this for partial text reads (use file_lines), directory discovery (use file_list), or content search across files (use file_grep). Paths must be absolute inside the workspace, for example /src/main.go.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute path inside the workspace"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace path to a file or symlink, for example /src/main.go"},
 				},
 				"required": []string{"path"},
 			},
 		},
 		{
 			Name:        "file_lines",
-			Description: "Read a specific line range from a text file",
+			Description: "Read a specific line range from a text file. Use this instead of file_read when the file is large or you only need a slice. This is for text files only. Do not use it for directory listing or cross-file search. Paths must be absolute inside the workspace, for example /src/main.go.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute path inside the workspace"},
-					"start":     map[string]string{"type": "integer", "description": "Start line (1-indexed)"},
-					"end":       map[string]string{"type": "integer", "description": "End line (inclusive, -1 for EOF)"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace path to a text file, for example /src/main.go"},
+					"start":     map[string]string{"type": "integer", "description": "Start line, 1-indexed"},
+					"end":       map[string]string{"type": "integer", "description": "End line, inclusive. Use -1 to read through EOF"},
 				},
 				"required": []string{"path", "start"},
 			},
 		},
 		{
 			Name:        "file_list",
-			Description: "List files and directories under a workspace path",
+			Description: "List files and directories under a workspace path. Use this for structure discovery and navigation. Do not use it for filename pattern matching or content search; use a dedicated glob-style tool or file_grep instead. Paths must be absolute inside the workspace, for example / or /src.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute directory path", "default": "/"},
-					"depth":     map[string]string{"type": "integer", "description": "Depth relative to the requested path", "default": "1"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace directory path, for example / or /src", "default": "/"},
+					"depth":     map[string]string{"type": "integer", "description": "Depth relative to the requested path. Use 1 for immediate children", "default": "1"},
 				},
 			},
 		},
 		{
-			Name:        "file_write",
-			Description: "Write a file in a workspace, creating parent directories as needed; leaves the workspace dirty until checkpoint_create is called",
+			Name:        "file_glob",
+			Description: "Find files or directories under a workspace path by basename glob pattern. Use this for filename discovery before reading or editing. Do not use it for content search; use file_grep instead. The search path must be an absolute directory path inside the workspace, for example / or /src.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
-					"content":   map[string]string{"type": "string", "description": "Full file contents"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace directory path to search within, for example / or /src", "default": "/"},
+					"pattern":   map[string]string{"type": "string", "description": "Basename glob pattern, for example *.go or [Mm]akefile"},
+					"kind":      map[string]string{"type": "string", "description": "Optional kind filter: file, dir, symlink, or any", "default": "file"},
+					"limit":     map[string]string{"type": "integer", "description": "Maximum number of results to return", "default": "100"},
+				},
+				"required": []string{"pattern"},
+			},
+		},
+		{
+			Name:        "file_write",
+			Description: "Write a full file in a workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, or file_delete_lines for that. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called. Paths must be absolute inside the workspace, for example /src/main.go.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
+					"content":   map[string]string{"type": "string", "description": "Complete file contents to write"},
 				},
 				"required": []string{"path", "content"},
 			},
 		},
 		{
 			Name:        "file_replace",
-			Description: "Replace text in a file and leave the workspace dirty until checkpoint_create is called",
+			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, callers should be explicit about whether all occurrences are intended. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
-					"old":       map[string]string{"type": "string", "description": "Text to find"},
-					"new":       map[string]string{"type": "string", "description": "Replacement text"},
-					"all":       map[string]string{"type": "boolean", "description": "Replace all occurrences"},
+					"workspace":            map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"path":                 map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
+					"old":                  map[string]string{"type": "string", "description": "Exact text to find"},
+					"new":                  map[string]string{"type": "string", "description": "Replacement text"},
+					"all":                  map[string]string{"type": "boolean", "description": "Replace all occurrences instead of a single occurrence"},
+					"expected_occurrences": map[string]string{"type": "integer", "description": "Optional expected number of matching occurrences before replacing"},
+					"start_line":           map[string]string{"type": "integer", "description": "Optional exact 1-indexed line where the match must begin"},
+					"context_before":       map[string]string{"type": "string", "description": "Optional exact text that must appear immediately before the match"},
+					"context_after":        map[string]string{"type": "string", "description": "Optional exact text that must appear immediately after the match"},
 				},
 				"required": []string{"path", "old", "new"},
 			},
 		},
 		{
 			Name:        "file_insert",
-			Description: "Insert content after a specific line and leave the workspace dirty until checkpoint_create is called",
+			Description: "Insert content at a line boundary in a text file. Use this for additive edits where an exact insertion point is known. Do not use it for broad rewrites or ambiguous structural edits. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
-					"line":      map[string]string{"type": "integer", "description": "Insert after this line; 0=beginning, -1=end"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
+					"line":      map[string]string{"type": "integer", "description": "Insert after this line. Use 0 for the beginning of the file and -1 for the end"},
 					"content":   map[string]string{"type": "string", "description": "Content to insert"},
 				},
 				"required": []string{"path", "line", "content"},
@@ -272,42 +381,79 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_delete_lines",
-			Description: "Delete a line range from a file and leave the workspace dirty until checkpoint_create is called",
+			Description: "Delete a line range from a text file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
-					"start":     map[string]string{"type": "integer", "description": "Start line (1-indexed)"},
-					"end":       map[string]string{"type": "integer", "description": "End line (inclusive)"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
+					"start":     map[string]string{"type": "integer", "description": "Start line to delete, 1-indexed"},
+					"end":       map[string]string{"type": "integer", "description": "End line to delete, inclusive"},
 				},
 				"required": []string{"path", "start", "end"},
 			},
 		},
 		{
+			Name:        "file_patch",
+			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters. This tool supports replace, insert, and delete operations with optional line anchors, surrounding context checks, and a file hash precondition. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace":       map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"path":            map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
+					"expected_sha256": map[string]string{"type": "string", "description": "Optional SHA-256 hash of the file before patching; fail if the file changed"},
+					"patches": map[string]any{
+						"type":        "array",
+						"description": "Ordered list of structured patches to apply",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"op":             map[string]string{"type": "string", "description": "Patch operation: replace, insert, or delete"},
+								"start_line":     map[string]string{"type": "integer", "description": "1-indexed starting line for the patch. For insert, use 0 for the file beginning or -1 for EOF"},
+								"end_line":       map[string]string{"type": "integer", "description": "Optional inclusive end line for delete operations"},
+								"old":            map[string]string{"type": "string", "description": "Exact expected text for replace or delete"},
+								"new":            map[string]string{"type": "string", "description": "Replacement or inserted text"},
+								"context_before": map[string]string{"type": "string", "description": "Optional exact text that must appear immediately before the patch"},
+								"context_after":  map[string]string{"type": "string", "description": "Optional exact text that must appear immediately after the patch"},
+							},
+							"required": []string{"op"},
+						},
+					},
+				},
+				"required": []string{"path", "patches"},
+			},
+		},
+		{
 			Name:        "file_grep",
-			Description: "Search a workspace directly in Redis using the same engine as `afs grep`",
+			Description: "Search file contents in a workspace using the same engine as afs grep. Use this for content search across one file or many files. Do not use it for directory discovery or filename-only matching. The search path must be absolute inside the workspace, for example / or /src. Choose only one search mode among glob, fixed_strings, or regexp.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"workspace":          map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
-					"path":               map[string]string{"type": "string", "description": "Limit the search to a path", "default": "/"},
+					"path":               map[string]string{"type": "string", "description": "Absolute workspace path to search within, for example / or /src", "default": "/"},
 					"pattern":            map[string]string{"type": "string", "description": "Pattern to search for"},
 					"ignore_case":        map[string]string{"type": "boolean", "description": "Case-insensitive search"},
-					"glob":               map[string]string{"type": "boolean", "description": "Use AFS glob matching semantics"},
+					"glob":               map[string]string{"type": "boolean", "description": "Use AFS glob matching semantics for the pattern"},
 					"fixed_strings":      map[string]string{"type": "boolean", "description": "Treat the pattern as a fixed string"},
-					"regexp":             map[string]string{"type": "boolean", "description": "Use regex mode (RE2 syntax)"},
+					"regexp":             map[string]string{"type": "boolean", "description": "Use regex mode with RE2 syntax"},
 					"word_regexp":        map[string]string{"type": "boolean", "description": "Match whole words"},
 					"line_regexp":        map[string]string{"type": "boolean", "description": "Match entire lines"},
 					"invert_match":       map[string]string{"type": "boolean", "description": "Return non-matching lines"},
 					"files_with_matches": map[string]string{"type": "boolean", "description": "Return only matching file paths"},
-					"count":              map[string]string{"type": "boolean", "description": "Return match counts per file"},
+					"count":              map[string]string{"type": "boolean", "description": "Return match counts per file instead of line matches"},
 					"max_count":          map[string]string{"type": "integer", "description": "Maximum selected lines per file"},
 				},
 				"required": []string{"pattern"},
 			},
 		},
 	}
+	filtered := make([]mcpproto.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if controlplane.MCPProfileAllowsTool(s.effectiveProfile(), tool.Name) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
@@ -315,6 +461,15 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value any
 		err   error
 	)
+	if !controlplane.MCPProfileAllowsTool(s.effectiveProfile(), name) {
+		return mcpproto.ToolResult{
+			Content: []mcpproto.TextContent{{
+				Type: "text",
+				Text: fmt.Sprintf("tool %q is not available for mcp profile %q", name, s.effectiveProfile()),
+			}},
+			IsError: true,
+		}
+	}
 
 	switch name {
 	case "afs_status":
@@ -341,6 +496,8 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value, err = s.toolFileLines(ctx, args)
 	case "file_list":
 		value, err = s.toolFileList(ctx, args)
+	case "file_glob":
+		value, err = s.toolFileGlob(ctx, args)
 	case "file_write":
 		value, err = s.toolFileWrite(ctx, args)
 	case "file_replace":
@@ -349,6 +506,8 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value, err = s.toolFileInsert(ctx, args)
 	case "file_delete_lines":
 		value, err = s.toolFileDeleteLines(ctx, args)
+	case "file_patch":
+		value, err = s.toolFilePatch(ctx, args)
 	case "file_grep":
 		value, err = s.toolFileGrep(ctx, args)
 	default:
@@ -380,6 +539,8 @@ func (s *afsMCPServer) toolAFSStatus() (any, error) {
 		"redis_addr":        s.cfg.RedisAddr,
 		"redis_db":          s.cfg.RedisDB,
 		"current_workspace": selectedWorkspaceName(s.cfg),
+		"workspace_locked":  s.effectiveWorkspaceLock(),
+		"profile":           s.effectiveProfile(),
 		"mount_backend":     s.cfg.MountBackend,
 		"local_path":        s.cfg.LocalPath,
 	}, nil
@@ -390,6 +551,14 @@ func (s *afsMCPServer) toolWorkspaceList(ctx context.Context) (any, error) {
 }
 
 func (s *afsMCPServer) toolWorkspaceCurrent(ctx context.Context) (any, error) {
+	if s.effectiveWorkspaceLock() != "" {
+		return map[string]any{
+			"workspace": s.effectiveWorkspaceLock(),
+			"exists":    true,
+			"locked":    true,
+			"profile":   s.effectiveProfile(),
+		}, nil
+	}
 	workspace := selectedWorkspaceName(s.cfg)
 	exists := false
 	if workspace != "" {
@@ -642,6 +811,97 @@ func (s *afsMCPServer) toolFileList(ctx context.Context, args map[string]any) (a
 	}, nil
 }
 
+func (s *afsMCPServer) toolFileGlob(ctx context.Context, args map[string]any) (any, error) {
+	workspace, err := s.resolveWorkspaceArg(ctx, args, "workspace")
+	if err != nil {
+		return nil, err
+	}
+	pattern, err := mcpRequiredText(args, "pattern", false)
+	if err != nil {
+		return nil, err
+	}
+	rawPath, err := mcpStringDefault(args, "path", "/")
+	if err != nil {
+		return nil, err
+	}
+	normalizedPath := normalizeAFSGrepPath(rawPath)
+	kind, err := mcpStringDefault(args, "kind", "file")
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case "", "any":
+		kind = ""
+	case "file", "dir", "symlink":
+	default:
+		return nil, fmt.Errorf("argument %q must be one of file, dir, symlink, or any", "kind")
+	}
+	limit, err := mcpInt(args, "limit", 100)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	fsKey, _, _, err := s.store.ensureWorkspaceRoot(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	fsClient := client.New(s.store.rdb, fsKey)
+	stat, err := fsClient.Stat(ctx, normalizedPath)
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, os.ErrNotExist
+		}
+		return nil, err
+	}
+	if stat == nil {
+		return nil, os.ErrNotExist
+	}
+	if stat.Type != "dir" {
+		return nil, fmt.Errorf("path %q is not a directory", normalizedPath)
+	}
+
+	matches, err := fsClient.Find(ctx, normalizedPath, pattern, kind)
+	if err != nil {
+		return nil, err
+	}
+	truncated := false
+	if len(matches) > limit {
+		truncated = true
+		matches = matches[:limit]
+	}
+	items := make([]mcpFileListItem, 0, len(matches))
+	for _, matchPath := range matches {
+		item, err := workspaceFileListItem(ctx, fsClient, matchPath)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Kind != items[j].Kind {
+			if items[i].Kind == "dir" {
+				return true
+			}
+			if items[j].Kind == "dir" {
+				return false
+			}
+		}
+		return items[i].Path < items[j].Path
+	})
+	return map[string]any{
+		"workspace": workspace,
+		"path":      normalizedPath,
+		"pattern":   pattern,
+		"kind":      ternaryString(kind == "", "any", kind),
+		"count":     len(items),
+		"truncated": truncated,
+		"items":     items,
+	}, nil
+}
+
 func (s *afsMCPServer) toolFileWrite(ctx context.Context, args map[string]any) (any, error) {
 	content, err := mcpRequiredText(args, "content", true)
 	if err != nil {
@@ -686,6 +946,22 @@ func (s *afsMCPServer) toolFileReplace(ctx context.Context, args map[string]any)
 	if err != nil {
 		return nil, err
 	}
+	expectedOccurrences, err := mcpOptionalInt(args, "expected_occurrences")
+	if err != nil {
+		return nil, err
+	}
+	startLine, err := mcpOptionalInt(args, "start_line")
+	if err != nil {
+		return nil, err
+	}
+	contextBefore, err := mcpOptionalText(args, "context_before")
+	if err != nil {
+		return nil, err
+	}
+	contextAfter, err := mcpOptionalText(args, "context_after")
+	if err != nil {
+		return nil, err
+	}
 	return s.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient client.Client, normalizedPath string, stat *client.StatResult) (map[string]any, error) {
 		if stat == nil {
 			return nil, os.ErrNotExist
@@ -693,13 +969,39 @@ func (s *afsMCPServer) toolFileReplace(ctx context.Context, args map[string]any)
 		if stat.Type != "file" {
 			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
 		}
-		count, err := fsClient.Replace(ctx, normalizedPath, oldValue, newValue, replaceAll)
+		content, err := readWorkspaceTextContent(ctx, fsClient, normalizedPath, stat)
 		if err != nil {
+			return nil, err
+		}
+		matchCount := countTextMatches(content, oldValue, contextBefore, contextAfter, startLine, nil)
+		if expectedOccurrences != nil && matchCount != *expectedOccurrences {
+			return nil, fmt.Errorf("expected %d matching occurrences, found %d", *expectedOccurrences, matchCount)
+		}
+		var replaced int
+		switch {
+		case replaceAll:
+			if startLine != nil || contextBefore != "" || contextAfter != "" {
+				return nil, errors.New("all=true cannot be combined with start_line, context_before, or context_after")
+			}
+			if matchCount == 0 {
+				return nil, errors.New("old text not found")
+			}
+			content = strings.ReplaceAll(content, oldValue, newValue)
+			replaced = matchCount
+		default:
+			match, err := findSingleTextMatch(content, oldValue, contextBefore, contextAfter, startLine, nil)
+			if err != nil {
+				return nil, err
+			}
+			content = content[:match.Start] + newValue + content[match.End:]
+			replaced = 1
+		}
+		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
 			return nil, err
 		}
 		return map[string]any{
 			"operation":    "replace",
-			"replacements": int(count),
+			"replacements": replaced,
 		}, nil
 	})
 }
@@ -756,6 +1058,56 @@ func (s *afsMCPServer) toolFileDeleteLines(ctx context.Context, args map[string]
 		return map[string]any{
 			"operation":     "delete_lines",
 			"deleted_lines": int(deleted),
+		}, nil
+	})
+}
+
+func (s *afsMCPServer) toolFilePatch(ctx context.Context, args map[string]any) (any, error) {
+	var input mcpFilePatchInput
+	if err := decodeMCPArgs(args, &input); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.Path) == "" {
+		return nil, fmt.Errorf("missing required argument %q", "path")
+	}
+	if len(input.Patches) == 0 {
+		return nil, errors.New("argument \"patches\" must not be empty")
+	}
+
+	return s.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient client.Client, normalizedPath string, stat *client.StatResult) (map[string]any, error) {
+		if stat == nil {
+			return nil, os.ErrNotExist
+		}
+		if stat.Type != "file" {
+			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
+		}
+		content, err := readWorkspaceTextContent(ctx, fsClient, normalizedPath, stat)
+		if err != nil {
+			return nil, err
+		}
+		if input.ExpectedSHA256 != "" {
+			got := textSHA256(content)
+			if !strings.EqualFold(got, input.ExpectedSHA256) {
+				return nil, fmt.Errorf("expected_sha256 mismatch: got %s", got)
+			}
+		}
+		applied := make([]map[string]any, 0, len(input.Patches))
+		for i, patch := range input.Patches {
+			var patchMeta map[string]any
+			content, patchMeta, err = applyMCPTextPatch(content, patch)
+			if err != nil {
+				return nil, fmt.Errorf("patch %d: %w", i+1, err)
+			}
+			applied = append(applied, patchMeta)
+		}
+		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation":       "patch",
+			"patches_applied": len(applied),
+			"applied":         applied,
+			"sha256":          textSHA256(content),
 		}, nil
 	})
 }
@@ -1020,6 +1372,16 @@ func manifestPathPrefix(path string) string {
 }
 
 func (s *afsMCPServer) resolveWorkspaceArg(ctx context.Context, args map[string]any, field string) (string, error) {
+	if s.effectiveWorkspaceLock() != "" {
+		requested, err := mcpOptionalString(args, field)
+		if err != nil {
+			return "", err
+		}
+		if requested != "" && strings.TrimSpace(requested) != s.effectiveWorkspaceLock() {
+			return "", fmt.Errorf("workspace is locked to %q for mcp profile %q", s.effectiveWorkspaceLock(), s.effectiveProfile())
+		}
+		return s.effectiveWorkspaceLock(), nil
+	}
 	requested, err := mcpOptionalString(args, field)
 	if err != nil {
 		return "", err
@@ -1099,9 +1461,18 @@ func (s *afsMCPServer) mutateWorkspaceFile(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
+	updatedStat, statErr := fsClient.Stat(ctx, normalizedPath)
+	if statErr != nil && !errors.Is(statErr, redis.Nil) {
+		return nil, statErr
+	}
 	payload["workspace"] = workspace
 	payload["path"] = normalizedPath
 	payload["dirty"] = dirty
+	if updatedStat != nil {
+		payload["kind"] = updatedStat.Type
+		payload["size"] = updatedStat.Size
+		payload["modified_at"] = mcpFileModifiedAt(updatedStat.Mtime)
+	}
 	return payload, nil
 }
 
@@ -1201,6 +1572,31 @@ func readWorkspaceFSEntry(ctx context.Context, workspace, normalizedPath string,
 	}
 }
 
+func workspaceFileListItem(ctx context.Context, fsClient client.Client, filePath string) (mcpFileListItem, error) {
+	stat, err := fsClient.Stat(ctx, filePath)
+	if err != nil {
+		return mcpFileListItem{}, err
+	}
+	if stat == nil {
+		return mcpFileListItem{}, os.ErrNotExist
+	}
+	item := mcpFileListItem{
+		Path:       filePath,
+		Name:       filepath.Base(filePath),
+		Kind:       stat.Type,
+		Size:       stat.Size,
+		ModifiedAt: mcpFileModifiedAt(stat.Mtime),
+	}
+	if stat.Type == "symlink" {
+		target, err := fsClient.Readlink(ctx, filePath)
+		if err != nil {
+			return mcpFileListItem{}, err
+		}
+		item.Target = target
+	}
+	return item, nil
+}
+
 func listWorkspaceFSEntries(ctx context.Context, fsClient client.Client, manifestPath string, depth int) ([]mcpFileListItem, error) {
 	tree, err := fsClient.Tree(ctx, manifestPath, depth)
 	if err != nil {
@@ -1215,26 +1611,12 @@ func listWorkspaceFSEntries(ctx context.Context, fsClient client.Client, manifes
 		if node.Path == manifestPath {
 			continue
 		}
-		stat, err := fsClient.Stat(ctx, node.Path)
+		item, err := workspaceFileListItem(ctx, fsClient, node.Path)
 		if err != nil {
-			return nil, err
-		}
-		if stat == nil {
-			continue
-		}
-		item := mcpFileListItem{
-			Path:       node.Path,
-			Name:       filepath.Base(node.Path),
-			Kind:       stat.Type,
-			Size:       stat.Size,
-			ModifiedAt: mcpFileModifiedAt(stat.Mtime),
-		}
-		if stat.Type == "symlink" {
-			target, err := fsClient.Readlink(ctx, node.Path)
-			if err != nil {
-				return nil, err
+			if errors.Is(err, os.ErrNotExist) {
+				continue
 			}
-			item.Target = target
+			return nil, err
 		}
 		entries = append(entries, item)
 	}
@@ -1258,6 +1640,20 @@ func mcpFileModifiedAt(mtimeMs int64) string {
 		return ""
 	}
 	return time.UnixMilli(mtimeMs).UTC().Format(time.RFC3339)
+}
+
+func readWorkspaceTextContent(ctx context.Context, fsClient client.Client, normalizedPath string, stat *client.StatResult) (string, error) {
+	if stat.Type != "file" {
+		return "", fmt.Errorf("path %q is not a regular file", normalizedPath)
+	}
+	content, err := fsClient.Cat(ctx, normalizedPath)
+	if err != nil {
+		return "", err
+	}
+	if grepBinaryPrefix(content) {
+		return "", fmt.Errorf("path %q is binary", normalizedPath)
+	}
+	return string(content), nil
 }
 
 func mcpRequiredString(args map[string]any, key string) (string, error) {
@@ -1303,6 +1699,18 @@ func mcpOptionalString(args map[string]any, key string) (string, error) {
 	return strings.TrimSpace(text), nil
 }
 
+func mcpOptionalText(args map[string]any, key string) (string, error) {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return "", nil
+	}
+	text, ok := value.(string)
+	if !ok {
+		return "", fmt.Errorf("argument %q must be a string", key)
+	}
+	return text, nil
+}
+
 func mcpStringDefault(args map[string]any, key, fallback string) (string, error) {
 	value, err := mcpOptionalString(args, key)
 	if err != nil {
@@ -1342,6 +1750,238 @@ func mcpInt(args map[string]any, key string, fallback int) (int, error) {
 	default:
 		return 0, fmt.Errorf("argument %q must be an integer", key)
 	}
+}
+
+func mcpOptionalInt(args map[string]any, key string) (*int, error) {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return nil, nil
+	}
+	intValue, err := mcpInt(args, key, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &intValue, nil
+}
+
+func decodeMCPArgs(args map[string]any, target any) error {
+	body, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(body, target)
+}
+
+func textSHA256(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
+func countTextMatches(content, old, contextBefore, contextAfter string, startLine, endLine *int) int {
+	if old == "" {
+		return 0
+	}
+	count := 0
+	offset := 0
+	for {
+		index := strings.Index(content[offset:], old)
+		if index < 0 {
+			break
+		}
+		matchStart := offset + index
+		matchEnd := matchStart + len(old)
+		match := mcpTextMatch{
+			Start:     matchStart,
+			End:       matchEnd,
+			StartLine: lineNumberAtOffset(content, matchStart),
+			EndLine:   textEndLine(lineNumberAtOffset(content, matchStart), old),
+		}
+		if matchMatchesConstraints(content, match, contextBefore, contextAfter, startLine, endLine) {
+			count++
+		}
+		offset = matchStart + len(old)
+	}
+	return count
+}
+
+func findSingleTextMatch(content, old, contextBefore, contextAfter string, startLine, endLine *int) (mcpTextMatch, error) {
+	if old == "" {
+		return mcpTextMatch{}, errors.New("old text must not be empty")
+	}
+	var (
+		match  mcpTextMatch
+		found  bool
+		offset int
+		count  int
+	)
+	for {
+		index := strings.Index(content[offset:], old)
+		if index < 0 {
+			break
+		}
+		matchStart := offset + index
+		matchEnd := matchStart + len(old)
+		current := mcpTextMatch{
+			Start:     matchStart,
+			End:       matchEnd,
+			StartLine: lineNumberAtOffset(content, matchStart),
+			EndLine:   textEndLine(lineNumberAtOffset(content, matchStart), old),
+		}
+		if matchMatchesConstraints(content, current, contextBefore, contextAfter, startLine, endLine) {
+			match = current
+			found = true
+			count++
+		}
+		offset = matchStart + len(old)
+	}
+	switch {
+	case !found:
+		return mcpTextMatch{}, errors.New("target text not found with the requested constraints")
+	case count > 1:
+		return mcpTextMatch{}, fmt.Errorf("target text matched %d times; refine with start_line or surrounding context", count)
+	default:
+		return match, nil
+	}
+}
+
+func matchMatchesConstraints(content string, match mcpTextMatch, contextBefore, contextAfter string, startLine, endLine *int) bool {
+	if startLine != nil && match.StartLine != *startLine {
+		return false
+	}
+	if endLine != nil && match.EndLine != *endLine {
+		return false
+	}
+	if contextBefore != "" && !strings.HasSuffix(content[:match.Start], contextBefore) {
+		return false
+	}
+	if contextAfter != "" && !strings.HasPrefix(content[match.End:], contextAfter) {
+		return false
+	}
+	return true
+}
+
+func lineNumberAtOffset(content string, offset int) int {
+	if offset <= 0 {
+		return 1
+	}
+	return strings.Count(content[:offset], "\n") + 1
+}
+
+func textEndLine(startLine int, text string) int {
+	if text == "" {
+		return startLine
+	}
+	newlineCount := strings.Count(text, "\n")
+	if newlineCount == 0 {
+		return startLine
+	}
+	if strings.HasSuffix(text, "\n") {
+		return startLine + newlineCount - 1
+	}
+	return startLine + newlineCount
+}
+
+func applyMCPTextPatch(content string, patch mcpFilePatchOp) (string, map[string]any, error) {
+	switch patch.Op {
+	case "replace":
+		if patch.Old == "" {
+			return "", nil, errors.New("replace patch requires old")
+		}
+		match, err := findSingleTextMatch(content, patch.Old, patch.ContextBefore, patch.ContextAfter, patch.StartLine, patch.EndLine)
+		if err != nil {
+			return "", nil, err
+		}
+		return content[:match.Start] + patch.New + content[match.End:], map[string]any{
+			"op":         patch.Op,
+			"start_line": match.StartLine,
+			"end_line":   match.EndLine,
+		}, nil
+	case "insert":
+		if patch.New == "" {
+			return "", nil, errors.New("insert patch requires new")
+		}
+		if patch.StartLine == nil {
+			return "", nil, errors.New("insert patch requires start_line")
+		}
+		insertOffset, actualLine, err := insertOffsetForLine(content, *patch.StartLine)
+		if err != nil {
+			return "", nil, err
+		}
+		if patch.ContextBefore != "" && !strings.HasSuffix(content[:insertOffset], patch.ContextBefore) {
+			return "", nil, errors.New("insert patch context_before did not match")
+		}
+		if patch.ContextAfter != "" && !strings.HasPrefix(content[insertOffset:], patch.ContextAfter) {
+			return "", nil, errors.New("insert patch context_after did not match")
+		}
+		return content[:insertOffset] + patch.New + content[insertOffset:], map[string]any{
+			"op":         patch.Op,
+			"start_line": actualLine,
+		}, nil
+	case "delete":
+		switch {
+		case patch.Old != "":
+			match, err := findSingleTextMatch(content, patch.Old, patch.ContextBefore, patch.ContextAfter, patch.StartLine, patch.EndLine)
+			if err != nil {
+				return "", nil, err
+			}
+			return content[:match.Start] + content[match.End:], map[string]any{
+				"op":         patch.Op,
+				"start_line": match.StartLine,
+				"end_line":   match.EndLine,
+			}, nil
+		case patch.StartLine != nil && patch.EndLine != nil:
+			next, deleted, err := deleteContentLines(content, *patch.StartLine, *patch.EndLine)
+			if err != nil {
+				return "", nil, err
+			}
+			return next, map[string]any{
+				"op":            patch.Op,
+				"start_line":    *patch.StartLine,
+				"end_line":      *patch.EndLine,
+				"deleted_lines": deleted,
+			}, nil
+		default:
+			return "", nil, errors.New("delete patch requires old or both start_line and end_line")
+		}
+	default:
+		return "", nil, fmt.Errorf("unsupported patch op %q", patch.Op)
+	}
+}
+
+func insertOffsetForLine(content string, startLine int) (int, int, error) {
+	if startLine < -1 {
+		return 0, 0, errors.New("start_line must be >= -1")
+	}
+	if startLine == -1 {
+		return len(content), -1, nil
+	}
+	if startLine == 0 {
+		return 0, 0, nil
+	}
+	lines := splitTextLines(content)
+	if startLine > len(lines) {
+		return 0, 0, fmt.Errorf("start_line %d is beyond EOF", startLine)
+	}
+	offset := 0
+	for i := 0; i < startLine; i++ {
+		offset += len(lines[i])
+	}
+	return offset, startLine, nil
+}
+
+func deleteContentLines(content string, start, end int) (string, int, error) {
+	if start <= 0 || end < start {
+		return "", 0, errors.New("start_line and end_line must be >= 1 and end_line must be >= start_line")
+	}
+	lines := splitTextLines(content)
+	if start > len(lines) {
+		return "", 0, fmt.Errorf("start_line %d is beyond EOF", start)
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	next := strings.Join(append(lines[:start-1], lines[end:]...), "")
+	return next, end - start + 1, nil
 }
 
 func readLocalWorkspaceEntry(workspace, normalizedPath, localPath string, info os.FileInfo) (any, error) {

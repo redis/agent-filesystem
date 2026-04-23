@@ -1,6 +1,6 @@
 import { createFileRoute, Outlet, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
-import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useRef, useState } from "react";
+import { Button, Loader, Select } from "@redis-ui/components";
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 import {
   DialogActions,
@@ -14,16 +14,15 @@ import {
   Field,
   FormGrid,
   PageStack,
-  Select,
   TextInput,
 } from "../components/afs-kit";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { FreeTierLimitDialog } from "../components/free-tier-limit-dialog";
+import { CreateWorkspaceDialog } from "../features/workspaces/CreateWorkspaceDialog";
 
 const FREE_TIER_WORKSPACE_LIMIT = 3;
 import {
   agentsQueryOptions,
-  useCreateWorkspaceMutation,
   useDeleteWorkspaceMutation,
   useUpdateWorkspaceMutation,
   useImportLocalMutation,
@@ -170,15 +169,13 @@ function ImportDialog({
             <Field>
               Database
               <Select
+                options={databases.map((db) => ({
+                  value: db.id,
+                  label: db.displayName || db.databaseName,
+                }))}
                 value={form.databaseId}
-                onChange={(e) => update("databaseId", e.target.value)}
-              >
-                {databases.map((db) => (
-                  <option key={db.id} value={db.id}>
-                    {db.displayName || db.databaseName}
-                  </option>
-                ))}
-              </Select>
+                onChange={(next) => update("databaseId", next as string)}
+              />
             </Field>
           )}
 
@@ -220,11 +217,6 @@ function workspaceEligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
   return databases.filter((database) => database.canCreateWorkspaces);
 }
 
-function isFreeTierLimitError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  return error.message.toLowerCase().includes("free tier workspace limit");
-}
-
 function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
   const eligible = workspaceEligibleDatabases(databases);
   return eligible.find((database) => database.isDefault) ?? eligible[0] ?? null;
@@ -254,19 +246,16 @@ function WorkspacesPage() {
   const agentsQuery = useScopedAgents();
   const { databases } = useDatabaseScope();
   const eligibleDatabases = workspaceEligibleDatabases(databases);
-  const createWorkspace = useCreateWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
   const deleteWorkspace = useDeleteWorkspaceMutation();
-  const importLocal = useImportLocalMutation();
 
   const [importOpen, setImportOpen] = useState(false);
-  const [importPath, setImportPath] = useState("");
-  const [importFileCount, setImportFileCount] = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
   const [editingWorkspaceDatabaseId, setEditingWorkspaceDatabaseId] = useState<string | null>(null);
   const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceSummary | null>(null);
+  const [workspaceToDelete, setWorkspaceToDelete] = useState<AFSWorkspaceSummary | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [freeTierDialogOpen, setFreeTierDialogOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [form, setForm] = useState<WorkspaceFormState>(() =>
@@ -295,21 +284,6 @@ function WorkspacesPage() {
     });
   }, [dialogMode, editingWorkspaceQuery.data]);
 
-  useEffect(() => {
-    if (dialogMode !== "create") {
-      return;
-    }
-
-    setForm((current) => {
-      const currentDatabase = databases.find((item) => item.id === current.databaseId) ?? preferredDatabase(databases);
-      if (currentDatabase != null && !currentDatabase.canCreateWorkspaces) {
-        return { ...current, ...createWorkspaceDefaults(preferredDatabase(databases)) };
-      }
-      const defaults = createWorkspaceDefaults(currentDatabase);
-      return { ...current, ...defaults };
-    });
-  }, [databases, dialogMode]);
-
   const workspaces = workspacesQuery.data;
   const connectedAgentsByWorkspace = agentsQuery.data.reduce<Record<string, number>>((counts, session) => {
     const key = workspaceRowKey(session.databaseId, session.workspaceId);
@@ -334,12 +308,9 @@ function WorkspacesPage() {
     return <Loader data-testid="loader--spinner" />;
   }
 
-  const isDialogOpen = dialogMode != null;
   const isEditing = dialogMode === "edit" && editingWorkspaceId != null;
   const formBusy =
-    createWorkspace.isPending ||
     updateWorkspace.isPending ||
-    importLocal.isPending ||
     (isEditing && editingWorkspaceQuery.isLoading);
 
   function closeDialog() {
@@ -347,8 +318,6 @@ function WorkspacesPage() {
     setEditingWorkspaceId(null);
     setEditingWorkspaceDatabaseId(null);
     setFormError(null);
-    setImportPath("");
-    setImportFileCount(0);
     setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
@@ -361,14 +330,7 @@ function WorkspacesPage() {
       void navigate({ to: "/databases" });
       return;
     }
-
     setDialogMode("create");
-    setEditingWorkspaceId(null);
-    setEditingWorkspaceDatabaseId(null);
-    setFormError(null);
-    setImportPath("");
-    setImportFileCount(0);
-    setForm(createInitialFormState(preferredDatabase(databases)));
   }
 
   function openEditDialog(workspace: AFSWorkspaceSummary) {
@@ -421,24 +383,41 @@ function WorkspacesPage() {
   }
 
   function deleteSelectedWorkspace(workspace: AFSWorkspaceSummary) {
-    const confirmed = window.confirm(
-      `Delete workspace "${workspace.name}"? This removes its registry entry from the catalog.`,
-    );
+    setDeleteError(null);
+    setWorkspaceToDelete(workspace);
+  }
 
-    if (!confirmed) {
+  function closeDeleteDialog() {
+    if (deleteWorkspace.isPending) {
       return;
     }
+    setWorkspaceToDelete(null);
+    setDeleteError(null);
+  }
 
-    deleteWorkspace.mutate({
-      databaseId: workspace.databaseId,
-      workspaceId: workspace.id,
-    }, {
-      onSuccess: () => {
-        if (editingWorkspaceId === workspace.id) {
-          closeDialog();
-        }
+  function confirmDeleteWorkspace() {
+    if (workspaceToDelete == null) {
+      return;
+    }
+    const target = workspaceToDelete;
+    setDeleteError(null);
+    deleteWorkspace.mutate(
+      {
+        databaseId: target.databaseId,
+        workspaceId: target.id,
       },
-    });
+      {
+        onSuccess: () => {
+          if (editingWorkspaceId === target.id) {
+            closeDialog();
+          }
+          setWorkspaceToDelete(null);
+        },
+        onError: (error) => {
+          setDeleteError(mutationErrorMessage(error, "Unable to remove the workspace."));
+        },
+      },
+    );
   }
 
   if (location.pathname !== "/workspaces") {
@@ -500,7 +479,7 @@ function WorkspacesPage() {
         onDeleteWorkspace={deleteSelectedWorkspace}
       />
 
-      {isDialogOpen ? (
+      {isEditing ? (
         <DialogOverlay
           onClick={(event) => {
             if (event.target === event.currentTarget) {
@@ -511,13 +490,9 @@ function WorkspacesPage() {
           <DialogCard>
             <DialogHeader>
               <div>
-                <DialogTitle>
-                  {isEditing ? "Edit workspace" : "Add workspace"}
-                </DialogTitle>
+                <DialogTitle>Edit workspace</DialogTitle>
                 <DialogBody>
-                  {isEditing
-                    ? "Update the workspace name and metadata."
-                    : "Add a new workspace and choose which database will host it."}
+                  Update the workspace name and metadata.
                 </DialogBody>
               </div>
               <DialogCloseButton type="button" aria-label="Close" onClick={closeDialog}>
@@ -531,85 +506,25 @@ function WorkspacesPage() {
                 if (form.name.trim() === "") {
                   return;
                 }
-
-                if (editingWorkspaceId != null) {
-                  updateWorkspace.mutate(
-                    {
-                      databaseId: editingWorkspaceDatabaseId ?? undefined,
-                      workspaceId: editingWorkspaceId,
-                      name: form.name,
-                      description: form.description,
-                      cloudAccount: form.cloudAccount,
-                      databaseName: form.databaseName,
-                      region: form.region,
+                updateWorkspace.mutate(
+                  {
+                    databaseId: editingWorkspaceDatabaseId ?? undefined,
+                    workspaceId: editingWorkspaceId!,
+                    name: form.name,
+                    description: form.description,
+                    cloudAccount: form.cloudAccount,
+                    databaseName: form.databaseName,
+                    region: form.region,
+                  },
+                  {
+                    onSuccess: () => {
+                      closeDialog();
                     },
-                    {
-                      onSuccess: () => {
-                        closeDialog();
-                      },
-                      onError: (error) => {
-                        setFormError(mutationErrorMessage(error, "Unable to update the workspace."));
-                      },
+                    onError: (error) => {
+                      setFormError(mutationErrorMessage(error, "Unable to update the workspace."));
                     },
-                  );
-                  return;
-                }
-
-                if (importPath.trim() !== "") {
-                  importLocal.mutate(
-                    {
-                      databaseId: form.databaseId,
-                      name: form.name,
-                      path: importPath.trim(),
-                      description: form.description,
-                    },
-                    {
-                      onSuccess: (result) => {
-                        closeDialog();
-                        void navigate({
-                          to: "/workspaces/$workspaceId",
-                          params: { workspaceId: result.workspaceId },
-                          search: { databaseId: result.databaseId, tab: "browse" },
-                        });
-                      },
-                      onError: (error) => {
-                        setFormError(
-                          mutationErrorMessage(error, "Unable to import files."),
-                        );
-                      },
-                    },
-                  );
-                } else {
-                  createWorkspace.mutate(
-                    {
-                      databaseId: form.databaseId,
-                      name: form.name,
-                      description: form.description,
-                      cloudAccount: form.cloudAccount,
-                      databaseName: form.databaseName,
-                      region: form.region,
-                      source: "blank",
-                    },
-                    {
-                      onSuccess: () => {
-                        closeDialog();
-                      },
-                      onError: (error) => {
-                        if (isFreeTierLimitError(error)) {
-                          closeDialog();
-                          setFreeTierDialogOpen(true);
-                          return;
-                        }
-                        setFormError(
-                          mutationErrorMessage(
-                            error,
-                            "Unable to create the workspace.",
-                          ),
-                        );
-                      },
-                    },
-                  );
-                }
+                  },
+                );
               }}
             >
               <Field>
@@ -620,30 +535,8 @@ function WorkspacesPage() {
                   onChange={(event) => updateForm("name", event.target.value)}
                   placeholder="customer-portal"
                 />
-                {isEditing ? (
-                  <FieldHint>Renaming keeps the same stable workspace ID.</FieldHint>
-                ) : null}
+                <FieldHint>Renaming keeps the same stable workspace ID.</FieldHint>
               </Field>
-
-              {!isEditing ? (
-                <Field>
-                  Database
-                  <Select
-                    value={form.databaseId}
-                    onChange={(event) => {
-                    const nextDatabase = eligibleDatabases.find((item) => item.id === event.target.value);
-                      updateForm("databaseId", event.target.value);
-                      updateForm("databaseName", nextDatabase?.databaseName ?? nextDatabase?.displayName ?? "");
-                    }}
-                  >
-                    {eligibleDatabases.map((database) => (
-                      <option key={database.id} value={database.id}>
-                        {database.displayName || database.databaseName}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              ) : null}
 
               <Field>
                 Description
@@ -653,85 +546,6 @@ function WorkspacesPage() {
                   placeholder="What this workspace is for, who owns it, and why it exists."
                 />
               </Field>
-
-              {!isEditing ? (
-                <ImportFilesSection>
-                  <ImportFilesHeader>Seed with files (optional)</ImportFilesHeader>
-                  <ImportFilesDescription>
-                    Pick a local folder to copy into the new workspace. Leave empty to
-                    start with an empty workspace.
-                  </ImportFilesDescription>
-                  {importPath === "" ? (
-                    <Button
-                      size="medium"
-                      variant="secondary-fill"
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      Import files&hellip;
-                    </Button>
-                  ) : (
-                    <SelectedFolderCard>
-                      <SelectedFolderIcon aria-hidden>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                        </svg>
-                      </SelectedFolderIcon>
-                      <SelectedFolderInfo>
-                        <SelectedFolderName>{importPath}</SelectedFolderName>
-                        <SelectedFolderMeta>
-                          {importFileCount} file{importFileCount === 1 ? "" : "s"} ready to import
-                        </SelectedFolderMeta>
-                      </SelectedFolderInfo>
-                      <Button
-                        size="medium"
-                        variant="secondary-fill"
-                        type="button"
-                        onClick={() => {
-                          setImportPath("");
-                          setImportFileCount(0);
-                          if (fileInputRef.current) {
-                            fileInputRef.current.value = "";
-                          }
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    </SelectedFolderCard>
-                  )}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    /* @ts-expect-error webkitdirectory is non-standard */
-                    webkitdirectory=""
-                    directory=""
-                    style={{ display: "none" }}
-                    onChange={(event) => {
-                      const files = event.target.files;
-                      if (files && files.length > 0) {
-                        const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
-                        if (path) {
-                          setImportPath(path);
-                          setImportFileCount(files.length);
-                        }
-                      }
-                    }}
-                  />
-                </ImportFilesSection>
-              ) : null}
-
-              {!isEditing ? (
-                <ActionPreview>
-                  {importPath === "" ? (
-                    <>Pressing <strong>Add workspace</strong> creates an empty workspace
-                      {form.name.trim() !== "" ? <> named <code>{form.name.trim()}</code></> : null}.</>
-                  ) : (
-                    <>Pressing <strong>Add workspace</strong> creates the workspace and imports{" "}
-                      <strong>{importFileCount}</strong> file{importFileCount === 1 ? "" : "s"} from{" "}
-                      <code>{importPath}</code>.</>
-                  )}
-                </ActionPreview>
-              ) : null}
 
               {formError ? <DialogError role="alert">{formError}</DialogError> : null}
 
@@ -746,21 +560,22 @@ function WorkspacesPage() {
                   Cancel
                 </Button>
                 <Button disabled={formBusy} size="medium" type="submit">
-                  {isEditing
-                    ? updateWorkspace.isPending
-                      ? "Saving\u2026"
-                      : "Save changes"
-                    : importLocal.isPending
-                      ? "Importing\u2026"
-                      : createWorkspace.isPending
-                        ? "Adding\u2026"
-                        : "Add workspace"}
+                  {updateWorkspace.isPending ? "Saving\u2026" : "Save changes"}
                 </Button>
               </DialogActions>
             </FormGrid>
           </DialogCard>
         </DialogOverlay>
       ) : null}
+
+      <CreateWorkspaceDialog
+        open={dialogMode === "create"}
+        onClose={closeDialog}
+        onFreeTierLimitHit={() => {
+          closeDialog();
+          setFreeTierDialogOpen(true);
+        }}
+      />
 
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} databases={databases} />
 
@@ -783,6 +598,61 @@ function WorkspacesPage() {
         limit={FREE_TIER_WORKSPACE_LIMIT}
         onClose={() => setFreeTierDialogOpen(false)}
       />
+
+      {workspaceToDelete ? (
+        <DialogOverlay
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-workspace-dialog-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              closeDeleteDialog();
+            }
+          }}
+        >
+          <ConfirmCard onClick={(event) => event.stopPropagation()}>
+            <DialogHeader>
+              <div>
+                <DialogTitle id="remove-workspace-dialog-title">
+                  Remove this workspace?
+                </DialogTitle>
+                <DialogBody>
+                  Remove <strong>{workspaceToDelete.name}</strong> from the workspace registry
+                  and permanently delete its files, folders, and checkpoints from Redis.
+                  This action cannot be undone.
+                </DialogBody>
+              </div>
+              <DialogCloseButton
+                type="button"
+                aria-label="Close"
+                onClick={closeDeleteDialog}
+              >
+                &times;
+              </DialogCloseButton>
+            </DialogHeader>
+
+            {deleteError ? <DialogError role="alert">{deleteError}</DialogError> : null}
+
+            <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>
+              <Button
+                variant="secondary-fill"
+                size="medium"
+                onClick={closeDeleteDialog}
+                disabled={deleteWorkspace.isPending}
+              >
+                Cancel
+              </Button>
+              <DeleteConfirmButton
+                size="medium"
+                onClick={confirmDeleteWorkspace}
+                disabled={deleteWorkspace.isPending}
+              >
+                {deleteWorkspace.isPending ? "Removing..." : "Remove workspace"}
+              </DeleteConfirmButton>
+            </DialogActions>
+          </ConfirmCard>
+        </DialogOverlay>
+      ) : null}
     </PageStack>
   );
 }
@@ -792,99 +662,10 @@ function isGettingStartedWorkspace(name: string) {
   return trimmed === "getting-started" || trimmed.startsWith("getting-started-");
 }
 
-/* ---- Import Files section styled components ---- */
-const ImportFilesSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--afs-line, #e4e4e7);
-  border-radius: 12px;
-  background: var(--afs-panel, #fafafa);
-`;
-
-const ImportFilesHeader = styled.span`
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--afs-ink, #18181b);
-`;
-
-const ImportFilesDescription = styled.span`
-  font-size: 12px;
-  color: var(--afs-muted, #71717a);
-  line-height: 1.5;
-`;
-
 const FieldHint = styled.span`
   font-size: 12px;
   color: var(--afs-muted, #71717a);
   line-height: 1.5;
-`;
-
-const SelectedFolderCard = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  background: var(--afs-panel);
-`;
-
-const SelectedFolderIcon = styled.div`
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--afs-accent-soft, color-mix(in srgb, var(--afs-accent, #2563eb) 12%, transparent));
-  color: var(--afs-accent, #2563eb);
-`;
-
-const SelectedFolderInfo = styled.div`
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const SelectedFolderName = styled.span`
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--afs-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-`;
-
-const SelectedFolderMeta = styled.span`
-  font-size: 12px;
-  color: var(--afs-muted);
-`;
-
-const ActionPreview = styled.p`
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--afs-accent, #2563eb) 6%, transparent);
-  color: var(--afs-ink);
-  font-size: 13px;
-  line-height: 1.55;
-
-  strong {
-    font-weight: 700;
-  }
-
-  code {
-    background: var(--afs-line);
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-family: var(--afs-mono, "SF Mono", monospace);
-  }
 `;
 
 const ToolbarActions = styled.div`
@@ -961,4 +742,23 @@ const GettingStartedPanelActions = styled.div`
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+`;
+
+const ConfirmCard = styled(DialogCard)`
+  max-width: 540px;
+`;
+
+const DeleteConfirmButton = styled(Button)`
+  && {
+    background: ${({ theme }) => theme.semantic.color.background.danger500};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+    box-shadow: none;
+  }
+
+  &&:hover:not(:disabled),
+  &&:focus-visible:not(:disabled) {
+    background: ${({ theme }) => theme.semantic.color.background.danger600};
+    color: ${({ theme }) => theme.semantic.color.text.inverse};
+    box-shadow: none;
+  }
 `;

@@ -8,6 +8,8 @@ import {
   FoldersIcon,
   LifeBuoyIcon,
   PieChartIcon,
+  PlugIcon,
+  SparklesIcon,
 } from "../components/lucide-icons";
 
 export type SidebarPanelId = "root" | "workspaces";
@@ -39,6 +41,7 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Overview", path: "/", icon: PieChartIcon },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: FoldersIcon },
   { kind: "route", label: "Agents", path: "/agents", icon: BotIcon },
+  { kind: "route", label: "MCP", path: "/mcp", icon: PlugIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
@@ -50,6 +53,7 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
 
 export const bottomNavigationItems: ReadonlyArray<NavigationRouteItem> = [
   { kind: "route", label: "Docs", path: "/docs", icon: BookOpenIcon, title: "Documentation" },
+  { kind: "route", label: "Templates", path: "/templates", icon: SparklesIcon, title: "Workspace templates" },
   { kind: "route", label: "Downloads", path: "/downloads", icon: CloudDownloadIcon, title: "Downloads" },
   { kind: "route", label: "Agent Guide", path: "/agent-guide", icon: LifeBuoyIcon, title: "Agent Guide" },
 ];
@@ -87,6 +91,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
     return { page: "Documentation" };
   }
 
+  if (pathname.startsWith("/templates")) {
+    return { page: "Workspace templates", subtitle: "Pre-shaped workspaces for common multi-agent workflows. Pick one, name it, paste a prompt into your agent." };
+  }
+
   if (pathname.startsWith("/agent-guide")) {
     return { page: "Agent Guide" };
   }
@@ -101,6 +109,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
 
   if (pathname.startsWith("/agents")) {
     return { page: "Agents", subtitle: "View and manage connected agents." };
+  }
+
+  if (pathname.startsWith("/mcp")) {
+    return { page: "MCP", subtitle: "Create and manage MCP servers that expose workspaces to agents." };
   }
 
   if (pathname.startsWith("/activity")) {

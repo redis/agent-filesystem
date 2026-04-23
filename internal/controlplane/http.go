@@ -87,6 +87,7 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
 				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
 				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
+				MCPProfile:        strings.TrimSpace(record.Profile),
 				Readonly:          record.Readonly,
 			}, nil
 		})
@@ -376,6 +377,19 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/mcp-tokens", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.ListAllMCPAccessTokens(r.Context())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": response})
 	})
 
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {
@@ -1475,7 +1489,7 @@ func cors(next http.Handler, allowOrigin string) http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", allowOrigin)
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

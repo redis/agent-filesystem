@@ -1,5 +1,4 @@
 import { Button } from "@redis-ui/components";
-import { useEffect, useState } from "react";
 import styled from "styled-components";
 import {
   DialogActions,
@@ -12,7 +11,7 @@ import {
   SectionTitle,
   TextInput,
 } from "../../components/afs-kit";
-import type { AFSWorkspaceDetail } from "../../foundation/types/afs";
+import type { AFSMCPToken, AFSWorkspaceDetail } from "../../foundation/types/afs";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
@@ -21,6 +20,8 @@ type Props = {
   saveError?: string | null;
   onDelete: () => void;
   isDeleting: boolean;
+  mcpTokens: AFSMCPToken[];
+  onOpenMCPConsole: () => void;
 };
 
 export function SettingsTab({
@@ -30,20 +31,12 @@ export function SettingsTab({
   saveError,
   onDelete,
   isDeleting,
+  mcpTokens,
+  onOpenMCPConsole,
 }: Props) {
-  const [name, setName] = useState(workspace.name);
-  const [description, setDescription] = useState(workspace.description);
-  const [localError, setLocalError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setName(workspace.name);
-    setDescription(workspace.description);
-    setLocalError(null);
-  }, [workspace.id, workspace.name, workspace.description]);
-
-  const normalizedName = name.trim();
-  const normalizedDescription = description.trim();
-  const isDirty = normalizedName !== workspace.name || normalizedDescription !== workspace.description;
+  const activeTokens = mcpTokens.filter((token) => token.revokedAt == null || token.revokedAt === "");
+  const [activeToken] = activeTokens;
+  const tokenCount = activeTokens.length;
 
   return (
     <SectionGrid>
@@ -55,45 +48,30 @@ export function SettingsTab({
         <FormGrid
           onSubmit={(event) => {
             event.preventDefault();
-            if (normalizedName === "") {
-              setLocalError("Workspace name is required.");
-              return;
-            }
-            setLocalError(null);
-            void onSave({ name: normalizedName, description: normalizedDescription });
+            const form = new FormData(event.currentTarget);
+            const name = String(form.get("name") ?? "").trim();
+            const description = String(form.get("description") ?? "").trim();
+            void onSave({ name, description });
           }}
         >
           <Field>
             Workspace name
-            <TextInput
-              autoFocus
-              value={name}
-              onChange={(event) => {
-                setLocalError(null);
-                setName(event.target.value);
-              }}
-              placeholder="customer-portal"
-            />
-            <FieldHint>Renaming keeps the same stable workspace ID and URL.</FieldHint>
+            <TextInput name="name" defaultValue={workspace.name} placeholder="customer-portal" />
           </Field>
 
           <Field>
             Description
             <TextInput
-              value={description}
-              onChange={(event) => {
-                setLocalError(null);
-                setDescription(event.target.value);
-              }}
+              name="description"
+              defaultValue={workspace.description}
               placeholder="What this workspace is for, who owns it, and why it exists."
             />
           </Field>
 
-          {localError ? <DialogError role="alert">{localError}</DialogError> : null}
           {saveError ? <DialogError role="alert">{saveError}</DialogError> : null}
 
           <DialogActions style={{ justifyContent: "flex-end" }}>
-            <Button size="medium" type="submit" disabled={isSaving || !isDirty}>
+            <Button size="medium" type="submit" disabled={isSaving}>
               {isSaving ? "Saving..." : "Save changes"}
             </Button>
           </DialogActions>
@@ -125,6 +103,74 @@ export function SettingsTab({
             ) : null}
           </tbody>
         </MetaTable>
+      </SectionCard>
+
+      <SectionCard $span={12}>
+        <SectionHeader>
+          <SectionTitle title="Agent access" />
+          <Button size="medium" onClick={onOpenMCPConsole}>
+            Open MCP console
+          </Button>
+        </SectionHeader>
+
+        <AccessCopy>
+          MCP setup now lives on the Agents page so you can manage all workspace-scoped tokens and hosted/local server configs in one place. This panel stays focused on the current workspace and shows whether it already has authorized MCP access.
+        </AccessCopy>
+
+        <MetaTable>
+          <tbody>
+            <MetaRow>
+              <MetaLabel>Authorized tokens</MetaLabel>
+              <MetaValue>{tokenCount === 0 ? "None yet" : `${tokenCount} active token${tokenCount === 1 ? "" : "s"}`}</MetaValue>
+            </MetaRow>
+            <MetaRow>
+              <MetaLabel>Workspace scope</MetaLabel>
+              <MetaValue>All MCP tokens created from this workspace stay locked to {workspace.name}.</MetaValue>
+            </MetaRow>
+            <MetaRow>
+              <MetaLabel>Admin tools</MetaLabel>
+              <MetaValue>Workspace settings no longer mint admin MCP access. Use the MCP console for explicit elevated flows.</MetaValue>
+            </MetaRow>
+            {activeToken ? (
+              <>
+                <MetaRow>
+                  <MetaLabel>Latest token</MetaLabel>
+                  <MetaValue>{activeToken.name?.trim() || activeToken.id}</MetaValue>
+                </MetaRow>
+                <MetaRow>
+                  <MetaLabel>Last used</MetaLabel>
+                  <MetaValue>{activeToken.lastUsedAt ? formatTimestamp(activeToken.lastUsedAt) : "Never"}</MetaValue>
+                </MetaRow>
+              </>
+            ) : null}
+          </tbody>
+        </MetaTable>
+
+        {activeTokens.length > 0 ? (
+          <TokenTable>
+            <thead>
+              <tr>
+                <TokenHead>Name</TokenHead>
+                <TokenHead>Profile</TokenHead>
+                <TokenHead>Last used</TokenHead>
+                <TokenHead>Expires</TokenHead>
+              </tr>
+            </thead>
+            <tbody>
+              {activeTokens.slice(0, 5).map((token) => (
+                <TokenRow key={token.id}>
+                  <TokenCell>
+                    <TokenName>{token.name?.trim() || token.id}</TokenName>
+                    <TokenSubtle>{token.id}</TokenSubtle>
+                  </TokenCell>
+                  <TokenCell>{formatProfile(token.profile)}</TokenCell>
+                  <TokenCell>{token.lastUsedAt ? formatTimestamp(token.lastUsedAt) : "Never"}</TokenCell>
+                  <TokenCell>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</TokenCell>
+                </TokenRow>
+              ))}
+            </tbody>
+          </TokenTable>
+        ) : null}
       </SectionCard>
 
       <DangerZoneCard>
@@ -179,11 +225,48 @@ const MonoValue = styled.code`
   font-size: 13px;
 `;
 
-const FieldHint = styled.span`
+const AccessCopy = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
+const TokenTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 18px;
+`;
+
+const TokenHead = styled.th`
+  padding: 0 0 10px;
   color: var(--afs-muted);
   font-size: 12px;
-  font-weight: 500;
-  line-height: 1.5;
+  font-weight: 700;
+  text-align: left;
+  border-bottom: 1px solid var(--afs-line);
+`;
+
+const TokenRow = styled.tr`
+  border-bottom: 1px solid var(--afs-line);
+`;
+
+const TokenCell = styled.td`
+  padding: 14px 0;
+  color: var(--afs-ink);
+  font-size: 13px;
+  vertical-align: top;
+`;
+
+const TokenName = styled.div`
+  font-weight: 700;
+`;
+
+const TokenSubtle = styled.div`
+  margin-top: 4px;
+  color: var(--afs-muted);
+  font-size: 12px;
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 `;
 
 const DangerZoneCard = styled.div`
@@ -238,3 +321,28 @@ const DeleteWorkspaceButton = styled(Button)`
     box-shadow: none;
   }
 `;
+
+function formatProfile(profile: AFSMCPToken["profile"]) {
+  switch (profile) {
+    case "workspace-ro":
+      return "Read only";
+    case "workspace-rw":
+      return "Read/write";
+    case "workspace-rw-checkpoint":
+      return "Read/write + checkpoints";
+    case "admin-ro":
+      return "Admin read only";
+    case "admin-rw":
+      return "Admin read/write";
+    default:
+      return profile;
+  }
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}

@@ -1,6 +1,7 @@
 import { Typography } from "@redis-ui/components";
 import { FoldersIcon as FoldersIconMono } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
+import { Trash2 } from "lucide-react";
 import { FoldersIcon } from "../../components/lucide-icons";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
@@ -87,6 +88,8 @@ export function WorkspaceTable({
   onOpenWorkspace,
   onPreviewWorkspace,
   onOpenWorkspaceTab,
+  onDeleteWorkspace,
+  deletingWorkspaceKey,
 }: Props) {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
@@ -233,12 +236,39 @@ export function WorkspaceTable({
             </UpdatedStack>
           ),
         },
+        {
+          id: "actions",
+          header: "",
+          size: 48,
+          enableSorting: false,
+          cell: ({ row }) => {
+            const rowKey = workspaceRowKey(row.original);
+            const isDeleting = deletingWorkspaceKey === rowKey;
+            return (
+              <ActionsCell>
+                <DeleteRowButton
+                  type="button"
+                  aria-label={`Remove workspace ${row.original.name}`}
+                  title="Remove workspace"
+                  disabled={isDeleting}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onDeleteWorkspace(row.original);
+                  }}
+                >
+                  <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
+                </DeleteRowButton>
+              </ActionsCell>
+            );
+          },
+        },
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, copiedId, onOpenWorkspace, onPreviewWorkspace],
+    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onPreviewWorkspace],
   );
 
   return (
     <>
+      <S.TableBlock>
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
@@ -393,6 +423,7 @@ export function WorkspaceTable({
           })}
         </S.WorkspaceCardGrid>
       ) : null}
+      </S.TableBlock>
     </>
   );
 }
@@ -404,6 +435,47 @@ const WorkspaceTableViewport = styled(S.DenseTableViewport)`
   }
   tbody tr:hover button[aria-label^="Copy workspace ID"]:hover {
     opacity: 1;
+  }
+
+  /* Reveal delete button on row hover */
+  tbody tr:hover button[aria-label^="Remove workspace"] {
+    opacity: 1;
+  }
+`;
+
+const ActionsCell = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+`;
+
+const DeleteRowButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #dc2626;
+  cursor: pointer;
+  border-radius: 6px;
+  opacity: 0;
+  transition: background 140ms ease, opacity 140ms ease;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, #dc2626 12%, transparent);
+  }
+
+  &:focus-visible {
+    outline: 2px solid #dc2626;
+    outline-offset: 1px;
+    opacity: 1;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
   }
 `;
 

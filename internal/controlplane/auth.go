@@ -62,6 +62,7 @@ type AuthIdentity struct {
 	ScopedDatabaseID  string
 	ScopedWorkspaceID string
 	ScopedWorkspace   string
+	MCPProfile        string
 	Readonly          bool
 }
 
@@ -242,7 +243,7 @@ func (a *AuthHandler) AttachCLITokenAuthenticator(authenticate func(context.Cont
 }
 
 func (a *AuthHandler) Middleware(next http.Handler) http.Handler {
-	if a == nil || a.cfg.Mode == AuthModeNone {
+	if a == nil {
 		return next
 	}
 
@@ -255,6 +256,10 @@ func (a *AuthHandler) Middleware(next http.Handler) http.Handler {
 		identity, err := a.authenticate(r)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+			return
+		}
+		if identity == nil {
+			next.ServeHTTP(w, r)
 			return
 		}
 
@@ -333,10 +338,6 @@ func (a *AuthHandler) DeleteCurrentIdentity(ctx context.Context) error {
 }
 
 func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
-	if a == nil || a.mode() == AuthModeNone {
-		return nil, nil
-	}
-
 	if bearer, ok := bearerTokenFromRequest(r); ok {
 		if isMCPTokenAuthPath(r.URL.Path) {
 			if a.mcpAuthenticate == nil {
@@ -355,6 +356,9 @@ func (a *AuthHandler) authenticate(r *http.Request) (*AuthIdentity, error) {
 			}
 			return identity, nil
 		}
+	}
+	if a == nil || a.mode() == AuthModeNone {
+		return nil, nil
 	}
 
 	switch a.cfg.Mode {

@@ -263,14 +263,6 @@ const UptimeLabel = styled.span`
   font-weight: 600;
 `;
 
-/* ---- Toolbar (no bounding card) ---- */
-const ToolbarWrap = styled.div`
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 16px;
-`;
-
 /* ---- View toggle ---- */
 const ToggleGroup = styled.div`
   display: inline-flex;
@@ -522,7 +514,8 @@ export function AgentsTable({
 
   return (
     <>
-      <ToolbarWrap>
+    <S.TableBlock>
+      <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
           onChange={setSearch}
@@ -543,7 +536,7 @@ export function AgentsTable({
           </ToggleButton>
         </ToggleGroup>
         {toolbarAction}
-      </ToolbarWrap>
+      </S.HeadingWrap>
 
       {loading ? <S.EmptyState>Loading connected agents...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
@@ -635,6 +628,7 @@ export function AgentsTable({
           })}
         </CardGrid>
       ) : null}
+    </S.TableBlock>
 
       {/* ---- DETAIL DIALOG ---- */}
       {selectedAgent != null ? (

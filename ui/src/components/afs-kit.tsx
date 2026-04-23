@@ -294,10 +294,6 @@ export const TextArea = styled.textarea`
   resize: vertical;
 `;
 
-export const Select = styled.select`
-  ${fieldBase}
-`;
-
 export const EmptyState = styled.div`
   ${insetSurface}
   padding: 18px;
@@ -335,30 +331,29 @@ export const NoticeBody = styled.div`
 
 export const Tabs = styled.div`
   display: inline-flex;
+  align-items: center;
   gap: 8px;
-  padding: 7px;
-  border-radius: 999px;
-  border: 1px solid var(--afs-line-strong);
-  background: var(--afs-bg-soft);
+  width: fit-content;
+  padding: 6px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 14px;
+  background: var(--afs-panel, #fafafa);
 `;
 
 export const TabButton = styled.button<{ $active?: boolean }>`
-  border: 1px solid ${({ $active }) => ($active ? "var(--afs-line-strong)" : "transparent")};
-  border-radius: 999px;
-  padding: 10px 15px;
-  cursor: pointer;
+  border: none;
+  background: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "transparent")};
+  color: ${({ $active }) => ($active ? "#fff" : "var(--afs-muted, #71717a)")};
+  padding: 9px 16px;
+  border-radius: 10px;
+  font-size: 13px;
   font-weight: 700;
-  color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-muted)")};
-  background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "transparent")};
-  box-shadow: ${({ $active }) =>
-    $active ? "0 4px 10px rgba(8, 6, 13, 0.08)" : "none"};
-  transition:
-    background 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
 
   &:hover {
-    background: ${({ $active }) => ($active ? "var(--afs-panel-strong)" : "var(--afs-panel)")};
+    color: ${({ $active }) => ($active ? "#fff" : "var(--afs-ink, #18181b)")};
     transform: translateY(-1px);
   }
 `;

@@ -185,6 +185,7 @@ export type AFSWorkspace = {
   source: AFSWorkspaceSource;
   createdAt: string;
   updatedAt: string;
+  draftState: string;
   headSavepointId: string;
   tags: string[];
   fileCount: number;
@@ -368,6 +369,36 @@ export type OnboardingTokenResponse = {
   workspaceId: string;
   workspaceName: string;
   expiresAt: string;
+};
+
+export type AFSMCPProfile =
+  | "workspace-ro"
+  | "workspace-rw"
+  | "workspace-rw-checkpoint"
+  | "admin-ro"
+  | "admin-rw";
+
+export type AFSMCPToken = {
+  id: string;
+  name?: string;
+  databaseId: string;
+  workspaceId: string;
+  workspaceName?: string;
+  profile: AFSMCPProfile;
+  readonly: boolean;
+  token?: string;
+  createdAt: string;
+  lastUsedAt?: string;
+  expiresAt?: string;
+  revokedAt?: string;
+};
+
+export type CreateMCPTokenInput = {
+  databaseId?: string;
+  workspaceId: string;
+  name?: string;
+  profile: AFSMCPProfile;
+  expiresAt?: string;
 };
 
 export type ImportLocalInput = {

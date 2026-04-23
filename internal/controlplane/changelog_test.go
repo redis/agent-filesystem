@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -251,6 +252,63 @@ func TestListChangelogFiltersBySession(t *testing.T) {
 		if e.SessionID != "sess-a" {
 			t.Errorf("leaked session %q", e.SessionID)
 		}
+	}
+}
+
+func TestListChangelogPaginationCursorsAreExclusive(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+
+	entries := make([]ChangeEntry, 0, 5)
+	for i := 0; i < 5; i++ {
+		entries = append(entries, ChangeEntry{
+			Op:     ChangeOpPut,
+			Path:   "/f" + strconv.Itoa(i),
+			Source: ChangeSourceCheckpoint,
+		})
+	}
+	pipe := store.rdb.Pipeline()
+	enqueueChangeEntries(ctx, pipe, "ws1", entries)
+	if _, err := pipe.Exec(ctx); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	// Forward pagination: Since should exclude the cursor row.
+	page1, err := store.ListChangelog(ctx, "ws1", ChangelogListRequest{Limit: 2})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1.Entries) != 2 {
+		t.Fatalf("page1 entries = %d, want 2", len(page1.Entries))
+	}
+	page2, err := store.ListChangelog(ctx, "ws1", ChangelogListRequest{Since: page1.NextCursor, Limit: 2})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2.Entries) != 2 {
+		t.Fatalf("page2 entries = %d, want 2", len(page2.Entries))
+	}
+	if page2.Entries[0].ID == page1.Entries[len(page1.Entries)-1].ID {
+		t.Fatalf("forward pagination duplicated cursor row %q", page2.Entries[0].ID)
+	}
+
+	// Reverse pagination: Until should exclude the cursor row.
+	rev1, err := store.ListChangelog(ctx, "ws1", ChangelogListRequest{Limit: 2, Reverse: true})
+	if err != nil {
+		t.Fatalf("rev1: %v", err)
+	}
+	if len(rev1.Entries) != 2 {
+		t.Fatalf("rev1 entries = %d, want 2", len(rev1.Entries))
+	}
+	rev2, err := store.ListChangelog(ctx, "ws1", ChangelogListRequest{Until: rev1.NextCursor, Limit: 2, Reverse: true})
+	if err != nil {
+		t.Fatalf("rev2: %v", err)
+	}
+	if len(rev2.Entries) != 2 {
+		t.Fatalf("rev2 entries = %d, want 2", len(rev2.Entries))
+	}
+	if rev2.Entries[0].ID == rev1.Entries[len(rev1.Entries)-1].ID {
+		t.Fatalf("reverse pagination duplicated cursor row %q", rev2.Entries[0].ID)
 	}
 }
 

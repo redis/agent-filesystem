@@ -328,7 +328,7 @@ func TestHTTPOnboardingTokenExchange(t *testing.T) {
 func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	t.Helper()
 
-	manager, _ := newTestManager(t)
+	manager, databaseID := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{
 		Mode:              AuthModeTrustedHeader,
 		TrustedUserHeader: "X-Forwarded-User",
@@ -373,7 +373,54 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 		t.Fatal("expected created mcp token secret")
 	}
 
-	callBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"file_read","arguments":{"path":"/README.md"}}}`
+	toolsReq, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(mcp tools/list) returned error: %v", err)
+	}
+	toolsReq.Header.Set("Content-Type", "application/json")
+	toolsReq.Header.Set("Authorization", "Bearer "+token.Token)
+	toolsReq.Header.Set(AgentIDHeader, "agt_hosted")
+	toolsReq.Header.Set("X-AFS-Hostname", "devbox")
+	toolsReq.Header.Set("X-AFS-Client-Kind", "mcp")
+	toolsResp, err := http.DefaultClient.Do(toolsReq)
+	if err != nil {
+		t.Fatalf("POST /mcp tools/list returned error: %v", err)
+	}
+	defer toolsResp.Body.Close()
+	if toolsResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(toolsResp.Body)
+		t.Fatalf("POST /mcp tools/list status = %d, want %d, body=%s", toolsResp.StatusCode, http.StatusOK, body)
+	}
+
+	var toolsPayload struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(toolsResp.Body).Decode(&toolsPayload); err != nil {
+		t.Fatalf("Decode(mcp tools/list) returned error: %v", err)
+	}
+	toolNames := make(map[string]struct{}, len(toolsPayload.Result.Tools))
+	for _, tool := range toolsPayload.Result.Tools {
+		toolNames[tool.Name] = struct{}{}
+	}
+	if _, ok := toolNames["file_patch"]; !ok {
+		t.Fatalf("tools/list missing file_patch: %#v", toolsPayload.Result.Tools)
+	}
+	if _, ok := toolNames["file_grep"]; !ok {
+		t.Fatalf("tools/list missing file_grep: %#v", toolsPayload.Result.Tools)
+	}
+	if _, ok := toolNames["workspace_current"]; ok {
+		t.Fatalf("workspace_current should not be exposed to workspace-rw tokens: %#v", toolsPayload.Result.Tools)
+	}
+
+	callBody := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"file_write","arguments":{"path":"/notes/hosted.txt","content":"hello from hosted mcp\n"}}}`
 	callReq, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(callBody))
 	if err != nil {
 		t.Fatalf("NewRequest(mcp call) returned error: %v", err)
@@ -401,8 +448,41 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	if err := json.NewDecoder(callResp.Body).Decode(&mcpPayload); err != nil {
 		t.Fatalf("Decode(mcp response) returned error: %v", err)
 	}
-	if got := mcpPayload.Result.StructuredContent["content"]; got != "# demo\n" {
-		t.Fatalf("mcp file_read content = %#v, want %#v", got, "# demo\n")
+	if got := mcpPayload.Result.StructuredContent["operation"]; got != "write" {
+		t.Fatalf("mcp file_write operation = %#v, want %#v", got, "write")
+	}
+	if got := mcpPayload.Result.StructuredContent["dirty"]; got != true {
+		t.Fatalf("mcp file_write dirty = %#v, want true", got)
+	}
+
+	changesReq, err := http.NewRequest(http.MethodGet, server.URL+"/v1/databases/"+databaseID+"/workspaces/repo/changes?limit=10", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(changes) returned error: %v", err)
+	}
+	changesReq.Header.Set("X-Forwarded-User", "alice@example.com")
+	changesResp, err := http.DefaultClient.Do(changesReq)
+	if err != nil {
+		t.Fatalf("GET /v1/databases/%s/workspaces/repo/changes returned error: %v", databaseID, err)
+	}
+	defer changesResp.Body.Close()
+	if changesResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(changesResp.Body)
+		t.Fatalf("GET /v1/databases/%s/workspaces/repo/changes status = %d, want %d, body=%s", databaseID, changesResp.StatusCode, http.StatusOK, body)
+	}
+
+	var changes ChangelogListResponse
+	if err := json.NewDecoder(changesResp.Body).Decode(&changes); err != nil {
+		t.Fatalf("Decode(changes) returned error: %v", err)
+	}
+	foundChange := false
+	for _, entry := range changes.Entries {
+		if entry.Path == "/notes/hosted.txt" && entry.Source == ChangeSourceMCP {
+			foundChange = true
+			break
+		}
+	}
+	if !foundChange {
+		t.Fatalf("expected mcp changelog entry for /notes/hosted.txt, got %#v", changes.Entries)
 	}
 
 	agentsReq, err := http.NewRequest(http.MethodGet, server.URL+"/v1/agents", nil)
@@ -438,6 +518,90 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	}
 	if sessions.Items[0].Hostname != "devbox" {
 		t.Fatalf("agent hostname = %q, want %q", sessions.Items[0].Hostname, "devbox")
+	}
+
+	tokensReq, err := http.NewRequest(http.MethodGet, server.URL+"/v1/mcp-tokens", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(mcp tokens) returned error: %v", err)
+	}
+	tokensReq.Header.Set("X-Forwarded-User", "alice@example.com")
+	tokensResp, err := http.DefaultClient.Do(tokensReq)
+	if err != nil {
+		t.Fatalf("GET /v1/mcp-tokens returned error: %v", err)
+	}
+	defer tokensResp.Body.Close()
+	if tokensResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(tokensResp.Body)
+		t.Fatalf("GET /v1/mcp-tokens status = %d, want %d, body=%s", tokensResp.StatusCode, http.StatusOK, body)
+	}
+
+	var tokenList struct {
+		Items []mcpAccessTokenResponse `json:"items"`
+	}
+	if err := json.NewDecoder(tokensResp.Body).Decode(&tokenList); err != nil {
+		t.Fatalf("Decode(mcp tokens) returned error: %v", err)
+	}
+	if len(tokenList.Items) != 1 {
+		t.Fatalf("len(mcp_tokens.items) = %d, want 1", len(tokenList.Items))
+	}
+	if tokenList.Items[0].ID != token.ID {
+		t.Fatalf("mcp token id = %q, want %q", tokenList.Items[0].ID, token.ID)
+	}
+}
+
+func TestMCPTokenFlowWorksWithoutAuth(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	createReq, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/workspaces/repo/mcp-tokens",
+		strings.NewReader(`{"name":"Local agent","profile":"workspace-rw"}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(create token) returned error: %v", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("POST mcp token returned error: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("POST mcp token status = %d, want %d, body=%s", createResp.StatusCode, http.StatusCreated, body)
+	}
+
+	var token mcpAccessTokenResponse
+	if err := json.NewDecoder(createResp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(mcp token) returned error: %v", err)
+	}
+	if token.Token == "" {
+		t.Fatal("expected created mcp token secret")
+	}
+	if token.Profile != MCPProfileWorkspaceRW {
+		t.Fatalf("token profile = %q, want %q", token.Profile, MCPProfileWorkspaceRW)
+	}
+
+	callBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}`
+	callReq, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(callBody))
+	if err != nil {
+		t.Fatalf("NewRequest(mcp initialize) returned error: %v", err)
+	}
+	callReq.Header.Set("Content-Type", "application/json")
+	callReq.Header.Set("Accept", "application/json, text/event-stream")
+	callReq.Header.Set("Authorization", "Bearer "+token.Token)
+	callResp, err := http.DefaultClient.Do(callReq)
+	if err != nil {
+		t.Fatalf("POST /mcp returned error: %v", err)
+	}
+	defer callResp.Body.Close()
+	if callResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(callResp.Body)
+		t.Fatalf("POST /mcp status = %d, want %d, body=%s", callResp.StatusCode, http.StatusOK, body)
 	}
 }
 

@@ -1,3 +1,4 @@
+import { Button } from "@redis-ui/components";
 import { useMemo } from "react";
 import styled from "styled-components";
 import {
@@ -7,8 +8,10 @@ import {
   SectionTitle,
 } from "../../components/afs-kit";
 import { computeChangelogTotals, formatChangelogBytes } from "../../foundation/changelog-utils";
+import { useInfiniteChangelog } from "../../foundation/hooks/use-afs";
 import { ChangesTable } from "../../foundation/tables/changes-table";
-import { useChangelog } from "../../foundation/hooks/use-afs";
+
+const CHANGELOG_PAGE_SIZE = 100;
 
 type Props = {
   databaseId?: string;
@@ -16,14 +19,17 @@ type Props = {
 };
 
 export function ChangesTab({ databaseId, workspaceId }: Props) {
-  const query = useChangelog({
+  const query = useInfiniteChangelog({
     databaseId,
     workspaceId,
-    limit: 200,
+    limit: CHANGELOG_PAGE_SIZE,
     direction: "desc",
   });
 
-  const entries = query.data?.entries ?? [];
+  const entries = useMemo(
+    () => query.data?.pages.flatMap((page) => page.entries) ?? [],
+    [query.data],
+  );
   const totals = useMemo(() => computeChangelogTotals(entries), [entries]);
   const hasEntries = entries.length > 0;
 
@@ -35,6 +41,7 @@ export function ChangesTab({ databaseId, workspaceId }: Props) {
           <HeaderSummary>
             {hasEntries ? (
               <>
+                Showing <strong>{entries.length}</strong> recent changes ·{" "}
                 <strong>{totals.added}</strong> added ·{" "}
                 <strong>{totals.modified}</strong> modified ·{" "}
                 <strong>{totals.deleted}</strong> deleted ·{" "}
@@ -57,6 +64,18 @@ export function ChangesTab({ databaseId, workspaceId }: Props) {
               : "Unable to load changes. Please retry."
           }
         />
+        {!query.isLoading && !query.isError && hasEntries && query.hasNextPage ? (
+          <LoadMoreRow>
+            <Button
+              size="medium"
+              variant="secondary-fill"
+              onClick={() => void query.fetchNextPage()}
+              disabled={query.isFetchingNextPage}
+            >
+              {query.isFetchingNextPage ? "Loading more…" : "Load more changes"}
+            </Button>
+          </LoadMoreRow>
+        ) : null}
       </SectionCard>
     </SectionGrid>
   );
@@ -81,4 +100,10 @@ const PositiveDelta = styled.span`
 const NegativeDelta = styled.span`
   color: #dc2626;
   font-weight: 700;
+`;
+
+const LoadMoreRow = styled.div`
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
 `;

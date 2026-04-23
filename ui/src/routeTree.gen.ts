@@ -10,8 +10,10 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as TemplatesRouteImport } from './routes/templates'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DownloadsRouteImport } from './routes/downloads'
@@ -32,6 +34,11 @@ const WorkspacesRoute = WorkspacesRouteImport.update({
   path: '/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TemplatesRoute = TemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
@@ -40,6 +47,11 @@ const SignupRoute = SignupRouteImport.update({
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const McpRoute = McpRouteImport.update({
+  id: '/mcp',
+  path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -124,8 +136,10 @@ export interface FileRoutesByFullPath {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
+  '/templates': typeof TemplatesRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
@@ -143,8 +157,10 @@ export interface FileRoutesByTo {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
+  '/templates': typeof TemplatesRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
@@ -163,8 +179,10 @@ export interface FileRoutesById {
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRouteWithChildren
+  '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
   '/signup': typeof SignupRouteWithChildren
+  '/templates': typeof TemplatesRoute
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents_/add': typeof AgentsAddRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
@@ -184,8 +202,10 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/mcp'
     | '/settings'
     | '/signup'
+    | '/templates'
     | '/workspaces'
     | '/agents/add'
     | '/login/$clerkPath'
@@ -203,8 +223,10 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/mcp'
     | '/settings'
     | '/signup'
+    | '/templates'
     | '/workspaces'
     | '/agents/add'
     | '/login/$clerkPath'
@@ -222,8 +244,10 @@ export interface FileRouteTypes {
     | '/downloads'
     | '/forgot-password'
     | '/login'
+    | '/mcp'
     | '/settings'
     | '/signup'
+    | '/templates'
     | '/workspaces'
     | '/agents_/add'
     | '/login/$clerkPath'
@@ -242,8 +266,10 @@ export interface RootRouteChildren {
   DownloadsRoute: typeof DownloadsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRouteWithChildren
+  McpRoute: typeof McpRoute
   SettingsRoute: typeof SettingsRoute
   SignupRoute: typeof SignupRouteWithChildren
+  TemplatesRoute: typeof TemplatesRoute
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AgentsAddRoute: typeof AgentsAddRoute
 }
@@ -255,6 +281,13 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/templates': {
+      id: '/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof TemplatesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/signup': {
@@ -269,6 +302,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/mcp': {
+      id: '/mcp'
+      path: '/mcp'
+      fullPath: '/mcp'
+      preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -416,8 +456,10 @@ const rootRouteChildren: RootRouteChildren = {
   DownloadsRoute: DownloadsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRouteWithChildren,
+  McpRoute: McpRoute,
   SettingsRoute: SettingsRoute,
   SignupRoute: SignupRouteWithChildren,
+  TemplatesRoute: TemplatesRoute,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AgentsAddRoute: AgentsAddRoute,
 }

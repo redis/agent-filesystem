@@ -29,13 +29,14 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		database_id,
 		workspace_id,
 		workspace_name,
+		profile,
 		readonly,
 		secret_hash,
 		created_at,
 		last_used_at,
 		expires_at,
 		revoked_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		strings.TrimSpace(item.ID),
 		strings.TrimSpace(item.Name),
 		strings.TrimSpace(item.OwnerSubject),
@@ -43,6 +44,7 @@ func (c *workspaceCatalog) CreateMCPAccessToken(ctx context.Context, item mcpAcc
 		strings.TrimSpace(item.DatabaseID),
 		strings.TrimSpace(item.WorkspaceID),
 		strings.TrimSpace(item.WorkspaceName),
+		strings.TrimSpace(item.Profile),
 		boolToCatalogInt(item.Readonly),
 		strings.TrimSpace(item.SecretHash),
 		strings.TrimSpace(item.CreatedAt),
@@ -62,6 +64,7 @@ func (c *workspaceCatalog) ListMCPAccessTokens(ctx context.Context, databaseID, 
 		database_id,
 		workspace_id,
 		workspace_name,
+		profile,
 		readonly,
 		secret_hash,
 		created_at,
@@ -78,6 +81,31 @@ func (c *workspaceCatalog) ListMCPAccessTokens(ctx context.Context, databaseID, 
 	return scanMCPAccessTokenRows(rows)
 }
 
+func (c *workspaceCatalog) ListAllMCPAccessTokens(ctx context.Context) ([]mcpAccessTokenRecord, error) {
+	rows, err := c.queryContext(ctx, c.rebind(`SELECT
+		id,
+		name,
+		owner_subject,
+		owner_label,
+		database_id,
+		workspace_id,
+		workspace_name,
+		profile,
+		readonly,
+		secret_hash,
+		created_at,
+		last_used_at,
+		expires_at,
+		revoked_at
+	FROM mcp_access_tokens
+	ORDER BY created_at DESC, id ASC`))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanMCPAccessTokenRows(rows)
+}
+
 func (c *workspaceCatalog) GetMCPAccessToken(ctx context.Context, tokenID string) (mcpAccessTokenRecord, error) {
 	rows, err := c.queryContext(ctx, c.rebind(`SELECT
 		id,
@@ -87,6 +115,7 @@ func (c *workspaceCatalog) GetMCPAccessToken(ctx context.Context, tokenID string
 		database_id,
 		workspace_id,
 		workspace_name,
+		profile,
 		readonly,
 		secret_hash,
 		created_at,
@@ -151,6 +180,7 @@ func scanMCPAccessTokenRows(rows *sql.Rows) ([]mcpAccessTokenRecord, error) {
 			&item.DatabaseID,
 			&item.WorkspaceID,
 			&item.WorkspaceName,
+			&item.Profile,
 			&readonly,
 			&item.SecretHash,
 			&item.CreatedAt,

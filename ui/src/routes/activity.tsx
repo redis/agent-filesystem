@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Loader } from "@redis-ui/components";
+import { Button, Loader } from "@redis-ui/components";
 import { useMemo } from "react";
 import styled from "styled-components";
 import { z } from "zod";
@@ -12,13 +12,17 @@ import {
   SectionGrid,
   SectionHeader,
   SectionTitle,
+  TabButton,
+  Tabs,
 } from "../components/afs-kit";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { computeChangelogTotals, formatChangelogBytes } from "../foundation/changelog-utils";
-import { useActivity, useChangelog } from "../foundation/hooks/use-afs";
+import { useActivity, useInfiniteChangelog } from "../foundation/hooks/use-afs";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import { ChangesTable } from "../foundation/tables/changes-table";
 import type { AFSActivityEvent, AFSChangelogEntry } from "../foundation/types/afs";
+
+const CHANGELOG_PAGE_SIZE = 100;
 
 const activitySearchSchema = z.object({
   view: z.enum(["changes", "events"]).optional(),
@@ -36,15 +40,18 @@ function ActivityPage() {
   const view = search.view ?? "changes";
 
   const activityQuery = useActivity(null, 50, view === "events");
-  const changelogQuery = useChangelog(
+  const changelogQuery = useInfiniteChangelog(
     {
-      limit: 1000,
+      limit: CHANGELOG_PAGE_SIZE,
       direction: "desc",
     },
     view === "changes",
   );
 
-  const changelogEntries = changelogQuery.data?.entries ?? [];
+  const changelogEntries = useMemo(
+    () => changelogQuery.data?.pages.flatMap((page) => page.entries) ?? [],
+    [changelogQuery.data],
+  );
   const changelogTotals = useMemo(
     () => computeChangelogTotals(changelogEntries),
     [changelogEntries],
@@ -107,8 +114,8 @@ function ActivityPage() {
         </NoticeCard>
       ) : null}
 
-      <FilterBar role="tablist" aria-label="Activity filters">
-        <FilterButton
+      <Tabs role="tablist" aria-label="Activity filters">
+        <TabButton
           type="button"
           role="tab"
           aria-selected={view === "changes"}
@@ -116,8 +123,8 @@ function ActivityPage() {
           onClick={() => setView("changes")}
         >
           Changelog
-        </FilterButton>
-        <FilterButton
+        </TabButton>
+        <TabButton
           type="button"
           role="tab"
           aria-selected={view === "events"}
@@ -125,8 +132,8 @@ function ActivityPage() {
           onClick={() => setView("events")}
         >
           Events
-        </FilterButton>
-      </FilterBar>
+        </TabButton>
+      </Tabs>
 
       {view === "changes" ? (
         <SectionGrid>
@@ -138,6 +145,7 @@ function ActivityPage() {
                   "Loading changelog…"
                 ) : hasChangelogEntries ? (
                   <>
+                    Showing <strong>{changelogEntries.length}</strong> recent changes ·{" "}
                     <strong>{changelogTotals.added}</strong> added ·{" "}
                     <strong>{changelogTotals.modified}</strong> modified ·{" "}
                     <strong>{changelogTotals.deleted}</strong> deleted ·{" "}
@@ -162,6 +170,18 @@ function ActivityPage() {
               emptyStateText="No changes have been recorded for any workspace yet."
               onOpenChange={openChange}
             />
+            {!changelogQuery.isLoading && !changelogQuery.isError && hasChangelogEntries && changelogQuery.hasNextPage ? (
+              <LoadMoreRow>
+                <Button
+                  size="medium"
+                  variant="secondary-fill"
+                  onClick={() => void changelogQuery.fetchNextPage()}
+                  disabled={changelogQuery.isFetchingNextPage}
+                >
+                  {changelogQuery.isFetchingNextPage ? "Loading more…" : "Load more changes"}
+                </Button>
+              </LoadMoreRow>
+            ) : null}
           </SectionCard>
         </SectionGrid>
       ) : null}
@@ -183,35 +203,6 @@ function ActivityPage() {
   );
 }
 
-const FilterBar = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  padding: 6px;
-  border: 1px solid var(--afs-line, #e4e4e7);
-  border-radius: 14px;
-  background: var(--afs-panel, #fafafa);
-`;
-
-const FilterButton = styled.button<{ $active: boolean }>`
-  border: none;
-  background: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "transparent")};
-  color: ${({ $active }) => ($active ? "#fff" : "var(--afs-muted, #71717a)")};
-  padding: 9px 16px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
-
-  &:hover {
-    color: ${({ $active }) => ($active ? "#fff" : "var(--afs-ink, #18181b)")};
-    transform: translateY(-1px);
-  }
-`;
-
 const HeaderSummary = styled.span`
   color: var(--afs-muted);
   font-size: 13px;
@@ -231,4 +222,10 @@ const PositiveDelta = styled.span`
 const NegativeDelta = styled.span`
   color: #dc2626;
   font-weight: 700;
+`;
+
+const LoadMoreRow = styled.div`
+  display: flex;
+  justify-content: center;
+  padding-top: 16px;
 `;

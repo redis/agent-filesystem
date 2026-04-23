@@ -427,7 +427,7 @@ export function DatabaseTable({
   );
 
   return (
-    <>
+    <S.TableBlock>
       <S.HeadingWrap style={{ padding: 0 }}>
         <S.SearchInput
           value={search}
@@ -464,7 +464,7 @@ export function DatabaseTable({
           </DatabaseTableViewport>
         </S.TableCard>
       ) : null}
-    </>
+    </S.TableBlock>
   );
 }
 

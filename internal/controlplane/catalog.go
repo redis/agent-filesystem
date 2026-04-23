@@ -162,6 +162,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			database_id TEXT NOT NULL,
 			workspace_id TEXT NOT NULL,
 			workspace_name TEXT NOT NULL DEFAULT '',
+			profile TEXT NOT NULL DEFAULT '',
 			readonly INTEGER NOT NULL DEFAULT 0,
 			secret_hash TEXT NOT NULL,
 			created_at TEXT NOT NULL,
@@ -190,6 +191,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE session_catalog ADD COLUMN IF NOT EXISTS agent_id TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS profile TEXT NOT NULL DEFAULT ''`,
 		}
 		for _, statement := range alterations {
 			if _, err := c.execContext(ctx, statement); err != nil {
@@ -210,6 +212,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE session_catalog ADD COLUMN agent_id TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN profile TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, statement := range sqliteAlterations {
 		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {

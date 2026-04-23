@@ -217,6 +217,19 @@ export const SearchOnlyHeadingWrap = styled(HeadingWrap)`
   justify-content: flex-start;
 `;
 
+/**
+ * Wraps a table's search/toolbar row and table card so they share
+ * a consistent vertical gap. Use this when a table has a search box
+ * above the table body — it keeps the search-to-table spacing uniform
+ * across PageStack and SectionCard contexts.
+ */
+export const TableBlock = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+`;
+
 /* ---- View toggle ---- */
 export const ToggleGroup = styled.div`
   display: inline-flex;

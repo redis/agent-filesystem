@@ -22,6 +22,7 @@ type hostedMCPProvider struct {
 	manager    *DatabaseManager
 	databaseID string
 	workspace  string
+	profile    string
 	readonly   bool
 }
 
@@ -76,6 +77,7 @@ func authWrappedMCPHandler(manager *DatabaseManager, auth *AuthHandler) http.Han
 			return
 		}
 		ctx := context.WithValue(r.Context(), hostedMCPProviderContextKey{}, provider)
+		ctx = WithChangeSessionContext(ctx, ChangeSessionContext{SessionID: sessionID})
 		server.ServeHTTP(w, r.WithContext(ctx))
 	})
 
@@ -114,6 +116,7 @@ func hostedMCPProviderForRequest(ctx context.Context, manager *DatabaseManager, 
 		manager:    manager,
 		databaseID: strings.TrimSpace(identity.ScopedDatabaseID),
 		workspace:  strings.TrimSpace(identity.ScopedWorkspace),
+		profile:    firstNonEmpty(strings.TrimSpace(identity.MCPProfile), MCPProfileWorkspaceRW),
 		readonly:   identity.Readonly,
 	}, sessionInput, sessionID, nil
 }
@@ -133,7 +136,7 @@ func buildHostedMCPSessionID(tokenID, hostname, localPath string) string {
 }
 
 func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
-	return []mcpproto.Tool{
+	tools := []mcpproto.Tool{
 		{
 			Name:        "workspace_current",
 			Description: "Show the current hosted AFS workspace available to this MCP token",
@@ -201,8 +204,44 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "file_glob",
+			Description: "Find files or directories under a workspace path by basename glob pattern. Use this for filename discovery before reading or editing. Do not use it for content search; use file_grep instead.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]string{"type": "string", "description": "Absolute directory path", "default": "/"},
+					"pattern": map[string]string{"type": "string", "description": "Basename glob pattern"},
+					"kind":    map[string]string{"type": "string", "description": "Optional kind filter: file, dir, symlink, or any", "default": "file"},
+					"limit":   map[string]string{"type": "integer", "description": "Maximum number of results to return", "default": "100"},
+				},
+				"required": []string{"pattern"},
+			},
+		},
+		{
+			Name:        "file_grep",
+			Description: "Search file contents in the current workspace. Use this for content search across one file or many files. Do not use it for directory discovery or filename-only matching. Choose only one search mode among glob, fixed_strings, or regexp.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":               map[string]string{"type": "string", "description": "Absolute workspace path to search within", "default": "/"},
+					"pattern":            map[string]string{"type": "string", "description": "Pattern to search for"},
+					"ignore_case":        map[string]string{"type": "boolean", "description": "Case-insensitive search"},
+					"glob":               map[string]string{"type": "boolean", "description": "Use glob matching semantics for the pattern"},
+					"fixed_strings":      map[string]string{"type": "boolean", "description": "Treat the pattern as a fixed string"},
+					"regexp":             map[string]string{"type": "boolean", "description": "Use regex mode with RE2-style syntax"},
+					"word_regexp":        map[string]string{"type": "boolean", "description": "Match whole words"},
+					"line_regexp":        map[string]string{"type": "boolean", "description": "Match entire lines"},
+					"invert_match":       map[string]string{"type": "boolean", "description": "Return non-matching lines"},
+					"files_with_matches": map[string]string{"type": "boolean", "description": "Return only matching file paths"},
+					"count":              map[string]string{"type": "boolean", "description": "Return match counts per file instead of line matches"},
+					"max_count":          map[string]string{"type": "integer", "description": "Maximum selected lines per file"},
+				},
+				"required": []string{"pattern"},
+			},
+		},
+		{
 			Name:        "file_write",
-			Description: "Write a file in the current workspace, creating parent directories as needed",
+			Description: "Write a full file in the current workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, file_delete_lines, or file_patch for that.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -214,14 +253,18 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_replace",
-			Description: "Replace text in a file",
+			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, be explicit about whether all occurrences are intended.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"path": map[string]string{"type": "string", "description": "Absolute file path"},
-					"old":  map[string]string{"type": "string", "description": "Text to find"},
-					"new":  map[string]string{"type": "string", "description": "Replacement text"},
-					"all":  map[string]string{"type": "boolean", "description": "Replace all occurrences"},
+					"path":                 map[string]string{"type": "string", "description": "Absolute file path"},
+					"old":                  map[string]string{"type": "string", "description": "Text to find"},
+					"new":                  map[string]string{"type": "string", "description": "Replacement text"},
+					"all":                  map[string]string{"type": "boolean", "description": "Replace all occurrences"},
+					"expected_occurrences": map[string]string{"type": "integer", "description": "Optional expected number of matching occurrences before replacing"},
+					"start_line":           map[string]string{"type": "integer", "description": "Optional exact 1-indexed line where the match must begin"},
+					"context_before":       map[string]string{"type": "string", "description": "Optional exact text that must appear immediately before the match"},
+					"context_after":        map[string]string{"type": "string", "description": "Optional exact text that must appear immediately after the match"},
 				},
 				"required": []string{"path", "old", "new"},
 			},
@@ -241,7 +284,7 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_delete_lines",
-			Description: "Delete a line range from a file",
+			Description: "Delete a line range from a file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -252,7 +295,43 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 				"required": []string{"path", "start", "end"},
 			},
 		},
+		{
+			Name:        "file_patch",
+			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":            map[string]string{"type": "string", "description": "Absolute workspace file path"},
+					"expected_sha256": map[string]string{"type": "string", "description": "Optional SHA-256 hash of the file before patching; fail if the file changed"},
+					"patches": map[string]any{
+						"type":        "array",
+						"description": "Ordered list of structured patches to apply",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"op":             map[string]string{"type": "string", "description": "Patch operation: replace, insert, or delete"},
+								"start_line":     map[string]string{"type": "integer", "description": "1-indexed starting line for the patch. For insert, use 0 for the file beginning or -1 for EOF"},
+								"end_line":       map[string]string{"type": "integer", "description": "Optional inclusive end line for delete operations"},
+								"old":            map[string]string{"type": "string", "description": "Exact expected text for replace or delete"},
+								"new":            map[string]string{"type": "string", "description": "Replacement or inserted text"},
+								"context_before": map[string]string{"type": "string", "description": "Optional exact text that must appear immediately before the patch"},
+								"context_after":  map[string]string{"type": "string", "description": "Optional exact text that must appear immediately after the patch"},
+							},
+							"required": []string{"op"},
+						},
+					},
+				},
+				"required": []string{"path", "patches"},
+			},
+		},
 	}
+	filtered := make([]mcpproto.Tool, 0, len(tools))
+	for _, tool := range tools {
+		if MCPProfileAllowsTool(p.profile, tool.Name) {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered
 }
 
 func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
@@ -265,6 +344,7 @@ func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[
 		value = map[string]any{
 			"workspace": p.workspace,
 			"database":  p.databaseID,
+			"profile":   p.profile,
 			"readonly":  p.readonly,
 		}
 	case "checkpoint_list":
@@ -313,6 +393,10 @@ func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[
 		value, err = p.toolFileLines(ctx, args)
 	case "file_list":
 		value, err = p.toolFileList(ctx, args)
+	case "file_glob":
+		value, err = p.toolFileGlob(ctx, args)
+	case "file_grep":
+		value, err = p.toolFileGrep(ctx, args)
 	case "file_write":
 		err = p.ensureWritable()
 		if err == nil {
@@ -333,8 +417,16 @@ func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[
 		if err == nil {
 			value, err = p.toolFileDeleteLines(ctx, args)
 		}
+	case "file_patch":
+		err = p.ensureWritable()
+		if err == nil {
+			value, err = p.toolFilePatch(ctx, args)
+		}
 	default:
 		err = fmt.Errorf("unknown tool %q", name)
+	}
+	if err == nil && !MCPProfileAllowsTool(p.profile, name) {
+		err = fmt.Errorf("tool %q is not available for mcp profile %q", name, p.profile)
 	}
 	if err != nil {
 		return mcpErrorResult(err)
@@ -343,7 +435,7 @@ func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[
 }
 
 func (p *hostedMCPProvider) ensureWritable() error {
-	if p.readonly {
+	if p.readonly || MCPProfileIsReadonly(p.profile) {
 		return fmt.Errorf("this mcp token is read-only")
 	}
 	return nil
@@ -411,25 +503,111 @@ func (p *hostedMCPProvider) toolFileList(ctx context.Context, args map[string]an
 	}, nil
 }
 
+func (p *hostedMCPProvider) toolFileGlob(ctx context.Context, args map[string]any) (any, error) {
+	path, err := mcpStringDefault(args, "path", "/")
+	if err != nil {
+		return nil, err
+	}
+	pattern, err := mcpRequiredText(args, "pattern", false)
+	if err != nil {
+		return nil, err
+	}
+	kind, err := mcpStringDefault(args, "kind", "file")
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case "", "any":
+		kind = ""
+	case "file", "dir", "symlink":
+	default:
+		return nil, fmt.Errorf("argument %q must be one of file, dir, symlink, or any", "kind")
+	}
+	limit, err := mcpInt(args, "limit", 100)
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	normalizedPath := normalizeAFSGrepPath(path)
+	fsClient, err := p.fsClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	matches, err := fsClient.Find(ctx, normalizedPath, pattern, kind)
+	if err != nil {
+		return nil, err
+	}
+	truncated := false
+	if len(matches) > limit {
+		truncated = true
+		matches = matches[:limit]
+	}
+	items := make([]mcpFileListItem, 0, len(matches))
+	for _, matchPath := range matches {
+		stat, err := fsClient.Stat(ctx, matchPath)
+		if err != nil {
+			return nil, err
+		}
+		if stat == nil {
+			continue
+		}
+		item := mcpFileListItem{
+			Path:       matchPath,
+			Name:       filepath.Base(matchPath),
+			Kind:       stat.Type,
+			Size:       stat.Size,
+			ModifiedAt: mcpFileModifiedAt(stat.Mtime),
+		}
+		if stat.Type == "symlink" {
+			target, err := fsClient.Readlink(ctx, matchPath)
+			if err != nil {
+				return nil, err
+			}
+			item.Target = target
+		}
+		items = append(items, item)
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"path":      normalizedPath,
+		"pattern":   pattern,
+		"kind":      ternaryString(kind == "", "any", kind),
+		"count":     len(items),
+		"truncated": truncated,
+		"items":     items,
+	}, nil
+}
+
 func (p *hostedMCPProvider) toolFileWrite(ctx context.Context, args map[string]any) (any, error) {
 	content, err := mcpRequiredText(args, "content", true)
 	if err != nil {
 		return nil, err
 	}
 	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
-		if stat == nil {
+		if stat != nil {
+			if stat.Type == "dir" {
+				return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+			}
+			if stat.Type == "symlink" {
+				return nil, fmt.Errorf("path %q is a symlink; write the target explicitly", normalizedPath)
+			}
+			if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+				return nil, err
+			}
+		} else {
+			if err := ensureHostedWorkspaceParentDirs(ctx, fsClient, normalizedPath); err != nil {
+				return nil, err
+			}
 			if err := fsClient.EchoCreate(ctx, normalizedPath, []byte(content), 0o644); err != nil {
 				return nil, err
 			}
-			return map[string]any{"kind": "file", "created": true, "bytes": len(content)}, nil
 		}
-		if stat.Type == "dir" {
-			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
-		}
-		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
-			return nil, err
-		}
-		return map[string]any{"kind": stat.Type, "created": false, "bytes": len(content)}, nil
+		return map[string]any{
+			"operation": "write",
+			"bytes":     len(content),
+		}, nil
 	})
 }
 
@@ -446,18 +624,63 @@ func (p *hostedMCPProvider) toolFileReplace(ctx context.Context, args map[string
 	if err != nil {
 		return nil, err
 	}
+	expectedOccurrences, err := mcpOptionalInt(args, "expected_occurrences")
+	if err != nil {
+		return nil, err
+	}
+	startLine, err := mcpOptionalInt(args, "start_line")
+	if err != nil {
+		return nil, err
+	}
+	contextBefore, err := mcpOptionalText(args, "context_before")
+	if err != nil {
+		return nil, err
+	}
+	contextAfter, err := mcpOptionalText(args, "context_after")
+	if err != nil {
+		return nil, err
+	}
 	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
 		if stat == nil {
 			return nil, os.ErrNotExist
 		}
-		if stat.Type == "dir" {
-			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+		if stat.Type != "file" {
+			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
 		}
-		replaced, err := fsClient.Replace(ctx, normalizedPath, oldValue, newValue, replaceAll)
+		content, err := readWorkspaceTextContent(ctx, fsClient, normalizedPath, stat)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"kind": stat.Type, "replacements": replaced}, nil
+		matchCount := countTextMatches(content, oldValue, contextBefore, contextAfter, startLine, nil)
+		if expectedOccurrences != nil && matchCount != *expectedOccurrences {
+			return nil, fmt.Errorf("expected %d matching occurrences, found %d", *expectedOccurrences, matchCount)
+		}
+		var replaced int
+		switch {
+		case replaceAll:
+			if startLine != nil || contextBefore != "" || contextAfter != "" {
+				return nil, errors.New("all=true cannot be combined with start_line, context_before, or context_after")
+			}
+			if matchCount == 0 {
+				return nil, errors.New("old text not found")
+			}
+			content = strings.ReplaceAll(content, oldValue, newValue)
+			replaced = matchCount
+		default:
+			match, err := findSingleTextMatch(content, oldValue, contextBefore, contextAfter, startLine, nil)
+			if err != nil {
+				return nil, err
+			}
+			content = content[:match.Start] + newValue + content[match.End:]
+			replaced = 1
+		}
+		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation":    "replace",
+			"replacements": replaced,
+		}, nil
 	})
 }
 
@@ -474,13 +697,17 @@ func (p *hostedMCPProvider) toolFileInsert(ctx context.Context, args map[string]
 		if stat == nil {
 			return nil, os.ErrNotExist
 		}
-		if stat.Type == "dir" {
-			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+		if stat.Type != "file" {
+			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
 		}
 		if err := fsClient.Insert(ctx, normalizedPath, line, content); err != nil {
 			return nil, err
 		}
-		return map[string]any{"kind": stat.Type, "line": line, "bytes": len(content)}, nil
+		return map[string]any{
+			"operation": "insert",
+			"line":      line,
+			"bytes":     len(content),
+		}, nil
 	})
 }
 
@@ -493,31 +720,244 @@ func (p *hostedMCPProvider) toolFileDeleteLines(ctx context.Context, args map[st
 	if err != nil {
 		return nil, err
 	}
+	if start <= 0 || end <= 0 || end < start {
+		return nil, errors.New("start and end must be >= 1 and end must be >= start")
+	}
 	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
 		if stat == nil {
 			return nil, os.ErrNotExist
 		}
-		if stat.Type == "dir" {
-			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+		if stat.Type != "file" {
+			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
 		}
 		deleted, err := fsClient.DeleteLines(ctx, normalizedPath, start, end)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"kind": stat.Type, "deleted": deleted}, nil
+		return map[string]any{
+			"operation":     "delete_lines",
+			"deleted_lines": int(deleted),
+		}, nil
 	})
 }
 
-func (p *hostedMCPProvider) fsClient(ctx context.Context) (afsclient.Client, error) {
+func (p *hostedMCPProvider) toolFilePatch(ctx context.Context, args map[string]any) (any, error) {
+	var input mcpFilePatchInput
+	if err := decodeMCPArgs(args, &input); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(input.Path) == "" {
+		return nil, fmt.Errorf("missing required argument %q", "path")
+	}
+	if len(input.Patches) == 0 {
+		return nil, errors.New("argument \"patches\" must not be empty")
+	}
+	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
+		if stat == nil {
+			return nil, os.ErrNotExist
+		}
+		if stat.Type != "file" {
+			return nil, fmt.Errorf("path %q is not a regular file", normalizedPath)
+		}
+		content, err := readWorkspaceTextContent(ctx, fsClient, normalizedPath, stat)
+		if err != nil {
+			return nil, err
+		}
+		if input.ExpectedSHA256 != "" {
+			got := textSHA256(content)
+			if !strings.EqualFold(got, input.ExpectedSHA256) {
+				return nil, fmt.Errorf("expected_sha256 mismatch: got %s", got)
+			}
+		}
+		applied := make([]map[string]any, 0, len(input.Patches))
+		for i, patch := range input.Patches {
+			var patchMeta map[string]any
+			content, patchMeta, err = applyMCPTextPatch(content, patch)
+			if err != nil {
+				return nil, fmt.Errorf("patch %d: %w", i+1, err)
+			}
+			applied = append(applied, patchMeta)
+		}
+		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation":       "patch",
+			"patches_applied": len(applied),
+			"applied":         applied,
+			"sha256":          textSHA256(content),
+		}, nil
+	})
+}
+
+func (p *hostedMCPProvider) toolFileGrep(ctx context.Context, args map[string]any) (any, error) {
+	pattern, err := mcpRequiredText(args, "pattern", false)
+	if err != nil {
+		return nil, err
+	}
+	opts := hostedMCPGrepOptions{
+		path:    "/",
+		pattern: pattern,
+	}
+	if opts.path, err = mcpStringDefault(args, "path", "/"); err != nil {
+		return nil, err
+	}
+	if opts.ignoreCase, err = mcpBool(args, "ignore_case", false); err != nil {
+		return nil, err
+	}
+	if opts.glob, err = mcpBool(args, "glob", false); err != nil {
+		return nil, err
+	}
+	if opts.fixedStrings, err = mcpBool(args, "fixed_strings", false); err != nil {
+		return nil, err
+	}
+	if opts.regexp, err = mcpBool(args, "regexp", false); err != nil {
+		return nil, err
+	}
+	if opts.wordRegexp, err = mcpBool(args, "word_regexp", false); err != nil {
+		return nil, err
+	}
+	if opts.lineRegexp, err = mcpBool(args, "line_regexp", false); err != nil {
+		return nil, err
+	}
+	if opts.invertMatch, err = mcpBool(args, "invert_match", false); err != nil {
+		return nil, err
+	}
+	if opts.filesWithMatches, err = mcpBool(args, "files_with_matches", false); err != nil {
+		return nil, err
+	}
+	if opts.countOnly, err = mcpBool(args, "count", false); err != nil {
+		return nil, err
+	}
+	if opts.maxCount, err = mcpInt(args, "max_count", 0); err != nil {
+		return nil, err
+	}
+	modeFlags := 0
+	if opts.glob {
+		modeFlags++
+	}
+	if opts.fixedStrings {
+		modeFlags++
+	}
+	if opts.regexp {
+		modeFlags++
+	}
+	if modeFlags > 1 {
+		return nil, errors.New("choose only one of glob, fixed_strings, or regexp")
+	}
+	searchPath := normalizeAFSGrepPath(opts.path)
+	fsClient, err := p.fsClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	targets, err := collectHostedMCPGrepTargets(ctx, fsClient, searchPath)
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return nil, fmt.Errorf("path %q does not exist in workspace %q", searchPath, p.workspace)
+		}
+		return nil, err
+	}
+	matcher, err := compileHostedMCPGrepMatcher(opts)
+	if err != nil {
+		return nil, err
+	}
+	result := map[string]any{
+		"workspace": p.workspace,
+		"path":      searchPath,
+	}
+	switch {
+	case opts.filesWithMatches:
+		files := make([]string, 0)
+		for _, target := range targets {
+			content := target.content
+			if !target.loaded {
+				content, err = fsClient.Cat(ctx, target.path)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if hostedMCPGrepFileHasMatch(content, opts, matcher) {
+				files = append(files, target.path)
+			}
+		}
+		result["mode"] = "files"
+		result["files"] = files
+	case opts.countOnly:
+		counts := make([]mcpGrepCount, 0, len(targets))
+		for _, target := range targets {
+			content := target.content
+			if !target.loaded {
+				content, err = fsClient.Cat(ctx, target.path)
+				if err != nil {
+					return nil, err
+				}
+			}
+			counts = append(counts, mcpGrepCount{
+				Path:  target.path,
+				Count: hostedMCPGrepFileMatchCount(content, opts, matcher),
+			})
+		}
+		result["mode"] = "counts"
+		result["counts"] = counts
+	default:
+		matches := make([]mcpGrepMatch, 0)
+		for _, target := range targets {
+			content := target.content
+			if !target.loaded {
+				content, err = fsClient.Cat(ctx, target.path)
+				if err != nil {
+					return nil, err
+				}
+			}
+			matches = append(matches, hostedMCPCollectGrepMatches(target.path, content, opts, matcher)...)
+			if opts.maxCount > 0 && len(matches) >= opts.maxCount {
+				matches = matches[:opts.maxCount]
+				break
+			}
+		}
+		result["mode"] = "matches"
+		result["matches"] = matches
+	}
+	return result, nil
+}
+
+type hostedWorkspaceContext struct {
+	service   *Service
+	route     workspaceCatalogRoute
+	meta      WorkspaceMeta
+	storageID string
+	fsClient  afsclient.Client
+}
+
+func (p *hostedMCPProvider) resolveWorkspaceContext(ctx context.Context) (*hostedWorkspaceContext, error) {
 	service, _, route, err := p.manager.resolveScopedWorkspace(ctx, p.databaseID, p.workspace)
 	if err != nil {
 		return nil, err
 	}
+	meta, err := service.store.GetWorkspaceMeta(ctx, route.Name)
+	if err != nil {
+		return nil, err
+	}
+	storageID := workspaceStorageID(meta)
 	fsKey, _, _, err := EnsureWorkspaceRoot(ctx, service.store, route.Name)
 	if err != nil {
 		return nil, err
 	}
-	return afsclient.New(service.store.rdb, fsKey), nil
+	return &hostedWorkspaceContext{
+		service:   service,
+		route:     route,
+		meta:      meta,
+		storageID: storageID,
+		fsClient:  afsclient.New(service.store.rdb, fsKey),
+	}, nil
+}
+
+func (p *hostedMCPProvider) fsClient(ctx context.Context) (afsclient.Client, error) {
+	resolved, err := p.resolveWorkspaceContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.fsClient, nil
 }
 
 func (p *hostedMCPProvider) resolveWorkspaceFSPath(ctx context.Context, args map[string]any, requireFile bool) (string, afsclient.Client, *afsclient.StatResult, error) {
@@ -552,10 +992,11 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 		return nil, err
 	}
 	normalizedPath := normalizeAFSGrepPath(rawPath)
-	fsClient, err := p.fsClient(ctx)
+	resolved, err := p.resolveWorkspaceContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+	fsClient := resolved.fsClient
 	stat, err := fsClient.Stat(ctx, normalizedPath)
 	if err != nil && !errors.Is(err, redis.Nil) {
 		return nil, err
@@ -563,13 +1004,81 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	if errors.Is(err, redis.Nil) {
 		stat = nil
 	}
+	var (
+		prevHash string
+		prevSize int64
+	)
+	if stat != nil && stat.Type == "file" {
+		prevContent, readErr := fsClient.Cat(ctx, normalizedPath)
+		if readErr == nil {
+			prevHash = textSHA256(string(prevContent))
+			prevSize = int64(len(prevContent))
+		}
+	}
 	payload, err := mutate(ctx, fsClient, normalizedPath, stat)
 	if err != nil {
 		return nil, err
 	}
+	if err := MarkWorkspaceRootDirty(ctx, resolved.service.store, resolved.storageID); err != nil {
+		return nil, err
+	}
+	resolved.meta.DirtyHint = true
+	if err := resolved.service.store.PutWorkspaceMeta(ctx, resolved.meta); err != nil {
+		return nil, err
+	}
+	updatedStat, statErr := fsClient.Stat(ctx, normalizedPath)
+	if statErr != nil && !errors.Is(statErr, redis.Nil) {
+		return nil, statErr
+	}
 	payload["workspace"] = p.workspace
 	payload["path"] = normalizedPath
+	payload["dirty"] = true
+	if updatedStat != nil {
+		payload["kind"] = updatedStat.Type
+		payload["size"] = updatedStat.Size
+		payload["modified_at"] = mcpFileModifiedAt(updatedStat.Mtime)
+	}
+	template := resolved.service.buildChangelogTemplate(ctx, resolved.storageID, strings.TrimSpace(resolved.meta.HeadSavepoint), ChangeSourceMCP)
+	entry := template
+	entry.Path = normalizedPath
+	entry.Op = ChangeOpPut
+	entry.PrevHash = prevHash
+	entry.DeltaBytes = -prevSize
+	if updatedStat != nil && updatedStat.Type == "file" {
+		nextContent, readErr := fsClient.Cat(ctx, normalizedPath)
+		if readErr == nil {
+			entry.ContentHash = textSHA256(string(nextContent))
+			entry.SizeBytes = int64(len(nextContent))
+			entry.DeltaBytes = entry.SizeBytes - prevSize
+			entry.Mode = 0o644
+		}
+	}
+	WriteChangeEntries(ctx, resolved.service.store.rdb, resolved.storageID, []ChangeEntry{entry})
 	return payload, nil
+}
+
+func ensureHostedWorkspaceParentDirs(ctx context.Context, fsClient afsclient.Client, normalizedPath string) error {
+	trimmed := strings.Trim(normalizedPath, "/")
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) <= 1 {
+		return nil
+	}
+	current := ""
+	for _, part := range parts[:len(parts)-1] {
+		current += "/" + part
+		if stat, err := fsClient.Stat(ctx, current); err == nil && stat != nil {
+			continue
+		} else if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		if err := fsClient.Mkdir(ctx, current); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func mcpErrorResult(err error) mcpproto.ToolResult {

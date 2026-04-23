@@ -1,58 +1,69 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { useEffect } from "react";
-import { z } from "zod";
 import styled from "styled-components";
+import { z } from "zod";
 import {
-  PageStack,
   InlineActions,
   NoticeBody,
   NoticeCard,
   NoticeTitle,
+  PageStack,
+  SectionCard,
+  SectionGrid,
+  TabButton,
+  Tabs,
 } from "../components/afs-kit";
 import { AgentSetupGuide } from "../features/agents/AgentSetupGuide";
-import { useDatabaseScope, useScopedAgents } from "../foundation/database-scope";
-import { agentsQueryOptions } from "../foundation/hooks/use-afs";
-import { queryClient } from "../foundation/query-client";
+import { useAuthSession } from "../foundation/auth-context";
+import { useDatabaseScope } from "../foundation/database-scope";
+import {
+  useActivity,
+  useAgents,
+} from "../foundation/hooks/use-afs";
+import { ActivityTable } from "../foundation/tables/activity-table";
 import { AgentsTable } from "../foundation/tables/agents-table";
-import type { AFSAgentSession } from "../foundation/types/afs";
+import type {
+  AFSActivityEvent,
+  AFSAgentSession,
+} from "../foundation/types/afs";
+
+type AgentsTab = "active" | "history";
 
 const agentsSearchSchema = z.object({
   workspaceId: z.string().optional(),
   databaseId: z.string().optional(),
+  tab: z.enum(["active", "history"]).optional(),
 });
 
 export const Route = createFileRoute("/agents")({
   validateSearch: agentsSearchSchema,
-  loader: () =>
-    queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
   component: AgentsPage,
 });
 
 function AgentsPage() {
   const navigate = useNavigate();
+  const auth = useAuthSession();
   const search = Route.useSearch();
   const { unavailableDatabases } = useDatabaseScope();
-  const agentsQuery = useScopedAgents();
+  const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
+  const agentsQuery = useAgents(null, queriesEnabled);
+  const activityQuery = useActivity(search.databaseId ?? null, 100, queriesEnabled);
+
+  const tab: AgentsTab = search.tab ?? "active";
   const workspaceId = search.workspaceId;
   const databaseId = search.databaseId;
-
   const allAgents = agentsQuery.data ?? [];
 
-  // Poll so the table updates live when agents connect / disconnect.
   useEffect(() => {
     const interval = setInterval(() => {
       void agentsQuery.refetch();
+      void activityQuery.refetch();
     }, 5000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activityQuery, agentsQuery]);
 
-  if (agentsQuery.isLoading) {
-    return <Loader data-testid="loader--spinner" />;
-  }
-
-  const rows = allAgents.filter((agent) => {
+  const currentConnections = allAgents.filter((agent) => {
     if (workspaceId != null && agent.workspaceId !== workspaceId) {
       return false;
     }
@@ -61,6 +72,19 @@ function AgentsPage() {
     }
     return true;
   });
+
+  const connectionHistory = (activityQuery.data ?? [])
+    .filter((event) => event.kind === "session.started")
+    .filter((event) => {
+      if (workspaceId != null && event.workspaceId !== workspaceId) {
+        return false;
+      }
+      if (databaseId != null && event.databaseId !== databaseId) {
+        return false;
+      }
+      return true;
+    })
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 
   const isFiltered = workspaceId != null || databaseId != null;
 
@@ -72,12 +96,40 @@ function AgentsPage() {
     });
   }
 
-  /* Show the getting-started empty state only when there are truly no agents
-     (not when the user has a filter active that happens to match nothing). */
-  if (rows.length === 0 && !isFiltered && !agentsQuery.isError) {
+  function openActivity(event: AFSActivityEvent) {
+    if (event.workspaceId == null) {
+      return;
+    }
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: event.workspaceId },
+      search: event.databaseId ? { databaseId: event.databaseId } : {},
+    });
+  }
+
+  function setTab(nextTab: AgentsTab) {
+    void navigate({
+      to: "/agents",
+      search: {
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(databaseId ? { databaseId } : {}),
+        ...(nextTab === "active" ? {} : { tab: nextTab }),
+      },
+      replace: true,
+    });
+  }
+
+  if (auth.isLoading) {
+    return <Loader data-testid="loader--spinner" />;
+  }
+
+  if (agentsQuery.isLoading && tab === "active") {
+    return <Loader data-testid="loader--spinner" />;
+  }
+
+  if (tab === "active" && currentConnections.length === 0 && connectionHistory.length === 0 && !isFiltered && !agentsQuery.isError) {
     return (
       <PageStack>
-
         {unavailableDatabases.length > 0 ? (
           <NoticeCard $tone="warning" role="status">
             <NoticeTitle>Some databases are unavailable</NoticeTitle>
@@ -87,6 +139,14 @@ function AgentsPage() {
             </NoticeBody>
           </NoticeCard>
         ) : null}
+        <Tabs>
+          <TabButton $active onClick={() => setTab("active")}>
+            Active Agents
+          </TabButton>
+          <TabButton $active={false} onClick={() => setTab("history")}>
+            Connection History
+          </TabButton>
+        </Tabs>
         <AgentsEmptyState />
       </PageStack>
     );
@@ -98,40 +158,73 @@ function AgentsPage() {
         <NoticeCard $tone="warning" role="status">
           <NoticeTitle>Some databases are unavailable</NoticeTitle>
           <NoticeBody>
-            Connected-agent results are partial while these databases are disconnected:{" "}
+            Agent results are partial while these databases are disconnected:{" "}
             {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
           </NoticeBody>
         </NoticeCard>
       ) : null}
+
+      <Tabs>
+        <TabButton $active={tab === "active"} onClick={() => setTab("active")}>
+          Active Agents
+        </TabButton>
+        <TabButton $active={tab === "history"} onClick={() => setTab("history")}>
+          Connection History
+        </TabButton>
+      </Tabs>
+
       {isFiltered ? (
         <InlineActions>
           <Button
             kind="ghost"
             size="small"
             onClick={() => {
-              void navigate({ to: "/agents", search: {} });
+              void navigate({
+                to: "/agents",
+                search: tab === "active" ? {} : { tab },
+              });
             }}
           >
-            Show all agents
+            Show all
           </Button>
         </InlineActions>
       ) : null}
-      <AgentsTable
-        rows={rows}
-        loading={agentsQuery.isLoading}
-        error={agentsQuery.isError}
-        toolbarAction={(
-          <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
-            Add agent
-          </Button>
-        )}
-        onOpenWorkspace={openWorkspace}
-      />
+
+      {tab === "active" ? (
+        <SectionGrid>
+          <SectionCard $span={12}>
+            <AgentsTable
+              rows={currentConnections}
+              loading={agentsQuery.isLoading}
+              error={agentsQuery.isError}
+              toolbarAction={(
+                <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
+                  Add agent
+                </Button>
+              )}
+              onOpenWorkspace={openWorkspace}
+            />
+          </SectionCard>
+        </SectionGrid>
+      ) : null}
+
+      {tab === "history" ? (
+        <SectionGrid>
+          <SectionCard $span={12}>
+            <ActivityTable
+              rows={connectionHistory}
+              loading={activityQuery.isLoading}
+              error={activityQuery.isError}
+              errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
+              hideTypeColumn
+              onOpenActivity={openActivity}
+            />
+          </SectionCard>
+        </SectionGrid>
+      ) : null}
     </PageStack>
   );
 }
-
-/* ── Empty state ── */
 
 function AgentsEmptyState() {
   return (
@@ -150,8 +243,7 @@ function AgentsEmptyState() {
         </EmptyIcon>
         <EmptyTitle>No agents connected</EmptyTitle>
         <EmptyDesc>
-          Connect an agent to start working with your workspaces. Agents sync
-          files to Redis automatically and appear here in real time.
+          Connect an agent to start working with your workspaces. Agents sync files to Redis automatically and appear here in real time.
         </EmptyDesc>
       </EmptyHeader>
       <AgentSetupGuide compact />
