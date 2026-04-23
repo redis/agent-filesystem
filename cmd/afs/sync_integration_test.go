@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -233,6 +234,105 @@ func TestSyncEmptyFile(t *testing.T) {
 	})
 	if got := env.readRemoteFile(t, "empty.txt"); got != "" {
 		t.Fatalf("remote content = %q, want empty", got)
+	}
+}
+
+func TestSyncCreateExclusiveRequestCreatesRemoteAndLocal(t *testing.T) {
+	t.Helper()
+
+	env := newSyncTestEnv(t)
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	requestID := "create-lock"
+	request := syncControlRequest{
+		Version:   syncControlVersion,
+		Operation: syncControlOpCreateExclusive,
+		Path:      "/locks/deploy.lock",
+		Content:   "agent-a\n",
+	}
+	if err := writeSyncControlJSON(syncControlRequestPath(env.localRoot, requestID), request, 0o600); err != nil {
+		t.Fatalf("writeSyncControlJSON(request) returned error: %v", err)
+	}
+
+	resultPath := syncControlResultPath(env.localRoot, requestID)
+	assertEventually(t, 3*time.Second, "sync control result", func() bool {
+		_, err := os.Stat(resultPath)
+		return err == nil
+	})
+
+	data, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatalf("ReadFile(result) returned error: %v", err)
+	}
+	var result syncControlResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("json.Unmarshal(result) returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("result = %+v, want success", result)
+	}
+
+	assertEventually(t, 3*time.Second, "local lock file", func() bool {
+		return env.localExists("locks/deploy.lock")
+	})
+	if got := env.readLocalFile(t, "locks/deploy.lock"); got != "agent-a\n" {
+		t.Fatalf("local content = %q, want %q", got, "agent-a\n")
+	}
+	if got := env.readRemoteFile(t, "locks/deploy.lock"); got != "agent-a\n" {
+		t.Fatalf("remote content = %q, want %q", got, "agent-a\n")
+	}
+}
+
+func TestCmdSyncCreateExclusiveRoundTrip(t *testing.T) {
+	t.Helper()
+
+	env := newSyncTestEnv(t)
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	oldCfgPathOverride := cfgPathOverride
+	cfgPathOverride = filepath.Join(t.TempDir(), "afs.config.json")
+	t.Cleanup(func() {
+		cfgPathOverride = oldCfgPathOverride
+	})
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeLocal
+	cfg.Mode = modeSync
+	cfg.RedisAddr = env.mr.Addr()
+	cfg.RedisDB = 0
+	cfg.LocalPath = env.localRoot
+	cfg.CurrentWorkspace = env.workspace
+	if err := saveConfig(cfg); err != nil {
+		t.Fatalf("saveConfig() returned error: %v", err)
+	}
+
+	st := state{
+		ProductMode:      productModeLocal,
+		RedisAddr:        env.mr.Addr(),
+		RedisDB:          0,
+		CurrentWorkspace: env.workspace,
+		LocalPath:        env.localRoot,
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+	}
+	if err := saveState(st); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	if err := cmdSync([]string{"sync", "create-exclusive", "--content", "agent-b\n", "/tasks/002.claim"}); err != nil {
+		t.Fatalf("cmdSync(create-exclusive) returned error: %v", err)
+	}
+	assertEventually(t, 3*time.Second, "remote 002.claim", func() bool {
+		return env.remoteExists(t, "tasks/002.claim")
+	})
+	if got := env.readRemoteFile(t, "tasks/002.claim"); got != "agent-b\n" {
+		t.Fatalf("remote content = %q, want %q", got, "agent-b\n")
+	}
+
+	if err := cmdSync([]string{"sync", "create-exclusive", "/tasks/002.claim"}); err == nil {
+		t.Fatal("second cmdSync(create-exclusive) should fail, got success")
 	}
 }
 

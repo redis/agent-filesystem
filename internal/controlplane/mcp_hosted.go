@@ -213,6 +213,18 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "file_create_exclusive",
+			Description: "Atomically create a file only if it does not already exist; fails if the path is already taken. Useful for distributed locking and coordination between agents. Creates parent directories as needed.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]string{"type": "string", "description": "Absolute file path"},
+					"content": map[string]string{"type": "string", "description": "File contents to write on creation"},
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+		{
 			Name:        "file_replace",
 			Description: "Replace text in a file",
 			InputSchema: map[string]any{
@@ -317,6 +329,11 @@ func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[
 		err = p.ensureWritable()
 		if err == nil {
 			value, err = p.toolFileWrite(ctx, args)
+		}
+	case "file_create_exclusive":
+		err = p.ensureWritable()
+		if err == nil {
+			value, err = p.toolFileCreateExclusive(ctx, args)
 		}
 	case "file_replace":
 		err = p.ensureWritable()
@@ -431,6 +448,51 @@ func (p *hostedMCPProvider) toolFileWrite(ctx context.Context, args map[string]a
 		}
 		return map[string]any{"kind": stat.Type, "created": false, "bytes": len(content)}, nil
 	})
+}
+
+func (p *hostedMCPProvider) toolFileCreateExclusive(ctx context.Context, args map[string]any) (any, error) {
+	content, err := mcpRequiredText(args, "content", true)
+	if err != nil {
+		return nil, err
+	}
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	normalizedPath := normalizeAFSGrepPath(rawPath)
+	fsClient, err := p.fsClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if stat, statErr := fsClient.Stat(ctx, normalizedPath); statErr == nil && stat != nil {
+		if stat.Type == "dir" {
+			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+		}
+		return nil, fmt.Errorf("path %q already exists", normalizedPath)
+	} else if statErr != nil && !errors.Is(statErr, redis.Nil) {
+		return nil, statErr
+	}
+
+	if err := ensureHostedWorkspaceParentDirs(ctx, fsClient, normalizedPath); err != nil {
+		return nil, err
+	}
+
+	_, _, err = fsClient.CreateFile(ctx, normalizedPath, 0o644, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+		return nil, err
+	}
+
+	return map[string]any{
+		"workspace": p.workspace,
+		"path":      normalizedPath,
+		"operation": "create_exclusive",
+		"created":   true,
+		"bytes":     len(content),
+	}, nil
 }
 
 func (p *hostedMCPProvider) toolFileReplace(ctx context.Context, args map[string]any) (any, error) {
@@ -570,6 +632,30 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	payload["workspace"] = p.workspace
 	payload["path"] = normalizedPath
 	return payload, nil
+}
+
+func ensureHostedWorkspaceParentDirs(ctx context.Context, fsClient afsclient.Client, normalizedPath string) error {
+	trimmed := strings.Trim(normalizedPath, "/")
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, "/")
+	if len(parts) <= 1 {
+		return nil
+	}
+	current := ""
+	for _, part := range parts[:len(parts)-1] {
+		current += "/" + part
+		if stat, err := fsClient.Stat(ctx, current); err == nil && stat != nil {
+			continue
+		} else if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		if err := fsClient.Mkdir(ctx, current); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func mcpErrorResult(err error) mcpproto.ToolResult {

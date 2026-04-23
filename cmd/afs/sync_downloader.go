@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -335,49 +334,7 @@ func (d *downloader) processChmod(ctx context.Context, op downloadOp) {
 // either the old or the new file but never a partial. The temp filename
 // embeds .afssync.tmp so the baseline ignore filter drops the watcher event.
 func (d *downloader) atomicWriteFile(absPath string, data []byte, mode uint32) error {
-	if mode == 0 {
-		mode = 0o644
-	}
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return err
-	}
-	dir := filepath.Dir(absPath)
-	base := filepath.Base(absPath)
-	suffix, err := randomSuffix()
-	if err != nil {
-		return err
-	}
-	tmpName := filepath.Join(dir, "."+base+".afssync.tmp."+fmt.Sprintf("%d.%s", d.pid, suffix))
-	f, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|os.O_TRUNC, fs.FileMode(mode&0o7777))
-	if err != nil {
-		return err
-	}
-	cleanup := func() {
-		_ = os.Remove(tmpName)
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		cleanup()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		_ = f.Close()
-		cleanup()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	if err := os.Rename(tmpName, absPath); err != nil {
-		cleanup()
-		return err
-	}
-	// Re-apply mode in case the umask narrowed it.
-	if err := os.Chmod(absPath, fs.FileMode(mode&0o7777)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		// Best effort.
-	}
-	return nil
+	return writeAtomicFile(absPath, data, mode)
 }
 
 func (d *downloader) send(r downloadResult) {
@@ -406,8 +363,8 @@ type echoSuppressor struct {
 }
 
 type echoExpectation struct {
-	kind   string // "file" | "symlink" | "dir" | "delete"
-	hash   string // sha256 hex for files; symlink target for symlinks
+	kind string // "file" | "symlink" | "dir" | "delete"
+	hash string // sha256 hex for files; symlink target for symlinks
 }
 
 func newEchoSuppressor() *echoSuppressor {
@@ -451,4 +408,3 @@ func (e *echoSuppressor) consume(rel string) (echoExpectation, bool) {
 	}
 	return exp, ok
 }
-

@@ -242,6 +242,19 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "file_create_exclusive",
+			Description: "Atomically create a file only if it does not already exist; fails if the path is already taken. Useful for distributed locking and coordination between agents. Creates parent directories as needed. Leaves the workspace dirty until checkpoint_create is called.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
+					"content":   map[string]string{"type": "string", "description": "File contents to write on creation"},
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+		{
 			Name:        "file_replace",
 			Description: "Replace text in a file and leave the workspace dirty until checkpoint_create is called",
 			InputSchema: map[string]any{
@@ -343,6 +356,8 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value, err = s.toolFileList(ctx, args)
 	case "file_write":
 		value, err = s.toolFileWrite(ctx, args)
+	case "file_create_exclusive":
+		value, err = s.toolFileCreateExclusive(ctx, args)
 	case "file_replace":
 		value, err = s.toolFileReplace(ctx, args)
 	case "file_insert":
@@ -671,6 +686,66 @@ func (s *afsMCPServer) toolFileWrite(ctx context.Context, args map[string]any) (
 			"bytes":     len(content),
 		}, nil
 	})
+}
+
+func (s *afsMCPServer) toolFileCreateExclusive(ctx context.Context, args map[string]any) (any, error) {
+	content, err := mcpRequiredText(args, "content", true)
+	if err != nil {
+		return nil, err
+	}
+	workspace, err := s.resolveWorkspaceArg(ctx, args, "workspace")
+	if err != nil {
+		return nil, err
+	}
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	normalizedPath := normalizeAFSGrepPath(rawPath)
+
+	fsKey, _, _, err := s.store.ensureWorkspaceRoot(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	fsClient := client.New(s.store.rdb, fsKey)
+
+	// Check if path is already a directory.
+	if stat, statErr := fsClient.Stat(ctx, normalizedPath); statErr == nil && stat != nil {
+		if stat.Type == "dir" {
+			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+		}
+		return nil, fmt.Errorf("path %q already exists", normalizedPath)
+	}
+
+	if err := ensureWorkspaceParentDirs(ctx, fsClient, normalizedPath); err != nil {
+		return nil, err
+	}
+
+	// Atomic exclusive create via CreateFile (backed by HSETNX in Redis).
+	// When exclusive=true, CreateFile returns an error if the file already
+	// exists (via the HSETNX race), so we only need the error check.
+	_, _, err = fsClient.CreateFile(ctx, normalizedPath, 0o644, true)
+	if err != nil {
+		return nil, err
+	}
+
+	// Write the content into the newly created file.
+	if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+		return nil, err
+	}
+
+	dirty, err := s.refreshWorkspaceLiveState(ctx, workspace)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"operation": "create_exclusive",
+		"created":   true,
+		"workspace": workspace,
+		"path":      normalizedPath,
+		"bytes":     len(content),
+		"dirty":     dirty,
+	}, nil
 }
 
 func (s *afsMCPServer) toolFileReplace(ctx context.Context, args map[string]any) (any, error) {

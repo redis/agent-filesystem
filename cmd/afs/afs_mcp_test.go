@@ -356,6 +356,237 @@ func frameForTest(body string) string {
 	return "Content-Length: " + strconv.Itoa(len(body)) + "\r\n\r\n" + body
 }
 
+func TestAFSMCPFileCreateExclusiveCreatesNewFile(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/tasks/001.claim",
+		"content": "agent-sre\n",
+	})
+	if result.IsError {
+		t.Fatalf("file_create_exclusive returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(create) returned error: %v", err)
+	}
+	if op, _ := payload["operation"].(string); op != "create_exclusive" {
+		t.Fatalf("operation = %#v, want %q", payload["operation"], "create_exclusive")
+	}
+	if created, _ := payload["created"].(bool); !created {
+		t.Fatalf("created = %#v, want true", payload["created"])
+	}
+	if dirty, _ := payload["dirty"].(bool); !dirty {
+		t.Fatalf("dirty = %#v, want true", payload["dirty"])
+	}
+
+	// Verify the file is readable with expected content.
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/tasks/001.claim",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read returned error result: %+v", readResult)
+	}
+	var readPayload map[string]any
+	if err := decodeStructuredContent(readResult.StructuredContent, &readPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(read) returned error: %v", err)
+	}
+	if got := readPayload["content"]; got != "agent-sre\n" {
+		t.Fatalf("file_read content = %#v, want written content", got)
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveFailsWhenFileExists(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	// Create the file first via normal write.
+	writeResult := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/tasks/001.claim",
+		"content": "agent-sre\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	// Attempt exclusive create — should fail.
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/tasks/001.claim",
+		"content": "agent-deploy\n",
+	})
+	if !result.IsError {
+		t.Fatal("file_create_exclusive on existing file should return error, got success")
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveDoubleCallSecondFails(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	// First exclusive create succeeds.
+	first := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/locks/deploy.lock",
+		"content": "agent-1\n",
+	})
+	if first.IsError {
+		t.Fatalf("first file_create_exclusive returned error: %+v", first)
+	}
+
+	// Second exclusive create to same path fails.
+	second := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/locks/deploy.lock",
+		"content": "agent-2\n",
+	})
+	if !second.IsError {
+		t.Fatal("second file_create_exclusive should fail, got success")
+	}
+
+	// Original content should be preserved.
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/locks/deploy.lock",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read returned error: %+v", readResult)
+	}
+	var readPayload map[string]any
+	if err := decodeStructuredContent(readResult.StructuredContent, &readPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(read) returned error: %v", err)
+	}
+	if got := readPayload["content"]; got != "agent-1\n" {
+		t.Fatalf("content = %#v, want original agent-1 content", got)
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveRequiresPath(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"content": "data\n",
+	})
+	if !result.IsError {
+		t.Fatal("file_create_exclusive without path should return error, got success")
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveRequiresContent(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path": "/tasks/empty.claim",
+	})
+	if !result.IsError {
+		t.Fatal("file_create_exclusive without content should return error, got success")
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveAllowsEmptyContent(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/locks/empty.lock",
+		"content": "",
+	})
+	if result.IsError {
+		t.Fatalf("file_create_exclusive with empty content returned error: %+v", result)
+	}
+
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/locks/empty.lock",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read returned error: %+v", readResult)
+	}
+
+	var readPayload map[string]any
+	if err := decodeStructuredContent(readResult.StructuredContent, &readPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(read) returned error: %v", err)
+	}
+	if got := readPayload["content"]; got != "" {
+		t.Fatalf("content = %#v, want empty string", got)
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveCreatesParentDirs(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/deep/nested/dir/file.lock",
+		"content": "locked\n",
+	})
+	if result.IsError {
+		t.Fatalf("file_create_exclusive with nested path returned error: %+v", result)
+	}
+
+	// Verify parent directory exists by listing it.
+	listResult := server.callTool(context.Background(), "file_list", map[string]any{
+		"path": "/deep/nested/dir",
+	})
+	if listResult.IsError {
+		t.Fatalf("file_list on parent dir returned error: %+v", listResult)
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveOnDirectoryFails(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	// Create a file to ensure parent dir exists.
+	writeResult := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/mydir/placeholder.txt",
+		"content": "x",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error: %+v", writeResult)
+	}
+
+	// Attempt exclusive create on the directory path.
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"path":    "/mydir",
+		"content": "should fail",
+	})
+	if !result.IsError {
+		t.Fatal("file_create_exclusive on a directory should return error, got success")
+	}
+}
+
+func TestAFSMCPFileCreateExclusiveNonexistentWorkspaceFails(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_create_exclusive", map[string]any{
+		"workspace": "no-such-workspace",
+		"path":      "/test.lock",
+		"content":   "data\n",
+	})
+	if !result.IsError {
+		t.Fatal("file_create_exclusive with nonexistent workspace should return error, got success")
+	}
+}
+
 func decodeStructuredContent(value any, target any) error {
 	body, err := json.Marshal(value)
 	if err != nil {

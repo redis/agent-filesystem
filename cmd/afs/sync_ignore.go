@@ -75,6 +75,9 @@ func (s *syncIgnore) shouldIgnoreEntry(absPath string, entry fs.DirEntry) bool {
 		return false
 	}
 	rel = filepath.ToSlash(rel)
+	if isSyncControlPath(rel) {
+		return true
+	}
 	return s.shouldIgnore(rel, entry.IsDir())
 }
 
