@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -26,20 +27,20 @@ type remoteEvent struct {
 // subscription events, upload results, and download results all funnel
 // through one goroutine so we never have to lock individual entries.
 type reconciler struct {
-	state    *stateWriter
-	root     string
+	state     *stateWriter
+	root      string
 	workspace string
-	store    *afsStore
-	echo     *echoSuppressor
-	conflict *conflictNamer
-	ignore   *syncIgnore
+	store     *afsStore
+	echo      *echoSuppressor
+	conflict  *conflictNamer
+	ignore    *syncIgnore
 
-	uploadCh    chan uploadOp
-	downloadCh  chan downloadOp
-	uploadResCh chan uploadResult
+	uploadCh      chan uploadOp
+	downloadCh    chan downloadOp
+	uploadResCh   chan uploadResult
 	downloadResCh chan downloadResult
-	localCh     <-chan LocalEvent
-	remoteCh    <-chan remoteEvent
+	localCh       <-chan LocalEvent
+	remoteCh      <-chan remoteEvent
 
 	fs           client.Client
 	maxFileBytes int64
@@ -159,6 +160,13 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	if ev.Path == "" {
 		return
 	}
+	if requestID, ok := syncControlRequestID(ev.Path); ok {
+		r.handleSyncControlRequest(ctx, ev.Path, requestID)
+		return
+	}
+	if isSyncControlPath(ev.Path) {
+		return
+	}
 	if r.ignore.shouldIgnore(ev.Path, false) {
 		return
 	}
@@ -202,6 +210,136 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 		r.handleLocalFile(ev.Path, abs, info)
 	default:
 		// Sockets, fifos, devices: ignored.
+	}
+}
+
+func (r *reconciler) handleSyncControlRequest(ctx context.Context, rel, requestID string) {
+	abs := filepath.Join(r.root, filepath.FromSlash(rel))
+	data, err := os.ReadFile(abs)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	result := syncControlResult{
+		Version:   syncControlVersion,
+		Operation: syncControlOpCreateExclusive,
+		Success:   false,
+	}
+	if err != nil {
+		result.Error = fmt.Sprintf("read sync control request: %v", err)
+		r.writeSyncControlResult(requestID, result)
+		_ = os.Remove(abs)
+		return
+	}
+
+	var request syncControlRequest
+	if err := json.Unmarshal(data, &request); err != nil {
+		result.Error = fmt.Sprintf("parse sync control request: %v", err)
+		r.writeSyncControlResult(requestID, result)
+		_ = os.Remove(abs)
+		return
+	}
+
+	result = r.executeSyncControlRequest(ctx, request)
+	r.writeSyncControlResult(requestID, result)
+	_ = os.Remove(abs)
+}
+
+func (r *reconciler) executeSyncControlRequest(ctx context.Context, request syncControlRequest) syncControlResult {
+	result := syncControlResult{
+		Version:   syncControlVersion,
+		Operation: request.Operation,
+		Path:      request.Path,
+	}
+	if request.Version != 0 && request.Version != syncControlVersion {
+		result.Error = fmt.Sprintf("unsupported sync control version %d", request.Version)
+		return result
+	}
+	switch request.Operation {
+	case syncControlOpCreateExclusive:
+		return r.executeSyncCreateExclusive(ctx, request)
+	default:
+		result.Error = fmt.Sprintf("unsupported sync control operation %q", request.Operation)
+		return result
+	}
+}
+
+func (r *reconciler) executeSyncCreateExclusive(ctx context.Context, request syncControlRequest) syncControlResult {
+	result := syncControlResult{
+		Version:   syncControlVersion,
+		Operation: syncControlOpCreateExclusive,
+		Path:      request.Path,
+	}
+	if r.readonly {
+		result.Error = "sync daemon is read-only"
+		return result
+	}
+
+	normalizedPath, err := normalizeSyncControlTarget(request.Path)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Path = normalizedPath
+	rel := strings.TrimPrefix(normalizedPath, "/")
+	localAbs := filepath.Join(r.root, filepath.FromSlash(rel))
+
+	if _, err := os.Lstat(localAbs); err == nil {
+		result.Error = fmt.Sprintf("path %q already exists locally", normalizedPath)
+		return result
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		result.Error = fmt.Sprintf("stat local path %q: %v", normalizedPath, err)
+		return result
+	}
+
+	if err := ensureSyncRemoteParentDirs(ctx, r.fs, normalizedPath); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if _, _, err := r.fs.CreateFile(ctx, normalizedPath, 0o644, true); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	if err := r.fs.Echo(ctx, normalizedPath, []byte(request.Content)); err != nil {
+		result.Error = fmt.Sprintf("write remote path %q: %v", normalizedPath, err)
+		r.requestFullSweep()
+		return result
+	}
+	if err := writeAtomicFile(localAbs, []byte(request.Content), 0o644); err != nil {
+		result.Error = fmt.Sprintf("materialize local path %q: %v", normalizedPath, err)
+		r.requestFullSweep()
+		return result
+	}
+
+	hash := sha256Hex([]byte(request.Content))
+	r.echo.markFile(rel, hash)
+	localMtimeMs := time.Now().UTC().UnixMilli()
+	if info, err := os.Stat(localAbs); err == nil {
+		localMtimeMs = info.ModTime().UnixMilli()
+	}
+
+	r.state.mu.Lock()
+	r.state.state.Entries[rel] = SyncEntry{
+		Type:          "file",
+		Mode:          0o644,
+		Size:          int64(len(request.Content)),
+		LocalHash:     hash,
+		RemoteHash:    hash,
+		LocalMtimeMs:  localMtimeMs,
+		RemoteMtimeMs: localMtimeMs,
+		LastSyncedAt:  time.Now().UTC(),
+		Version:       r.state.nextVersion(),
+	}
+	r.state.dirty = true
+	r.state.mu.Unlock()
+
+	result.Success = true
+	result.Bytes = len(request.Content)
+	return result
+}
+
+func (r *reconciler) writeSyncControlResult(requestID string, result syncControlResult) {
+	if err := writeSyncControlJSON(syncControlResultPath(r.root, requestID), result, 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "afs sync: write control result %s: %v\n", requestID, err)
 	}
 }
 
@@ -555,15 +693,15 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 			size = res.Op.FileSize
 		}
 		entry := SyncEntry{
-			Type:          "file",
-			Mode:          res.Op.Mode,
-			Size:          size,
-			LocalHash:     res.Op.LocalHash,
-			RemoteHash:    res.Op.LocalHash,
-			LastSyncedAt:  now,
-			ChunkSize:     res.Op.ChunkSize,
-			ChunkHashes:   res.Op.ChunkHashes,
-			Version:       r.state.nextVersion(),
+			Type:         "file",
+			Mode:         res.Op.Mode,
+			Size:         size,
+			LocalHash:    res.Op.LocalHash,
+			RemoteHash:   res.Op.LocalHash,
+			LastSyncedAt: now,
+			ChunkSize:    res.Op.ChunkSize,
+			ChunkHashes:  res.Op.ChunkHashes,
+			Version:      r.state.nextVersion(),
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
