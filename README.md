@@ -24,6 +24,12 @@ If you want the short version, AFS is:
 - backed by Redis
 - with real directories for real tools
 
+AFS has three modes of operation:
+
+- Cloud-hosted - now at https://afs.cloud
+- Self-managed - run `docker compose up` or `make web-dev`
+- Standalone - no control plane, direct to Redis
+
 ## Why AFS Instead of the Usual Tools
 
 AFS is not trying to replace every mature filesystem or version-control tool.
