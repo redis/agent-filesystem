@@ -284,14 +284,18 @@ const HeroAnimationWrap = styled.div`
   justify-content: center;
 `;
 
-const Headline = styled.h1`
+const Headline = styled.h2`
   margin: 8px 0 12px;
   color: var(--afs-ink);
-  font-size: clamp(2rem, 4.4vw, 2.8rem);
+  font-size: 42px;
   font-weight: 700;
   line-height: 1.1;
-  letter-spacing: -0.025em;
+  letter-spacing: 0;
   max-width: 18ch;
+
+  @media (max-width: 720px) {
+    font-size: 32px;
+  }
 `;
 
 const Description = styled.p`
@@ -403,6 +407,7 @@ const FooterLink = styled.a`
 `;
 
 const ClickableStatCardWrap = styled.div`
+  height: 100%;
   cursor: pointer;
   transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
   border-radius: 16px;
@@ -414,6 +419,10 @@ const ClickableStatCardWrap = styled.div`
 
   &:hover > * {
     border-color: var(--afs-accent, #2563eb);
+  }
+
+  > * {
+    height: 100%;
   }
 `;
 

@@ -20,10 +20,16 @@ const hostedMCPProtocolVersion = "2024-11-05"
 
 type hostedMCPProvider struct {
 	manager    *DatabaseManager
-	databaseID string
-	workspace  string
-	profile    string
+	scope      string // "workspace:<id>" or "control-plane"
+	databaseID string // empty for control-plane scope
+	workspace  string // empty for control-plane scope
+	profile    string // empty for control-plane scope
 	readonly   bool
+	baseURL    string // absolute URL of /mcp (used by mcp_token_issue)
+}
+
+func (p *hostedMCPProvider) isControlPlane() bool {
+	return isControlPlaneScope(p.scope)
 }
 
 type mcpFileListItem struct {
@@ -72,9 +78,13 @@ func authWrappedMCPHandler(manager *DatabaseManager, auth *AuthHandler) http.Han
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
 			return
 		}
-		if _, err := manager.UpsertWorkspaceSession(r.Context(), provider.databaseID, provider.workspace, sessionID, sessionInput); err != nil {
-			writeError(w, err)
-			return
+		// Session tracking is per-workspace; control-plane tokens have no
+		// workspace binding, so skip the upsert for that path.
+		if !provider.isControlPlane() {
+			if _, err := manager.UpsertWorkspaceSession(r.Context(), provider.databaseID, provider.workspace, sessionID, sessionInput); err != nil {
+				writeError(w, err)
+				return
+			}
 		}
 		ctx := context.WithValue(r.Context(), hostedMCPProviderContextKey{}, provider)
 		ctx = WithChangeSessionContext(ctx, ChangeSessionContext{SessionID: sessionID})
@@ -99,7 +109,16 @@ func hostedMCPProviderFromContext(ctx context.Context, manager *DatabaseManager)
 
 func hostedMCPProviderForRequest(ctx context.Context, manager *DatabaseManager, r *http.Request) (*hostedMCPProvider, createWorkspaceSessionRequest, string, error) {
 	identity, ok := AuthIdentityFromContext(ctx)
-	if !ok || strings.TrimSpace(identity.TokenID) == "" || strings.TrimSpace(identity.ScopedDatabaseID) == "" || strings.TrimSpace(identity.ScopedWorkspace) == "" {
+	if !ok || strings.TrimSpace(identity.TokenID) == "" {
+		return nil, createWorkspaceSessionRequest{}, "", ErrUnauthorized
+	}
+	scope := strings.TrimSpace(identity.Scope)
+	if scope == "" && strings.TrimSpace(identity.ScopedWorkspaceID) != "" {
+		scope = workspaceScope(identity.ScopedWorkspaceID)
+	}
+	isControlPlane := isControlPlaneScope(scope)
+	// Workspace-scoped tokens require a workspace binding; control-plane tokens must not.
+	if !isControlPlane && (strings.TrimSpace(identity.ScopedDatabaseID) == "" || strings.TrimSpace(identity.ScopedWorkspace) == "") {
 		return nil, createWorkspaceSessionRequest{}, "", ErrUnauthorized
 	}
 	sessionInput := createWorkspaceSessionRequest{
@@ -112,13 +131,40 @@ func hostedMCPProviderForRequest(ctx context.Context, manager *DatabaseManager, 
 		Readonly:        identity.Readonly,
 	}
 	sessionID := buildHostedMCPSessionID(identity.TokenID, sessionInput.Hostname, sessionInput.LocalPath)
-	return &hostedMCPProvider{
-		manager:    manager,
-		databaseID: strings.TrimSpace(identity.ScopedDatabaseID),
-		workspace:  strings.TrimSpace(identity.ScopedWorkspace),
-		profile:    firstNonEmpty(strings.TrimSpace(identity.MCPProfile), MCPProfileWorkspaceRW),
-		readonly:   identity.Readonly,
-	}, sessionInput, sessionID, nil
+	provider := &hostedMCPProvider{
+		manager: manager,
+		scope:   scope,
+		baseURL: deriveMCPBaseURL(r),
+	}
+	if !isControlPlane {
+		provider.databaseID = strings.TrimSpace(identity.ScopedDatabaseID)
+		provider.workspace = strings.TrimSpace(identity.ScopedWorkspace)
+		provider.profile = firstNonEmpty(strings.TrimSpace(identity.MCPProfile), MCPProfileWorkspaceRW)
+		provider.readonly = identity.Readonly
+	}
+	return provider, sessionInput, sessionID, nil
+}
+
+// deriveMCPBaseURL reconstructs the absolute URL the caller reached /mcp at,
+// honoring X-Forwarded-Proto/Host when running behind a reverse proxy.
+func deriveMCPBaseURL(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	scheme := "http"
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		scheme = proto
+	} else if r.TLS != nil {
+		scheme = "https"
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = r.Host
+	}
+	if host == "" {
+		return ""
+	}
+	return scheme + "://" + host + "/mcp"
 }
 
 func buildHostedMCPSessionID(tokenID, hostname, localPath string) string {
@@ -135,7 +181,14 @@ func buildHostedMCPSessionID(tokenID, hostname, localPath string) string {
 	return "mcp-" + strings.NewReplacer("/", "-", "\\", "-", " ", "-").Replace(base)
 }
 
-func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
+func (p *hostedMCPProvider) Tools(ctx context.Context) []mcpproto.Tool {
+	if p.isControlPlane() {
+		return p.controlPlaneTools()
+	}
+	return p.workspaceTools()
+}
+
+func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 	tools := []mcpproto.Tool{
 		{
 			Name:        "workspace_current",
@@ -335,6 +388,13 @@ func (p *hostedMCPProvider) Tools(context.Context) []mcpproto.Tool {
 }
 
 func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
+	if p.isControlPlane() {
+		return p.callControlPlaneTool(ctx, name, args)
+	}
+	return p.callWorkspaceTool(ctx, name, args)
+}
+
+func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
 	var (
 		value any
 		err   error

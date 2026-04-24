@@ -1906,6 +1906,9 @@ func (m *DatabaseManager) attachWorkspaceDetailIdentity(ctx context.Context, det
 		return err
 	}
 	detail.ID = synced.ID
+	if strings.TrimSpace(detail.TemplateSlug) == "" {
+		detail.TemplateSlug = synced.TemplateSlug
+	}
 	return nil
 }
 

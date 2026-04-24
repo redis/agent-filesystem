@@ -20,6 +20,7 @@ import type {
   QuickstartInput,
   ImportLocalInput,
   CreateMCPTokenInput,
+  CreateControlPlaneTokenInput,
 } from "../types/afs";
 
 const LIVE_QUERY_STALE_MS = 10_000;
@@ -95,6 +96,7 @@ export const afsKeys = {
   mcpTokens: (databaseId: string | null, workspaceId: string) =>
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
   allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
+  controlPlaneTokens: () => [...afsKeys.all, "mcp-tokens", "control-plane"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -213,6 +215,15 @@ export function allMCPAccessTokensQueryOptions() {
   });
 }
 
+export function controlPlaneTokensQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.controlPlaneTokens(),
+    queryFn: () => afsApi.listControlPlaneTokens(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function useDatabases(enabled = true) {
   return useQuery({
     ...databasesQueryOptions(),
@@ -255,6 +266,13 @@ export function useMCPAccessTokens(databaseId: string | null, workspaceId: strin
 export function useAllMCPAccessTokens(enabled = true) {
   return useQuery({
     ...allMCPAccessTokensQueryOptions(),
+    enabled,
+  });
+}
+
+export function useControlPlaneTokens(enabled = true) {
+  return useQuery({
+    ...controlPlaneTokensQueryOptions(),
     enabled,
   });
 }
@@ -357,6 +375,26 @@ export function useRevokeMCPAccessTokenMutation() {
       });
       void queryClient.invalidateQueries({ queryKey: afsKeys.allMcpTokens() });
       void queryClient.invalidateQueries({ queryKey: afsKeys.agents(variables.databaseId ?? null) });
+    },
+  });
+}
+
+export function useCreateControlPlaneTokenMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateControlPlaneTokenInput) => afsApi.createControlPlaneToken(input),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: afsKeys.controlPlaneTokens() });
+    },
+  });
+}
+
+export function useRevokeControlPlaneTokenMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tokenId: string) => afsApi.revokeControlPlaneToken(tokenId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: afsKeys.controlPlaneTokens() });
     },
   });
 }

@@ -183,6 +183,7 @@ export type AFSWorkspace = {
   region: string;
   mountedPath?: string;
   source: AFSWorkspaceSource;
+  templateSlug?: string;
   createdAt: string;
   updatedAt: string;
   draftState: string;
@@ -219,6 +220,7 @@ export type AFSWorkspaceSummary = {
   updatedAt: string;
   region: string;
   source: AFSWorkspaceSource;
+  templateSlug?: string;
 };
 
 export type AFSWorkspaceListResponse = {
@@ -290,6 +292,7 @@ export type CreateWorkspaceInput = {
   databaseName?: string;
   region?: string;
   source: AFSWorkspaceSource;
+  templateSlug?: string;
 };
 
 export type UpdateWorkspaceInput = {
@@ -378,9 +381,24 @@ export type AFSMCPProfile =
   | "admin-ro"
   | "admin-rw";
 
+/**
+ * Scope of an access token. `control-plane` = user-scoped, no workspace
+ * binding; agents use it for workspace management + on-demand issuance of
+ * workspace tokens. `workspace:<workspaceId>` = bound to a single workspace;
+ * agents use it for file operations + checkpoints.
+ */
+export type AFSMCPScope = string;
+
+export const AFS_MCP_SCOPE_CONTROL_PLANE = "control-plane";
+
+export function isControlPlaneScope(scope?: string): boolean {
+  return typeof scope === "string" && scope.trim() === AFS_MCP_SCOPE_CONTROL_PLANE;
+}
+
 export type AFSMCPToken = {
   id: string;
   name?: string;
+  scope?: AFSMCPScope;
   databaseId: string;
   workspaceId: string;
   workspaceName?: string;
@@ -391,6 +409,7 @@ export type AFSMCPToken = {
   lastUsedAt?: string;
   expiresAt?: string;
   revokedAt?: string;
+  templateSlug?: string;
 };
 
 export type CreateMCPTokenInput = {
@@ -398,6 +417,12 @@ export type CreateMCPTokenInput = {
   workspaceId: string;
   name?: string;
   profile: AFSMCPProfile;
+  expiresAt?: string;
+  templateSlug?: string;
+};
+
+export type CreateControlPlaneTokenInput = {
+  name?: string;
   expiresAt?: string;
 };
 

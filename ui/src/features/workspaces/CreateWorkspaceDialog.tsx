@@ -31,23 +31,14 @@ import {
   useCreateWorkspaceMutation,
   useImportLocalMutation,
 } from "../../foundation/hooks/use-afs";
-import type {
-  AFSMCPToken,
-  AFSWorkspaceDetail,
-} from "../../foundation/types/afs";
 import {
   findTemplate,
-  templates,
   type Template,
   type TemplateSeedFile,
 } from "../templates/templates-data";
 
 type SeedMode = "blank" | "import";
-type View =
-  | "chooser"
-  | "gallery"
-  | "template-form"
-  | "template-success";
+type View = "chooser" | "template-form";
 
 type Props = {
   open: boolean;
@@ -55,17 +46,6 @@ type Props = {
   onFreeTierLimitHit?: () => void;
   initialTemplateId?: string;
 };
-
-type CreatedState = {
-  workspace: AFSWorkspaceDetail;
-  token: AFSMCPToken;
-  template: Template;
-  seededCount: number;
-};
-
-const GALLERY_TEMPLATES = templates.filter(
-  (template) => template.id !== "blank",
-);
 
 function eligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
   return databases.filter((database) => database.canCreateWorkspaces);
@@ -140,27 +120,6 @@ async function seedTemplateFiles(
   return done;
 }
 
-function buildHostedMCPConfig(
-  workspaceName: string,
-  controlPlaneUrl: string,
-  token: string,
-) {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        [`afs-${workspaceName}`]: {
-          url: `${controlPlaneUrl.replace(/\/+$/, "")}/mcp`,
-          headers: {
-            Authorization: `Bearer ${token || "<token-not-returned>"}`,
-          },
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
-
 export function CreateWorkspaceDialog({
   open,
   onClose,
@@ -179,7 +138,6 @@ export function CreateWorkspaceDialog({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
     null,
   );
-  const [entryWasTemplate, setEntryWasTemplate] = useState(false);
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -188,17 +146,15 @@ export function CreateWorkspaceDialog({
   const [importFileCount, setImportFileCount] = useState(0);
   const [formError, setFormError] = useState<string | null>(null);
   const [nameEdited, setNameEdited] = useState(false);
-  const [created, setCreated] = useState<CreatedState | null>(null);
   const [seedingProgress, setSeedingProgress] = useState<{
     done: number;
     total: number;
   } | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const selectedTemplate = useMemo(
-    () => (selectedTemplateId ? findTemplate(selectedTemplateId) : null),
+  const selectedTemplate: Template | null = useMemo(
+    () => (selectedTemplateId ? findTemplate(selectedTemplateId) ?? null : null),
     [selectedTemplateId],
   );
 
@@ -211,7 +167,6 @@ export function CreateWorkspaceDialog({
     const startedFromTemplate =
       startTemplate != null && startTemplate.id !== "blank";
 
-    setEntryWasTemplate(startedFromTemplate);
     if (startedFromTemplate && startTemplate) {
       setView("template-form");
       setSelectedTemplateId(startTemplate.id);
@@ -228,7 +183,6 @@ export function CreateWorkspaceDialog({
     setImportFileCount(0);
     setFormError(null);
     setNameEdited(false);
-    setCreated(null);
     setSeedingProgress(null);
     const defaultDb = preferredDatabase(databases);
     setDatabaseId(defaultDb?.id ?? "");
@@ -247,59 +201,9 @@ export function CreateWorkspaceDialog({
     onClose();
   }
 
-  function copy(text: string, label: string) {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(label);
-      window.setTimeout(() => setCopied(null), 2000);
-    });
-  }
-
-  function goToWorkspace() {
-    if (!created) return;
-    void navigate({
-      to: "/workspaces/$workspaceId",
-      params: { workspaceId: created.workspace.id },
-    });
-    onClose();
-  }
-
-  function selectMode(next: SeedMode | "templates") {
+  function selectMode(next: SeedMode) {
     setFormError(null);
-    if (next === "templates") {
-      setView("gallery");
-      return;
-    }
     setMode(next);
-  }
-
-  function pickTemplate(id: string) {
-    const tpl = findTemplate(id);
-    if (!tpl) return;
-    setSelectedTemplateId(id);
-    setName(tpl.slug);
-    setDescription(tpl.tagline);
-    setNameEdited(false);
-    setFormError(null);
-    setView("template-form");
-  }
-
-  function handleBackFromGallery() {
-    setView("chooser");
-    setFormError(null);
-  }
-
-  function handleBackFromTemplateForm() {
-    if (entryWasTemplate) {
-      // Came in via /templates page; back = close.
-      onClose();
-      return;
-    }
-    setSelectedTemplateId(null);
-    setName("");
-    setDescription("");
-    setNameEdited(false);
-    setFormError(null);
-    setView("gallery");
   }
 
   function handleFolderPicked(files: FileList | null) {
@@ -402,6 +306,7 @@ export function CreateWorkspaceDialog({
         databaseName,
         region: "",
         source: "blank",
+        templateSlug: selectedTemplate.id,
       });
 
       const token = await createToken.mutateAsync({
@@ -409,6 +314,7 @@ export function CreateWorkspaceDialog({
         workspaceId: workspace.id,
         name: `${selectedTemplate.title} setup`,
         profile: selectedTemplate.profile,
+        templateSlug: selectedTemplate.id,
       });
 
       const tokenValue = token.token ?? "";
@@ -427,13 +333,17 @@ export function CreateWorkspaceDialog({
         (done, total) => setSeedingProgress({ done, total }),
       );
       setSeedingProgress(null);
-      setCreated({
-        workspace,
-        token,
-        template: selectedTemplate,
-        seededCount: seeded,
+
+      onClose();
+      void navigate({
+        to: "/templates/installed/$workspaceId",
+        params: { workspaceId: workspace.id },
+        search: {
+          seeded,
+          fresh: true,
+          ...(workspace.databaseId ? { databaseId: workspace.databaseId } : {}),
+        },
       });
-      setView("template-success");
     } catch (error) {
       setSeedingProgress(null);
       if (isFreeTierLimitError(error)) {
@@ -465,56 +375,13 @@ export function CreateWorkspaceDialog({
     </DialogOverlay>
   );
 
-  /* ────────────────────── view renderers ────────────────────── */
-
   function renderHeader() {
-    if (view === "template-success" && created) {
-      return (
-        <DialogHeader>
-          <div>
-            <DialogTitle>Workspace ready: {created.workspace.name}</DialogTitle>
-            <DialogBody>
-              Files are in place. Connect your agent and it will pick up the
-              protocol from AGENTS.md automatically.
-            </DialogBody>
-          </div>
-          <DialogCloseButton
-            type="button"
-            aria-label="Close"
-            onClick={handleClose}
-          >
-            &times;
-          </DialogCloseButton>
-        </DialogHeader>
-      );
-    }
-
     if (view === "template-form" && selectedTemplate) {
       return (
         <DialogHeader>
           <div>
-            <DialogTitle>Create &ldquo;{selectedTemplate.title}&rdquo;</DialogTitle>
+            <DialogTitle>Install &ldquo;{selectedTemplate.title}&rdquo;</DialogTitle>
             <DialogBody>{selectedTemplate.tagline}</DialogBody>
-          </div>
-          <DialogCloseButton
-            type="button"
-            aria-label="Close"
-            onClick={handleClose}
-          >
-            &times;
-          </DialogCloseButton>
-        </DialogHeader>
-      );
-    }
-
-    if (view === "gallery") {
-      return (
-        <DialogHeader>
-          <div>
-            <DialogTitle>Choose a template</DialogTitle>
-            <DialogBody>
-              Pre-shaped workspaces for teams of agents working together.
-            </DialogBody>
           </div>
           <DialogCloseButton
             type="button"
@@ -548,131 +415,9 @@ export function CreateWorkspaceDialog({
   }
 
   function renderBody() {
-    if (view === "template-success" && created) {
-      const mcpConfig = buildHostedMCPConfig(
-        created.workspace.name,
-        getControlPlaneURL(),
-        created.token.token ?? "",
-      );
-      return (
-        <SuccessPanel>
-          <SeededBanner>
-            <SeededDot aria-hidden>&#10003;</SeededDot>
-            <SeededText>
-              Seeded <strong>{created.seededCount}</strong> file
-              {created.seededCount === 1 ? "" : "s"} into{" "}
-              <code>{created.workspace.name}</code>. The workspace layout is
-              ready.
-            </SeededText>
-          </SeededBanner>
-
-          <SuccessSection>
-            <SectionLabel>Point your agent at this workspace</SectionLabel>
-            <SectionHint>
-              Add the block below to your MCP client config. The token is
-              shown once — save it somewhere safe now.
-            </SectionHint>
-            <CodeBlock>{mcpConfig}</CodeBlock>
-            <InlineActionsRight>
-              <Button
-                size="small"
-                variant="secondary-fill"
-                onClick={() => copy(mcpConfig, "config")}
-              >
-                {copied === "config" ? "Copied!" : "Copy MCP config"}
-              </Button>
-            </InlineActionsRight>
-            <ClientHints>
-              <ClientHint>
-                <strong>Claude Code.</strong> Paste into{" "}
-                <code>.mcp.json</code> at your project root or into{" "}
-                <code>~/.claude.json</code> under <code>mcpServers</code>.
-              </ClientHint>
-              <ClientHint>
-                <strong>Codex.</strong> Add to{" "}
-                <code>~/.codex/config.toml</code> as{" "}
-                <code>[mcp_servers.afs-{created.workspace.name}]</code> with{" "}
-                <code>url</code> and <code>bearer_token</code>.
-              </ClientHint>
-              <ClientHint>
-                <strong>Prefer the CLI?</strong> Run{" "}
-                <code>
-                  afs mcp --workspace {created.workspace.name} --profile{" "}
-                  {created.template.profile}
-                </code>{" "}
-                after <code>afs login</code> with the token above.
-              </ClientHint>
-            </ClientHints>
-          </SuccessSection>
-
-          <SuccessSection>
-            <SectionLabel>Then ask your agent</SectionLabel>
-            <FirstPrompt>
-              &ldquo;{created.template.firstPrompt}&rdquo;
-            </FirstPrompt>
-          </SuccessSection>
-
-          <DialogActions style={{ justifyContent: "flex-end" }}>
-            <Button
-              size="medium"
-              variant="secondary-fill"
-              onClick={handleClose}
-            >
-              Close
-            </Button>
-            <Button size="medium" onClick={goToWorkspace}>
-              Open workspace
-            </Button>
-          </DialogActions>
-        </SuccessPanel>
-      );
-    }
-
-    if (view === "gallery") {
-      return (
-        <GalleryBody>
-          <BackRow>
-            <BackButton type="button" onClick={handleBackFromGallery}>
-              <BackArrow aria-hidden>&larr;</BackArrow>
-              Back
-            </BackButton>
-          </BackRow>
-          <GalleryGrid>
-            {GALLERY_TEMPLATES.map((template) => (
-              <GalleryCard
-                key={template.id}
-                type="button"
-                onClick={() => pickTemplate(template.id)}
-                aria-label={`Use the ${template.title} template`}
-              >
-                <GalleryCardHead>
-                  <GalleryIconSlot $accent={template.accent}>
-                    <template.icon size="M" />
-                  </GalleryIconSlot>
-                  <GalleryAddFab aria-hidden>+</GalleryAddFab>
-                </GalleryCardHead>
-                <GalleryCardTitle>{template.title}</GalleryCardTitle>
-                <GalleryCardBody>{template.tagline}</GalleryCardBody>
-                <GalleryProfileBadge $profile={template.profile}>
-                  {template.profileLabel}
-                </GalleryProfileBadge>
-              </GalleryCard>
-            ))}
-          </GalleryGrid>
-        </GalleryBody>
-      );
-    }
-
     if (view === "template-form" && selectedTemplate) {
       return (
         <FormGrid onSubmit={submitTemplateForm}>
-          <BackRow>
-            <BackButton type="button" onClick={handleBackFromTemplateForm}>
-              <BackArrow aria-hidden>&larr;</BackArrow>
-              {entryWasTemplate ? "Back" : "Back to templates"}
-            </BackButton>
-          </BackRow>
-
           <TemplateSummary $accent={selectedTemplate.accent}>
             <TemplateSummaryIcon $accent={selectedTemplate.accent}>
               <selectedTemplate.icon size="M" />
@@ -742,8 +487,8 @@ export function CreateWorkspaceDialog({
               {seedingProgress
                 ? `Seeding files… ${seedingProgress.done}/${seedingProgress.total}`
                 : busy
-                  ? "Creating…"
-                  : "Create workspace"}
+                  ? "Installing…"
+                  : "Install template"}
             </Button>
           </DialogActions>
         </FormGrid>
@@ -757,18 +502,11 @@ export function CreateWorkspaceDialog({
         <ModeStrip>
           <ModeCard
             type="button"
-            $active={mode === "blank" && view === "chooser"}
+            $active={mode === "blank"}
             onClick={() => selectMode("blank")}
           >
             <ModeTitle>Blank</ModeTitle>
             <ModeHint>Empty workspace, add files later.</ModeHint>
-          </ModeCard>
-          <ModeCard
-            type="button"
-            onClick={() => selectMode("templates")}
-          >
-            <ModeTitle>Templates</ModeTitle>
-            <ModeHint>Pre-shaped for a multi-agent workflow.</ModeHint>
           </ModeCard>
           <ModeCard
             type="button"
@@ -889,8 +627,6 @@ export function CreateWorkspaceDialog({
   }
 }
 
-/* ── Styled components ── */
-
 const SectionLabel = styled.h4`
   margin: 0;
   color: var(--afs-ink);
@@ -899,16 +635,9 @@ const SectionLabel = styled.h4`
   letter-spacing: 0.02em;
 `;
 
-const SectionHint = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.55;
-`;
-
 const ModeStrip = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 
   @media (max-width: 560px) {
@@ -989,171 +718,6 @@ const SelectedFolderMeta = styled.span`
   color: var(--afs-muted);
 `;
 
-/* Back button */
-
-const BackRow = styled.div`
-  display: flex;
-  margin: -4px 0 4px;
-`;
-
-const BackButton = styled.button`
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  color: var(--afs-muted);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 4px 6px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: color 120ms ease, background 120ms ease;
-
-  &:hover {
-    color: var(--afs-accent, #2563eb);
-    background: color-mix(in srgb, var(--afs-muted) 8%, transparent);
-  }
-`;
-
-const BackArrow = styled.span`
-  font-size: 14px;
-  line-height: 1;
-`;
-
-/* Gallery (inside dialog) */
-
-const GalleryBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-`;
-
-const GalleryGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const GalleryCard = styled.button`
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--afs-line);
-  border-radius: 14px;
-  background: var(--afs-panel);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    transform 140ms ease,
-    border-color 140ms ease,
-    box-shadow 140ms ease;
-
-  &:hover {
-    border-color: var(--afs-accent, #2563eb);
-    transform: translateY(-1px);
-    box-shadow: 0 8px 20px rgba(8, 6, 13, 0.08);
-  }
-
-  &:hover [data-fab] {
-    background: var(--afs-accent, #2563eb);
-    color: #fff;
-  }
-`;
-
-const GalleryCardHead = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-`;
-
-const GalleryIconSlot = styled.div<{ $accent: string }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: ${({ $accent }) =>
-    `color-mix(in srgb, ${$accent} 18%, transparent)`};
-  color: ${({ $accent }) => $accent};
-`;
-
-const GalleryAddFab = styled.span.attrs({ "data-fab": true })`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--afs-line);
-  background: var(--afs-panel-strong);
-  color: var(--afs-muted);
-  font-size: 16px;
-  font-weight: 600;
-  line-height: 1;
-  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
-`;
-
-const GalleryCardTitle = styled.h3`
-  margin: 0;
-  color: var(--afs-ink);
-  font-size: 14px;
-  font-weight: 700;
-`;
-
-const GalleryCardBody = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 12.5px;
-  line-height: 1.5;
-`;
-
-const GalleryProfileBadge = styled.span<{ $profile: string }>`
-  align-self: flex-start;
-  margin-top: 2px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  background: ${({ $profile }) => profileBackground($profile)};
-  color: ${({ $profile }) => profileForeground($profile)};
-`;
-
-function profileBackground(profile: string) {
-  switch (profile) {
-    case "workspace-ro":
-      return "color-mix(in srgb, #2563eb 14%, transparent)";
-    case "workspace-rw-checkpoint":
-      return "color-mix(in srgb, #22c55e 18%, transparent)";
-    case "workspace-rw":
-    default:
-      return "color-mix(in srgb, #f59e0b 16%, transparent)";
-  }
-}
-
-function profileForeground(profile: string) {
-  switch (profile) {
-    case "workspace-ro":
-      return "#2563eb";
-    case "workspace-rw-checkpoint":
-      return "#16a34a";
-    case "workspace-rw":
-    default:
-      return "#b45309";
-  }
-}
-
-/* Template summary pill on template-form screen */
-
 const TemplateSummary = styled.div<{ $accent: string }>`
   display: flex;
   align-items: center;
@@ -1197,6 +761,7 @@ const TemplateSummaryText = styled.span`
   color: var(--afs-muted);
   font-size: 12.5px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
 `;
 
 const TemplateSummaryBadge = styled.span`
@@ -1206,116 +771,4 @@ const TemplateSummaryBadge = styled.span`
   font-weight: 800;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-`;
-
-/* Success panel */
-
-const SuccessPanel = styled.div`
-  display: grid;
-  gap: 20px;
-`;
-
-const SuccessSection = styled.div`
-  display: grid;
-  gap: 8px;
-
-  & + & {
-    padding-top: 4px;
-    border-top: 1px solid var(--afs-line);
-  }
-`;
-
-const SeededBanner = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: color-mix(in srgb, #22c55e 14%, transparent);
-  border: 1px solid color-mix(in srgb, #22c55e 40%, transparent);
-`;
-
-const SeededDot = styled.span`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: #16a34a;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-`;
-
-const SeededText = styled.span`
-  color: var(--afs-ink);
-  font-size: 13px;
-  line-height: 1.5;
-
-  strong {
-    font-weight: 700;
-  }
-
-  code {
-    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-    font-size: 12px;
-    padding: 1px 6px;
-    border-radius: 4px;
-    background: color-mix(in srgb, #22c55e 16%, transparent);
-    color: var(--afs-ink);
-  }
-`;
-
-const CodeBlock = styled.pre`
-  margin: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  background: rgba(15, 23, 42, 0.94);
-  color: #e2e8f0;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-all;
-`;
-
-const InlineActionsRight = styled.div`
-  display: flex;
-  justify-content: flex-end;
-`;
-
-const ClientHints = styled.div`
-  display: grid;
-  gap: 8px;
-  margin-top: 4px;
-`;
-
-const ClientHint = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 12.5px;
-  line-height: 1.55;
-
-  code {
-    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
-    font-size: 11.5px;
-    padding: 1px 6px;
-    margin: 0 2px;
-    border-radius: 4px;
-    background: color-mix(in srgb, var(--afs-line) 60%, transparent);
-    color: var(--afs-ink);
-  }
-`;
-
-const FirstPrompt = styled.blockquote`
-  margin: 0;
-  padding: 10px 14px;
-  border-left: 3px solid var(--afs-accent, #2563eb);
-  background: color-mix(in srgb, var(--afs-accent, #2563eb) 8%, transparent);
-  color: var(--afs-ink);
-  font-size: 14px;
-  line-height: 1.55;
-  font-style: italic;
 `;

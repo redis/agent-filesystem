@@ -1,0 +1,42 @@
+{
+  "name": "agent-filesystem",
+  "version": "0.1.0",
+  "description": "Codex plugin for managing Agent Filesystem through a control-plane MCP endpoint.",
+  "author": {
+    "name": "Agent Filesystem",
+    "url": "https://github.com/redis/agent-filesystem"
+  },
+  "homepage": "https://github.com/redis/agent-filesystem/tree/main/plugins/agent-filesystem",
+  "repository": "https://github.com/redis/agent-filesystem",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-filesystem",
+    "afs",
+    "codex",
+    "mcp",
+    "workspace",
+    "redis"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Agent Filesystem",
+    "shortDescription": "Manage AFS workspaces from Codex.",
+    "longDescription": "Connects Codex to the Agent Filesystem cloud or Self-managed control-plane MCP endpoint using a control-plane token. Use it to list, create, fork, checkpoint, and delete workspaces, and to mint workspace-scoped MCP tokens for follow-on tools.",
+    "developerName": "Agent Filesystem",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/redis/agent-filesystem",
+    "defaultPrompt": [
+      "List my AFS workspaces.",
+      "Create a new AFS workspace.",
+      "Issue a workspace MCP token."
+    ],
+    "brandColor": "#D82C20",
+    "screenshots": []
+  }
+}

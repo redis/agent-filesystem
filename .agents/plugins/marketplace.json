@@ -1,0 +1,20 @@
+{
+  "name": "agent-filesystem-local",
+  "interface": {
+    "displayName": "Agent Filesystem"
+  },
+  "plugins": [
+    {
+      "name": "agent-filesystem",
+      "source": {
+        "source": "local",
+        "path": "./plugins/agent-filesystem"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

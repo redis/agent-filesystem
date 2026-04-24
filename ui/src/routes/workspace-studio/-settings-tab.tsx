@@ -114,7 +114,7 @@ export function SettingsTab({
         </SectionHeader>
 
         <AccessCopy>
-          MCP setup now lives on the Agents page so you can manage all workspace-scoped tokens and hosted/local server configs in one place. This panel stays focused on the current workspace and shows whether it already has authorized MCP access.
+          MCP setup now lives on the Agents page so you can manage all workspace-scoped access tokens and config snippets in one place. This panel stays focused on the current workspace and shows whether it already has authorized MCP access.
         </AccessCopy>
 
         <MetaTable>
@@ -129,7 +129,7 @@ export function SettingsTab({
             </MetaRow>
             <MetaRow>
               <MetaLabel>Admin tools</MetaLabel>
-              <MetaValue>Workspace settings no longer mint admin MCP access. Use the MCP console for explicit elevated flows.</MetaValue>
+              <MetaValue>Workspace settings no longer mint admin access tokens. Use the access token console for explicit elevated flows.</MetaValue>
             </MetaRow>
             {activeToken ? (
               <>

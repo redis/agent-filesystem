@@ -79,11 +79,17 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 			if err != nil {
 				return nil, err
 			}
+			scope := strings.TrimSpace(record.Scope)
+			if scope == "" && strings.TrimSpace(record.WorkspaceID) != "" {
+				// Legacy tokens predating the scope column: infer.
+				scope = workspaceScope(record.WorkspaceID)
+			}
 			return &AuthIdentity{
 				Subject:           strings.TrimSpace(record.OwnerSubject),
 				Name:              strings.TrimSpace(record.OwnerLabel),
 				Provider:          "mcp-token",
 				TokenID:           strings.TrimSpace(record.ID),
+				Scope:             scope,
 				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
 				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
 				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
@@ -380,16 +386,56 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	})
 
 	mux.HandleFunc("/v1/mcp-tokens", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+			if scope == mcpScopeControlPlane {
+				response, err := manager.ListControlPlaneMCPAccessTokens(r.Context())
+				if err != nil {
+					writeError(w, err)
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"items": response})
+				return
+			}
+			response, err := manager.ListAllMCPAccessTokens(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"items": response})
+		case http.MethodPost:
+			var input createControlPlaneTokenRequest
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.CreateControlPlaneMCPAccessToken(r.Context(), input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusCreated, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
+	})
+
+	mux.HandleFunc("/v1/mcp-tokens/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
 			return
 		}
-		response, err := manager.ListAllMCPAccessTokens(r.Context())
-		if err != nil {
+		tokenID := strings.TrimPrefix(r.URL.Path, "/v1/mcp-tokens/")
+		if tokenID == "" || strings.Contains(tokenID, "/") {
+			writeError(w, fmt.Errorf("invalid token id"))
+			return
+		}
+		if err := manager.RevokeControlPlaneMCPAccessToken(r.Context(), tokenID); err != nil {
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"items": response})
+		w.WriteHeader(http.StatusNoContent)
 	})
 
 	mux.HandleFunc("/v1/workspaces", func(w http.ResponseWriter, r *http.Request) {

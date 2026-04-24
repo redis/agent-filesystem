@@ -2,6 +2,7 @@ import { Button, Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState, type ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import styled from "styled-components";
 import {
   DialogBody,
@@ -13,10 +14,11 @@ import {
 } from "../../components/afs-kit";
 import { PlugIcon } from "../../components/lucide-icons";
 import { getControlPlaneURL } from "../api/afs";
-import type { AFSMCPProfile, AFSMCPToken } from "../types/afs";
+import { isControlPlaneScope, type AFSMCPProfile, type AFSMCPToken } from "../types/afs";
+import { findTemplate } from "../../features/templates/templates-data";
 import * as S from "./workspace-table.styles";
 
-type MCPSortField = "name" | "workspaceName" | "lastUsedAt" | "expiresAt" | "createdAt";
+type AccessTokenSortField = "name" | "workspaceName" | "lastUsedAt" | "expiresAt" | "createdAt";
 
 type Props = {
   rows: AFSMCPToken[];
@@ -97,7 +99,7 @@ function expiryLabel(value?: string) {
 /*  Detail dialog                                                     */
 /* ------------------------------------------------------------------ */
 
-function MCPServerDetailDialog({
+function AccessTokenDetailDialog({
   token,
   workspaceNameById,
   databaseNameById,
@@ -116,7 +118,7 @@ function MCPServerDetailDialog({
   const [confirmingRevoke, setConfirmingRevoke] = useState(false);
   const workspaceName =
     token.workspaceName || workspaceNameById?.get(token.workspaceId) || token.workspaceId;
-  const configSnippet = buildHostedMCPTemplate(workspaceName);
+  const configSnippet = buildHostedAccessConfig(workspaceName);
 
   function copy() {
     void navigator.clipboard.writeText(configSnippet).then(() => {
@@ -126,82 +128,117 @@ function MCPServerDetailDialog({
   }
 
   return (
-    <DialogOverlay
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <DialogCard>
-        <DialogHeader>
-          <div>
-            <DialogTitle>{token.name?.trim() || "MCP server"}</DialogTitle>
-            <DialogBody>
-              Hosted MCP server connected to workspace <strong>{workspaceName}</strong>.
-            </DialogBody>
-          </div>
-          <DialogCloseButton onClick={onClose}>&times;</DialogCloseButton>
-        </DialogHeader>
+    <>
+      <DialogOverlay
+        onClick={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      >
+        <DialogCard>
+          <DialogHeader>
+            <div>
+              <DialogTitle>{token.name?.trim() || "Access token"}</DialogTitle>
+              <DialogBody>
+                Access token for workspace <strong>{workspaceName}</strong>.
+              </DialogBody>
+            </div>
+            <DialogCloseButton onClick={onClose}>&times;</DialogCloseButton>
+          </DialogHeader>
 
-        <DetailGrid>
-          <DetailField>
-            <DetailLabel>Token ID</DetailLabel>
-            <DetailValue style={{ fontFamily: "var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace)", fontSize: 12 }}>
-              {token.id}
-            </DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Profile</DetailLabel>
-            <DetailValue>{formatProfile(token.profile)}</DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Workspace</DetailLabel>
-            <DetailValue>{workspaceName}</DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Database</DetailLabel>
-            <DetailValue>
-              {databaseNameById?.get(token.databaseId) || token.databaseId}
-            </DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Created</DetailLabel>
-            <DetailValue>{formatTimestamp(token.createdAt)}</DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Last used</DetailLabel>
-            <DetailValue>{token.lastUsedAt ? formatTimestamp(token.lastUsedAt) : "Never"}</DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Expires</DetailLabel>
-            <DetailValue>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</DetailValue>
-          </DetailField>
-          <DetailField>
-            <DetailLabel>Access</DetailLabel>
-            <DetailValue>{token.readonly ? "Read only" : "Read / write"}</DetailValue>
-          </DetailField>
-        </DetailGrid>
+          <DetailGrid>
+            <DetailField>
+              <DetailLabel>Token ID</DetailLabel>
+              <DetailValue style={{ fontFamily: "var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace)", fontSize: 12 }}>
+                {token.id}
+              </DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Profile</DetailLabel>
+              <DetailValue>{formatProfile(token.profile)}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Workspace</DetailLabel>
+              <DetailValue>{workspaceName}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Database</DetailLabel>
+              <DetailValue>
+                {databaseNameById?.get(token.databaseId) || token.databaseId}
+              </DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Created</DetailLabel>
+              <DetailValue>{formatTimestamp(token.createdAt)}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Last used</DetailLabel>
+              <DetailValue>{token.lastUsedAt ? formatTimestamp(token.lastUsedAt) : "Never"}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Expires</DetailLabel>
+              <DetailValue>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</DetailValue>
+            </DetailField>
+            <DetailField>
+              <DetailLabel>Access</DetailLabel>
+              <DetailValue>{token.readonly ? "Read only" : "Read / write"}</DetailValue>
+            </DetailField>
+          </DetailGrid>
 
-        <ConfigBlock>
-          <DetailLabel>MCP client config</DetailLabel>
-          <ConfigHint>
-            Paste this into your client's MCP config (e.g. <code>claude_desktop_config.json</code>),
-            and replace <code>{"<YOUR_TOKEN>"}</code> with the bearer token you copied at creation.
-          </ConfigHint>
-          <CodeBlock>{configSnippet}</CodeBlock>
-          <ConfigActions>
-            <Button size="small" variant="secondary-fill" onClick={copy}>
-              {copied ? "Copied!" : "Copy config"}
+          <ConfigBlock>
+            <DetailLabel>MCP client config</DetailLabel>
+            <ConfigHint>
+              Paste this into your client's MCP config (e.g. <code>claude_desktop_config.json</code>),
+              and replace <code>{"<YOUR_TOKEN>"}</code> with the bearer token you copied at creation.
+            </ConfigHint>
+            <CodeBlock>{configSnippet}</CodeBlock>
+            <ConfigActions>
+              <Button size="small" variant="secondary-fill" onClick={copy}>
+                {copied ? "Copied!" : "Copy config"}
+              </Button>
+            </ConfigActions>
+          </ConfigBlock>
+
+          <DialogFooterRow>
+            <RemoveButton
+              size="medium"
+              type="button"
+              disabled={revoking}
+              onClick={() => setConfirmingRevoke(true)}
+            >
+              Revoke access token
+            </RemoveButton>
+            <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
+              Close
             </Button>
-          </ConfigActions>
-        </ConfigBlock>
+          </DialogFooterRow>
+        </DialogCard>
+      </DialogOverlay>
 
-        {confirmingRevoke ? (
-          <ConfirmRevokePanel role="alertdialog" aria-live="polite">
-            <ConfirmRevokeTitle>Remove this MCP server?</ConfirmRevokeTitle>
-            <ConfirmRevokeBody>
-              Any agent using this token will immediately lose access to{" "}
-              <strong>{workspaceName}</strong>. This can&rsquo;t be undone.
-            </ConfirmRevokeBody>
+      {confirmingRevoke ? (
+        <ConfirmOverlay
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !revoking) {
+              setConfirmingRevoke(false);
+            }
+          }}
+        >
+          <ConfirmCard role="alertdialog" aria-live="polite">
+            <DialogHeader>
+              <div>
+                <DialogTitle>Revoke this access token?</DialogTitle>
+                <DialogBody>
+                  Any agent using this token will immediately lose access to{" "}
+                  <strong>{workspaceName}</strong>. This can&rsquo;t be undone.
+                </DialogBody>
+              </div>
+              <DialogCloseButton
+                onClick={() => {
+                  if (!revoking) setConfirmingRevoke(false);
+                }}
+              >
+                &times;
+              </DialogCloseButton>
+            </DialogHeader>
             <ConfirmRevokeActions>
               <Button
                 size="medium"
@@ -218,31 +255,17 @@ function MCPServerDetailDialog({
                 disabled={revoking}
                 onClick={() => onRevoke(token)}
               >
-                {revoking ? "Removing..." : "Yes, remove"}
+                {revoking ? "Revoking..." : "Yes, revoke"}
               </RemoveButton>
             </ConfirmRevokeActions>
-          </ConfirmRevokePanel>
-        ) : (
-          <DialogFooterRow>
-            <RemoveButton
-              size="medium"
-              type="button"
-              disabled={revoking}
-              onClick={() => setConfirmingRevoke(true)}
-            >
-              Remove MCP server
-            </RemoveButton>
-            <Button size="medium" type="button" variant="secondary-fill" onClick={onClose}>
-              Close
-            </Button>
-          </DialogFooterRow>
-        )}
-      </DialogCard>
-    </DialogOverlay>
+          </ConfirmCard>
+        </ConfirmOverlay>
+      ) : null}
+    </>
   );
 }
 
-function buildHostedMCPTemplate(workspaceName: string) {
+function buildHostedAccessConfig(workspaceName: string) {
   return JSON.stringify(
     {
       mcpServers: {
@@ -263,11 +286,11 @@ function buildHostedMCPTemplate(workspaceName: string) {
 /*  Main component                                                    */
 /* ------------------------------------------------------------------ */
 
-export function MCPServersTable({
+export function AccessTokensTable({
   rows,
   loading = false,
   error = false,
-  errorMessage = "Unable to load MCP servers. Please retry.",
+  errorMessage = "Unable to load access tokens. Please retry.",
   workspaceNameById,
   databaseNameById,
   toolbarAction,
@@ -275,9 +298,10 @@ export function MCPServersTable({
   revoking = false,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<MCPSortField>("createdAt");
+  const [sortBy, setSortBy] = useState<AccessTokenSortField>("createdAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedToken, setSelectedToken] = useState<AFSMCPToken | null>(null);
+  const navigate = useNavigate();
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -315,40 +339,65 @@ export function MCPServersTable({
           header: "Name",
           size: 200,
           enableSorting: true,
-          cell: ({ row }) => (
-            <NameCell>
-              <NameIconBox>
-                <PlugIcon customSize={18} />
-              </NameIconBox>
-              <S.Stack>
-                <Typography.Body component="strong">
-                  {row.original.name?.trim() || "Unnamed"}
-                </Typography.Body>
-                <Typography.Body color="secondary" component="span" style={{ fontSize: 11 }}>
-                  {row.original.id}
-                </Typography.Body>
-              </S.Stack>
-            </NameCell>
-          ),
+          cell: ({ row }) => {
+            const templateSlug = row.original.templateSlug;
+            const template = templateSlug ? findTemplate(templateSlug) : undefined;
+            const templateLabel = template?.title ?? templateSlug;
+            return (
+              <NameCell>
+                <NameIconBox>
+                  <PlugIcon customSize={18} />
+                </NameIconBox>
+                <S.Stack>
+                  <Typography.Body component="strong">
+                    {row.original.name?.trim() || "Unnamed"}
+                  </Typography.Body>
+                  <Typography.Body color="secondary" component="span" style={{ fontSize: 11 }}>
+                    {row.original.id}
+                  </Typography.Body>
+                  {templateSlug ? (
+                    <TemplateChip
+                      type="button"
+                      title={`Open installed template: ${templateLabel}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void navigate({
+                          to: "/templates/installed/$workspaceId",
+                          params: { workspaceId: row.original.workspaceId },
+                          search: row.original.databaseId
+                            ? { databaseId: row.original.databaseId }
+                            : {},
+                        });
+                      }}
+                    >
+                      from: {templateLabel}
+                    </TemplateChip>
+                  ) : null}
+                </S.Stack>
+              </NameCell>
+            );
+          },
         },
         {
-          accessorKey: "workspaceName",
-          header: "Workspace",
-          size: 140,
+          accessorKey: "scope",
+          header: "Scope",
+          size: 260,
           enableSorting: true,
           cell: ({ row }) => {
+            if (isControlPlaneScope(row.original.scope)) {
+              return <ScopeBadge $tone="control">Control plane</ScopeBadge>;
+            }
             const name =
               row.original.workspaceName
               || workspaceNameById?.get(row.original.workspaceId)
               || row.original.workspaceId;
             const db = databaseNameById?.get(row.original.databaseId) || row.original.databaseId;
             return (
-              <S.Stack>
-                <S.SingleLineText title={name}>{name}</S.SingleLineText>
-                <Typography.Body color="secondary" component="span" style={{ fontSize: 11 }}>
-                  {db}
-                </Typography.Body>
-              </S.Stack>
+              <ScopeCell>
+                <ScopeBadge $tone="workspace" title={db ? `Database: ${db}` : undefined}>
+                  Workspace: {name}
+                </ScopeBadge>
+              </ScopeCell>
             );
           },
         },
@@ -406,18 +455,18 @@ export function MCPServersTable({
         <S.SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search MCP servers..."
+          placeholder="Search access tokens..."
         />
         {toolbarAction}
       </S.HeadingWrap>
 
-      {loading ? <S.EmptyState>Loading MCP servers...</S.EmptyState> : null}
+      {loading ? <S.EmptyState>Loading access tokens...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
         <S.EmptyState>
           {isFiltering
-            ? "No MCP servers match the current filter."
-            : "No hosted MCP servers yet. Click \u201CAdd MCP server\u201D to create one."}
+            ? "No access tokens match the current filter."
+            : "No access tokens yet. Click \u201CCreate access token\u201D to issue one."}
         </S.EmptyState>
       ) : null}
 
@@ -436,7 +485,7 @@ export function MCPServersTable({
                   return;
                 }
                 const next = nextState[0];
-                setSortBy(next.id as MCPSortField);
+                setSortBy(next.id as AccessTokenSortField);
                 setSortDirection(next.desc ? "desc" : "asc");
               }}
               enableSorting
@@ -449,7 +498,7 @@ export function MCPServersTable({
       </S.TableBlock>
 
       {selectedToken != null ? (
-        <MCPServerDetailDialog
+        <AccessTokenDetailDialog
           token={selectedToken}
           workspaceNameById={workspaceNameById}
           databaseNameById={databaseNameById}
@@ -467,7 +516,7 @@ export function MCPServersTable({
 
 function sortValue(
   token: AFSMCPToken,
-  field: MCPSortField,
+  field: AccessTokenSortField,
   workspaceNameById?: Map<string, string>,
 ): string | number {
   switch (field) {
@@ -539,6 +588,56 @@ const NameIconBox = styled.span`
   color: var(--afs-accent, #2563eb);
 `;
 
+const ScopeBadge = styled.span<{ $tone: "control" | "workspace" }>`
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid
+    ${({ $tone }) =>
+      $tone === "control"
+        ? "color-mix(in srgb, var(--afs-accent, #2563eb) 45%, var(--afs-line))"
+        : "color-mix(in srgb, #10b981 45%, var(--afs-line))"};
+  background: ${({ $tone }) =>
+    $tone === "control"
+      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 14%, transparent)"
+      : "color-mix(in srgb, #10b981 14%, transparent)"};
+  color: ${({ $tone }) =>
+    $tone === "control" ? "var(--afs-accent, #2563eb)" : "#047857"};
+`;
+
+const ScopeCell = styled.div`
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+`;
+
+const TemplateChip = styled.button`
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
+  background: color-mix(in srgb, var(--afs-accent, #2563eb) 10%, transparent);
+  color: var(--afs-accent, #2563eb);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--afs-accent, #2563eb) 18%, transparent);
+  }
+`;
+
 const ConfigBlock = styled.div`
   display: grid;
   gap: 8px;
@@ -588,25 +687,12 @@ const DialogFooterRow = styled.div`
   margin-top: 24px;
 `;
 
-const ConfirmRevokePanel = styled.div`
-  margin-top: 24px;
-  padding: 16px 18px;
-  border: 1px solid rgba(220, 38, 38, 0.28);
-  border-radius: 14px;
-  background: rgba(239, 68, 68, 0.06);
+const ConfirmOverlay = styled(DialogOverlay)`
+  z-index: 50;
 `;
 
-const ConfirmRevokeTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 14px;
-  font-weight: 700;
-`;
-
-const ConfirmRevokeBody = styled.p`
-  margin: 6px 0 0;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.55;
+const ConfirmCard = styled(DialogCard)`
+  max-width: 460px;
 `;
 
 const ConfirmRevokeActions = styled.div`

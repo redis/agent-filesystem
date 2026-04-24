@@ -92,7 +92,7 @@ func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLo
 		query := r.URL.Query()
 		if strings.TrimSpace(query.Get("state")) != expectedState {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", "The login response did not match this CLI session. Close this tab and try again.")))
+			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", "The login response did not match this CLI session. Close this tab and try again.", false)))
 			select {
 			case resultCh <- browserLoginResult{Err: fmt.Errorf("browser login returned an unexpected state")}:
 			default:
@@ -102,7 +102,7 @@ func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLo
 
 		if message := strings.TrimSpace(query.Get("error")); message != "" {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", message)))
+			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", message, false)))
 			select {
 			case resultCh <- browserLoginResult{Err: errors.New(message)}:
 			default:
@@ -113,7 +113,7 @@ func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLo
 		token := strings.TrimSpace(query.Get("token"))
 		if token == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", "No onboarding token was returned to the CLI.")))
+			_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login failed", "No onboarding token was returned to the CLI.", false)))
 			select {
 			case resultCh <- browserLoginResult{Err: fmt.Errorf("browser login returned no onboarding token")}:
 			default:
@@ -121,7 +121,7 @@ func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLo
 			return
 		}
 
-		_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login complete", "You can return to the terminal. The CLI will finish connecting automatically.")))
+		_, _ = w.Write([]byte(browserLoginCompletionPage("AFS login complete", "You can return to the terminal. The CLI will finish connecting automatically.", true)))
 		select {
 		case resultCh <- browserLoginResult{Token: token}:
 		default:
@@ -130,22 +130,114 @@ func browserLoginCallbackHandler(expectedState string, resultCh chan<- browserLo
 	return mux
 }
 
-func browserLoginCompletionPage(title, message string) string {
+func browserLoginCompletionPage(title, message string, success bool) string {
+	iconSVG := `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M15 9l-6 6"></path><path d="M9 9l6 6"></path></svg>`
+	if success {
+		iconSVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>`
+	}
+	iconClass := "icon"
+	if !success {
+		iconClass = "icon icon--error"
+	}
 	return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>` + html.EscapeString(title) + `</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f6f4ee; color: #16140f; margin: 0; padding: 32px; }
-      .card { max-width: 560px; margin: 48px auto; background: #fffdf8; border: 1px solid #e9dfcc; border-radius: 18px; padding: 28px 24px; box-shadow: 0 18px 50px rgba(91, 71, 32, 0.08); }
-      h1 { margin: 0 0 12px; font-size: 30px; line-height: 1.1; }
-      p { margin: 0; font-size: 16px; line-height: 1.6; color: #5a503b; }
+      :root {
+        color-scheme: light dark;
+        --afs-bg: #edf1f7;
+        --afs-panel: #ffffff;
+        --afs-line: rgba(8, 6, 13, 0.08);
+        --afs-ink: #08060d;
+        --afs-muted: #626b78;
+        --afs-accent: #2563eb;
+        --afs-accent-soft: rgba(37, 99, 235, 0.1);
+        --afs-danger: #dc2626;
+        --afs-danger-soft: rgba(220, 38, 38, 0.1);
+        --afs-shadow: 0 24px 70px rgba(8, 6, 13, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --afs-bg: #0b1b24;
+          --afs-panel: #122733;
+          --afs-line: rgba(58, 92, 110, 0.62);
+          --afs-ink: #f2f5f4;
+          --afs-muted: #98aab1;
+          --afs-accent: #60a5fa;
+          --afs-accent-soft: rgba(96, 165, 250, 0.16);
+          --afs-danger: #f87171;
+          --afs-danger-soft: rgba(248, 113, 113, 0.18);
+          --afs-shadow: 0 24px 70px rgba(0, 0, 0, 0.3);
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
+      body {
+        margin: 0;
+        font-family: "Nunito Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--afs-bg);
+        color: var(--afs-ink);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 24px;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: linear-gradient(180deg, #0f2230 0%, #0b1b24 16%, #0b1b24 100%);
+        }
+      }
+      .card {
+        width: 100%;
+        max-width: 480px;
+        background: var(--afs-panel);
+        border: 1px solid var(--afs-line);
+        border-radius: 20px;
+        padding: 36px 32px 32px;
+        box-shadow: var(--afs-shadow);
+        text-align: center;
+      }
+      .icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: var(--afs-accent-soft);
+        color: var(--afs-accent);
+        margin-bottom: 20px;
+      }
+      .icon--error {
+        background: var(--afs-danger-soft);
+        color: var(--afs-danger);
+      }
+      .icon svg { width: 28px; height: 28px; }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 26px;
+        font-weight: 700;
+        line-height: 1.2;
+        letter-spacing: -0.015em;
+        color: var(--afs-ink);
+      }
+      p {
+        margin: 0;
+        font-size: 15px;
+        line-height: 1.6;
+        color: var(--afs-muted);
+      }
     </style>
   </head>
   <body>
     <div class="card">
+      <div class="` + iconClass + `">` + iconSVG + `</div>
       <h1>` + html.EscapeString(title) + `</h1>
       <p>` + html.EscapeString(message) + `</p>
     </div>

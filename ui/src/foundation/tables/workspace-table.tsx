@@ -6,6 +6,7 @@ import { FoldersIcon } from "../../components/lucide-icons";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
@@ -13,6 +14,7 @@ import { shortDateTime } from "../time-format";
 import type { AFSWorkspaceSummary } from "../types/afs";
 import { displayWorkspaceName } from "../workspace-display";
 import type { StudioTab } from "../workspace-tabs";
+import { findTemplate } from "../../features/templates/templates-data";
 import * as S from "./workspace-table.styles";
 
 type WorkspaceSortField =
@@ -96,6 +98,7 @@ export function WorkspaceTable({
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode", "table");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const navigate = useNavigate();
   useMinuteTick();
 
   async function copyWorkspaceId(id: string) {
@@ -148,6 +151,9 @@ export function WorkspaceTable({
           enableSorting: true,
           cell: ({ row }) => {
             const id = row.original.id;
+            const templateSlug = row.original.templateSlug;
+            const template = templateSlug ? findTemplate(templateSlug) : undefined;
+            const templateLabel = template?.title ?? templateSlug;
             return (
               <NameCell>
                 <NameIconBox>
@@ -178,6 +184,24 @@ export function WorkspaceTable({
                     {copiedId === id ? <CheckIcon /> : <CopyIcon />}
                   </CopyButton>
                 </IdRow>
+                {templateSlug ? (
+                  <TemplateChip
+                    type="button"
+                    title={`Open installed template: ${templateLabel}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void navigate({
+                        to: "/templates/installed/$workspaceId",
+                        params: { workspaceId: row.original.id },
+                        search: row.original.databaseId
+                          ? { databaseId: row.original.databaseId }
+                          : {},
+                      });
+                    }}
+                  >
+                    from: {templateLabel}
+                  </TemplateChip>
+                ) : null}
               </NameStack>
               </NameCell>
             );
@@ -531,6 +555,24 @@ const IdText = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+`;
+
+const TemplateChip = styled.button`
+  align-self: flex-start;
+  margin-top: 3px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--afs-accent, #2563eb) 30%, var(--afs-line));
+  background: color-mix(in srgb, var(--afs-accent, #2563eb) 10%, transparent);
+  color: var(--afs-accent, #2563eb);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+
+  &:hover {
+    background: color-mix(in srgb, var(--afs-accent, #2563eb) 18%, transparent);
+  }
 `;
 
 const DatabaseName = styled.span`

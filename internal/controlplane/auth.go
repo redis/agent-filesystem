@@ -59,6 +59,11 @@ type AuthIdentity struct {
 	Groups            []string
 	Provider          string
 	TokenID           string
+	// Scope carries the MCP-token scope on token-authenticated requests:
+	//   "workspace:<workspace-id>" for workspace-bound tokens,
+	//   "control-plane"            for user-scoped control-plane tokens,
+	//   ""                         for non-MCP auth paths.
+	Scope             string
 	ScopedDatabaseID  string
 	ScopedWorkspaceID string
 	ScopedWorkspace   string

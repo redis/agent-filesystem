@@ -13,22 +13,39 @@ import (
 )
 
 const (
-	mcpAccessTokenPrefix = "afs_mcp"
+	mcpAccessTokenPrefix      = "afs_mcp"
+	mcpControlPlaneTokenPrefix = "afs_cp"
+
+	mcpScopeWorkspacePrefix = "workspace:"
+	mcpScopeControlPlane    = "control-plane"
 )
 
 var ErrMCPAccessTokenInvalid = errors.New("mcp access token is invalid or expired")
+
+// workspaceScope builds the scope string for a workspace-bound token.
+func workspaceScope(workspaceID string) string {
+	return mcpScopeWorkspacePrefix + strings.TrimSpace(workspaceID)
+}
+
+// isControlPlaneScope reports whether a scope string names the control-plane scope.
+func isControlPlaneScope(scope string) bool {
+	return strings.TrimSpace(scope) == mcpScopeControlPlane
+}
 
 type mcpAccessTokenRecord struct {
 	ID            string `json:"id"`
 	Name          string `json:"name,omitempty"`
 	OwnerSubject  string `json:"owner_subject,omitempty"`
 	OwnerLabel    string `json:"owner_label,omitempty"`
-	DatabaseID    string `json:"database_id"`
-	WorkspaceID   string `json:"workspace_id"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	Scope         string `json:"scope"`
 	Profile       string `json:"profile,omitempty"`
+	TemplateSlug  string `json:"template_slug,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
 	SecretHash    string `json:"-"`
+	Secret        string `json:"-"`
 	CreatedAt     string `json:"created_at"`
 	LastUsedAt    string `json:"last_used_at,omitempty"`
 	ExpiresAt     string `json:"expires_at,omitempty"`
@@ -38,10 +55,12 @@ type mcpAccessTokenRecord struct {
 type mcpAccessTokenResponse struct {
 	ID            string `json:"id"`
 	Name          string `json:"name,omitempty"`
-	DatabaseID    string `json:"database_id"`
-	WorkspaceID   string `json:"workspace_id"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
 	WorkspaceName string `json:"workspace_name,omitempty"`
+	Scope         string `json:"scope"`
 	Profile       string `json:"profile,omitempty"`
+	TemplateSlug  string `json:"template_slug,omitempty"`
 	Readonly      bool   `json:"readonly,omitempty"`
 	Token         string `json:"token,omitempty"`
 	CreatedAt     string `json:"created_at"`
@@ -51,9 +70,17 @@ type mcpAccessTokenResponse struct {
 }
 
 type createMCPAccessTokenRequest struct {
+	Name         string `json:"name"`
+	Profile      string `json:"profile,omitempty"`
+	TemplateSlug string `json:"template_slug,omitempty"`
+	Readonly     bool   `json:"readonly,omitempty"`
+	ExpiresAt    string `json:"expires_at,omitempty"`
+}
+
+// createControlPlaneTokenRequest is the payload for POST /v1/mcp-tokens when
+// issuing a user-scoped control-plane token (no workspace binding).
+type createControlPlaneTokenRequest struct {
 	Name      string `json:"name"`
-	Profile   string `json:"profile,omitempty"`
-	Readonly  bool   `json:"readonly,omitempty"`
 	ExpiresAt string `json:"expires_at,omitempty"`
 }
 
@@ -115,9 +142,12 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 		DatabaseID:    strings.TrimSpace(databaseID),
 		WorkspaceID:   strings.TrimSpace(workspaceID),
 		WorkspaceName: strings.TrimSpace(workspaceName),
+		Scope:         workspaceScope(workspaceID),
 		Profile:       profile,
+		TemplateSlug:  strings.TrimSpace(input.TemplateSlug),
 		Readonly:      MCPProfileIsReadonly(profile),
 		SecretHash:    hashMCPAccessTokenSecret(secret),
+		Secret:        formatMCPAccessToken(tokenID, secret),
 		CreatedAt:     now.Format(timeRFC3339),
 	}
 	if expiresAt := strings.TrimSpace(input.ExpiresAt); expiresAt != "" {
@@ -132,6 +162,96 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 	response := mcpAccessTokenResponseFromRecord(record)
 	response.Token = formatMCPAccessToken(tokenID, secret)
 	return response, nil
+}
+
+// CreateControlPlaneMCPAccessToken issues a user-scoped control-plane token with
+// no workspace binding. In auth-enabled deployments the token is bound to the
+// caller's subject; in self-hosted no-auth mode the owner fields are left empty
+// and anyone with access to the control plane can use/revoke the token.
+func (m *DatabaseManager) CreateControlPlaneMCPAccessToken(ctx context.Context, input createControlPlaneTokenRequest) (mcpAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return mcpAccessTokenResponse{}, fmt.Errorf("mcp token storage is unavailable")
+	}
+	subject, label, err := m.requireOwnedSubject(ctx)
+	if err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
+	tokenID, secret, err := newMCPAccessTokenParts()
+	if err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
+	now := time.Now().UTC()
+	record := mcpAccessTokenRecord{
+		ID:           tokenID,
+		Name:         strings.TrimSpace(input.Name),
+		OwnerSubject: strings.TrimSpace(subject),
+		OwnerLabel:   strings.TrimSpace(label),
+		Scope:        mcpScopeControlPlane,
+		SecretHash:   hashMCPAccessTokenSecret(secret),
+		Secret:       formatControlPlaneMCPAccessToken(tokenID, secret),
+		CreatedAt:    now.Format(timeRFC3339),
+	}
+	if expiresAt := strings.TrimSpace(input.ExpiresAt); expiresAt != "" {
+		if _, err := time.Parse(timeRFC3339, expiresAt); err != nil {
+			return mcpAccessTokenResponse{}, fmt.Errorf("expires_at must be RFC3339: %w", err)
+		}
+		record.ExpiresAt = expiresAt
+	}
+	if err := m.catalog.CreateMCPAccessToken(ctx, record); err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
+	response := mcpAccessTokenResponseFromRecord(record)
+	response.Token = formatControlPlaneMCPAccessToken(tokenID, secret)
+	return response, nil
+}
+
+// ListControlPlaneMCPAccessTokens returns every control-plane token owned by
+// the caller. Requires an authenticated subject.
+func (m *DatabaseManager) ListControlPlaneMCPAccessTokens(ctx context.Context) ([]mcpAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return nil, fmt.Errorf("mcp token storage is unavailable")
+	}
+	subject := authSubjectFromContext(ctx)
+	items, err := m.catalog.ListControlPlaneMCPAccessTokens(ctx)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]mcpAccessTokenRecord, 0, len(items))
+	for _, item := range items {
+		ownerSubject := strings.TrimSpace(item.OwnerSubject)
+		if subject != "" && ownerSubject != "" && ownerSubject != subject {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return mcpAccessTokenResponses(filtered), nil
+}
+
+// RevokeControlPlaneMCPAccessToken revokes a control-plane token by ID, scoped
+// to the caller's owner subject.
+func (m *DatabaseManager) RevokeControlPlaneMCPAccessToken(ctx context.Context, tokenID string) error {
+	if m == nil || m.catalog == nil {
+		return fmt.Errorf("mcp token storage is unavailable")
+	}
+	tokenID = strings.TrimSpace(tokenID)
+	if tokenID == "" {
+		return os.ErrNotExist
+	}
+	record, err := m.catalog.GetMCPAccessToken(ctx, tokenID)
+	if err != nil {
+		return err
+	}
+	if !isControlPlaneScope(record.Scope) {
+		return os.ErrNotExist
+	}
+	if strings.TrimSpace(record.RevokedAt) != "" {
+		return os.ErrNotExist
+	}
+	subject := authSubjectFromContext(ctx)
+	if subject != "" && strings.TrimSpace(record.OwnerSubject) != "" && strings.TrimSpace(record.OwnerSubject) != subject {
+		return os.ErrNotExist
+	}
+	return m.catalog.RevokeMCPAccessTokenByID(ctx, tokenID, time.Now().UTC().Format(timeRFC3339))
 }
 
 func (m *DatabaseManager) ListResolvedMCPAccessTokens(ctx context.Context, workspace string) ([]mcpAccessTokenResponse, error) {
@@ -293,8 +413,11 @@ func mcpAccessTokenResponseFromRecord(record mcpAccessTokenRecord) mcpAccessToke
 		DatabaseID:    record.DatabaseID,
 		WorkspaceID:   record.WorkspaceID,
 		WorkspaceName: record.WorkspaceName,
+		Scope:         record.Scope,
 		Profile:       record.Profile,
+		TemplateSlug:  record.TemplateSlug,
 		Readonly:      record.Readonly,
+		Token:         record.Secret,
 		CreatedAt:     record.CreatedAt,
 		LastUsedAt:    record.LastUsedAt,
 		ExpiresAt:     record.ExpiresAt,
@@ -342,10 +465,21 @@ func formatMCPAccessToken(id, secret string) string {
 	return mcpAccessTokenPrefix + "_" + strings.TrimSpace(id) + "_" + strings.TrimSpace(secret)
 }
 
+func formatControlPlaneMCPAccessToken(id, secret string) string {
+	return mcpControlPlaneTokenPrefix + "_" + strings.TrimSpace(id) + "_" + strings.TrimSpace(secret)
+}
+
+// parseMCPAccessToken accepts both `afs_mcp_<id>_<secret>` (workspace-scoped) and
+// `afs_cp_<id>_<secret>` (control-plane) token formats. The token's actual scope
+// is determined from the stored record, not the prefix — the prefix exists only
+// for at-a-glance recognition by humans.
 func parseMCPAccessToken(raw string) (string, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	parts := strings.Split(trimmed, "_")
-	if len(parts) != 4 || parts[0] != "afs" || parts[1] != "mcp" {
+	if len(parts) != 4 || parts[0] != "afs" {
+		return "", "", fmt.Errorf("invalid mcp token format")
+	}
+	if parts[1] != "mcp" && parts[1] != "cp" {
 		return "", "", fmt.Errorf("invalid mcp token format")
 	}
 	if strings.TrimSpace(parts[2]) == "" || strings.TrimSpace(parts[3]) == "" {

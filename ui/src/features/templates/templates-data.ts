@@ -12,6 +12,20 @@ export type TemplateSeedFile = {
   content: string;
 };
 
+/**
+ * Client-neutral agent skill. The install UI renders this as a Claude Code
+ * skill, a Codex skill, a Claude plugin bundle, or plain generic instructions.
+ * `{{serverName}}` is substituted with the generated MCP server name.
+ */
+export type TemplateAgentSkill = {
+  skillDescription: string;
+  skillBody: string;
+  commands?: ReadonlyArray<{
+    name: string;
+    body: string;
+  }>;
+};
+
 export type Template = {
   id: string;
   slug: string;
@@ -25,6 +39,7 @@ export type Template = {
   whyItMatters: string;
   seedFiles: readonly TemplateSeedFile[];
   firstPrompt: string;
+  agentSkill?: TemplateAgentSkill;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -521,6 +536,648 @@ useful.
 ];
 
 /* -------------------------------------------------------------------------- */
+/* LLM Wiki                                                                   */
+/* -------------------------------------------------------------------------- */
+
+const llmWikiFiles: TemplateSeedFile[] = [
+  {
+    path: "README.md",
+    content: `# Shared LLM Wiki (Karpathy style)
+
+A shared knowledge wiki maintained by agents. Humans curate sources and ask
+questions; agents read sources, update the wiki, preserve provenance, and keep
+the structure healthy over time.
+
+This template is inspired by Andrej Karpathy's LLM wiki idea:
+https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+
+## Layout
+
+- \`AGENTS.md\` - the protocol every connected agent follows.
+- \`raw/\` - immutable source material waiting to be processed.
+- \`wiki/index.md\` - content-oriented map of the maintained wiki.
+- \`wiki/log.md\` - append-only timeline of ingests, queries, and lint passes.
+- \`wiki/topics/\` - concept and theme pages.
+- \`wiki/entities/\` - people, orgs, places, products, projects, or objects.
+- \`wiki/syntheses/\` - durable answers, comparisons, and higher-level analysis.
+- \`wiki/questions/\` - active research questions and follow-ups.
+- \`tools/\` - optional helper scripts or search notes.
+
+## First workflow
+
+1. Drop one source into \`raw/inbox/\`.
+2. Ask an agent to ingest it.
+3. Review the summary and the touched wiki pages.
+4. Keep the resulting pages as durable knowledge for the next agent.
+
+The wiki is meant to compound. Every useful answer can become a page, every
+new source can refine existing pages, and every agent sees the same current
+state through Agent Filesystem.
+`,
+  },
+  {
+    path: "AGENTS.md",
+    content: `# Protocol for this workspace
+
+This is an LLM-maintained knowledge wiki. Multiple agents may read and write
+the same workspace, so keep updates explicit, cited, and easy to review.
+
+## Operating model
+
+- \`raw/\` is source of truth. Do not rewrite source files.
+- \`wiki/\` is agent-maintained synthesis. Update it when sources or user
+  questions create durable knowledge.
+- \`wiki/index.md\` is content-oriented. Update it whenever you create or
+  materially change a wiki page.
+- \`wiki/log.md\` is chronological and append-only. Add one entry for every
+  ingest, filed answer, or lint pass.
+
+## Before answering a non-trivial question
+
+1. Read \`wiki/index.md\`.
+2. Search \`wiki/\` for the key nouns in the user's question.
+3. Read the most relevant pages and cite their paths in the answer.
+4. If the answer is durable, ask whether to file it under \`wiki/syntheses/\`
+   or \`wiki/questions/\`.
+
+## Ingesting a source
+
+1. Confirm the source path under \`raw/inbox/\`, \`raw/sources/\`, or
+   \`raw/assets/\`.
+2. Read the source and identify its core claims, entities, dates, and open
+   questions.
+3. Create or update a page under \`wiki/sources/\` with the summary and
+   provenance.
+4. Update relevant pages under \`wiki/topics/\` and \`wiki/entities/\`.
+5. Note contradictions or stale claims in the affected page's
+   \`Open questions\` or \`Contradictions\` section.
+6. Move processed text sources from \`raw/inbox/\` to \`raw/sources/\` only
+   when the user explicitly asks you to organize the source folder.
+7. Update \`wiki/index.md\`.
+8. Append an entry to \`wiki/log.md\` using the log format below.
+
+## Page conventions
+
+Use this structure for new topic, entity, and synthesis pages:
+
+    ---
+    type: topic | entity | source | synthesis | question
+    status: draft | current | stale
+    updated: YYYY-MM-DD
+    sources:
+      - raw/sources/<file-or-url-note>
+    ---
+
+    # <Title>
+
+    ## Summary
+
+    ## Key facts
+
+    ## Connections
+
+    ## Open questions
+
+    ## Sources
+
+Prefer wiki links such as \`[Retrieval](../topics/retrieval.md)\` over vague
+references. Keep claims tied to source paths or source summary pages.
+
+## Log format
+
+Append entries to \`wiki/log.md\` with a parseable heading:
+
+    ## [YYYY-MM-DD] ingest | <Source title>
+
+Use one of these actions: \`ingest\`, \`query\`, \`lint\`, \`maintenance\`.
+
+## Lint pass
+
+When asked to lint the wiki, check for:
+
+- pages missing sources;
+- stale claims superseded by newer sources;
+- contradictions between pages;
+- orphan pages missing inbound links from \`wiki/index.md\`;
+- important concepts mentioned repeatedly without a page;
+- open questions that need a source search.
+
+Report suggested fixes first, then make edits only with user approval unless
+the requested lint explicitly includes cleanup.
+
+## Concurrent editing rules
+
+- Prefer focused edits over rewriting whole pages.
+- Never delete another agent's work without explaining why in \`wiki/log.md\`.
+- If a page may be contested, add a dated note under \`Open questions\` rather
+  than silently replacing the old claim.
+`,
+  },
+  {
+    path: "wiki/index.md",
+    content: `# Wiki index
+
+Start every non-trivial query here, then drill into the relevant pages.
+Update this file whenever pages are created or materially changed.
+
+## Overview
+
+- [Wiki operating model](topics/wiki-operating-model.md) - how this workspace
+  turns raw sources into maintained markdown knowledge.
+
+## Sources
+
+- [Karpathy LLM wiki idea](sources/karpathy-llm-wiki.md) - seed source note
+  for the pattern this template instantiates.
+
+## Topics
+
+- [Wiki operating model](topics/wiki-operating-model.md) - raw sources,
+  maintained wiki pages, and agent protocol.
+
+## Entities
+
+No entity pages yet.
+
+## Syntheses
+
+No synthesis pages yet.
+
+## Open questions
+
+- [Search and scale](questions/search-and-scale.md) - when should this wiki
+  add a search layer beyond \`wiki/index.md\`?
+`,
+  },
+  {
+    path: "wiki/log.md",
+    content: `# Wiki log
+
+Append-only timeline of ingests, queries, lint passes, and maintenance.
+
+## [2026-04-23] maintenance | Template initialized
+
+- Created the starter LLM wiki structure.
+- Seeded the first source note, operating model topic, and scale question.
+- Next step: add one source to \`raw/inbox/\` and ask an agent to ingest it.
+`,
+  },
+  {
+    path: "wiki/sources/karpathy-llm-wiki.md",
+    content: `---
+type: source
+status: current
+updated: 2026-04-23
+sources:
+  - https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+---
+
+# Karpathy LLM wiki idea
+
+## Summary
+
+The source describes a pattern for personal or team knowledge bases where an
+agent incrementally maintains a structured markdown wiki. Instead of relying
+only on query-time retrieval from raw documents, the agent reads new sources
+once, extracts durable knowledge, updates relevant pages, and records what
+changed.
+
+## Key ideas
+
+- Keep raw sources immutable and separate from the maintained wiki.
+- Let agents own the bookkeeping: summaries, links, entity pages, topic pages,
+  contradictions, and logs.
+- Use an agent-facing protocol file to define the workspace conventions.
+- Read \`wiki/index.md\` first, then drill into relevant pages.
+- Keep \`wiki/log.md\` as an append-only history of ingests and queries.
+
+## Connections
+
+- [Wiki operating model](../topics/wiki-operating-model.md)
+- [Search and scale](../questions/search-and-scale.md)
+
+## Open questions
+
+- What source types will this workspace ingest first?
+- At what size should this wiki add a dedicated markdown search tool?
+
+## Sources
+
+- Karpathy gist: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f
+`,
+  },
+  {
+    path: "wiki/topics/wiki-operating-model.md",
+    content: `---
+type: topic
+status: current
+updated: 2026-04-23
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+---
+
+# Wiki operating model
+
+## Summary
+
+This workspace has three layers: immutable raw sources, maintained wiki pages,
+and an agent protocol. The value comes from compiling knowledge into the wiki
+as sources are added, so future agents and future questions start from the
+existing synthesis instead of rediscovering everything.
+
+## Key facts
+
+- \`raw/\` contains source material. It should preserve provenance and remain
+  stable after ingestion.
+- \`wiki/\` contains agent-written markdown pages that can evolve as new
+  sources arrive.
+- \`AGENTS.md\` defines the rules for ingestion, query answering, logging, and
+  maintenance.
+- \`wiki/index.md\` is the navigation map.
+- \`wiki/log.md\` is the chronological record.
+
+## Connections
+
+- [Karpathy LLM wiki idea](../sources/karpathy-llm-wiki.md)
+- [Search and scale](../questions/search-and-scale.md)
+
+## Open questions
+
+- Which categories matter for this domain: entities, concepts, projects,
+  claims, timelines, or decisions?
+- Should answers created during chat be filed automatically or only after
+  explicit user approval?
+
+## Sources
+
+- [Karpathy LLM wiki idea](../sources/karpathy-llm-wiki.md)
+`,
+  },
+  {
+    path: "wiki/questions/search-and-scale.md",
+    content: `---
+type: question
+status: draft
+updated: 2026-04-23
+sources:
+  - wiki/sources/karpathy-llm-wiki.md
+---
+
+# Search and scale
+
+## Question
+
+When should this wiki add search tooling beyond \`wiki/index.md\`?
+
+## Current answer
+
+Use \`wiki/index.md\` while the wiki is small enough for an agent to read and
+navigate directly. Add a markdown search tool once the index becomes too large,
+when source volume grows faster than manual curation, or when agents repeatedly
+miss relevant pages during query answering.
+
+## Signals to watch
+
+- \`wiki/index.md\` becomes too long to scan comfortably.
+- Agents answer from partial context and miss obvious related pages.
+- Source documents are too large to read in one pass during ingestion.
+- Lint passes regularly find orphan pages or duplicated concepts.
+
+## Sources
+
+- [Karpathy LLM wiki idea](../sources/karpathy-llm-wiki.md)
+`,
+  },
+  {
+    path: "raw/inbox/README.md",
+    content: `# Inbox
+
+Drop new source files here before asking an agent to ingest them.
+
+Examples:
+
+- clipped articles as markdown;
+- paper notes;
+- meeting transcripts;
+- exported chat logs;
+- links collected into a markdown note.
+
+Agents should treat files here as source material, not as wiki pages.
+`,
+  },
+  {
+    path: "raw/sources/README.md",
+    content: `# Sources
+
+Processed source files can live here once the user asks to organize the raw
+folder. Keep filenames stable so wiki pages can cite them.
+`,
+  },
+  {
+    path: "raw/assets/README.md",
+    content: `# Assets
+
+Images, PDFs, and other non-markdown source assets can live here. When an
+agent uses an asset, it should cite the path from the relevant wiki page.
+`,
+  },
+  {
+    path: "wiki/entities/README.md",
+    content: `# Entities
+
+Create one page per important person, organization, product, project, place,
+or object. Keep links back to source summaries and related topic pages.
+`,
+  },
+  {
+    path: "wiki/syntheses/README.md",
+    content: `# Syntheses
+
+File durable answers here: comparisons, briefs, argument maps, timelines, and
+other outputs that should outlive the chat where they were created.
+`,
+  },
+  {
+    path: "tools/README.md",
+    content: `# Tools
+
+Optional helper scripts and notes for operating the wiki. Start with plain
+markdown and \`wiki/index.md\`; add tools only when the wiki outgrows them.
+`,
+  },
+];
+
+const llmWikiAgentSkill: TemplateAgentSkill = {
+  skillDescription:
+    "Use when answering non-trivial questions in a project connected to the {{serverName}} MCP server (tools prefixed mcp__{{serverName}}__*). Read wiki/index.md first, search wiki/ for key nouns, cite relevant wiki paths, and offer to file durable answers back into the Shared LLM Wiki (Karpathy style). When ingesting sources from raw/, update source/topic/entity pages plus wiki/index.md and append to wiki/log.md.",
+  skillBody: `# Shared LLM Wiki (Karpathy style) — agent protocol
+
+This skill operates a shared LLM-maintained knowledge wiki backed by Agent
+Filesystem (MCP server \`{{serverName}}\`). The workspace has immutable raw
+sources under \`raw/\`, maintained wiki pages under \`wiki/\`, and a protocol
+file at \`AGENTS.md\`.
+
+## Before answering a non-trivial question
+
+1. Read \`wiki/index.md\` with \`mcp__{{serverName}}__file_read\`.
+2. Search \`wiki/\` for the key nouns using
+   \`mcp__{{serverName}}__file_grep\`.
+3. Read the most relevant pages.
+4. Answer with citations to wiki paths.
+5. If the answer is durable, ask whether to file it under
+   \`wiki/syntheses/\` or \`wiki/questions/\`.
+
+## Ingesting a source
+
+1. Confirm the source path under \`raw/\`.
+2. Read the source.
+3. Create or update a source note under \`wiki/sources/\`.
+4. Update relevant pages under \`wiki/topics/\` and \`wiki/entities/\`.
+5. Update \`wiki/index.md\`.
+6. Append a parseable entry to \`wiki/log.md\`:
+   \`## [YYYY-MM-DD] ingest | <Source title>\`.
+
+## Maintenance
+
+When asked to lint the wiki, check for missing sources, stale claims,
+contradictions, orphan pages, missing concept pages, and unanswered questions.
+Report suggested fixes first unless the user explicitly asks you to clean them
+up.
+`,
+  commands: [
+    {
+      name: "wiki-ingest",
+      body: `---
+description: Ingest one source from the shared LLM wiki workspace.
+---
+
+Ingest the source path the user provides into the shared LLM wiki.
+
+1. Read \`AGENTS.md\` and \`wiki/index.md\`.
+2. Read the source from \`raw/\`.
+3. Create or update the matching source note under \`wiki/sources/\`.
+4. Update affected topic/entity pages.
+5. Update \`wiki/index.md\`.
+6. Append to \`wiki/log.md\` with an \`ingest\` heading.
+
+Source: $ARGUMENTS
+`,
+    },
+    {
+      name: "wiki-lint",
+      body: `---
+description: Health-check the shared LLM wiki.
+---
+
+Run a lint pass over the shared LLM wiki.
+
+Check for pages missing sources, stale claims, contradictions, orphan pages,
+important concepts without pages, and open questions that need a source search.
+Report findings first. Make edits only if the user explicitly asks for cleanup.
+
+Scope: $ARGUMENTS
+`,
+    },
+  ],
+};
+
+/* -------------------------------------------------------------------------- */
+/* Agent skill specs                                                          */
+/* -------------------------------------------------------------------------- */
+
+const sharedMemoryAgentSkill: TemplateAgentSkill = {
+  skillDescription:
+    "Use when answering any non-trivial question in a project connected to the {{serverName}} MCP server (tools prefixed mcp__{{serverName}}__*). Before answering, grep shared-memory/ for prior learnings on the question's key nouns — cite and build on any hits rather than re-derive. After discovering a durable fact (non-obvious, still true next week, reusable by another agent — NOT debug breadcrumbs or session recaps), record it as a new dated entry under shared-memory/entries/ and append a one-line pointer to shared-memory/index.md. Skip for trivial or session-specific questions.",
+  skillBody: `# Shared Agent Memory — read/write protocol
+
+This skill reads and writes a shared long-term memory workspace backed by
+Agent Filesystem (MCP server \`{{serverName}}\`). Multiple agents across
+machines and users read and write the same files. Follow the protocol below
+so concurrent writes stay safe.
+
+## Before answering a non-trivial question
+
+1. Call \`mcp__{{serverName}}__file_grep\` against \`shared-memory/\` for the
+   key nouns in the user's question.
+2. If hits look relevant, read the entry with \`mcp__{{serverName}}__file_read\`,
+   cite it in your answer, and build on it instead of re-deriving.
+3. If nothing relevant, proceed normally.
+
+Skip this entirely for trivial questions, quick follow-ups, or anything
+already answered in the active conversation.
+
+## After discovering a durable fact
+
+A **durable** fact is non-obvious, still true next week, and reusable by
+another agent. Debugging breadcrumbs, session recaps, and one-off context
+do **not** qualify.
+
+When you find one:
+
+1. Pick a slug. Format: \`YYYY-MM-DD-<short-slug>\`. If unsure about
+   collisions, append a random 4-char suffix (e.g.
+   \`2026-04-22-redis-ttl-3f9a\`).
+2. Write \`shared-memory/entries/<slug>.md\` with
+   \`mcp__{{serverName}}__file_write\` using this template:
+
+   \`\`\`
+   ---
+   date: YYYY-MM-DD
+   agent: <client-name>
+   ---
+
+   # <Title — a clear concrete statement>
+
+   **Context.** When or where does this apply?
+
+   **Finding.** What is the durable fact?
+
+   **Sources.** Files, links, or conversations the finding came from.
+   \`\`\`
+
+3. Append a one-line pointer to \`shared-memory/index.md\` under the most
+   recent date heading. Use \`mcp__{{serverName}}__file_insert\` — never
+   rewrite existing lines. Keep it under 140 chars:
+   \`- [Title](entries/<slug>.md) — one-line summary.\`
+
+## Concurrency rules — do not break these
+
+- **Never overwrite another agent's entry.** Always write new files.
+- **\`index.md\` is append-only.** Add new lines under the newest date
+  heading. Do not rewrite older lines.
+- **Slugs must be unique.** Add a random suffix if in doubt.
+
+## Escape hatches
+
+When slash commands are available, the user can explicitly invoke
+\`/memory-search <query>\` or \`/memory-record <title>\` to bypass
+auto-behavior.
+`,
+  commands: [
+    {
+      name: "memory-search",
+      body: `---
+description: Search shared memory for entries matching a query. Use when you want an explicit lookup without asking a question.
+---
+
+Search the shared memory workspace for entries matching the user's query.
+
+1. Call \`mcp__{{serverName}}__file_grep\` with pattern = the user's query,
+   path = \`shared-memory/\`.
+2. For each promising hit, read the full entry with
+   \`mcp__{{serverName}}__file_read\`.
+3. Report the findings: for each entry, show title + context + finding +
+   the file path. If nothing matched, say so explicitly.
+
+Query: $ARGUMENTS
+`,
+    },
+    {
+      name: "memory-record",
+      body: `---
+description: Force-record a durable learning into shared memory, bypassing the auto-skill's judgment on durability.
+---
+
+Record a new entry in shared memory. Use the title the user provides.
+
+1. Ask the user for Context, Finding, and Sources if they didn't provide
+   them in the command arguments.
+2. Pick a slug from the title: kebab-case, prefixed with today's date
+   (YYYY-MM-DD). If unsure about collisions, append a 4-char random suffix.
+3. Write \`shared-memory/entries/<slug>.md\` via
+   \`mcp__{{serverName}}__file_write\` using the standard entry template
+   (frontmatter: date, agent; sections: Context, Finding, Sources).
+4. Append a one-line pointer to \`shared-memory/index.md\` under the most
+   recent date heading via \`mcp__{{serverName}}__file_insert\`.
+
+Title: $ARGUMENTS
+`,
+    },
+  ],
+};
+
+const codingStandardsAgentSkill: TemplateAgentSkill = {
+  skillDescription:
+    "Use before writing, modifying, or reviewing code when the {{serverName}} MCP server is connected. Read the relevant standards files live from standards/, cite the specific path you used, and treat the workspace as read-only.",
+  skillBody: `# Org Coding Standards — read-only protocol
+
+This skill reads your organization's coding standards from the Agent
+Filesystem workspace exposed as MCP server \`{{serverName}}\`. The token is
+read-only, so use this workspace as a live source of truth rather than a place
+to edit rules.
+
+## Before writing or modifying code
+
+1. Identify the language and surface you are about to touch.
+2. Read \`standards/languages/<language>.md\` with
+   \`mcp__{{serverName}}__file_read\` when a matching file exists.
+3. Read \`standards/architecture-principles.md\` and
+   \`standards/security.md\` when the task crosses module boundaries, handles
+   user input, touches secrets, or changes authorization behavior.
+4. Apply the rules you read and cite the specific standard path when it affects
+   the plan or implementation.
+
+## When reviewing code
+
+1. Read \`standards/review-checklist.md\`.
+2. Check the diff against the applicable language, architecture, and security
+   files.
+3. Lead with findings, and cite the standard path behind each concern.
+
+## If a standard seems wrong or missing
+
+Do not edit this workspace through the MCP tools. Tell the user which file or
+section is missing and ask whether a maintainer should update the standard.
+`,
+};
+
+const teamBoardAgentSkill: TemplateAgentSkill = {
+  skillDescription:
+    "Use when coordinating project work through the {{serverName}} MCP server: reading the spec, claiming tasks, updating in-progress work, recording done work, or writing open questions. Preserve per-owner task files and append-only shared docs.",
+  skillBody: `# Team Planning Board — coordination protocol
+
+This skill coordinates a shared project board stored in Agent Filesystem and
+exposed as MCP server \`{{serverName}}\`. Multiple humans and agents may write
+to this workspace, so keep ownership clear and avoid broad rewrites.
+
+## First step in a session
+
+If you do not already know the user's handle, ask for a short stable handle
+such as \`alice\` or \`frontend\`. Use that handle in every task file you
+create or update.
+
+## Before planning work
+
+1. Read \`plan/spec.md\` and \`plan/roadmap.md\`.
+2. Read \`tasks/backlog.md\`.
+3. List \`tasks/in-progress/\` with
+   \`mcp__{{serverName}}__file_list\` at depth 2 so you do not duplicate active
+   work.
+
+## Claiming a task
+
+1. Pick the matching backlog line with the user.
+2. Create \`tasks/in-progress/<handle>-<slug>.md\` with owner, date, progress,
+   goal, plan, and log sections.
+3. Remove only the claimed line from \`tasks/backlog.md\`.
+
+## Making progress
+
+Append dated notes to your own in-progress file. Do not edit another owner's
+in-progress file. Shared files such as \`plan/spec.md\`,
+\`plan/roadmap.md\`, and \`questions/*.md\` should grow by focused additions
+instead of rewrites.
+
+## Finishing work
+
+1. Move the completed task content to \`tasks/done/<slug>.md\`.
+2. Clear the in-progress file after verifying the done file exists.
+3. If \`checkpoint_create\` is available, create a milestone checkpoint with a
+   short descriptive name.
+`,
+};
+
+/* -------------------------------------------------------------------------- */
 /* Template registry                                                          */
 /* -------------------------------------------------------------------------- */
 
@@ -545,6 +1202,29 @@ export const templates: readonly Template[] = [
     seedFiles: sharedMemoryFiles,
     firstPrompt:
       "What do you already know about this workspace? Grep shared-memory/ and summarize.",
+    agentSkill: sharedMemoryAgentSkill,
+  },
+  {
+    id: "shared-llm-wiki-karpathy",
+    slug: "shared-llm-wiki",
+    title: "Shared LLM Wiki (Karpathy style)",
+    tagline:
+      "A shared agent-maintained knowledge wiki inspired by Karpathy's LLM wiki: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f",
+    icon: BookOpenIcon,
+    accent: "#f97316",
+    profile: "workspace-rw",
+    profileLabel: "Read / write",
+    summary: [
+      "Raw sources stay immutable while agents maintain the wiki",
+      "Index and log files make knowledge compound across sessions",
+      "Works as a shared workspace for multiple agents",
+    ],
+    whyItMatters:
+      "Instead of rediscovering knowledge from raw documents on every question, agents compile useful findings into a durable markdown wiki. The next agent starts from the maintained synthesis, with source notes, links, and a chronological log already in place.",
+    seedFiles: llmWikiFiles,
+    firstPrompt:
+      "Read AGENTS.md and wiki/index.md, then tell me how you would ingest the first source into this wiki.",
+    agentSkill: llmWikiAgentSkill,
   },
   {
     id: "org-coding-standards",
@@ -566,6 +1246,7 @@ export const templates: readonly Template[] = [
     seedFiles: standardsFiles,
     firstPrompt:
       "Summarize every standard in this workspace in one paragraph each.",
+    agentSkill: codingStandardsAgentSkill,
   },
   {
     id: "team-planning-board",
@@ -587,6 +1268,7 @@ export const templates: readonly Template[] = [
     seedFiles: teamBoardFiles,
     firstPrompt:
       "Read plan/spec.md and tasks/backlog.md, then help me claim the next task.",
+    agentSkill: teamBoardAgentSkill,
   },
   {
     id: "blank",

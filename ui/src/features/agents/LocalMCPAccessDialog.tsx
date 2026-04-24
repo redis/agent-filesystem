@@ -55,7 +55,7 @@ export function LocalMCPAccessDialog({
   }, [isOpen, initialDatabaseId, initialWorkspaceId, options]);
 
   const selected = options.find((option) => option.key === workspaceKey)?.workspace ?? null;
-  const snippet = selected ? buildLocalMCPSnippet(selected.name, profile) : null;
+  const snippet = selected ? buildLocalAccessConfig(selected.name, profile) : null;
 
   function copy() {
     if (!snippet) return;
@@ -76,7 +76,7 @@ export function LocalMCPAccessDialog({
       <DialogCard>
         <DialogHeader>
           <div>
-            <DialogTitle>Local MCP access</DialogTitle>
+            <DialogTitle>Local access token</DialogTitle>
             <DialogBody>
               For agents running on a machine with the AFS CLI installed. No token required
               &mdash; authentication uses the local CLI session.
@@ -149,7 +149,7 @@ function keyFor(databaseId: string, workspaceId: string) {
   return `${databaseId}::${workspaceId}`;
 }
 
-function buildLocalMCPSnippet(workspaceName: string, profile: AFSMCPProfile) {
+function buildLocalAccessConfig(workspaceName: string, profile: AFSMCPProfile) {
   return JSON.stringify(
     {
       mcpServers: {

@@ -77,6 +77,7 @@ type workspaceSummary struct {
 	UpdatedAt              string `json:"updated_at"`
 	Region                 string `json:"region"`
 	Source                 string `json:"source"`
+	TemplateSlug           string `json:"template_slug,omitempty"`
 }
 
 type workspaceListResponse struct {
@@ -129,6 +130,7 @@ type workspaceDetail struct {
 	Region                 string              `json:"region"`
 	Status                 string              `json:"status"`
 	Source                 string              `json:"source"`
+	TemplateSlug           string              `json:"template_slug,omitempty"`
 	CreatedAt              string              `json:"created_at"`
 	UpdatedAt              string              `json:"updated_at"`
 	DraftState             string              `json:"draft_state"`
@@ -187,6 +189,7 @@ type createWorkspaceRequest struct {
 	CloudAccount string    `json:"cloud_account"`
 	Region       string    `json:"region"`
 	Source       sourceRef `json:"source"`
+	TemplateSlug string    `json:"template_slug,omitempty"`
 }
 
 type updateWorkspaceRequest struct {
@@ -945,7 +948,12 @@ func (s *Service) createWorkspace(ctx context.Context, input createWorkspaceRequ
 	if err := createWorkspaceWithMetadata(ctx, s.cfg, s.store, workspace, spec); err != nil {
 		return workspaceDetail{}, err
 	}
-	return s.getWorkspace(ctx, workspace)
+	detail, err := s.getWorkspace(ctx, workspace)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	detail.TemplateSlug = strings.TrimSpace(input.TemplateSlug)
+	return detail, nil
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace string) error {

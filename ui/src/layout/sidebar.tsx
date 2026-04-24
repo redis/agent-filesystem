@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { SignOutButton } from "@clerk/react";
-import { SideBar } from "@redis-ui/components";
+import { Button, SideBar } from "@redis-ui/components";
 import {
   ChevronDownIcon,
   DoubleChevronLeftIcon,
@@ -12,6 +12,7 @@ import {
   RedisLogoDarkFullIcon,
   RedisLogoDarkMinIcon,
 } from "@redis-ui/icons/multicolor";
+import { Moon, Sun } from "lucide-react";
 import * as S from "./sidebar.styles";
 import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
@@ -34,6 +35,14 @@ function readInitialSidebarState() {
   }
 }
 
+function profileInitials(displayName: string) {
+  const parts = displayName.trim().split(/\s+/).filter(Boolean);
+  const initials = parts.length > 1
+    ? `${parts[0][0]}${parts[1][0]}`
+    : parts[0]?.slice(0, 2);
+  return (initials || "AF").toUpperCase();
+}
+
 /** Routes that remain active even when no databases are configured. */
 const ALWAYS_ENABLED_PATHS = new Set(["/", "/docs", "/agent-guide", "/downloads"]);
 
@@ -41,13 +50,16 @@ export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const router = useRouter();
+  const auth = useAuthSession();
   const { colorMode, toggleColorMode } = useColorMode();
   const { databases, isLoading } = useDatabaseScope();
-  const auth = useAuthSession();
 
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
+  const isDark = colorMode === "dark";
+  const profileLabel = auth.supportsAccountAuth ? auth.displayName : "Logged in";
+  const avatarLabel = auth.supportsAccountAuth ? auth.displayName : "AFS";
 
   // Surface the control-plane version in the footer so operators can tell at
   // a glance which build is serving the UI. One fetch per session is plenty;
@@ -96,6 +108,13 @@ export function AppSidebar() {
   const handleNavigate = (path: string) => void navigate({ to: path });
   const handlePrefetch = (path: string) => {
     void router.preloadRoute({ to: path });
+  };
+  const openLogin = () => {
+    const target = location.pathname + location.searchStr;
+    void navigate({
+      to: "/login",
+      search: target && target !== "/" ? { redirect: target } : undefined,
+    });
   };
 
   const renderRouteItem = (item: NavigationItem) => {
@@ -159,72 +178,86 @@ export function AppSidebar() {
         <SideBar.Footer>
           <>
             <SideBar.Divider fullWidth />
-            <S.ProfileMenuContainer ref={profileMenuRef} $isExpanded={isExpanded}>
-              <S.ProfileButton
-                type="button"
-                onClick={() => setIsProfileMenuOpen((open) => !open)}
-                aria-expanded={isProfileMenuOpen}
-                aria-haspopup="menu"
-                title={auth.displayName}
-                $isExpanded={isExpanded}
-              >
-                <S.ProfileAvatar>{auth.displayName.slice(0, 1).toUpperCase()}</S.ProfileAvatar>
-                {isExpanded ? (
-                  <S.ProfileTextGroup>
-                    <S.ProfileName>{auth.displayName}</S.ProfileName>
-                    {auth.secondaryLabel ? <S.ProfileMeta>{auth.secondaryLabel}</S.ProfileMeta> : null}
-                  </S.ProfileTextGroup>
-                ) : null}
-                <S.ProfileChevron $isOpen={isProfileMenuOpen} $isExpanded={isExpanded}>
-                  <ChevronDownIcon customSize="14px" />
-                </S.ProfileChevron>
-              </S.ProfileButton>
-              {isProfileMenuOpen ? (
-                <S.ProfileDropdown $isExpanded={isExpanded} role="menu">
-                  <S.ProfileMenuItem
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setIsProfileMenuOpen(false);
-                      void navigate({ to: "/settings" });
-                    }}
-                  >
-                    Settings
-                  </S.ProfileMenuItem>
-                  {auth.supportsAccountAuth ? (
-                    <SignOutButton redirectUrl="/login">
-                      <S.ProfileMenuItem
-                        type="button"
-                        role="menuitem"
-                        onClick={() => {
-                          setIsProfileMenuOpen(false);
-                        }}
-                      >
-                        Log out
-                      </S.ProfileMenuItem>
-                    </SignOutButton>
-                  ) : (
-                    <S.ProfileMenuItem type="button" role="menuitem" disabled>
-                      Authentication managed externally
-                    </S.ProfileMenuItem>
-                  )}
-                </S.ProfileDropdown>
-              ) : null}
-            </S.ProfileMenuContainer>
-            <S.DarkModeRow>
+            <S.DarkModeRow $isExpanded={isExpanded}>
               <S.DarkModeToggle
+                type="button"
                 role="switch"
-                aria-checked={colorMode === "dark"}
+                aria-checked={isDark}
                 aria-label="Toggle dark mode"
+                title="Toggle dark mode"
                 onClick={toggleColorMode}
               >
-                <S.ToggleTrack $on={colorMode === "dark"}>
-                  <S.ToggleSun $on={colorMode === "dark"}>☀</S.ToggleSun>
-                  <S.ToggleMoon $on={colorMode === "dark"}>☾</S.ToggleMoon>
-                  <S.ToggleThumb $on={colorMode === "dark"} />
+                <S.ToggleTrack $on={isDark}>
+                  <S.ToggleIcon $active={!isDark}>
+                    <Sun size={14} strokeWidth={2} aria-hidden="true" />
+                  </S.ToggleIcon>
+                  <S.ToggleIcon $active={isDark}>
+                    <Moon size={14} strokeWidth={2} aria-hidden="true" />
+                  </S.ToggleIcon>
+                  <S.ToggleThumb $on={isDark} />
                 </S.ToggleTrack>
               </S.DarkModeToggle>
             </S.DarkModeRow>
+            {auth.isSignedOut ? (
+              <S.SignInButtonWrapper $isExpanded={isExpanded}>
+                <Button size="medium" onClick={openLogin}>
+                  Log in
+                </Button>
+              </S.SignInButtonWrapper>
+            ) : (
+              <S.ProfileMenuContainer ref={profileMenuRef} $isExpanded={isExpanded}>
+                <S.ProfileButton
+                  type="button"
+                  onClick={() => setIsProfileMenuOpen((open) => !open)}
+                  aria-expanded={isProfileMenuOpen}
+                  aria-haspopup="menu"
+                  title={auth.displayName}
+                  $isExpanded={isExpanded}
+                >
+                  <S.ProfileAvatar>{profileInitials(avatarLabel)}</S.ProfileAvatar>
+                  {isExpanded ? (
+                    <S.ProfileTextGroup>
+                      <S.ProfileName>{profileLabel}</S.ProfileName>
+                      {auth.secondaryLabel ? <S.ProfileMeta>{auth.secondaryLabel}</S.ProfileMeta> : null}
+                    </S.ProfileTextGroup>
+                  ) : null}
+                  <S.ProfileChevron $isOpen={isProfileMenuOpen} $isExpanded={isExpanded}>
+                    <ChevronDownIcon customSize="14px" />
+                  </S.ProfileChevron>
+                </S.ProfileButton>
+                {isProfileMenuOpen ? (
+                  <S.ProfileDropdown $isExpanded={isExpanded} role="menu">
+                    <S.ProfileMenuItem
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setIsProfileMenuOpen(false);
+                        void navigate({ to: "/settings" });
+                      }}
+                    >
+                      Settings
+                    </S.ProfileMenuItem>
+                    {auth.supportsAccountAuth ? (
+                      <SignOutButton redirectUrl="/login">
+                        <S.ProfileMenuItem
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setIsProfileMenuOpen(false);
+                          }}
+                        >
+                          Log out
+                        </S.ProfileMenuItem>
+                      </SignOutButton>
+                    ) : (
+                      <S.ProfileMenuItem type="button" role="menuitem" disabled>
+                        Authentication managed externally
+                      </S.ProfileMenuItem>
+                    )}
+                  </S.ProfileDropdown>
+                ) : null}
+              </S.ProfileMenuContainer>
+            )}
             <SideBar.Footer.MetaData>
               <SideBar.Footer.Link href="#" target="_blank" rel="noreferrer">
                 Terms

@@ -15,7 +15,10 @@ import {
   TextInput,
 } from "../../components/afs-kit";
 import { getControlPlaneURL } from "../../foundation/api/afs";
-import { useCreateMCPAccessTokenMutation } from "../../foundation/hooks/use-afs";
+import {
+  useCreateControlPlaneTokenMutation,
+  useCreateMCPAccessTokenMutation,
+} from "../../foundation/hooks/use-afs";
 import type {
   AFSMCPProfile,
   AFSMCPToken,
@@ -24,12 +27,15 @@ import type {
 
 type WorkspaceOption = { key: string; workspace: AFSWorkspaceSummary };
 
+type TokenScopeMode = "control-plane" | "workspace";
+
 type Props = {
   isOpen: boolean;
   onClose: () => void;
   workspaces: AFSWorkspaceSummary[];
   initialWorkspaceId?: string;
   initialDatabaseId?: string;
+  initialScope?: TokenScopeMode;
 };
 
 export function CreateMCPAccessDialog({
@@ -38,9 +44,12 @@ export function CreateMCPAccessDialog({
   workspaces,
   initialWorkspaceId,
   initialDatabaseId,
+  initialScope,
 }: Props) {
-  const createMCPAccessToken = useCreateMCPAccessTokenMutation();
+  const createWorkspaceToken = useCreateMCPAccessTokenMutation();
+  const createControlPlaneToken = useCreateControlPlaneTokenMutation();
 
+  const [scopeMode, setScopeMode] = useState<TokenScopeMode>(initialScope ?? "workspace");
   const [workspaceKey, setWorkspaceKey] = useState("");
   const [name, setName] = useState("");
   const [profile, setProfile] = useState<AFSMCPProfile>("workspace-rw");
@@ -68,6 +77,7 @@ export function CreateMCPAccessDialog({
     setName("");
     setProfile("workspace-rw");
     setExpiry("7d");
+    setScopeMode(initialScope ?? "workspace");
     const requestedKey =
       initialWorkspaceId && initialDatabaseId
         ? keyFor(initialDatabaseId, initialWorkspaceId)
@@ -75,16 +85,26 @@ export function CreateMCPAccessDialog({
     const fallback = options[0]?.key ?? "";
     const match = options.find((option) => option.key === requestedKey)?.key;
     setWorkspaceKey(match ?? fallback);
-  }, [isOpen, initialDatabaseId, initialWorkspaceId, options]);
+  }, [isOpen, initialDatabaseId, initialWorkspaceId, initialScope, options]);
 
   const selected = options.find((option) => option.key === workspaceKey)?.workspace ?? null;
+  const pending = createWorkspaceToken.isPending || createControlPlaneToken.isPending;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selected == null || createMCPAccessToken.isPending) return;
+    if (pending) return;
+    setFormError(null);
     try {
-      setFormError(null);
-      const token = await createMCPAccessToken.mutateAsync({
+      if (scopeMode === "control-plane") {
+        const token = await createControlPlaneToken.mutateAsync({
+          name: name.trim() || undefined,
+          expiresAt: expiryValueToTimestamp(expiry),
+        });
+        setCreatedToken(token);
+        return;
+      }
+      if (selected == null) return;
+      const token = await createWorkspaceToken.mutateAsync({
         databaseId: selected.databaseId,
         workspaceId: selected.id,
         name: name.trim() || undefined,
@@ -94,13 +114,13 @@ export function CreateMCPAccessDialog({
       setCreatedToken(token);
     } catch (error) {
       setFormError(
-        error instanceof Error ? error.message : "Unable to create MCP access.",
+        error instanceof Error ? error.message : "Unable to create access token.",
       );
     }
   }
 
   function handleClose() {
-    if (createMCPAccessToken.isPending) return;
+    if (pending) return;
     onClose();
   }
 
@@ -113,10 +133,25 @@ export function CreateMCPAccessDialog({
 
   if (!isOpen) return null;
 
-  const hostedSnippet =
-    createdToken && selected
-      ? buildHostedMCPSnippet(selected.name, getControlPlaneURL(), createdToken.token ?? "")
-      : null;
+  const mcpEndpoint = `${getControlPlaneURL().replace(/\/+$/, "")}/mcp`;
+  const createdSnippet = createdToken
+    ? buildSnippet({
+        token: createdToken.token ?? "",
+        url: mcpEndpoint,
+        serverName:
+          createdToken.scope === "control-plane"
+            ? "agent-filesystem"
+            : `afs-${(createdToken.workspaceName ?? selected?.name ?? "workspace").trim()}`,
+      })
+    : null;
+
+  const submitLabel = (() => {
+    if (createdToken) return null;
+    if (pending) {
+      return scopeMode === "control-plane" ? "Issuing..." : "Creating...";
+    }
+    return scopeMode === "control-plane" ? "Issue control-plane token" : "Create workspace token";
+  })();
 
   return (
     <DialogOverlay
@@ -128,12 +163,12 @@ export function CreateMCPAccessDialog({
         <DialogHeader>
           <div>
             <DialogTitle>
-              {createdToken ? "MCP server created" : "Add MCP server"}
+              {createdToken ? "Access token created" : "Create access token"}
             </DialogTitle>
             <DialogBody>
               {createdToken
-                ? "Copy the config below into your remote MCP client. The token is shown once \u2014 store it safely."
-                : "Issue a workspace-scoped bearer token that hosted MCP clients can use to reach this workspace."}
+                ? "Copy the config below into your MCP client. The token is shown once \u2014 store it safely."
+                : "Issue a bearer token an MCP client can use. Pick a scope to decide what it's allowed to do."}
             </DialogBody>
           </div>
           <DialogCloseButton onClick={handleClose}>&times;</DialogCloseButton>
@@ -155,15 +190,15 @@ export function CreateMCPAccessDialog({
               </InlineActionsRight>
             </FieldBlock>
 
-            {hostedSnippet ? (
+            {createdSnippet ? (
               <FieldBlock>
-                <FieldLabel>Hosted MCP config</FieldLabel>
-                <CodeBlock>{hostedSnippet}</CodeBlock>
+                <FieldLabel>MCP client config</FieldLabel>
+                <CodeBlock>{createdSnippet}</CodeBlock>
                 <InlineActionsRight>
                   <Button
                     size="small"
                     variant="secondary-fill"
-                    onClick={() => copy(hostedSnippet, "snippet")}
+                    onClick={() => copy(createdSnippet, "snippet")}
                   >
                     {copied === "snippet" ? "Copied!" : "Copy config"}
                   </Button>
@@ -179,44 +214,84 @@ export function CreateMCPAccessDialog({
           </CreatedPanel>
         ) : (
           <FormGrid onSubmit={submit}>
-            <Field>
-              Workspace
-              <Select
-                options={
-                  options.length === 0
-                    ? [{ value: "", label: "No workspaces available" }]
-                    : options.map((option) => ({
-                        value: option.key,
-                        label: option.workspace.name,
-                      }))
-                }
-                value={workspaceKey}
-                onChange={(next) => setWorkspaceKey(next as string)}
-                disabled={options.length === 0}
-              />
-            </Field>
+            <ScopeField>
+              <FieldLabel>Scope</FieldLabel>
+              <ScopeRow>
+                <ScopeOption $selected={scopeMode === "workspace"}>
+                  <input
+                    type="radio"
+                    checked={scopeMode === "workspace"}
+                    onChange={() => setScopeMode("workspace")}
+                  />
+                  <ScopeLabel>
+                    <ScopeName>Workspace</ScopeName>
+                    <ScopeHint>
+                      File tools scoped to one workspace.
+                    </ScopeHint>
+                  </ScopeLabel>
+                </ScopeOption>
+                <ScopeOption $selected={scopeMode === "control-plane"}>
+                  <input
+                    type="radio"
+                    checked={scopeMode === "control-plane"}
+                    onChange={() => setScopeMode("control-plane")}
+                  />
+                  <ScopeLabel>
+                    <ScopeName>Control plane</ScopeName>
+                    <ScopeHint>
+                      Manage workspaces + mint workspace tokens on demand.
+                    </ScopeHint>
+                  </ScopeLabel>
+                </ScopeOption>
+              </ScopeRow>
+            </ScopeField>
+
+            {scopeMode === "workspace" ? (
+              <Field>
+                Workspace
+                <Select
+                  options={
+                    options.length === 0
+                      ? [{ value: "", label: "No workspaces available" }]
+                      : options.map((option) => ({
+                          value: option.key,
+                          label: option.workspace.name,
+                        }))
+                  }
+                  value={workspaceKey}
+                  onChange={(next) => setWorkspaceKey(next as string)}
+                  disabled={options.length === 0}
+                />
+              </Field>
+            ) : null}
 
             <Field>
               Name
               <TextInput
                 value={name}
                 onChange={(event) => setName(event.target.value)}
-                placeholder="Claude Desktop on Rowan's Mac"
+                placeholder={
+                  scopeMode === "control-plane"
+                    ? "e.g. dev laptop, staging agent"
+                    : "Claude Desktop on Rowan's Mac"
+                }
               />
             </Field>
 
-            <Field>
-              Access profile
-              <Select
-                options={[
-                  { value: "workspace-ro", label: "Read only" },
-                  { value: "workspace-rw", label: "Read / write" },
-                  { value: "workspace-rw-checkpoint", label: "Read / write + checkpoints" },
-                ]}
-                value={profile}
-                onChange={(next) => setProfile(next as AFSMCPProfile)}
-              />
-            </Field>
+            {scopeMode === "workspace" ? (
+              <Field>
+                Access profile
+                <Select
+                  options={[
+                    { value: "workspace-ro", label: "Read only" },
+                    { value: "workspace-rw", label: "Read / write" },
+                    { value: "workspace-rw-checkpoint", label: "Read / write + checkpoints" },
+                  ]}
+                  value={profile}
+                  onChange={(next) => setProfile(next as AFSMCPProfile)}
+                />
+              </Field>
+            ) : null}
 
             <Field>
               Expiry
@@ -233,7 +308,7 @@ export function CreateMCPAccessDialog({
             </Field>
 
             <ToolPreview>
-              {toolListForProfile(profile).map((tool) => (
+              {toolListForScope(scopeMode, profile).map((tool) => (
                 <ToolChip key={tool}>{tool}</ToolChip>
               ))}
             </ToolPreview>
@@ -246,16 +321,18 @@ export function CreateMCPAccessDialog({
                 type="button"
                 variant="secondary-fill"
                 onClick={handleClose}
-                disabled={createMCPAccessToken.isPending}
+                disabled={pending}
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 size="medium"
-                disabled={selected == null || createMCPAccessToken.isPending}
+                disabled={
+                  pending || (scopeMode === "workspace" && selected == null)
+                }
               >
-                {createMCPAccessToken.isPending ? "Creating..." : "Create MCP server"}
+                {submitLabel}
               </Button>
             </DialogActions>
           </FormGrid>
@@ -283,12 +360,20 @@ function expiryValueToTimestamp(value: string) {
   }
 }
 
-function buildHostedMCPSnippet(workspaceName: string, controlPlaneURL: string, token: string) {
+function buildSnippet({
+  token,
+  url,
+  serverName,
+}: {
+  token: string;
+  url: string;
+  serverName: string;
+}) {
   return JSON.stringify(
     {
       mcpServers: {
-        [`afs-${workspaceName}`]: {
-          url: `${controlPlaneURL.replace(/\/+$/, "")}/mcp`,
+        [serverName]: {
+          url,
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -300,7 +385,21 @@ function buildHostedMCPSnippet(workspaceName: string, controlPlaneURL: string, t
   );
 }
 
-function toolListForProfile(profile: AFSMCPProfile) {
+function toolListForScope(scope: TokenScopeMode, profile: AFSMCPProfile) {
+  if (scope === "control-plane") {
+    return [
+      "workspace_list",
+      "workspace_get",
+      "workspace_create",
+      "workspace_fork",
+      "workspace_delete",
+      "checkpoint_list",
+      "checkpoint_create",
+      "checkpoint_restore",
+      "mcp_token_issue",
+      "mcp_token_revoke",
+    ];
+  }
   switch (profile) {
     case "workspace-ro":
       return ["file_read", "file_lines", "file_list", "file_glob", "file_grep"];
@@ -391,4 +490,56 @@ const ToolChip = styled.span`
   color: var(--afs-ink-soft);
   font-size: 11px;
   font-weight: 700;
+`;
+
+const ScopeField = styled.div`
+  display: grid;
+  gap: 10px;
+`;
+
+const ScopeRow = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ScopeOption = styled.label<{ $selected: boolean }>`
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid ${({ $selected }) => ($selected ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
+  background: ${({ $selected }) =>
+    $selected
+      ? "color-mix(in srgb, var(--afs-accent, #2563eb) 8%, var(--afs-panel))"
+      : "var(--afs-panel)"};
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+
+  input[type="radio"] {
+    margin-top: 3px;
+  }
+`;
+
+const ScopeLabel = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const ScopeName = styled.div`
+  color: var(--afs-ink);
+  font-size: 13.5px;
+  font-weight: 700;
+`;
+
+const ScopeHint = styled.div`
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.45;
 `;

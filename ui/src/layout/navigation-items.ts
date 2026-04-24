@@ -112,7 +112,7 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/mcp")) {
-    return { page: "MCP", subtitle: "Create and manage MCP servers that expose workspaces to agents." };
+    return { page: "MCP", subtitle: "Create and manage access tokens for agents." };
   }
 
   if (pathname.startsWith("/activity")) {

@@ -14,3 +14,8 @@ Add short, concrete notes here when you hit a repo-specific sharp edge that futu
 ## UI Semantics
 
 - In the workspace browser, treat `head` as the single canonical label for the current saved checkpoint. Do not also surface that same checkpoint by name, and only show `working-copy` when the live draft actually differs from head.
+
+## Plugin Layout
+
+- Keep the baseline Codex AFS plugin at `plugins/agent-filesystem/`, with plugin and MCP server name `agent-filesystem`; make it secret-free by reading control-plane tokens through `bearer_token_env_var`.
+- For the Codex AFS plugin, cloud vs localhost is an endpoint choice in `.mcp.json` (`url`), while the token stays outside the plugin in `AFS_CONTROL_PLANE_TOKEN`.

@@ -8,6 +8,7 @@ import type {
   AFSMCPToken,
   CreateSavepointInput,
   CreateMCPTokenInput,
+  CreateControlPlaneTokenInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
   GetWorkspaceTreeInput,
@@ -71,6 +72,9 @@ type AFSClient = {
   listMCPAccessTokens: (databaseId: string | undefined, workspaceId: string) => Promise<AFSMCPToken[]>;
   createMCPAccessToken: (input: CreateMCPTokenInput) => Promise<AFSMCPToken>;
   revokeMCPAccessToken: (databaseId: string | undefined, workspaceId: string, tokenId: string) => Promise<void>;
+  listControlPlaneTokens: () => Promise<AFSMCPToken[]>;
+  createControlPlaneToken: (input: CreateControlPlaneTokenInput) => Promise<AFSMCPToken>;
+  revokeControlPlaneToken: (tokenId: string) => Promise<void>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   getAuthConfig: () => Promise<AFSAuthConfig>;
   getServerVersion: () => Promise<AFSServerVersion>;
@@ -174,6 +178,7 @@ type HTTPWorkspaceSummary = {
   updated_at: string;
   region: string;
   source: AFSWorkspaceSource;
+  template_slug?: string;
 };
 
 type HTTPCheckpoint = {
@@ -226,6 +231,7 @@ type HTTPWorkspaceDetail = {
   redis_key: string;
   region: string;
   source: AFSWorkspaceSource;
+  template_slug?: string;
   created_at: string;
   updated_at: string;
   draft_state: string;
@@ -312,8 +318,9 @@ type HTTPOnboardingTokenResponse = {
 type HTTPMCPToken = {
   id: string;
   name?: string;
-  database_id: string;
-  workspace_id: string;
+  scope?: string;
+  database_id?: string;
+  workspace_id?: string;
   workspace_name?: string;
   profile?: string;
   readonly?: boolean;
@@ -322,7 +329,31 @@ type HTTPMCPToken = {
   last_used_at?: string;
   expires_at?: string;
   revoked_at?: string;
+  template_slug?: string;
 };
+
+function mapHTTPMCPToken(
+  item: HTTPMCPToken,
+  opts?: { profileFallback?: AFSMCPToken["profile"] },
+): AFSMCPToken {
+  const profileFallback = opts?.profileFallback ?? "workspace-rw";
+  return {
+    id: item.id,
+    name: item.name,
+    scope: item.scope,
+    databaseId: item.database_id ?? "",
+    workspaceId: item.workspace_id ?? "",
+    workspaceName: item.workspace_name,
+    profile: (item.profile?.trim() || profileFallback) as AFSMCPToken["profile"],
+    readonly: Boolean(item.readonly),
+    token: item.token,
+    createdAt: item.created_at,
+    lastUsedAt: item.last_used_at,
+    expiresAt: item.expires_at,
+    revokedAt: item.revoked_at,
+    templateSlug: item.template_slug,
+  };
+}
 
 type HTTPAuthConfig = {
   mode: string;
@@ -1202,6 +1233,18 @@ This workspace was created from the AFS Web UI.
     throw new Error("MCP tokens are not available in demo mode.");
   },
 
+  async listControlPlaneTokens() {
+    return [] as AFSMCPToken[];
+  },
+
+  async createControlPlaneToken() {
+    throw new Error("MCP tokens are not available in demo mode.");
+  },
+
+  async revokeControlPlaneToken() {
+    throw new Error("MCP tokens are not available in demo mode.");
+  },
+
   async importLocal() {
     throw new Error("Import is not available in demo mode.");
   },
@@ -1492,6 +1535,7 @@ function mapWorkspaceSummary(input: HTTPWorkspaceSummary): AFSWorkspaceSummary {
     updatedAt: input.updated_at,
     region: input.region,
     source: input.source,
+    templateSlug: input.template_slug,
   };
 }
 
@@ -1511,6 +1555,7 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     redisKey: input.redis_key,
     region: input.region,
     source: input.source,
+    templateSlug: input.template_slug,
     createdAt: input.created_at,
     updatedAt: input.updated_at,
     draftState: input.draft_state,
@@ -1839,6 +1884,7 @@ const httpAFSClient: AFSClient = {
           source: {
             kind: input.source,
           },
+          template_slug: input.templateSlug,
         }),
       }),
     );
@@ -2026,40 +2072,36 @@ const httpAFSClient: AFSClient = {
 
   async listAllMCPAccessTokens() {
     const response = await requestJSON<{ items: HTTPMCPToken[] }>("/mcp-tokens");
-    return response.items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      databaseId: item.database_id,
-      workspaceId: item.workspace_id,
-      workspaceName: item.workspace_name,
-      profile: (item.profile?.trim() || "workspace-rw") as AFSMCPToken["profile"],
-      readonly: Boolean(item.readonly),
-      token: item.token,
-      createdAt: item.created_at,
-      lastUsedAt: item.last_used_at,
-      expiresAt: item.expires_at,
-      revokedAt: item.revoked_at,
-    }));
+    return response.items.map(mapHTTPMCPToken);
+  },
+
+  async listControlPlaneTokens() {
+    const response = await requestJSON<{ items: HTTPMCPToken[] }>("/mcp-tokens?scope=control-plane");
+    return response.items.map(mapHTTPMCPToken);
+  },
+
+  async createControlPlaneToken(input: CreateControlPlaneTokenInput) {
+    const response = await requestJSON<HTTPMCPToken>("/mcp-tokens", {
+      method: "POST",
+      body: JSON.stringify({
+        name: input.name,
+        expires_at: input.expiresAt,
+      }),
+    });
+    return mapHTTPMCPToken(response);
+  },
+
+  async revokeControlPlaneToken(tokenId: string) {
+    await requestJSON<void>(`/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+      method: "DELETE",
+    });
   },
 
   async listMCPAccessTokens(databaseId: string | undefined, workspaceId: string) {
     const response = await requestJSON<{ items: HTTPMCPToken[] }>(
       `${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens`,
     );
-    return response.items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      databaseId: item.database_id,
-      workspaceId: item.workspace_id,
-      workspaceName: item.workspace_name,
-      profile: (item.profile?.trim() || "workspace-rw") as AFSMCPToken["profile"],
-      readonly: Boolean(item.readonly),
-      token: item.token,
-      createdAt: item.created_at,
-      lastUsedAt: item.last_used_at,
-      expiresAt: item.expires_at,
-      revokedAt: item.revoked_at,
-    }));
+    return response.items.map(mapHTTPMCPToken);
   },
 
   async createMCPAccessToken(input: CreateMCPTokenInput) {
@@ -2071,23 +2113,11 @@ const httpAFSClient: AFSClient = {
           name: input.name,
           profile: input.profile,
           expires_at: input.expiresAt,
+          template_slug: input.templateSlug,
         }),
       },
     );
-    return {
-      id: response.id,
-      name: response.name,
-      databaseId: response.database_id,
-      workspaceId: response.workspace_id,
-      workspaceName: response.workspace_name,
-      profile: (response.profile?.trim() || input.profile) as AFSMCPToken["profile"],
-      readonly: Boolean(response.readonly),
-      token: response.token,
-      createdAt: response.created_at,
-      lastUsedAt: response.last_used_at,
-      expiresAt: response.expires_at,
-      revokedAt: response.revoked_at,
-    };
+    return mapHTTPMCPToken(response, { profileFallback: input.profile });
   },
 
   async revokeMCPAccessToken(databaseId: string | undefined, workspaceId: string, tokenId: string) {

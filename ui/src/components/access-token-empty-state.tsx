@@ -2,11 +2,11 @@ import { Button } from "@redis-ui/components";
 import styled, { keyframes } from "styled-components";
 
 type Props = {
-  onAddMCP: () => void;
-  onAddLocalMCP: () => void;
+  onCreateToken: () => void;
+  onCreateLocalToken: () => void;
 };
 
-export function MCPEmptyState({ onAddMCP, onAddLocalMCP }: Props) {
+export function AccessTokenEmptyState({ onCreateToken, onCreateLocalToken }: Props) {
   return (
     <Hero>
       <HeroInner>
@@ -19,20 +19,20 @@ export function MCPEmptyState({ onAddMCP, onAddLocalMCP }: Props) {
             Give your AI agents secure, scoped access to your workspace.
           </HeroTitle>
           <HeroLede>
-            Spin up an MCP server in seconds. Connect Claude Desktop, Cursor,
+            Issue an access token in seconds. Connect Claude Desktop, Cursor,
             Windsurf — or any MCP-native client — with a token that expires,
             can be revoked, and logs every read and write.
           </HeroLede>
           <HeroActions>
-            <Button size="large" onClick={onAddMCP}>
-              Add MCP server
+            <Button size="large" onClick={onCreateToken}>
+              Create access token
             </Button>
             <Button
               size="large"
               variant="secondary-fill"
-              onClick={onAddLocalMCP}
+              onClick={onCreateLocalToken}
             >
-              Use local MCP
+              Use local token
             </Button>
           </HeroActions>
           <HeroMeta>
@@ -87,7 +87,7 @@ export function MCPEmptyState({ onAddMCP, onAddLocalMCP }: Props) {
           </BenefitIcon>
           <BenefitTitle>Scoped by token</BenefitTitle>
           <BenefitBody>
-            Each server is bound to a single workspace and database. Agents
+            Each token is bound to a single workspace and database. Agents
             can only reach what you explicitly grant.
           </BenefitBody>
         </Benefit>
@@ -217,7 +217,7 @@ export function MCPEmptyState({ onAddMCP, onAddLocalMCP }: Props) {
           <StepPill>
             <StepNum>1</StepNum>
             <StepText>
-              <StepHeadline>Create a server</StepHeadline>
+              <StepHeadline>Create a token</StepHeadline>
               <StepBody>
                 Pick a workspace, database, and permission profile.
               </StepBody>
@@ -250,12 +250,12 @@ export function MCPEmptyState({ onAddMCP, onAddLocalMCP }: Props) {
         <FooterCtaText>
           <FooterCtaTitle>Ready to plug your agent in?</FooterCtaTitle>
           <FooterCtaBody>
-            Create your first MCP server and connect any MCP-compatible
+            Create your first access token and connect any MCP-compatible
             client in under a minute.
           </FooterCtaBody>
         </FooterCtaText>
-        <Button size="large" onClick={onAddMCP}>
-          Add MCP server
+        <Button size="large" onClick={onCreateToken}>
+          Create access token
         </Button>
       </FooterCta>
     </Hero>

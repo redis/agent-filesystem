@@ -62,9 +62,11 @@ type catalogStore interface {
 	CreateMCPAccessToken(ctx context.Context, item mcpAccessTokenRecord) error
 	ListAllMCPAccessTokens(ctx context.Context) ([]mcpAccessTokenRecord, error)
 	ListMCPAccessTokens(ctx context.Context, databaseID, workspaceID string) ([]mcpAccessTokenRecord, error)
+	ListControlPlaneMCPAccessTokens(ctx context.Context) ([]mcpAccessTokenRecord, error)
 	GetMCPAccessToken(ctx context.Context, tokenID string) (mcpAccessTokenRecord, error)
 	TouchMCPAccessToken(ctx context.Context, tokenID, lastUsedAt string) error
 	RevokeMCPAccessToken(ctx context.Context, tokenID, databaseID, workspaceID, revokedAt string) error
+	RevokeMCPAccessTokenByID(ctx context.Context, tokenID, revokedAt string) error
 }
 
 var _ catalogStore = (*workspaceCatalog)(nil)

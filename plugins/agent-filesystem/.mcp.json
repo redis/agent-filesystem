@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent-filesystem": {
+      "url": "https://agent-filesystem.vercel.app/mcp",
+      "bearer_token_env_var": "AFS_CONTROL_PLANE_TOKEN"
+    }
+  }
+}

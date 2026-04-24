@@ -218,19 +218,18 @@ export const ProfileMenuItem = styled.button`
 
 export const SignInButtonWrapper = styled.div<{ $isExpanded: boolean }>`
   display: flex;
-  justify-content: center;
+  justify-content: ${({ $isExpanded }) => ($isExpanded ? "flex-start" : "center")};
+  padding: ${({ $isExpanded }) => ($isExpanded ? "12px 12px 8px" : "12px 8px 8px")};
 
   > button {
     width: ${({ $isExpanded }) => ($isExpanded ? "100%" : "auto")};
   }
 `;
 
-/* ── Dark-mode toggle switch ── */
-
-export const DarkModeRow = styled.div`
+export const DarkModeRow = styled.div<{ $isExpanded: boolean }>`
   display: flex;
   justify-content: center;
-  padding: 8px 0 4px;
+  padding: ${({ $isExpanded }) => ($isExpanded ? "10px 12px 4px" : "10px 8px 4px")};
 `;
 
 export const DarkModeToggle = styled.button`
@@ -239,49 +238,45 @@ export const DarkModeToggle = styled.button`
   padding: 0;
   cursor: pointer;
   line-height: 0;
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-focus);
+    outline-offset: 3px;
+    border-radius: 999px;
+  }
 `;
 
-export const ToggleTrack = styled.div<{ $on: boolean }>`
+export const ToggleTrack = styled.span<{ $on: boolean }>`
   position: relative;
-  width: 44px;
-  height: 24px;
-  border-radius: 12px;
+  width: 52px;
+  height: 28px;
+  border-radius: 999px;
   background: ${({ $on }) => ($on ? "var(--afs-ink-soft)" : "var(--afs-panel-strong)")};
   border: 1px solid ${({ $on }) => ($on ? "transparent" : "var(--afs-line)")};
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease;
   display: flex;
   align-items: center;
-  padding: 0 4px;
+  padding: 0 7px;
   justify-content: space-between;
 `;
 
-export const ToggleThumb = styled.div<{ $on: boolean }>`
+export const ToggleIcon = styled.span<{ $active: boolean }>`
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-muted)")};
+  opacity: ${({ $active }) => ($active ? 1 : 0.54)};
+  transition: color 0.2s ease, opacity 0.2s ease;
+`;
+
+export const ToggleThumb = styled.span<{ $on: boolean }>`
   position: absolute;
-  top: 2px;
-  left: ${({ $on }) => ($on ? "22px" : "2px")};
-  width: 20px;
-  height: 20px;
+  top: 3px;
+  left: ${({ $on }) => ($on ? "25px" : "3px")};
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: ${({ $on }) => ($on ? "#0b1b24" : "var(--afs-ink)")};
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  background: var(--afs-bg-soft);
+  box-shadow: 0 1px 4px rgba(8, 6, 13, 0.22);
   transition: left 0.2s ease;
-`;
-
-export const ToggleSun = styled.span<{ $on: boolean }>`
-  font-size: 12px;
-  line-height: 1;
-  opacity: ${({ $on }) => ($on ? 0.4 : 1)};
-  transition: opacity 0.2s ease;
-  user-select: none;
-  z-index: 1;
-`;
-
-export const ToggleMoon = styled.span<{ $on: boolean }>`
-  font-size: 12px;
-  line-height: 1;
-  opacity: ${({ $on }) => ($on ? 1 : 0.4)};
-  transition: opacity 0.2s ease;
-  user-select: none;
-  z-index: 1;
-  color: ${({ $on }) => ($on ? "#0b1b24" : "var(--afs-muted)")};
 `;

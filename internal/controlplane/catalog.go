@@ -73,6 +73,7 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL DEFAULT '',
 			region TEXT NOT NULL DEFAULT '',
 			source TEXT NOT NULL DEFAULT '',
+			template_slug TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (database_id, workspace_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_workspace_catalog_name ON workspace_catalog(name)`,
@@ -159,12 +160,15 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			name TEXT NOT NULL DEFAULT '',
 			owner_subject TEXT NOT NULL DEFAULT '',
 			owner_label TEXT NOT NULL DEFAULT '',
-			database_id TEXT NOT NULL,
-			workspace_id TEXT NOT NULL,
+			database_id TEXT NOT NULL DEFAULT '',
+			workspace_id TEXT NOT NULL DEFAULT '',
 			workspace_name TEXT NOT NULL DEFAULT '',
+			scope TEXT NOT NULL DEFAULT '',
 			profile TEXT NOT NULL DEFAULT '',
+			template_slug TEXT NOT NULL DEFAULT '',
 			readonly INTEGER NOT NULL DEFAULT 0,
 			secret_hash TEXT NOT NULL,
+			secret TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			last_used_at TEXT NOT NULL DEFAULT '',
 			expires_at TEXT NOT NULL DEFAULT '',
@@ -172,6 +176,9 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_workspace ON mcp_access_tokens(database_id, workspace_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_owner ON mcp_access_tokens(owner_subject, created_at DESC)`,
+		// idx_mcp_access_tokens_scope is created in the alter/backfill block
+		// so legacy DBs (which don't have the scope column yet) can add the
+		// column first; indexing happens right after.
 	}
 	for _, statement := range statements {
 		if _, err := c.execContext(ctx, statement); err != nil {
@@ -192,6 +199,12 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_subject TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE onboarding_tokens ADD COLUMN IF NOT EXISTS owner_label TEXT NOT NULL DEFAULT ''`,
 			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS profile TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE workspace_catalog ADD COLUMN IF NOT EXISTS template_slug TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS template_slug TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS secret TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE mcp_access_tokens ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT ''`,
+			`UPDATE mcp_access_tokens SET scope = 'workspace:' || workspace_id WHERE scope = '' AND workspace_id <> ''`,
+			`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_scope ON mcp_access_tokens(scope)`,
 		}
 		for _, statement := range alterations {
 			if _, err := c.execContext(ctx, statement); err != nil {
@@ -213,9 +226,22 @@ func (c *workspaceCatalog) migrate(ctx context.Context) error {
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_subject TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE onboarding_tokens ADD COLUMN owner_label TEXT NOT NULL DEFAULT ''`,
 		`ALTER TABLE mcp_access_tokens ADD COLUMN profile TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE workspace_catalog ADD COLUMN template_slug TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN template_slug TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN secret TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE mcp_access_tokens ADD COLUMN scope TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, statement := range sqliteAlterations {
 		if _, err := c.execContext(ctx, statement); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return err
+		}
+	}
+	sqliteBackfills := []string{
+		`UPDATE mcp_access_tokens SET scope = 'workspace:' || workspace_id WHERE scope = '' AND workspace_id <> ''`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_access_tokens_scope ON mcp_access_tokens(scope)`,
+	}
+	for _, statement := range sqliteBackfills {
+		if _, err := c.execContext(ctx, statement); err != nil {
 			return err
 		}
 	}
@@ -241,10 +267,19 @@ func (c *workspaceCatalog) ReplaceDatabaseWorkspaces(ctx context.Context, databa
 	if err != nil {
 		return nil, err
 	}
+	existingTemplateSlugs, err := catalogTemplateSlugsByID(ctx, tx, c.rebind, databaseID)
+	if err != nil {
+		return nil, err
+	}
 	keepIDs := make(map[string]struct{}, len(items))
 	synced := make([]workspaceSummary, 0, len(items))
 	for _, item := range items {
 		item.DatabaseID = strings.TrimSpace(databaseID)
+		if strings.TrimSpace(item.TemplateSlug) == "" {
+			if existing, ok := existingTemplateSlugs[strings.TrimSpace(item.ID)]; ok {
+				item.TemplateSlug = existing
+			}
+		}
 		item, err = upsertCatalogWorkspaceSummary(ctx, tx, statement, c.rebind, existingByIdentity, item)
 		if err != nil {
 			return nil, err
@@ -273,6 +308,15 @@ func (c *workspaceCatalog) UpsertWorkspace(ctx context.Context, item workspaceSu
 	existingByIdentity, err := catalogRoutesByIdentity(ctx, c.db, c.rebind, item.DatabaseID)
 	if err != nil {
 		return workspaceSummary{}, err
+	}
+	if strings.TrimSpace(item.TemplateSlug) == "" {
+		existingTemplateSlugs, err := catalogTemplateSlugsByID(ctx, c.db, c.rebind, item.DatabaseID)
+		if err != nil {
+			return workspaceSummary{}, err
+		}
+		if existing, ok := existingTemplateSlugs[strings.TrimSpace(item.ID)]; ok {
+			item.TemplateSlug = existing
+		}
 	}
 	return upsertCatalogWorkspaceSummary(ctx, c.db, statement, c.rebind, existingByIdentity, item)
 }
@@ -354,7 +398,8 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 			last_checkpoint_at,
 			updated_at,
 			region,
-			source
+			source,
+			template_slug
 		FROM workspace_catalog
 		ORDER BY updated_at DESC, lower(name), database_id`)
 	if err != nil {
@@ -385,6 +430,7 @@ func (c *workspaceCatalog) ListWorkspaces(ctx context.Context) ([]workspaceSumma
 			&item.UpdatedAt,
 			&item.Region,
 			&item.Source,
+			&item.TemplateSlug,
 		); err != nil {
 			return nil, err
 		}
@@ -458,6 +504,34 @@ func (c *workspaceCatalog) ResolveWorkspaceInDatabase(ctx context.Context, datab
 
 func workspaceCatalogIdentityKey(name, ownerSubject string) string {
 	return strings.TrimSpace(ownerSubject) + "\x1f" + strings.TrimSpace(name)
+}
+
+func catalogTemplateSlugsByID(ctx context.Context, queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, rebind func(string) string, databaseID string) (map[string]string, error) {
+	rows, err := queryer.QueryContext(
+		ctx,
+		rebind(`SELECT workspace_id, template_slug
+		 FROM workspace_catalog
+		 WHERE database_id = ?`),
+		strings.TrimSpace(databaseID),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	slugs := make(map[string]string)
+	for rows.Next() {
+		var workspaceID, slug string
+		if err := rows.Scan(&workspaceID, &slug); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(slug) != "" {
+			slugs[workspaceID] = slug
+		}
+	}
+	return slugs, rows.Err()
 }
 
 func catalogRoutesByIdentity(ctx context.Context, queryer interface {
@@ -592,6 +666,7 @@ func upsertCatalogWorkspaceSummary(
 		strings.TrimSpace(item.UpdatedAt),
 		strings.TrimSpace(item.Region),
 		strings.TrimSpace(item.Source),
+		strings.TrimSpace(item.TemplateSlug),
 	); err != nil {
 		return workspaceSummary{}, err
 	}
@@ -668,6 +743,7 @@ func workspaceSummaryFromDetail(detail workspaceDetail) workspaceSummary {
 		UpdatedAt:              detail.UpdatedAt,
 		Region:                 detail.Region,
 		Source:                 detail.Source,
+		TemplateSlug:           detail.TemplateSlug,
 	}
 }
 
@@ -690,8 +766,9 @@ const workspaceCatalogUpsertSQL = `INSERT INTO workspace_catalog (
 	last_checkpoint_at,
 	updated_at,
 	region,
-	source
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	source,
+	template_slug
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(database_id, workspace_id) DO UPDATE SET
 	name = excluded.name,
 	database_name = excluded.database_name,
@@ -709,4 +786,5 @@ ON CONFLICT(database_id, workspace_id) DO UPDATE SET
 	last_checkpoint_at = excluded.last_checkpoint_at,
 	updated_at = excluded.updated_at,
 	region = excluded.region,
-	source = excluded.source`
+	source = excluded.source,
+	template_slug = CASE WHEN excluded.template_slug = '' THEN workspace_catalog.template_slug ELSE excluded.template_slug END`

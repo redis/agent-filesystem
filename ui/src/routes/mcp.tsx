@@ -13,17 +13,20 @@ import {
 import styled from "styled-components";
 import { CreateMCPAccessDialog } from "../features/agents/CreateMCPAccessDialog";
 import { LocalMCPAccessDialog } from "../features/agents/LocalMCPAccessDialog";
-import { MCPEmptyState } from "../components/mcp-empty-state";
+import { AccessTokenEmptyState } from "../components/access-token-empty-state";
+import { MCPConnectionPanel } from "../components/mcp-connection-panel";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 import {
   useAllMCPAccessTokens,
+  useControlPlaneTokens,
   useDatabases,
+  useRevokeControlPlaneTokenMutation,
   useRevokeMCPAccessTokenMutation,
   useWorkspaceSummaries,
 } from "../foundation/hooks/use-afs";
-import { MCPServersTable } from "../foundation/tables/mcp-servers-table";
-import type { AFSMCPToken } from "../foundation/types/afs";
+import { AccessTokensTable } from "../foundation/tables/access-tokens-table";
+import { isControlPlaneScope, type AFSMCPToken } from "../foundation/types/afs";
 
 const mcpSearchSchema = z.object({
   workspaceId: z.string().optional(),
@@ -43,8 +46,10 @@ function MCPPage() {
   const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const databasesQuery = useDatabases(queriesEnabled);
   const workspacesQuery = useWorkspaceSummaries(search.databaseId ?? null, queriesEnabled);
-  const allTokensQuery = useAllMCPAccessTokens(queriesEnabled);
-  const revokeMCPAccessToken = useRevokeMCPAccessTokenMutation();
+  const workspaceTokensQuery = useAllMCPAccessTokens(queriesEnabled);
+  const controlPlaneTokensQuery = useControlPlaneTokens(queriesEnabled);
+  const revokeWorkspaceToken = useRevokeMCPAccessTokenMutation();
+  const revokeControlPlaneToken = useRevokeControlPlaneTokenMutation();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [localOpen, setLocalOpen] = useState(false);
@@ -52,15 +57,15 @@ function MCPPage() {
   const workspaceId = search.workspaceId;
   const databaseId = search.databaseId;
   const allWorkspaces = workspacesQuery.data ?? [];
-  const allTokens = allTokensQuery.data ?? [];
   const databases = databasesQuery.data ?? [];
 
   useEffect(() => {
     const interval = setInterval(() => {
-      void allTokensQuery.refetch();
+      void workspaceTokensQuery.refetch();
+      void controlPlaneTokensQuery.refetch();
     }, 5000);
     return () => clearInterval(interval);
-  }, [allTokensQuery]);
+  }, [workspaceTokensQuery, controlPlaneTokensQuery]);
 
   const workspaceNameById = useMemo(
     () => new Map(allWorkspaces.map((workspace) => [workspace.id, workspace.name])),
@@ -71,9 +76,26 @@ function MCPPage() {
     [databases],
   );
 
+  // Merge workspace-scoped tokens and control-plane tokens into one list.
+  // Client-side filter for control-plane tokens (defensive — the backend
+  // should only return control-plane entries to that query). Workspace list
+  // already excludes scope-empty/control-plane rows by virtue of requiring a
+  // database binding on the server.
+  const allTokens: AFSMCPToken[] = useMemo(() => {
+    const workspace = (workspaceTokensQuery.data ?? []).filter(
+      (token) => !isControlPlaneScope(token.scope),
+    );
+    const controlPlane = (controlPlaneTokensQuery.data ?? []).filter((token) =>
+      isControlPlaneScope(token.scope),
+    );
+    return [...controlPlane, ...workspace];
+  }, [workspaceTokensQuery.data, controlPlaneTokensQuery.data]);
+
   const filteredTokens = allTokens
-    .filter((token) => token.revokedAt == null || token.revokedAt === "")
+    .filter((token) => !token.revokedAt || token.revokedAt === "")
     .filter((token) => {
+      // Control-plane tokens are never workspace/database filtered.
+      if (isControlPlaneScope(token.scope)) return true;
       if (workspaceId != null && token.workspaceId !== workspaceId) {
         return false;
       }
@@ -82,12 +104,26 @@ function MCPPage() {
       }
       return true;
     })
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+    .sort(
+      (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime(),
+    );
 
   const isFiltered = workspaceId != null || databaseId != null;
+  const isLoading = workspaceTokensQuery.isLoading || controlPlaneTokensQuery.isLoading;
+  const loadError =
+    workspaceTokensQuery.error instanceof Error
+      ? workspaceTokensQuery.error
+      : controlPlaneTokensQuery.error instanceof Error
+        ? controlPlaneTokensQuery.error
+        : null;
+  const isError = Boolean(workspaceTokensQuery.isError || controlPlaneTokensQuery.isError);
 
   async function revokeToken(token: AFSMCPToken) {
-    await revokeMCPAccessToken.mutateAsync({
+    if (isControlPlaneScope(token.scope)) {
+      await revokeControlPlaneToken.mutateAsync(token.id);
+      return;
+    }
+    await revokeWorkspaceToken.mutateAsync({
       databaseId: token.databaseId,
       workspaceId: token.workspaceId,
       tokenId: token.id,
@@ -97,6 +133,8 @@ function MCPPage() {
   if (auth.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
+
+  const revoking = revokeWorkspaceToken.isPending || revokeControlPlaneToken.isPending;
 
   return (
     <PageStack>
@@ -109,6 +147,8 @@ function MCPPage() {
           </NoticeBody>
         </NoticeCard>
       ) : null}
+
+      <MCPConnectionPanel />
 
       {isFiltered ? (
         <InlineActions>
@@ -124,25 +164,21 @@ function MCPPage() {
         </InlineActions>
       ) : null}
 
-      {allTokensQuery.error instanceof Error ? (
-        <DialogError role="alert">{allTokensQuery.error.message}</DialogError>
-      ) : null}
-      {!allTokensQuery.isLoading
-        && !allTokensQuery.isError
-        && !isFiltered
-        && filteredTokens.length === 0 ? (
-        <MCPEmptyState
-          onAddMCP={() => setCreateOpen(true)}
-          onAddLocalMCP={() => setLocalOpen(true)}
+      {loadError ? <DialogError role="alert">{loadError.message}</DialogError> : null}
+
+      {!isLoading && !isError && !isFiltered && filteredTokens.length === 0 ? (
+        <AccessTokenEmptyState
+          onCreateToken={() => setCreateOpen(true)}
+          onCreateLocalToken={() => setLocalOpen(true)}
         />
       ) : (
-        <MCPServersTable
+        <AccessTokensTable
           rows={filteredTokens}
-          loading={allTokensQuery.isLoading}
-          error={allTokensQuery.isError}
+          loading={isLoading}
+          error={isError}
           workspaceNameById={workspaceNameById}
           databaseNameById={databaseNameById}
-          revoking={revokeMCPAccessToken.isPending}
+          revoking={revoking}
           onRevoke={(token) => void revokeToken(token)}
           toolbarAction={(
             <HeaderActions>
@@ -151,10 +187,10 @@ function MCPPage() {
                 variant="secondary-fill"
                 onClick={() => setLocalOpen(true)}
               >
-                Local MCP
+                Local
               </Button>
               <Button size="medium" onClick={() => setCreateOpen(true)}>
-                Add MCP
+                Create token
               </Button>
             </HeaderActions>
           )}

@@ -1,8 +1,15 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import {
+  createFileRoute,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router";
 import styled from "styled-components";
 import { CreateWorkspaceDialog } from "../features/workspaces/CreateWorkspaceDialog";
-import { templates } from "../features/templates/templates-data";
+import { findTemplate, templates } from "../features/templates/templates-data";
+import { useWorkspaceSummaries } from "../foundation/hooks/use-afs";
+import type { AFSWorkspaceSummary } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/templates")({
   component: TemplatesPage,
@@ -11,10 +18,81 @@ export const Route = createFileRoute("/templates")({
 const GALLERY_TEMPLATES = templates.filter((template) => template.id !== "blank");
 
 function TemplatesPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const summariesQuery = useWorkspaceSummaries(null);
+
+  const installed = useMemo(() => {
+    const list = summariesQuery.data ?? [];
+    return list
+      .filter((workspace): workspace is AFSWorkspaceSummary & { templateSlug: string } =>
+        Boolean(workspace.templateSlug && workspace.templateSlug.length > 0),
+      )
+      .map((workspace) => ({
+        workspace,
+        template: findTemplate(workspace.templateSlug),
+      }));
+  }, [summariesQuery.data]);
+
+  if (location.pathname !== "/templates") {
+    return <Outlet />;
+  }
 
   return (
     <Wrap>
+      {installed.length > 0 ? (
+        <Section>
+          <SectionHeading>Installed</SectionHeading>
+          <SectionRule />
+          <Grid>
+            {installed.map(({ workspace, template }) => {
+              const title = template?.title ?? workspace.templateSlug;
+              const tagline = template
+                ? template.tagline
+                : "Template no longer registered.";
+              return (
+                <Card
+                  key={workspace.id}
+                  type="button"
+                  onClick={() =>
+                    void navigate({
+                      to: "/templates/installed/$workspaceId",
+                      params: { workspaceId: workspace.id },
+                      search: workspace.databaseId
+                        ? { databaseId: workspace.databaseId }
+                        : {},
+                    })
+                  }
+                  aria-label={`Open installed template ${title} in ${workspace.name}`}
+                >
+                  <CardHead>
+                    {template ? (
+                      <IconSlot $accent={template.accent}>
+                        <template.icon size="M" />
+                      </IconSlot>
+                    ) : (
+                      <IconSlot $accent="#94a3b8">
+                        <InstalledDot aria-hidden>&#10003;</InstalledDot>
+                      </IconSlot>
+                    )}
+                    <InstalledBadge>Installed</InstalledBadge>
+                  </CardHead>
+                  <CardTitle>{title}</CardTitle>
+                  <CardBody>
+                    <WorkspaceLabel>
+                      Workspace: <code>{workspace.name}</code>
+                    </WorkspaceLabel>
+                    <TaglineText>{tagline}</TaglineText>
+                  </CardBody>
+                  <ViewInstructions>View instructions &rarr;</ViewInstructions>
+                </Card>
+              );
+            })}
+          </Grid>
+        </Section>
+      ) : null}
+
       <Section>
         <SectionHeading>Multi-agent workflows</SectionHeading>
         <SectionRule />
@@ -163,6 +241,22 @@ const AddFab = styled.span.attrs({ "data-fab": true })`
   transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
 `;
 
+const InstalledDot = styled.span`
+  font-size: 18px;
+  font-weight: 800;
+`;
+
+const InstalledBadge = styled.span`
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #22c55e 18%, transparent);
+  color: #16a34a;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+`;
+
 const CardTitle = styled.h3`
   margin: 0;
   color: var(--afs-ink);
@@ -171,11 +265,39 @@ const CardTitle = styled.h3`
   letter-spacing: -0.005em;
 `;
 
-const CardBody = styled.p`
-  margin: 0;
+const CardBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   color: var(--afs-muted);
   font-size: 13.5px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+`;
+
+const WorkspaceLabel = styled.span`
+  color: var(--afs-ink);
+  font-size: 12.5px;
+
+  code {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 12px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--afs-line) 60%, transparent);
+  }
+`;
+
+const TaglineText = styled.span`
+  color: var(--afs-muted);
+  overflow-wrap: anywhere;
+`;
+
+const ViewInstructions = styled.span`
+  margin-top: 4px;
+  color: var(--afs-accent, #2563eb);
+  font-size: 12.5px;
+  font-weight: 700;
 `;
 
 const ProfileBadge = styled.span<{ $profile: string }>`
