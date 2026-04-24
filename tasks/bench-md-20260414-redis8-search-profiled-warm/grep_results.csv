@@ -1,4 +1,0 @@
-name,local_label,redis_label,local_median_ms,redis_median_ms,ratio,local_count,redis_count,validation
-grep_literal_rare,grep,afs grep,365.281,45.827,0.125,9,9,different normalized output (local=9 redis=0)
-grep_literal_common,grep,afs grep,361.012,47.203,0.131,445,445,identical normalized output
-grep_regex_escalation,grep,afs grep,211.323,1043.085,4.936,48000,48000,identical normalized output

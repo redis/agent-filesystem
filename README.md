@@ -188,7 +188,7 @@ The current config shape is nested and workspace-oriented:
     "sync": "/tmp/afs-sync.log"
   },
   "sync": {
-    "fileSizeCapMB": 100
+    "fileSizeCapMB": 2048
   }
 }
 ```

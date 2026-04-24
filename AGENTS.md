@@ -7,10 +7,12 @@ This file provides guidance to Codex and other AI coding agents working in this 
 ## Quick Links
 
 - [README.md](README.md)
+- [docs/README.md](docs/README.md)
 - [docs/repo-walkthrough.md](docs/repo-walkthrough.md)
 - [docs/afs-control-plane-api.md](docs/afs-control-plane-api.md)
 - [ui/README.md](ui/README.md)
 - [docs/afs-cloud-control-plane-design.md](docs/afs-cloud-control-plane-design.md)
+- [docs/backlog/storage-and-sync.md](docs/backlog/storage-and-sync.md)
 - [docs/agents/lessons-learned.md](docs/agents/lessons-learned.md)
 
 ## Critical Invariants
@@ -98,11 +100,13 @@ This repo has two active product layers:
 Useful supporting areas:
 
 - `deploy/`: deployment-specific notes and helpers.
-- `plans/` and `tasks/`: working design notes, backlog fragments, and benchmark outputs.
 - `sandbox/`: isolated process runner.
 - `scripts/`: helper scripts for local development and benchmarks.
 - `skills/`: installable skill docs for agent use.
 - `tests/`: benchmark helpers and fixtures for the active workspace-first surfaces.
+
+Active backlog notes and longer design proposals live under `docs/backlog/`
+and `docs/plans/`. Raw benchmark outputs should stay outside the repo.
 
 For a file-by-file walkthrough of the current tree, read `docs/repo-walkthrough.md`.
 

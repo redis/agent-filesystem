@@ -17,7 +17,7 @@
 
 set -euo pipefail
 
-OUT_DIR="${1:-$(pwd)/tasks/perf-capture-$(date +%Y%m%d-%H%M%S)}"
+OUT_DIR="${1:-/tmp/afs-perf-capture-$(date +%Y%m%d-%H%M%S)}"
 PROMPT="${2:-list the files in your ~/.claude/plans directory and tell me how many there are}"
 mkdir -p "$OUT_DIR"
 

@@ -1,6 +1,6 @@
 # Agent Filesystem Repo Walkthrough
 
-This guide is the "what lives where" map for the current `/Users/rowantrollope/git/agent-filesystem` working tree as of 2026-04-21.
+This guide is the "what lives where" map for the current `/Users/rowantrollope/git/agent-filesystem` working tree as of 2026-04-24.
 
 ## Scope
 
@@ -22,7 +22,6 @@ Supporting areas:
 - `sandbox/`: isolated process runner service.
 - `scripts/`: local development and benchmark helpers.
 - `skills/`: agent-facing skill docs.
-- `tasks/` and `plans/`: working notes, task fragments, and benchmark outputs.
 - `tests/`: benchmark helpers and fixtures for active workspace-first flows.
 - `third_party/go-nfs/`: vendored upstream NFS library used by the NFS server binary.
 
@@ -34,11 +33,9 @@ Supporting areas:
 - `examples/`: example configs and migration guides.
 - `internal/`: shared workspace/control-plane packages used by the top-level commands.
 - `mount/`: Go mount and NFS serving stack.
-- `plans/`: longer-lived design proposals.
 - `sandbox/`: HTTP and MCP process sandbox.
 - `scripts/`: helper scripts for web-dev and benchmarks.
 - `skills/`: installable agent skill docs and assets.
-- `tasks/`: working task notes and benchmark outputs.
 - `tests/`: benchmark tools and fixtures.
 - `third_party/`: vendored dependencies, currently `go-nfs`.
 - `ui/`: React/TanStack control-plane UI.
@@ -93,15 +90,19 @@ Supporting areas:
 
 ### `docs/`
 
+- `docs/README.md`: index of current docs and where non-current material belongs.
 - `docs/afs-control-plane-api.md`: current shared HTTP contract for the CLI and web UI.
-- `docs/afs-hybrid-architecture.md`: historical context for the earlier workspace model; read the note at the top before treating it as current.
+- `docs/backlog/`: active implementation backlog notes.
+- `docs/performance.md`: consolidated benchmark and performance notes.
+- `docs/plans/`: longer-lived design proposals that are not yet canonical contracts.
 - `docs/repo-walkthrough.md`: this file.
 
-### `plans/` and `tasks/`
+### Planning Material
 
-- `plans/`: design proposals that may or may not be implemented yet.
-- `tasks/`: working notes, TODOs, performance studies, and experiment outputs.
+- Active backlog notes live under `docs/backlog/`.
+- Design proposals that may or may not be implemented yet live under `docs/plans/`.
 - Treat both as helpful context, not as authoritative product contracts.
+- Raw benchmark CSV/JSON outputs should be rerun into `/tmp` or another external artifact directory.
 
 ### `tests/`
 

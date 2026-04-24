@@ -39,6 +39,10 @@ ENV/
 .coverage
 htmlcov/
 
+# Retired root note/artifact folders; use docs/backlog and docs/plans.
+/tasks/
+/plans/
+
 .DS_Store
 
 !internal/uistatic/

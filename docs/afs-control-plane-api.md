@@ -1,6 +1,7 @@
 # AFS Control Plane API
 
 Date: 2026-04-05
+Last reviewed: 2026-04-24
 
 ## Goal
 
@@ -15,6 +16,8 @@ The current shared model is workspace-first:
 - one workspace owns one working copy state
 - one workspace owns one checkpoint timeline
 - files are read and written directly against the workspace view
+- aggregate workspace listing is served through the control-plane catalog
+- database-scoped routes still exist for admin/debug flows and disambiguation
 
 ## Resource Model
 
@@ -24,6 +27,9 @@ The shared nouns are:
 - `workspace`
 - `checkpoint`
 - `file`
+- `agent session`
+- `activity event`
+- `MCP access token`
 - `job`
 
 ### Workspace
@@ -75,18 +81,47 @@ Optional helpful fields:
 
 ## HTTP API
 
-All paths below are rooted at `/v1`.
+Unless noted otherwise, paths below are rooted at `/v1`.
+
+### Runtime And Auth
+
+- `GET /auth/config`
+- `POST /auth/exchange`
+- `GET /version`
+- `GET /account`
+- `DELETE /account`
+- `POST /account/developer/reset`
+- `GET /cli`
+- `GET /install.sh` (not under `/v1`; root-level installer script)
+- `POST /quickstart`
 
 ### Databases
 
 - `GET /databases`
+- `POST /databases`
+- `PUT /databases/{database_id}`
+- `DELETE /databases/{database_id}`
+- `POST /databases/{database_id}/default`
+- `GET /databases/{database_id}/activity`
+- `GET /databases/{database_id}/agents`
 
 ### Workspaces
 
 - `GET /workspaces`
 - `GET /workspaces/{workspace_id}`
 - `POST /workspaces`
+- `PUT /workspaces/{workspace_id}`
 - `DELETE /workspaces/{workspace_id}`
+- `POST /workspaces:import`
+- `POST /workspaces:import-local`
+
+Database-scoped equivalents remain available:
+
+- `GET /databases/{database_id}/workspaces`
+- `POST /databases/{database_id}/workspaces`
+- `POST /databases/{database_id}/workspaces:import`
+- `POST /databases/{database_id}/workspaces:import-local`
+- `GET|PUT|DELETE /databases/{database_id}/workspaces/{workspace_id}`
 
 `GET /workspaces/{workspace_id}` should return:
 
@@ -94,6 +129,7 @@ All paths below are rooted at `/v1`.
 - checkpoint summaries
 - file inventory or tree summary
 - recent activity
+- connected-agent/session summaries
 - capability flags
 
 ### Checkpoints
@@ -101,6 +137,8 @@ All paths below are rooted at `/v1`.
 - `GET /workspaces/{workspace_id}/checkpoints`
 - `POST /workspaces/{workspace_id}/checkpoints`
 - `POST /workspaces/{workspace_id}:restore`
+- `POST /workspaces/{workspace_id}:save-from-live`
+- `POST /workspaces/{workspace_id}:fork`
 
 `POST /workspaces/{workspace_id}:restore` accepts:
 
@@ -110,13 +148,49 @@ All paths below are rooted at `/v1`.
 
 - `GET /workspaces/{workspace_id}/tree`
 - `GET /workspaces/{workspace_id}/files/content`
-- `PUT /workspaces/{workspace_id}/files/content`
+- `GET /workspaces/{workspace_id}/path-last`
 
-`PUT /workspaces/{workspace_id}/files/content` accepts:
+The browser-facing read paths accept view/path/depth query parameters where
+applicable. File mutation still happens through checkpoint/save/import flows
+rather than a standalone `PUT /files/content` route.
 
-- `path`
-- `content`
-- `expected_revision` (optional)
+### Activity, Changes, And Agents
+
+- `GET /activity`
+- `GET /agents`
+- `GET /workspaces/{workspace_id}/activity`
+- `GET /workspaces/{workspace_id}/changes`
+- `GET /workspaces/{workspace_id}/sessions`
+- `GET /workspaces/{workspace_id}/sessions/{session_id}/summary`
+
+Database-scoped equivalents are available under
+`/databases/{database_id}/workspaces/{workspace_id}/...`.
+
+### MCP Tokens
+
+- `GET /mcp-tokens`
+- `GET /mcp-tokens?scope=control-plane`
+- `POST /mcp-tokens`
+- `DELETE /mcp-tokens/{token_id}`
+- `GET /workspaces/{workspace_id}/mcp-tokens`
+- `POST /workspaces/{workspace_id}/mcp-tokens`
+- `DELETE /workspaces/{workspace_id}/mcp-tokens/{token_id}`
+
+### Client Session Surface
+
+The client/daemon surface is mounted under `/v1/client`.
+
+- `POST /v1/client/workspaces/{workspace_id}/sessions`
+- `POST /v1/client/workspaces/{workspace_id}/sessions/{session_id}/heartbeat`
+- `DELETE /v1/client/workspaces/{workspace_id}/sessions/{session_id}`
+
+Database-scoped equivalents are available under
+`/v1/client/databases/{database_id}/workspaces/{workspace_id}/sessions`.
+
+### Catalog Health
+
+- `GET /catalog/health`
+- `POST /catalog/reconcile`
 
 ## Example `GET /workspaces`
 
@@ -144,11 +218,11 @@ All paths below are rooted at `/v1`.
 }
 ```
 
-## Direct Mode vs Cloud Mode
+## Local Mode vs Cloud Mode
 
 The command language should stay the same across transports.
 
-- Direct mode talks to Redis and local AFS state directly.
+- Local mode talks to Redis and local AFS state directly.
 - Cloud mode talks to the HTTP API and must not bypass it.
 
 The shared contract should preserve workspace IDs, checkpoint IDs, and file semantics across both modes.

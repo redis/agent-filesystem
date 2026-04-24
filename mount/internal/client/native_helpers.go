@@ -689,7 +689,7 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 // and fall through to load the existing file via loadInodeByID (one additional
 // read on the existing-file branch, same as today's WATCH/MULTI loser path).
 //
-// See tasks/perf-nfs-followups.md candidate 1 for the full rationale.
+// See docs/performance.md for the summarized benchmark rationale.
 func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, content string, mode uint32, exclusive bool) (*inodeData, bool, error) {
 	p = normalizePath(p)
 	if p == "/" {

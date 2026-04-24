@@ -1,10 +1,19 @@
 # AFS Cloud Control Plane + Customer-Hosted Redis (BYODB) Design
 
+Date: 2026-04-21
+Status: Target design, not current implementation
+
+This document describes the intended hosted BYODB and private data-plane
+architecture. The current repo has the shared control-plane/catalog/session
+foundation, but managed database provisioning, external database attachment, and
+the private customer-side connector are still future work.
+
 ## 1. Problem Statement
 
 You want AFS to support three product experiences without forking the architecture:
 
-1. **Self-hosted:** the current entirely local experience remains available.
+1. **Self-managed:** the control-plane-backed local/private deployment remains
+   available.
 2. **Cloud quick start:** AFS provisions and manages a Redis instance for the customer so they can create a workspace immediately.
 3. **Cloud + customer database:** customer points AFS Cloud at their own Redis where workspace file/content data lives.
 
@@ -89,9 +98,10 @@ For the final hybrid design rule:
 
 All three binding types share one logical workspace model and one control-plane API surface.
 
-## 3.4 Self-Hosted Mode
+## 3.4 Self-Managed Mode
 
-- Self-hosted remains a supported product mode.
+- Self-managed remains a supported product mode; the current config/runtime mode
+  is still named `self-hosted`.
 - It can reuse core workspace/data structures, but it does not need to route through the hosted control plane.
 - The hosted architecture should not regress or replace the current local-first experience.
 
@@ -355,7 +365,10 @@ Job/event topics (logical):
 
 ## 15. Bottom Line
 
-Yes—this can cleanly support quick-start cloud, reachable external databases, fully private hybrid BYODB, and the existing self-hosted mode if you treat Redis as **data-plane storage**, move control-plane truth to a dedicated cloud metadata store, and keep every binding behind one provider contract.
+Yes—this can cleanly support quick-start cloud, reachable external databases,
+fully private hybrid BYODB, and the existing self-managed mode if you treat
+Redis as **data-plane storage**, move control-plane truth to a dedicated cloud
+metadata store, and keep every binding behind one provider contract.
 
 That gives:
 

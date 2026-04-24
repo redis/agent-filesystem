@@ -10,7 +10,7 @@
 //
 // Example:
 //
-//	go run ./tests/bench_md_workloads --markdown-files 4000 --rounds 5 --output-dir ./tasks/bench-md-run
+//	go run ./tests/bench_md_workloads --markdown-files 4000 --rounds 5 --output-dir /tmp/afs-bench-md-run
 package main
 
 import (

@@ -1,6 +1,17 @@
 # Observability Plan — Agents & Workspaces
 
-Research doc. What's worth observing, for whom, and where the signal lives in code. No implementation yet.
+Last reviewed: 2026-04-24.
+Status: research context; superseded where it conflicts with
+`docs/plans/event-history-merge.md`.
+
+Research doc. What's worth observing, for whom, and where the signal lives in
+code. The first changelog milestone has partially landed; use
+`docs/plans/event-history-merge.md` for the current next step that merges
+workspace lifecycle events and file changes into one history stream.
+
+Current implementation note: lifecycle activity and file changes live in Redis
+Streams today. There is no SQLite activity table to remove, and the durable
+next step is the Redis-stream merge described in `event-history-merge.md`.
 
 ---
 
@@ -17,7 +28,7 @@ For every agent session, capture every file **added / modified / deleted / renam
 Primary structure: **Redis Stream per workspace.**
 
 ```
-Key:      ws:{workspace_id}:changelog
+Key:      afs:{workspace_id}:workspace:changelog
 Type:     Stream (XADD / XRANGE / XREVRANGE / XTRIM)
 Entry ID: auto (ms-seq)
 Fields:
@@ -37,18 +48,18 @@ Fields:
 ```
 
 Companion keys:
-- `ws:{id}:sess:{sid}:summary` — hash. `HINCRBY` on count/bytes per op alongside each `XADD`. Cheap "what did this session do" rollup.
-- `ws:{id}:path:{path}:last` — hash with `last_entry_id`, `last_session_id`, `last_hash`. Updated on every write. Powers "who last touched this path" without scanning.
+- `afs:{id}:sess:{sid}:summary` — hash. `HINCRBY` on count/bytes per op alongside each `XADD`. Cheap "what did this session do" rollup.
+- `afs:{id}:path:last:{path}` — hash with `last_entry_id`, `last_session_id`, `last_hash`. Updated on every write. Powers "who last touched this path" without scanning.
 
 **Queries**
 | Need | How |
 |---|---|
-| Session timeline | `XRANGE ws:{id}:changelog - +` filtered by `session_id` (V1); small enough for short sessions |
-| Workspace recent feed | `XREVRANGE ws:{id}:changelog + - COUNT N` |
+| Session timeline | `XRANGE afs:{id}:workspace:changelog - +` filtered by `session_id` (V1); small enough for short sessions |
+| Workspace recent feed | `XREVRANGE afs:{id}:workspace:changelog + - COUNT N` |
 | Path history | deep: scan stream; V1 ship the "last writer" from `path:last` only |
-| Session summary totals | `HGETALL ws:{id}:sess:{sid}:summary` |
+| Session summary totals | `HGETALL afs:{id}:sess:{sid}:summary` |
 
-If session-filter scans get expensive later, add `ws:{id}:sess:{sid}:entries` (list of entry IDs) as a secondary index, or a second stream scoped to the session.
+If session-filter scans get expensive later, add `afs:{id}:sess:{sid}:entries` (list of entry IDs) as a secondary index, or a second stream scoped to the session.
 
 **Retention.** `XADD ... MAXLEN ~ N` per workspace at write time for soft cap; a periodic `XTRIM MINID` by age for hard cap. Per-workspace configurable.
 
@@ -59,12 +70,16 @@ Control-plane-side emission, not agent-side — the server is the authority on w
 
 | Hook | Emits |
 |---|---|
-| [service.go:1030](internal/controlplane/service.go) `SaveCheckpoint` manifest diff vs parent | one row per changed path, tagged with `checkpoint_id` |
+| [service.go:1030](../../internal/controlplane/service.go) `SaveCheckpoint` manifest diff vs parent | one row per changed path, tagged with `checkpoint_id` |
 | sync upload receive path (server receives manifest delta from agent) | one row per op as the server applies it |
-| [service.go](internal/controlplane/service.go) `RestoreCheckpoint` | rows with `source=server_restore` for paths the restore mutated |
-| [service.go](internal/controlplane/service.go) `ImportWorkspace` | rows with `source=import` |
+| [service.go](../../internal/controlplane/service.go) `RestoreCheckpoint` | rows with `source=server_restore` for paths the restore mutated |
+| [service.go](../../internal/controlplane/service.go) `ImportWorkspace` | rows with `source=import` |
 
-Every write that reaches Redis also `XADD`s to the stream. Same code path that mutates the manifest issues the `XADD` + `HINCRBY` + `path:last` update. Tiny drift window between the FS mutation and the stream write is acceptable for V1; migrate the writes into the AFS Redis module for atomicity once the shape is settled.
+Every write that reaches Redis also `XADD`s to the stream. Same code path that
+mutates the manifest issues the `XADD` + `HINCRBY` + `path:last` update. Tiny
+drift window between the FS mutation and the stream write is acceptable for V1;
+if profiling shows the overhead matters, batch the Redis writes in the Go
+client path instead of reviving the retired Redis module.
 
 **Diffing:** when an agent submits a manifest delta, we already know old-hash / new-hash per path (the manifest carries it). No extra hashing. For checkpoint save we walk parent→child manifest diff once.
 
@@ -85,7 +100,12 @@ Agents benefit from reading their own change log mid-run (e.g. "what have I done
 - HTTP `GET /v1/sessions/{id}/changes?since=seq`
 
 ### Retention
-Stream is trimmed by a combination of `MAXLEN ~` at write time (soft cap, e.g. 100k entries per workspace) and a periodic `XTRIM MINID` by age (hard cap, e.g. 30 days). Session summary hashes (`ws:{id}:sess:{sid}:summary`) persist for the life of the session + a configurable grace period, then drop. Per-workspace `path:last` entries persist indefinitely — one hash per live path, cheap. All thresholds configurable per workspace.
+Stream is trimmed by a combination of `MAXLEN ~` at write time (soft cap, e.g.
+100k entries per workspace) and a periodic `XTRIM MINID` by age (hard cap, e.g.
+30 days). Session summary hashes (`afs:{id}:sess:{sid}:summary`) persist for the
+life of the session + a configurable grace period, then drop. Per-workspace
+`path:last` entries persist indefinitely — one hash per live path, cheap. All
+thresholds configurable per workspace.
 
 ### Non-goals for this milestone
 - Content diffs (line-level). Hash + size is enough for V1; content diff is a later layer on top.
@@ -202,9 +222,9 @@ Four signal types. Each has a different storage/query pattern.
 | Counters | files_uploaded_total, auth_failures_total | Prom or SQLite rollup |
 | Gauges | active_sessions, redis_memory_used | Prom scrape or polled |
 | Histograms | sync_upload_latency, checkpoint_save_bytes | Prom or bucket-in-SQLite |
-| Events (activity) | "agent X modified /foo", "session Y went stale" | SQLite (already exists) |
+| Events (activity) | "agent X modified /foo", "session Y went stale" | Redis streams |
 
-Activity events are already partially there — [catalog_health.go](internal/controlplane/catalog_health.go) and the `/v1/activity` endpoint. Lean into it.
+Activity events are already partially there — [catalog_health.go](../../internal/controlplane/catalog_health.go) and the `/v1/activity` endpoint. Lean into it.
 
 ---
 
@@ -217,7 +237,7 @@ Activity events are already partially there — [catalog_health.go](internal/con
 - `afs_session_duration_seconds` histogram (observed at close)
 - `afs_session_heartbeats_total{state_transition}` — active→stale transitions are the signal
 
-Instrument at [service.go:405-593](internal/controlplane/service.go) (`CreateWorkspaceSession`, `HeartbeatWorkspaceSession`, `CloseWorkspaceSession`, `reapExpiredWorkspaceSessions`).
+Instrument at [service.go:405-593](../../internal/controlplane/service.go) (`CreateWorkspaceSession`, `HeartbeatWorkspaceSession`, `CloseWorkspaceSession`, `reapExpiredWorkspaceSessions`).
 
 ### 3.2 File-sync throughput (server view)
 - `afs_sync_ops_total{op,outcome}` — op = file_put|file_del|mkdir|symlink|chmod|chunk
@@ -225,7 +245,7 @@ Instrument at [service.go:405-593](internal/controlplane/service.go) (`CreateWor
 - `afs_sync_conflicts_total{resolution}` — resolution = local_win|remote_win|abort
 - `afs_manifest_rejections_total{reason}` — reason = hash_mismatch|race|schema
 
-Instrument at [sync_uploader.go:91-267](cmd/afs/sync_uploader.go) (agent-side emit) and the server-side receive path.
+Instrument at [sync_uploader.go:91-267](../../cmd/afs/sync_uploader.go) (agent-side emit) and the server-side receive path.
 
 ### 3.3 Checkpoints
 - `afs_checkpoint_ops_total{op,outcome}` — op = save|restore|fork|delete
@@ -233,16 +253,16 @@ Instrument at [sync_uploader.go:91-267](cmd/afs/sync_uploader.go) (agent-side em
 - `afs_checkpoint_save_duration_seconds` histogram
 - `afs_checkpoint_file_count` histogram (how big are the trees?)
 
-[service.go:1030-1157](internal/controlplane/service.go) `SaveCheckpoint`.
+[service.go:1030-1157](../../internal/controlplane/service.go) `SaveCheckpoint`.
 
 ### 3.4 HTTP control plane
-Standard RED metrics per route. Wrap the handler registered in [http.go](internal/controlplane/http.go):
+Standard RED metrics per route. Wrap the handler registered in [http.go](../../internal/controlplane/http.go):
 - `afs_http_requests_total{route,method,status}`
 - `afs_http_request_duration_seconds{route}`
 - `afs_http_requests_in_flight`
 
 ### 3.5 Redis / data plane
-Already collected by [redis_stats.go](internal/controlplane/redis_stats.go). Expose as gauges:
+Already collected by [redis_stats.go](../../internal/controlplane/redis_stats.go). Expose as gauges:
 - `afs_redis_memory_bytes{database}`
 - `afs_redis_memory_fragmentation_ratio{database}`
 - `afs_redis_ops_per_sec{database}`
@@ -257,7 +277,7 @@ Add: `afs_redis_probe_duration_seconds{database}` — our own latency to Redis, 
 - `afs_auth_tokens_active{kind}` gauge
 - `afs_auth_token_exchanges_total`
 
-[auth.go](internal/controlplane/auth.go), esp. `verifyClerkSessionToken`, `AttachCLITokenAuthenticator`.
+[auth.go](../../internal/controlplane/auth.go), esp. `verifyClerkSessionToken`, `AttachCLITokenAuthenticator`.
 
 ### 3.7 Storage cost (derived)
 - `afs_workspace_blob_bytes{workspace}` — sum of unique blob sizes
@@ -298,7 +318,7 @@ Serves three UIs: live tail in CLI, workspace activity panel in UI, audit log.
 Pulled from session catalog + manifest history. No new storage needed — query differently.
 
 ### 4.4 Per-file "exhaust" (agent activity summary)
-For the end user: "in this session my agent touched N files, added X KB, deleted Y files." Summarize the uploader result stream at [sync_uploader.go](cmd/afs/sync_uploader.go).
+For the end user: "in this session my agent touched N files, added X KB, deleted Y files." Summarize the uploader result stream at [sync_uploader.go](../../cmd/afs/sync_uploader.go).
 
 ---
 
@@ -315,7 +335,8 @@ Labels to avoid on hot metrics:
 - `path` (unbounded)
 - `user_id` (medium, keep only on auth metrics)
 
-Rule: per-workspace metrics live in SQLite rollups, not Prom labels. Fleet-wide aggregates go to Prom.
+Rule: per-workspace metrics live in Redis-derived rollups or optional catalog
+projections, not Prom labels. Fleet-wide aggregates go to Prom.
 
 ---
 
@@ -324,13 +345,15 @@ Rule: per-workspace metrics live in SQLite rollups, not Prom labels. Fleet-wide 
 Three transport options, use all three:
 
 1. **Structured logs (slog)** — every event emits a log line with fields. Cheap, searchable, no infra. Start here.
-2. **SQLite activity/rollup tables** — already have the catalog pattern. Add `observability_events` and nightly `workspace_rollup` tables. Powers UI + CLI.
+2. **Catalog rollup projections** — optional derived tables can cache
+   workspace/session aggregates for UI speed, but Redis Streams remain the
+   source of truth.
 3. **Prometheus `/metrics` endpoint** — operator-facing, Grafana-ready. Add when (2) stops scaling.
 
 Phasing:
 - **Phase 1a** (first): per-session file-change log (see §0). Schema + server-side emission + UI tab + CLI.
 - **Phase 1b**: slog everywhere + extend activity log schema for non-file events (sessions, auth, checkpoints). Zero new infra.
-- **Phase 2**: SQLite rollups + UI dashboards for workspace/session detail.
+- **Phase 2**: derived rollups + UI dashboards for workspace/session detail.
 - **Phase 3**: Prometheus endpoint + public dashboard for operators.
 
 ---
@@ -341,17 +364,17 @@ Minimum set for Phase 1:
 
 | File | What to emit |
 |---|---|
-| [service.go:405](internal/controlplane/service.go) | session_created |
-| [service.go:537](internal/controlplane/service.go) | session_heartbeat (sampled) |
-| [service.go:561](internal/controlplane/service.go) | session_closed |
-| [service.go:689](internal/controlplane/service.go) | session_stale |
-| [service.go:1030](internal/controlplane/service.go) | checkpoint_saved |
-| [http.go](internal/controlplane/http.go) middleware | http_request |
-| [auth.go](internal/controlplane/auth.go) | auth_attempt |
-| [sync_uploader.go:91](cmd/afs/sync_uploader.go) | upload_op |
-| [sync_downloader.go:100](cmd/afs/sync_downloader.go) | download_op |
-| [sync_reconcile.go:501](cmd/afs/sync_reconcile.go) | reconcile_cycle |
-| [redis_stats.go:35](internal/controlplane/redis_stats.go) | redis_poll (add probe latency) |
+| [service.go:405](../../internal/controlplane/service.go) | session_created |
+| [service.go:537](../../internal/controlplane/service.go) | session_heartbeat (sampled) |
+| [service.go:561](../../internal/controlplane/service.go) | session_closed |
+| [service.go:689](../../internal/controlplane/service.go) | session_stale |
+| [service.go:1030](../../internal/controlplane/service.go) | checkpoint_saved |
+| [http.go](../../internal/controlplane/http.go) middleware | http_request |
+| [auth.go](../../internal/controlplane/auth.go) | auth_attempt |
+| [sync_uploader.go:91](../../cmd/afs/sync_uploader.go) | upload_op |
+| [sync_downloader.go:100](../../cmd/afs/sync_downloader.go) | download_op |
+| [sync_reconcile.go:501](../../cmd/afs/sync_reconcile.go) | reconcile_cycle |
+| [redis_stats.go:35](../../internal/controlplane/redis_stats.go) | redis_poll (add probe latency) |
 
 ---
 
@@ -382,7 +405,7 @@ Minimum set for Phase 1:
 ## 9. Non-goals (for now)
 
 - Distributed tracing (OTEL) — overkill until we have multiple services.
-- Per-path cardinality in Prom — use SQLite rollups.
+- Per-path cardinality in Prom — use derived rollups.
 - Real-time streaming to UI — polling is fine at this scale.
 - Alerting rules — design after metrics exist.
 

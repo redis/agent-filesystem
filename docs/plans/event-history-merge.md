@@ -1,5 +1,8 @@
 # Event History Merge
 
+Last reviewed: 2026-04-24.
+Status: active follow-up plan.
+
 Merge `workspace:audit` (lifecycle) + `workspace:changelog` (file ops) → single unified stream. One source of truth for "what happened to this workspace," one UI surface, one CLI command.
 
 ---

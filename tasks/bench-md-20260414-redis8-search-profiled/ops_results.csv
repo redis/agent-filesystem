@@ -1,6 +1,0 @@
-name,local_label,redis_label,local_median_ms,redis_median_ms,ratio,local_count,redis_count,validation
-tree_walk,filepath.WalkDir,client.Tree,2.950,40.222,13.635,4049,4049,counts match (4049)
-find_runbook_names,local basename filter,client.Find,2.958,34.989,11.829,1000,1000,counts match (1000)
-read_hot_files,os.ReadFile,client.Cat,1.343,164.855,122.751,792005,792005,counts match (792005)
-head_hot_files,local head(40),client.Head(40),1.942,163.683,84.286,75690,75690,counts match (75690)
-line_window_hot_files,local lines(15..35),client.Lines(15..35),1.907,162.454,85.188,49587,49587,counts match (49587)

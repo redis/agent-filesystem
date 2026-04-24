@@ -6,8 +6,8 @@ import (
 )
 
 const (
-	// ProductModeEnvVar declares whether this control plane is the Anthropic-
-	// hosted cloud build or a self-hosted deployment. Affects install.sh output
+	// ProductModeEnvVar declares whether this control plane is the AFS Cloud
+	// build or a self-hosted deployment. Affects install.sh output
 	// and the /v1/auth/config response so the UI can tailor onboarding.
 	ProductModeEnvVar = "AFS_PRODUCT_MODE"
 

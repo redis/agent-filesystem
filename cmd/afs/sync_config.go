@@ -12,10 +12,6 @@ const (
 	modeNone  = "none"
 )
 
-// defaultSyncFileSizeCapMB is the per-file ceiling enforced by the sync
-// uploader. The Redis backend stores file content as a single hash field with
-// an implicit 512 MB cap; we set the default low enough that users get a
-// clean error before they hit the wall.
 // defaultSyncFileSizeCapMB is raised from 64 to 2048 (2 GB) now that
 // chunked delta sync avoids loading entire files into memory.
 const defaultSyncFileSizeCapMB = 2048

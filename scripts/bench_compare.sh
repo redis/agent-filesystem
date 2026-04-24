@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ROUNDS="${1:-5}"
-OUT_DIR="${2:-$(pwd)/tasks/perf-run-$(date +%Y%m%d-%H%M%S)}"
+OUT_DIR="${2:-/tmp/afs-perf-run-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$OUT_DIR"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

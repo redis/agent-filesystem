@@ -55,7 +55,7 @@ Use a config like:
     "sync": "/tmp/afs-sync.log"
   },
   "sync": {
-    "fileSizeCapMB": 100
+    "fileSizeCapMB": 2048
   }
 }
 ```

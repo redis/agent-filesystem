@@ -1,10 +1,7 @@
 # AFS Cloud Control Plane Design
 
 Date: 2026-04-13
-Status: In progress
-
-Follow-up execution plan:
-`docs/afs-cloud-execution-plan.md`
+Status: Current architecture reference with remaining hosted gaps
 
 ## Purpose
 
@@ -57,10 +54,18 @@ AFS already has useful building blocks:
 Important current constraints:
 
 - the CLI runtime still assumes it can connect directly to Redis for `up`, sync, and mount
-- the hosted HTTP control plane is browse-oriented today, not yet the full remote execution path
-- there is no user auth, no browser login flow, and no secure profile/token storage
-- there is no durable concept of active connected clients
-- the browser-facing surface and the local-client/session surface are not yet clearly separated
+- cloud login and token exchange exist, but the hosted product still uses a
+  browser-mediated bootstrap rather than a complete durable cloud account,
+  organization, profile, and credential-brokering model
+- auth middleware exists for `none`, trusted-header, Clerk, CLI tokens, and MCP
+  tokens, but full service-layer authorization for every tenant-scoped operation
+  is still incomplete
+- the CLI can use the HTTP backend for self-managed and cloud profiles, but cloud
+  mode still needs short-lived Redis/session renewal semantics before it is a
+  complete remote execution path
+- sync is the managed local surface today; mount mode is still local-only for
+  control-plane-managed usage
+- provider/database credentials are not yet behind a production secret-store layer
 
 ## Implementation Status
 
@@ -70,11 +75,13 @@ This section reflects the repository as it exists today.
 
 - explicit runtime modes now exist in the CLI config and bootstrap path:
   `local`, `self-hosted`, and `cloud`
-- the legacy `direct` name is still accepted as an alias for `local`
 - the CLI now has a backend boundary instead of assuming one direct Redis path everywhere
 - `local` mode continues to use the direct Redis-backed runtime path
 - `self-hosted` mode now has an HTTP control-plane client and backend
 - the control plane now exposes separate admin and client route surfaces
+- the control plane now exposes auth runtime configuration, onboarding-token
+  exchange, trusted-header/Clerk-backed auth middleware, CLI token auth, and MCP
+  token auth
 - workspace and checkpoint control-plane operations now work over HTTP in `self-hosted` mode
 - `afs up` and `afs down` now work in `self-hosted` mode for `sync`
 - `afs up` in `self-hosted` mode now asks the control plane for a workspace bootstrap/session bundle, then starts the local sync daemon from that bundle
@@ -88,21 +95,26 @@ This section reflects the repository as it exists today.
 - the control plane now exposes catalog health and repair endpoints for workspace/session reconciliation
 - the web UI primary navigation is now workspace-first; the database selector has been removed and databases are now a normal management tab in the sidebar
 - workspace detail, agents, overview, and activity views now carry enough workspace/database routing context to operate without a globally selected database
+- `afs login`, `afs logout`, and `afs status` now exist, including the
+  browser-mediated cloud login/onboarding path
 
 ### Partially completed
 
-- route-surface split exists, but there is still no auth boundary between them
+- route-surface split and auth middleware exist, but service-layer tenant checks
+  are still uneven across the older control-plane operations
 - workspace-first routing now exists with stable opaque workspace ids, but some mutation paths and follow-on UX still need cleanup around fully id-first APIs
 - `self-hosted` `afs up` works only for `sync`; mount mode is still local-only
 - the web UI is now mostly workspace-first, but a few creation/mutation paths still depend on scoped database endpoints under the hood
+- cloud login exists as a bootstrap path, but durable secure profile storage,
+  user/org ownership, token refresh, and credential brokering are not complete
 
 ### Not started yet
 
-- browser login and CLI login for AFS Cloud (`afs login/logout/status`)
-- secure token storage and profile management
 - secret-store support for provider credentials
 - Redis Cloud managed provisioning flow
-- real `cloud` runtime mode (`cloud` remains intentionally unimplemented)
+- fully brokered short-lived cloud session issuance and renewal for all local
+  runtime bindings
+- cloud-connected mount mode and external hybrid connector support
 
 ## Product Modes
 
@@ -125,7 +137,6 @@ Today's behavior.
 - local config points at Redis directly
 - local sync and mount keep working unchanged
 - no hosted control plane required
-- `direct` remains accepted as a legacy config alias
 
 ### `self-hosted`
 
@@ -269,7 +280,7 @@ For the first cloud-connected version, the local runtime should still talk to Re
 
 What changes is who mints the Redis access:
 
-- in `direct` mode, the CLI uses locally configured Redis credentials
+- in `local` mode, the CLI uses locally configured Redis credentials
 - in `cloud` mode, the CLI asks the control plane for a short-lived workspace session bundle
 
 That session bundle contains only the minimum needed to operate on one workspace for a limited time.
@@ -765,7 +776,7 @@ We should evolve toward:
 {
   "profiles": {
     "local": {
-      "mode": "direct"
+      "mode": "local"
     },
     "cloud": {
       "mode": "cloud",
@@ -906,7 +917,7 @@ Scope:
 Why first:
 
 - this is the smallest change that unlocks everything else
-- it makes cloud/direct behavior an explicit runtime contract instead of an implicit pile of conditionals
+- it makes cloud/local behavior an explicit runtime contract instead of an implicit pile of conditionals
 
 Tests:
 
@@ -939,7 +950,7 @@ What is done:
 
 What is still missing in this phase:
 
-- parity for every direct-only CLI operation
+- parity for every local-only CLI operation
 - mount-mode support over HTTP/self-hosted
 - auth on either route surface
 
@@ -957,7 +968,7 @@ Exit criteria:
 Current status against exit criteria:
 
 - achieved for workspace/checkpoint operations and sync startup
-- not yet achieved for all direct-only commands or mount mode
+- not yet achieved for all local-only commands or mount mode
 
 ### Phase 2b: Control-plane catalog and workspace-first routing
 
@@ -1000,7 +1011,7 @@ Current status against exit criteria:
 
 ### Phase 3: Browser login for AFS Cloud
 
-Status: not started
+Status: partially complete
 
 Scope:
 
@@ -1010,6 +1021,21 @@ Scope:
 - add local token validation via JWKS or equivalent verifier cache
 - add secure token storage in the CLI
 - implement `afs login/logout/status`
+
+What is done:
+
+- `afs login`, `afs logout`, and cloud-aware `afs status` exist
+- the CLI can open a browser-mediated login/onboarding flow and exchange the
+  onboarding token with the control plane
+- the control plane exposes auth runtime config and supports trusted-header,
+  Clerk, CLI-token, and MCP-token authentication paths
+
+What is still missing:
+
+- complete account/organization ownership model
+- secure OS-backed token/profile storage and refresh
+- hosted UI sign-in as the primary account surface
+- consistent service-layer authorization for every tenant-scoped operation
 
 Tests:
 
@@ -1195,18 +1221,21 @@ This gets user-visible value early without forcing a Redis Cloud auth decision u
 
 ## Recommended Next Steps
 
-The current repo is now past the initial opaque-workspace-id milestone.
+The current repo is now past the initial opaque-workspace-id milestone and has
+the first browser-mediated CLI login/bootstrap path.
 
-The next implementation slices should build on that catalog groundwork to add
-real hosted identity and credential brokering.
+The next implementation slices should turn that bootstrap path into real hosted
+identity, profile storage, and credential brokering.
 
-### Immediate next step: cloud identity and session brokering
+### Immediate next step: harden cloud identity and session brokering
 
 Concretely:
 
-- add browser and CLI auth for AFS Cloud with browser-launched PKCE for the CLI
+- add durable account, organization, and membership ownership to hosted records
 - add secure token storage and profile handling in the CLI
-- protect hosted workspace/session routes with real auth instead of self-hosted trust
+- finish token refresh/session renewal semantics for long-running sync daemons
+- protect hosted workspace/session routes with real service-layer auth instead
+  of only transport middleware
 - attach user/org ownership to workspaces and sessions in the control-plane catalog
 - build real cloud session issuance and renewal on top of the existing catalog-backed workspace identity model
 
@@ -1226,8 +1255,6 @@ Once auth and secret-backed bindings exist:
 1. Ship managed database creation in the hosted UI.
 2. Ship reachable external database attachment and validation.
 3. Keep browser-assisted Redis Cloud linking as an explicit later enhancement.
-
-See `docs/afs-cloud-execution-plan.md` for the review-oriented phase plan.
 
 ## What We Should Not Do First
 
