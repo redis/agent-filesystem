@@ -13,6 +13,7 @@ import {
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { LiveTopologyCard } from "../components/live-topology-card";
+import { CreateWorkspaceDialog } from "../features/workspaces/CreateWorkspaceDialog";
 import { formatBytes } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
@@ -23,6 +24,9 @@ import {
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
 import type { AFSWorkspaceDetail } from "../foundation/types/afs";
+import { templates } from "../features/templates/templates-data";
+
+const FEATURED_TEMPLATES = templates.filter((template) => template.id !== "blank").slice(0, 4);
 
 export const Route = createFileRoute("/")({
   loader: async () => {
@@ -102,49 +106,102 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
   totalBytes: number;
 }) {
   const navigate = useNavigate();
+  const [createOpen, setCreateOpen] = useState(false);
   const connectedAgents = agents.length;
 
   return (
-    <PageStack>
-      <StatGrid>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Workspaces</StatLabel>
-            <StatValue>{workspaces.length}</StatValue>
-          </div>
-          <StatDetail>
-            {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered across{" "}
-            {databases.length} database{databases.length === 1 ? "" : "s"}.
-          </StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Stored Data</StatLabel>
-            <StatValue>{formatBytes(totalBytes)}</StatValue>
-          </div>
-          <StatDetail>Total durable content tracked across all workspaces.</StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Checkpoints</StatLabel>
-            <StatValue>{checkpointCount}</StatValue>
-          </div>
-          <StatDetail>{checkpointCoverage}% of workspaces have checkpoint history.</StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/agents" })}>
-          <div>
-            <StatLabel>Connected Agents</StatLabel>
-            <StatValue>{connectedAgents}</StatValue>
-          </div>
-          <StatDetail>
-            {connectedAgents === 0
-              ? "No agents are currently connected."
-              : `${connectedAgents} live ${connectedAgents === 1 ? "agent" : "agents"} reporting workspace sessions.`}
-          </StatDetail>
-        </ClickableStatCard>
-      </StatGrid>
-      <LiveTopologyCard agents={agents as any} workspaces={workspaces as any} />
-    </PageStack>
+    <>
+      <PageStack>
+        <StatGrid>
+          <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
+            <div>
+              <StatLabel>Workspaces</StatLabel>
+              <StatValue>{workspaces.length}</StatValue>
+            </div>
+            <StatDetail>
+              {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered across{" "}
+              {databases.length} database{databases.length === 1 ? "" : "s"}.
+            </StatDetail>
+          </ClickableStatCard>
+          <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
+            <div>
+              <StatLabel>Stored Data</StatLabel>
+              <StatValue>{formatBytes(totalBytes)}</StatValue>
+            </div>
+            <StatDetail>Total durable content tracked across all workspaces.</StatDetail>
+          </ClickableStatCard>
+          <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
+            <div>
+              <StatLabel>Checkpoints</StatLabel>
+              <StatValue>{checkpointCount}</StatValue>
+            </div>
+            <StatDetail>{checkpointCoverage}% of workspaces have checkpoint history.</StatDetail>
+          </ClickableStatCard>
+          <ClickableStatCard onClick={() => navigate({ to: "/agents" })}>
+            <div>
+              <StatLabel>Connected Agents</StatLabel>
+              <StatValue>{connectedAgents}</StatValue>
+            </div>
+            <StatDetail>
+              {connectedAgents === 0
+                ? "No agents are currently connected."
+                : `${connectedAgents} live ${connectedAgents === 1 ? "agent" : "agents"} reporting workspace sessions.`}
+            </StatDetail>
+          </ClickableStatCard>
+        </StatGrid>
+        <LiveTopologyCard agents={agents as any} workspaces={workspaces as any} />
+        <TemplateOnboardingBanner
+          onBrowseTemplates={() => void navigate({ to: "/templates" })}
+          onCreateBlank={() => setCreateOpen(true)}
+        />
+      </PageStack>
+      <CreateWorkspaceDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+    </>
+  );
+}
+
+function TemplateOnboardingBanner({
+  onBrowseTemplates,
+  onCreateBlank,
+}: {
+  onBrowseTemplates: () => void;
+  onCreateBlank: () => void;
+}) {
+  return (
+    <TemplateBanner>
+      <TemplateBannerBody>
+        <TemplateBannerEyebrow>Next workspace</TemplateBannerEyebrow>
+        <TemplateBannerTitle>Get started creating your next workspace</TemplateBannerTitle>
+        <TemplateBannerText>
+          Keep your starter workspace as the sandbox, then create a focused
+          workspace from a template when you know what agents should share.
+        </TemplateBannerText>
+        <TemplateBannerActions>
+          <Button size="large" onClick={onBrowseTemplates}>
+            Browse templates
+          </Button>
+          <Button size="large" variant="secondary-fill" onClick={onCreateBlank}>
+            Create blank workspace
+          </Button>
+        </TemplateBannerActions>
+      </TemplateBannerBody>
+      <TemplatePreviewList aria-label="Featured templates">
+        {FEATURED_TEMPLATES.map((template) => (
+          <TemplatePreviewItem key={template.id} $accent={template.accent}>
+            <TemplatePreviewIcon $accent={template.accent}>
+              <template.icon size="M" />
+            </TemplatePreviewIcon>
+            <TemplatePreviewCopy>
+              <TemplatePreviewTitle>{template.title}</TemplatePreviewTitle>
+              <TemplatePreviewMeta>{template.profileLabel}</TemplatePreviewMeta>
+            </TemplatePreviewCopy>
+          </TemplatePreviewItem>
+        ))}
+      </TemplatePreviewList>
+    </TemplateBanner>
   );
 }
 
@@ -156,6 +213,9 @@ function GettingStartedView({
   onQuickstartCreated: (workspace: AFSWorkspaceDetail) => void;
 }) {
   const quickstartMutation = useQuickstartMutation();
+  const quickstartErrorMessage = quickstartMutation.isError
+    ? quickstartMutation.error.message || "Something went wrong."
+    : null;
 
   const handleQuickstart = async () => {
     try {
@@ -197,13 +257,13 @@ function GettingStartedView({
               ? "We'll preload sample files so you can explore in seconds."
               : "Requires Redis running on localhost:6379"}
           </CTAHint>
-          {quickstartMutation.isError && (
+          {quickstartErrorMessage ? (
             <QuickstartError>
-              {quickstartMutation.error?.message?.includes("cannot connect")
+              {quickstartErrorMessage.includes("cannot connect")
                 ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
-                : quickstartMutation.error?.message ?? "Something went wrong."}
+                : quickstartErrorMessage}
             </QuickstartError>
-          )}
+          ) : null}
         </CTABlock>
 
         <BenefitsGrid>
@@ -404,6 +464,123 @@ const FooterLink = styled.a`
   &:hover {
     text-decoration: underline;
   }
+`;
+
+const TemplateBanner = styled.section`
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 24px;
+  align-items: center;
+  border: 1px solid var(--afs-line);
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.88)),
+    color-mix(in srgb, var(--afs-accent, #2563eb) 7%, var(--afs-panel-strong));
+  padding: 24px;
+
+  @media (max-width: 980px) {
+    grid-template-columns: 1fr;
+  }
+
+  @media (max-width: 640px) {
+    padding: 18px;
+  }
+`;
+
+const TemplateBannerBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+`;
+
+const TemplateBannerEyebrow = styled.div`
+  color: var(--afs-accent, #2563eb);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const TemplateBannerTitle = styled.h2`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 24px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: 0;
+`;
+
+const TemplateBannerText = styled.p`
+  margin: 0;
+  max-width: 62ch;
+  color: var(--afs-muted);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
+const TemplateBannerActions = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+`;
+
+const TemplatePreviewList = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const TemplatePreviewItem = styled.div<{ $accent: string }>`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, ${({ $accent }) => $accent} 18%, var(--afs-line));
+  border-radius: 12px;
+  background: color-mix(in srgb, ${({ $accent }) => $accent} 7%, var(--afs-panel-strong));
+`;
+
+const TemplatePreviewIcon = styled.div<{ $accent: string }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: color-mix(in srgb, ${({ $accent }) => $accent} 16%, transparent);
+  color: ${({ $accent }) => $accent};
+`;
+
+const TemplatePreviewCopy = styled.div`
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const TemplatePreviewTitle = styled.span`
+  color: var(--afs-ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const TemplatePreviewMeta = styled.span`
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.3;
 `;
 
 const ClickableStatCardWrap = styled.div`
