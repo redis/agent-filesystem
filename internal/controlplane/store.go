@@ -636,16 +636,37 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 }
 
 func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([]auditRecord, error) {
+	response, err := s.listAuditPage(ctx, workspace, activityListRequest{Limit: int(limit)})
+	if err != nil {
+		return nil, err
+	}
+	return response.Items, nil
+}
+
+type auditListPage struct {
+	Items      []auditRecord
+	NextCursor string
+}
+
+func (s *Store) listAuditPage(ctx context.Context, workspace string, req activityListRequest) (auditListPage, error) {
+	limit := req.Limit
 	if limit <= 0 {
 		limit = 50
 	}
+	if limit > 1000 {
+		limit = 1000
+	}
 	meta, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
 	if err != nil {
-		return nil, err
+		return auditListPage{}, err
 	}
-	streams, err := s.rdb.XRevRangeN(ctx, workspaceAuditKey(storageID), "+", "-", limit).Result()
+	end := "+"
+	if strings.TrimSpace(req.Until) != "" {
+		end = "(" + strings.TrimSpace(req.Until)
+	}
+	streams, err := s.rdb.XRevRangeN(ctx, workspaceAuditKey(storageID), end, "-", int64(limit)).Result()
 	if err != nil {
-		return nil, err
+		return auditListPage{}, err
 	}
 	records := make([]auditRecord, 0, len(streams))
 	for _, stream := range streams {
@@ -667,7 +688,11 @@ func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([
 		record.Op = record.Fields["op"]
 		records = append(records, record)
 	}
-	return records, nil
+	response := auditListPage{Items: records}
+	if len(records) > 0 {
+		response.NextCursor = records[len(records)-1].ID
+	}
+	return response, nil
 }
 
 func ValidateName(kind, value string) error {

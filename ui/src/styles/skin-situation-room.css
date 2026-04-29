@@ -1,0 +1,301 @@
+/* ════════════════════════════════════════════════════════════════════
+   AFS Skin · Situation Room
+   Ported from "Agent Filesystem Coder Edition/tokens.css" (v0.4.1)
+   Scoped under [data-skin="situation-room"]. Dark is canonical;
+   light is a derived variant (see notes inline).
+   ════════════════════════════════════════════════════════════════════ */
+
+:root[data-skin="situation-room"],
+:root[data-skin="situation-room"][data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Surface */
+  --afs-bg:               #091A23;
+  --afs-bg-1:             #0E2330;
+  --afs-bg-2:             #143142;
+  --afs-bg-3:             #1A3D52;
+  /* Bridge to existing classic-token names so styled-components keep working */
+  --afs-bg-soft:          #0E2330;
+  --afs-panel:            #0E2330;
+  --afs-panel-strong:     #143142;
+
+  /* Ink */
+  --afs-ink:              #E8E6DF;
+  --afs-ink-soft:         #B8B6AE;
+  --afs-ink-dim:          #8A8B85;
+  --afs-ink-faint:        #4A4C48;
+  --afs-ink-on-accent:    #091A23;
+  --afs-muted:            #8A8B85;
+
+  /* Lines */
+  --afs-line:             #1D3645;
+  --afs-line-strong:      #284A5E;
+  --afs-line-dashed:      #1D3645;
+
+  /* Accent (lime signal) */
+  --afs-accent:           #DCFF1E;
+  --afs-accent-dim:       #9BB814;
+  --afs-accent-soft:      rgba(220, 255, 30, 0.06);
+  --afs-accent-glow:      rgba(220, 255, 30, 0.40);
+
+  /* State */
+  --afs-ok:               #DCFF1E;
+  --afs-warn:             #FFB547;
+  --afs-err:              #FF4D4D;
+  --afs-info:             #6AD7FF;
+  --afs-amber:            #FFB547;
+
+  /* Brand */
+  --afs-redis-red:        #FF4438;
+
+  /* Data-viz */
+  --afs-viz-1:            #DCFF1E;
+  --afs-viz-2:            #6AD7FF;
+  --afs-viz-3:            #FFB547;
+  --afs-viz-4:            #FF4D4D;
+  --afs-viz-5:            #B8B6AE;
+  --afs-viz-grid:         rgba(220, 255, 30, 0.04);
+
+  /* Typography — families */
+  --afs-font-mono:        'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --afs-font-sans:        'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --afs-font-display:     var(--afs-font-mono);
+  /* Aliases for classic-token consumers */
+  --afs-mono:             var(--afs-font-mono);
+  --afs-sans:             var(--afs-font-sans);
+
+  /* Typography — scale */
+  --afs-fz-3xs:           9px;
+  --afs-fz-2xs:           10px;
+  --afs-fz-xs:            11px;
+  --afs-fz-sm:            12px;
+  --afs-fz-md:            13px;
+  --afs-fz-lg:            15px;
+  --afs-fz-xl:            18px;
+  --afs-fz-2xl:           22px;
+  --afs-fz-display-sm:    clamp(28px, 3.5vw, 48px);
+  --afs-fz-display:       clamp(48px, 7vw, 104px);
+
+  /* Typography — line-height */
+  --afs-lh-tight:         0.95;
+  --afs-lh-snug:          1.2;
+  --afs-lh-base:          1.55;
+  --afs-lh-loose:         1.75;
+
+  /* Typography — tracking */
+  --afs-tr-tight:         -0.02em;
+  --afs-tr-body:           0.01em;
+  --afs-tr-label:          0.10em;
+  --afs-tr-caps:           0.20em;
+
+  /* Weight */
+  --afs-fw-regular:       400;
+  --afs-fw-medium:        500;
+  --afs-fw-semi:          600;
+  --afs-fw-bold:          700;
+
+  /* Spacing */
+  --afs-sp-0:             0;
+  --afs-sp-1:             4px;
+  --afs-sp-2:             8px;
+  --afs-sp-3:             12px;
+  --afs-sp-4:             16px;
+  --afs-sp-5:             20px;
+  --afs-sp-6:             24px;
+  --afs-sp-7:             32px;
+  --afs-sp-8:             40px;
+  --afs-sp-9:             48px;
+  --afs-sp-10:            56px;
+  --afs-sp-11:            64px;
+  --afs-sp-12:            80px;
+
+  /* Layout */
+  --afs-container-max:    1480px;
+  --afs-container-pad:    24px;
+  --afs-side-w:           248px;
+  --afs-side-w-collapsed: 64px;
+  --afs-topbar-h:         52px;
+
+  /* Radius — situation room is square */
+  --afs-r-0:              0px;
+  --afs-r-1:              2px;
+  --afs-r-2:              4px;
+  --afs-r-pill:           999px;
+
+  /* Border width */
+  --afs-bw-thin:          1px;
+  --afs-bw-mid:           2px;
+  --afs-bw-thick:         4px;
+
+  /* Shadow */
+  --afs-shadow-0:         none;
+  --afs-shadow-1:         0 1px 0 rgba(0,0,0,0.25);
+  --afs-shadow-2:         0 4px 12px rgba(0,0,0,0.35);
+  --afs-shadow-glow:      0 0 12px var(--afs-accent-glow);
+  --afs-shadow-stamp:     0 0 0 2px var(--afs-err);
+  --afs-shadow:           var(--afs-shadow-2);
+
+  /* Motion */
+  --afs-dur-instant:      80ms;
+  --afs-dur-fast:         120ms;
+  --afs-dur-base:         180ms;
+  --afs-dur-slow:         280ms;
+  --afs-dur-tick:         1400ms;
+  --afs-ease:             cubic-bezier(0.2, 0.8, 0.2, 1);
+  --afs-ease-in:          cubic-bezier(0.4, 0.0, 1.0, 1.0);
+  --afs-ease-out:         cubic-bezier(0.0, 0.0, 0.2, 1.0);
+  --afs-ease-step:        steps(2, end);
+
+  /* Icon spec */
+  --afs-icon-stroke:      1.5px;
+  --afs-icon-sm:          14px;
+  --afs-icon-md:          16px;
+  --afs-icon-lg:          20px;
+  --afs-icon-xl:          28px;
+
+  /* Z-index */
+  --afs-z-base:           1;
+  --afs-z-sticky:         30;
+  --afs-z-side:           40;
+  --afs-z-modal:          100;
+  --afs-z-toast:          200;
+
+  /* Focus */
+  --afs-focus:            var(--afs-accent);
+  --afs-focus-soft:       var(--afs-accent-soft);
+  --afs-focus-ring:       0 0 0 2px var(--afs-bg), 0 0 0 4px var(--afs-accent);
+
+  /* Pattern grid (consumed by [data-bg-pattern="grid"]) */
+  --afs-pattern-rgb:      220, 255, 30;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Situation Room · Light
+   Redis UI rebrand neutrals with the default Redis UI blue accent.
+   Dark remains the canonical situation-room palette above.
+   ──────────────────────────────────────────────────────────────────── */
+:root[data-skin="situation-room"][data-theme="light"] {
+  color-scheme: light;
+
+  /* Surface — Redis UI light neutral ramp */
+  --afs-bg:               #F8F8F8;
+  --afs-bg-1:             #FFFFFF;
+  --afs-bg-2:             #F3F3F3;
+  --afs-bg-3:             #E6E6E6;
+  --afs-bg-soft:          #FAFAF9;
+  --afs-panel:            #FFFFFF;
+  --afs-panel-strong:     #FFFFFF;
+
+  /* Ink — Redis UI neutral text */
+  --afs-ink:              #282828;
+  --afs-ink-soft:         #414042;
+  --afs-ink-dim:          #6D6E71;
+  --afs-ink-faint:        #A7A9AC;
+  --afs-ink-on-accent:    #FFFFFF;
+  --afs-muted:            #6D6E71;
+
+  /* Lines */
+  --afs-line:             #E6E6E6;
+  --afs-line-strong:      #D1D3D4;
+  --afs-line-dashed:      #E6E6E6;
+
+  /* Accent — Redis UI primary */
+  --afs-accent:           #064EA2;
+  --afs-accent-dim:       #0A4481;
+  --afs-accent-soft:      rgba(6, 78, 162, 0.10);
+  --afs-accent-glow:      rgba(6, 78, 162, 0.22);
+  --afs-accent-fill:      #064EA2;
+
+  /* State */
+  --afs-ok:               #16A34A;
+  --afs-warn:             #B45309;
+  --afs-err:              #DC2626;
+  --afs-info:             #0369A1;
+  --afs-amber:            #B45309;
+
+  /* Shadow */
+  --afs-shadow-0:         none;
+  --afs-shadow-1:         0 1px 0 rgba(40, 40, 40, 0.08);
+  --afs-shadow-2:         0 4px 12px rgba(40, 40, 40, 0.10);
+  --afs-shadow-glow:      0 0 12px rgba(6, 78, 162, 0.22);
+  --afs-shadow:           var(--afs-shadow-2);
+
+  /* Pattern grid */
+  --afs-pattern-rgb:      65, 64, 66;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Body baseline (mono-first, situation-room only)
+   Classic baseline lives in index.css.
+   ════════════════════════════════════════════════════════════════════ */
+
+[data-skin="situation-room"] body {
+  background: var(--afs-bg);
+  color: var(--afs-ink);
+  font-family: var(--afs-font-mono);
+  font-size: var(--afs-fz-md);
+  line-height: var(--afs-lh-base);
+  letter-spacing: var(--afs-tr-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+[data-skin="situation-room"][data-theme="light"] body {
+  background: var(--afs-bg);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Background FX — fixed grid overlay + scanline
+   Gated to situation-room only via component selector below.
+   ════════════════════════════════════════════════════════════════════ */
+
+.afs-bg-fx {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  display: none;
+  background-image:
+    linear-gradient(var(--afs-viz-grid, rgba(220, 255, 30, 0.04)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--afs-viz-grid, rgba(220, 255, 30, 0.04)) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 40%, transparent 100%);
+}
+
+.afs-bg-fx::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 3px);
+}
+
+[data-skin="situation-room"] .afs-bg-fx {
+  display: block;
+}
+
+[data-skin="situation-room"][data-theme="light"] .afs-bg-fx {
+  /* Light grid uses Redis UI neutral ink for visibility */
+  background-image:
+    linear-gradient(rgba(65, 64, 66, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(65, 64, 66, 0.05) 1px, transparent 1px);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Keyframes — name-spaced
+   ════════════════════════════════════════════════════════════════════ */
+
+@keyframes afs-blink   { 50% { opacity: 0.3; } }
+@keyframes afs-pulse   { 0% { transform: scale(0.6); opacity: 1; } 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes afs-spark   { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+@keyframes afs-ticker  { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes afs-cursor  { 50% { opacity: 0; } }
+@keyframes afs-scan    { from { transform: translateY(-100%); } to { transform: translateY(100%); } }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-skin="situation-room"] *,
+  [data-skin="situation-room"] *::before,
+  [data-skin="situation-room"] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

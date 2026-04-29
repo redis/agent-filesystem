@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -110,8 +111,14 @@ type activityEvent struct {
 	Title         string `json:"title"`
 }
 
+type activityListRequest struct {
+	Until string
+	Limit int
+}
+
 type activityListResponse struct {
-	Items []activityEvent `json:"items"`
+	Items      []activityEvent `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
 }
 
 type workspaceDetail struct {
@@ -271,6 +278,7 @@ type WorkspaceSummary = workspaceSummary
 type WorkspaceListResponse = workspaceListResponse
 type CheckpointSummary = checkpointSummary
 type ActivityEvent = activityEvent
+type ActivityListRequest = activityListRequest
 type ActivityListResponse = activityListResponse
 type WorkspaceDetail = workspaceDetail
 type TreeItem = treeItem
@@ -356,6 +364,10 @@ func (s *Service) ListChangelog(ctx context.Context, workspace string, req Chang
 		return ChangelogListResponse{}, err
 	}
 	return s.store.ListChangelog(ctx, storageID, req)
+}
+
+func (s *Service) ListGlobalChangelog(ctx context.Context, req ChangelogListRequest) (ChangelogListResponse, error) {
+	return s.listGlobalChangelog(ctx, req)
 }
 
 // GetSessionChangelogSummary reads the per-session rollup hash.
@@ -644,11 +656,19 @@ func (s *Service) GetFileContent(ctx context.Context, workspace, rawView, rawPat
 }
 
 func (s *Service) ListWorkspaceActivity(ctx context.Context, workspace string, limit int) (ActivityListResponse, error) {
-	return s.listWorkspaceActivity(ctx, workspace, limit)
+	return s.listWorkspaceActivity(ctx, workspace, activityListRequest{Limit: limit})
+}
+
+func (s *Service) ListWorkspaceActivityPage(ctx context.Context, workspace string, req ActivityListRequest) (ActivityListResponse, error) {
+	return s.listWorkspaceActivity(ctx, workspace, req)
 }
 
 func (s *Service) ListGlobalActivity(ctx context.Context, limit int) (ActivityListResponse, error) {
-	return s.listGlobalActivity(ctx, limit)
+	return s.listGlobalActivity(ctx, activityListRequest{Limit: limit})
+}
+
+func (s *Service) ListGlobalActivityPage(ctx context.Context, req ActivityListRequest) (ActivityListResponse, error) {
+	return s.listGlobalActivity(ctx, req)
 }
 
 func ApplyWorkspaceMetaDefaults(cfg Config, meta WorkspaceMeta) WorkspaceMeta {
@@ -878,7 +898,7 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		return workspaceDetail{}, err
 	}
 	stats := s.currentWorkspaceStats(ctx, storageID, headMeta)
-	activity, err := s.listWorkspaceActivity(ctx, storageID, 25)
+	activity, err := s.listWorkspaceActivity(ctx, storageID, activityListRequest{Limit: 25})
 	if err != nil {
 		return workspaceDetail{}, err
 	}
@@ -1621,28 +1641,32 @@ func appendWorkingCopyTreeItems(ctx context.Context, fsClient afsclient.Client, 
 	return nil
 }
 
-func (s *Service) listWorkspaceActivity(ctx context.Context, workspace string, limit int) (activityListResponse, error) {
+func (s *Service) listWorkspaceActivity(ctx context.Context, workspace string, req activityListRequest) (activityListResponse, error) {
+	limit := req.Limit
 	if limit <= 0 {
-		limit = 50
+		req.Limit = 50
+		limit = req.Limit
 	}
 	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	records, err := s.store.ListAudit(ctx, workspace, int64(limit))
+	page, err := s.store.listAuditPage(ctx, workspace, req)
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	items := make([]activityEvent, 0, len(records))
-	for _, record := range records {
+	items := make([]activityEvent, 0, len(page.Items))
+	for _, record := range page.Items {
 		items = append(items, activityFromAudit(meta.Name, record))
 	}
-	return activityListResponse{Items: items}, nil
+	return activityListResponse{Items: items, NextCursor: page.NextCursor}, nil
 }
 
-func (s *Service) listGlobalActivity(ctx context.Context, limit int) (activityListResponse, error) {
+func (s *Service) listGlobalActivity(ctx context.Context, req activityListRequest) (activityListResponse, error) {
+	limit := req.Limit
 	if limit <= 0 {
 		limit = 50
+		req.Limit = limit
 	}
 	metas, err := s.store.ListWorkspaces(ctx)
 	if err != nil {
@@ -1650,19 +1674,115 @@ func (s *Service) listGlobalActivity(ctx context.Context, limit int) (activityLi
 	}
 	items := make([]activityEvent, 0, len(metas))
 	for _, meta := range metas {
-		records, err := s.store.ListAudit(ctx, workspaceStorageID(meta), int64(limit))
+		page, err := s.store.listAuditPage(ctx, workspaceStorageID(meta), req)
 		if err != nil {
 			return activityListResponse{}, err
 		}
-		for _, record := range records {
+		for _, record := range page.Items {
 			items = append(items, activityFromAudit(meta.Name, record))
 		}
 	}
-	sort.Slice(items, func(i, j int) bool { return items[i].CreatedAt > items[j].CreatedAt })
+	sort.Slice(items, func(i, j int) bool { return compareActivityEvents(items[i], items[j]) > 0 })
 	if len(items) > limit {
 		items = items[:limit]
 	}
-	return activityListResponse{Items: items}, nil
+	response := activityListResponse{Items: items}
+	if len(items) > 0 {
+		response.NextCursor = items[len(items)-1].ID
+	}
+	return response, nil
+}
+
+func (s *Service) listGlobalChangelog(ctx context.Context, req ChangelogListRequest) (ChangelogListResponse, error) {
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+		req.Limit = limit
+	}
+	if limit > 1000 {
+		limit = 1000
+		req.Limit = limit
+	}
+	metas, err := s.store.ListWorkspaces(ctx)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	entries := make([]ChangelogEntryRow, 0, limit)
+	for _, meta := range metas {
+		page, err := s.store.ListChangelog(ctx, workspaceStorageID(meta), req)
+		if err != nil {
+			return ChangelogListResponse{}, err
+		}
+		for _, entry := range page.Entries {
+			entry.WorkspaceID = defaultString(meta.ID, meta.Name)
+			entry.WorkspaceName = meta.Name
+			entries = append(entries, entry)
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		comparison := compareChangelogRows(entries[i], entries[j])
+		if req.Reverse {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	response := ChangelogListResponse{Entries: entries}
+	if len(entries) > 0 {
+		response.NextCursor = entries[len(entries)-1].ID
+	}
+	return response, nil
+}
+
+func compareChangelogRows(left, right ChangelogEntryRow) int {
+	if comparison := compareRedisStreamIDs(left.ID, right.ID); comparison != 0 {
+		return comparison
+	}
+	if comparison := strings.Compare(left.WorkspaceID, right.WorkspaceID); comparison != 0 {
+		return comparison
+	}
+	return strings.Compare(left.Path, right.Path)
+}
+
+func compareActivityEvents(left, right activityEvent) int {
+	if comparison := compareRedisStreamIDs(left.ID, right.ID); comparison != 0 {
+		return comparison
+	}
+	if comparison := strings.Compare(left.WorkspaceID, right.WorkspaceID); comparison != 0 {
+		return comparison
+	}
+	return strings.Compare(left.Kind, right.Kind)
+}
+
+func compareRedisStreamIDs(left, right string) int {
+	leftMS, leftSeq := parseRedisStreamID(left)
+	rightMS, rightSeq := parseRedisStreamID(right)
+	if leftMS < rightMS {
+		return -1
+	}
+	if leftMS > rightMS {
+		return 1
+	}
+	if leftSeq < rightSeq {
+		return -1
+	}
+	if leftSeq > rightSeq {
+		return 1
+	}
+	return strings.Compare(left, right)
+}
+
+func parseRedisStreamID(id string) (int64, int64) {
+	ms, seq, ok := strings.Cut(id, "-")
+	if !ok {
+		n, _ := strconv.ParseInt(id, 10, 64)
+		return n, 0
+	}
+	msValue, _ := strconv.ParseInt(ms, 10, 64)
+	seqValue, _ := strconv.ParseInt(seq, 10, 64)
+	return msValue, seqValue
 }
 
 func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta) (workspaceSummary, error) {

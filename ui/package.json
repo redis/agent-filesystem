@@ -4,10 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "templates:generate": "node ../scripts/generate-template-data.mjs",
+    "predev": "npm run templates:generate",
     "dev": "vite",
+    "prebuild": "npm run templates:generate",
     "build": "vite build",
+    "prelint": "npm run templates:generate",
     "lint": "eslint .",
     "preview": "vite preview",
+    "pretest": "npm run templates:generate",
     "test": "vitest run",
     "test:watch": "vitest"
   },

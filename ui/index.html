@@ -5,7 +5,31 @@
     <link rel="icon" type="image/svg+xml" href="/redis-afs-favicon.svg" />
     <link rel="shortcut icon" type="image/svg+xml" href="/redis-afs-favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Redis AFS</title>
+    <script>
+      // Apply persisted skin/theme attributes before React paints to avoid FOUC.
+      // Mirrors defaults in foundation/skin-context.tsx and foundation/theme-context.tsx.
+      (function () {
+        try {
+          var skin = localStorage.getItem("afs_skin");
+          if (skin !== "classic" && skin !== "situation-room") skin = "situation-room";
+          document.documentElement.setAttribute("data-skin", skin);
+
+          var theme = localStorage.getItem("afs_color_mode");
+          if (theme !== "light" && theme !== "dark") theme = "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-skin", "situation-room");
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

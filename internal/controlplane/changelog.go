@@ -375,23 +375,27 @@ type ChangelogListResponse struct {
 // ChangeEntry with the addition of an ID (Redis stream entry ID) and
 // occurred_at timestamp parsed from the ts_ms field.
 type ChangelogEntryRow struct {
-	ID           string `json:"id"`
-	OccurredAt   string `json:"occurred_at,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	AgentID      string `json:"agent_id,omitempty"`
-	User         string `json:"user,omitempty"`
-	Label        string `json:"label,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
-	Op           string `json:"op"`
-	Path         string `json:"path"`
-	PrevPath     string `json:"prev_path,omitempty"`
-	SizeBytes    int64  `json:"size_bytes,omitempty"`
-	DeltaBytes   int64  `json:"delta_bytes,omitempty"`
-	ContentHash  string `json:"content_hash,omitempty"`
-	PrevHash     string `json:"prev_hash,omitempty"`
-	Mode         uint32 `json:"mode,omitempty"`
-	CheckpointID string `json:"checkpoint_id,omitempty"`
-	Source       string `json:"source,omitempty"`
+	ID            string `json:"id"`
+	OccurredAt    string `json:"occurred_at,omitempty"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
+	WorkspaceName string `json:"workspace_name,omitempty"`
+	DatabaseID    string `json:"database_id,omitempty"`
+	DatabaseName  string `json:"database_name,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	User          string `json:"user,omitempty"`
+	Label         string `json:"label,omitempty"`
+	AgentVersion  string `json:"agent_version,omitempty"`
+	Op            string `json:"op"`
+	Path          string `json:"path"`
+	PrevPath      string `json:"prev_path,omitempty"`
+	SizeBytes     int64  `json:"size_bytes,omitempty"`
+	DeltaBytes    int64  `json:"delta_bytes,omitempty"`
+	ContentHash   string `json:"content_hash,omitempty"`
+	PrevHash      string `json:"prev_hash,omitempty"`
+	Mode          uint32 `json:"mode,omitempty"`
+	CheckpointID  string `json:"checkpoint_id,omitempty"`
+	Source        string `json:"source,omitempty"`
 }
 
 func rowFromStreamMessage(msg redis.XMessage) ChangelogEntryRow {

@@ -1,0 +1,17 @@
+{
+  "id": "shared-agent-memory",
+  "slug": "shared-memory",
+  "title": "Shared Agent Memory",
+  "tagline": "A collective long-term memory your whole team of agents can read and write.",
+  "icon": "bot",
+  "accent": "#6366f1",
+  "profile": "workspace-rw",
+  "profileLabel": "Read / write",
+  "summary": [
+    "One memory, many agents, any machine",
+    "Append-only entries keep concurrent writes safe",
+    "Works with Claude Code, Codex, Cursor, or any MCP client"
+  ],
+  "whyItMatters": "Redis-backed filesystem means every agent sees learnings in real time, with sub-millisecond reads. Agent A's discovery from yesterday is Agent B's starting point today — no copy-paste, no syncing.",
+  "firstPrompt": "What do you already know about this workspace? Grep shared-memory/ and summarize."
+}

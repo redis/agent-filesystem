@@ -7,6 +7,7 @@ import { useAuthSession } from "../foundation/auth-context";
 import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
+import { BgFx } from "../layout/situation-room-chrome";
 import { bottomNavigationItems, navigationItems } from "../layout/navigation-items";
 import {
   FlexRow,
@@ -72,6 +73,7 @@ function RootLayout() {
   if (onAuthRoute) {
     return (
       <BackgroundPatternProvider>
+        <BgFx />
         <Outlet />
       </BackgroundPatternProvider>
     );
@@ -79,6 +81,7 @@ function RootLayout() {
 
   return (
     <BackgroundPatternProvider>
+      <BgFx />
       <RouteWarmup />
       <FlexRow>
         <AppSidebar />

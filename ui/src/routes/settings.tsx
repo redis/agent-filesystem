@@ -22,6 +22,7 @@ import {
 import { useAuthSession } from "../foundation/auth-context";
 import { accountQueryOptions, useAccount, useDeleteAccountMutation, useResetAccountDataMutation } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
+import { useSkin, type Skin } from "../foundation/skin-context";
 
 export const Route = createFileRoute("/settings")({
   loader: () =>
@@ -37,6 +38,7 @@ function SettingsPage() {
   if (!auth.supportsAccountAuth) {
     return (
       <PageStack>
+        <SkinSwitcher />
         <SectionCard $span={12}>
           <SectionHeader>
             <SectionTitle
@@ -54,6 +56,55 @@ function SettingsPage() {
   }
 
   return <ClerkSettingsPage />;
+}
+
+const SKIN_OPTIONS: ReadonlyArray<{ value: Skin; label: string; body: string }> = [
+  {
+    value: "classic",
+    label: "Classic",
+    body: "Today's Redis-UI styling — light surfaces, blue accent, rounded cards.",
+  },
+  {
+    value: "situation-room",
+    label: "Modern",
+    body: "Mono-first canvas with a focused app shell, crisp spacing, and high-contrast accents. Work in progress.",
+  },
+];
+
+function SkinSwitcher() {
+  const { skin, setSkin, isSwitcherEnabled } = useSkin();
+
+  if (!isSwitcherEnabled) return null;
+
+  return (
+    <SectionCard $span={12}>
+      <SectionHeader>
+        <SectionTitle
+          title="UI skin (dev only)"
+          body="Switch between visual skins for the AFS console. The setting is stored locally and is not exposed to end users."
+        />
+      </SectionHeader>
+      <SkinGrid>
+        {SKIN_OPTIONS.map((option) => {
+          const active = skin === option.value;
+          return (
+            <SkinOption
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              $active={active}
+              onClick={() => setSkin(option.value)}
+            >
+              <SkinOptionLabel>{option.label}</SkinOptionLabel>
+              <SkinOptionBody>{option.body}</SkinOptionBody>
+              {active ? <SkinOptionStatus>Active</SkinOptionStatus> : null}
+            </SkinOption>
+          );
+        })}
+      </SkinGrid>
+    </SectionCard>
+  );
 }
 
 function ClerkSettingsPage() {
@@ -99,6 +150,7 @@ function ClerkSettingsPage() {
 
   return (
     <PageStack>
+      <SkinSwitcher />
       <SectionCard $span={12}>
         <SectionHeader>
           <SectionTitle
@@ -394,4 +446,61 @@ const DangerButton = styled(Button)`
     border-color: #991b1b;
     background: #991b1b;
   }
+`;
+
+const SkinGrid = styled.div`
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const SkinOption = styled.button<{ $active: boolean }>`
+  position: relative;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line)")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)")};
+  border-radius: 12px;
+  padding: 16px 18px;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  font: inherit;
+  color: var(--afs-ink);
+  transition: border-color 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    border-color: var(--afs-line-strong);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-focus);
+    outline-offset: 2px;
+  }
+`;
+
+const SkinOptionLabel = styled.span`
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--afs-ink);
+`;
+
+const SkinOptionBody = styled.span`
+  font-size: 13px;
+  color: var(--afs-muted);
+  line-height: 1.5;
+`;
+
+const SkinOptionStatus = styled.span`
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--afs-accent);
 `;

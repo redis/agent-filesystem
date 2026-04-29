@@ -24,7 +24,7 @@ AFS_WEB_UI_PORT ?= 5173
 
 .DEFAULT_GOAL := all
 
-.PHONY: help all mount commands afs afs-control-plane afs-control-plane-noui clean test install uninstall install-skill install-skill-local uninstall-skill-local web-install web-build embed-ui web-server web-ui web-dev
+.PHONY: help all mount commands afs afs-control-plane afs-control-plane-noui clean test install uninstall install-skill install-skill-local uninstall-skill-local templates-generate web-install web-build embed-ui web-server web-ui web-dev
 
 help: ## Show repo-specific make targets and common variables.
 	@printf '%s\n' 'AFS make targets:'
@@ -38,6 +38,7 @@ help: ## Show repo-specific make targets and common variables.
 	@printf '  %-20s %s\n' 'clean' 'Remove compiled artifacts.'
 	@printf '  %-20s %s\n' 'install' 'Symlink ./afs into $(BINDIR).'
 	@printf '  %-20s %s\n' 'uninstall' 'Remove the installed afs symlink from $(BINDIR).'
+	@printf '  %-20s %s\n' 'templates-generate' 'Regenerate UI template data from templates/.'
 	@printf '  %-20s %s\n' 'web-install' 'Install UI dependencies into $(UI_DIR).'
 	@printf '  %-20s %s\n' 'web-server' 'Run afs-control-plane on $(AFS_WEB_SERVER_ADDR).'
 	@printf '  %-20s %s\n' 'web-ui' 'Run the Vite UI against $(AFS_WEB_API_BASE_URL).'
@@ -96,6 +97,9 @@ $(UI_NODE_MODULES):
 
 web-install: ## Install UI dependencies into $(UI_DIR).
 web-install: $(UI_NODE_MODULES)
+
+templates-generate: ## Regenerate UI template data from templates/.
+	cd "$(UI_DIR)" && $(NPM) run templates:generate
 
 web-build: ## Build the UI for production.
 web-build: $(UI_NODE_MODULES)

@@ -1,0 +1,17 @@
+{
+  "id": "shared-llm-wiki-karpathy",
+  "slug": "shared-llm-wiki",
+  "title": "Shared LLM Wiki (Karpathy style)",
+  "tagline": "A shared agent-maintained knowledge wiki inspired by Karpathy's LLM wiki: https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f",
+  "icon": "book-open",
+  "accent": "#f97316",
+  "profile": "workspace-rw",
+  "profileLabel": "Read / write",
+  "summary": [
+    "Raw sources stay immutable while agents maintain the wiki",
+    "Index and log files make knowledge compound across sessions",
+    "Works as a shared workspace for multiple agents"
+  ],
+  "whyItMatters": "Instead of rediscovering knowledge from raw documents on every question, agents compile useful findings into a durable markdown wiki. The next agent starts from the maintained synthesis, with source notes, links, and a chronological log already in place.",
+  "firstPrompt": "Read AGENTS.md and wiki/index.md, then tell me how you would ingest the first source into this wiki."
+}

@@ -22,11 +22,12 @@ var (
 		"file_grep":  {},
 	}
 	workspaceWriteTools = map[string]struct{}{
-		"file_write":        {},
-		"file_replace":      {},
-		"file_insert":       {},
-		"file_delete_lines": {},
-		"file_patch":        {},
+		"file_write":            {},
+		"file_create_exclusive": {},
+		"file_replace":          {},
+		"file_insert":           {},
+		"file_delete_lines":     {},
+		"file_patch":            {},
 	}
 	workspaceCheckpointTools = map[string]struct{}{
 		"checkpoint_list":    {},
@@ -57,9 +58,12 @@ func NormalizeMCPProfile(raw string) (string, error) {
 }
 
 func MCPProfileAllowsTool(profile, tool string) bool {
-	profile = strings.TrimSpace(strings.ToLower(profile))
+	normalizedProfile, err := NormalizeMCPProfile(profile)
+	if err != nil {
+		return false
+	}
 	tool = strings.TrimSpace(tool)
-	switch profile {
+	switch normalizedProfile {
 	case MCPProfileWorkspaceRO:
 		return inToolSet(workspaceReadTools, tool)
 	case MCPProfileWorkspaceRW:

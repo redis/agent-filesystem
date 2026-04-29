@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button, Loader } from "@redis-ui/components";
-import { useMemo } from "react";
+import { Button } from "@redis-ui/components";
+import { useMemo, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
@@ -17,12 +17,12 @@ import {
 } from "../components/afs-kit";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { computeChangelogTotals, formatChangelogBytes } from "../foundation/changelog-utils";
-import { useActivity, useInfiniteChangelog } from "../foundation/hooks/use-afs";
+import { useActivityPage, useChangelog } from "../foundation/hooks/use-afs";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import { ChangesTable } from "../foundation/tables/changes-table";
 import type { AFSActivityEvent, AFSChangelogEntry } from "../foundation/types/afs";
 
-const CHANGELOG_PAGE_SIZE = 100;
+const ACTIVITY_PAGE_SIZE = 25;
 
 const activitySearchSchema = z.object({
   view: z.enum(["changes", "events"]).optional(),
@@ -38,25 +38,36 @@ function ActivityPage() {
   const search = Route.useSearch();
   const { unavailableDatabases } = useDatabaseScope();
   const view = search.view ?? "changes";
+  const [changelogCursors, setChangelogCursors] = useState<string[]>([]);
+  const [activityCursors, setActivityCursors] = useState<string[]>([]);
+  const changelogCursor = changelogCursors[changelogCursors.length - 1];
+  const activityCursor = activityCursors[activityCursors.length - 1];
 
-  const activityQuery = useActivity(null, 50, view === "events");
-  const changelogQuery = useInfiniteChangelog(
+  const activityQuery = useActivityPage(
     {
-      limit: CHANGELOG_PAGE_SIZE,
+      limit: ACTIVITY_PAGE_SIZE,
+      until: activityCursor,
+    },
+    view === "events",
+  );
+  const changelogQuery = useChangelog(
+    {
+      limit: ACTIVITY_PAGE_SIZE,
       direction: "desc",
+      until: changelogCursor,
     },
     view === "changes",
   );
 
-  const changelogEntries = useMemo(
-    () => changelogQuery.data?.pages.flatMap((page) => page.entries) ?? [],
-    [changelogQuery.data],
-  );
+  const changelogEntries = changelogQuery.data?.entries ?? [];
+  const activityRows = activityQuery.data?.items ?? [];
   const changelogTotals = useMemo(
     () => computeChangelogTotals(changelogEntries),
     [changelogEntries],
   );
   const hasChangelogEntries = changelogEntries.length > 0;
+  const canPageChangelogNext = Boolean(changelogQuery.data?.nextCursor) && changelogEntries.length === ACTIVITY_PAGE_SIZE;
+  const canPageActivityNext = Boolean(activityQuery.data?.nextCursor) && activityRows.length === ACTIVITY_PAGE_SIZE;
 
   function setView(nextView: "changes" | "events") {
     void navigate({
@@ -145,7 +156,7 @@ function ActivityPage() {
                   "Loading changelog…"
                 ) : hasChangelogEntries ? (
                   <>
-                    Showing <strong>{changelogEntries.length}</strong> recent changes ·{" "}
+                    Showing <strong>{changelogEntries.length}</strong> changes on this page ·{" "}
                     <strong>{changelogTotals.added}</strong> added ·{" "}
                     <strong>{changelogTotals.modified}</strong> modified ·{" "}
                     <strong>{changelogTotals.deleted}</strong> deleted ·{" "}
@@ -170,36 +181,93 @@ function ActivityPage() {
               emptyStateText="No changes have been recorded for any workspace yet."
               onOpenChange={openChange}
             />
-            {!changelogQuery.isLoading && !changelogQuery.isError && hasChangelogEntries && changelogQuery.hasNextPage ? (
-              <LoadMoreRow>
-                <Button
-                  size="medium"
-                  variant="secondary-fill"
-                  onClick={() => void changelogQuery.fetchNextPage()}
-                  disabled={changelogQuery.isFetchingNextPage}
-                >
-                  {changelogQuery.isFetchingNextPage ? "Loading more…" : "Load more changes"}
-                </Button>
-              </LoadMoreRow>
+            {!changelogQuery.isLoading &&
+            !changelogQuery.isError &&
+            hasChangelogEntries &&
+            (changelogCursors.length > 0 || canPageChangelogNext) ? (
+              <PaginationControls
+                onPrevious={() => setChangelogCursors((cursors) => cursors.slice(0, -1))}
+                onNext={() => {
+                  const nextCursor = changelogQuery.data?.nextCursor;
+                  if (nextCursor) {
+                    setChangelogCursors((cursors) => [...cursors, nextCursor]);
+                  }
+                }}
+                previousDisabled={changelogCursors.length === 0}
+                nextDisabled={!canPageChangelogNext}
+                loading={changelogQuery.isFetching}
+              />
             ) : null}
           </SectionCard>
         </SectionGrid>
       ) : null}
 
       {view === "events" ? (
-        activityQuery.isLoading ? (
-          <Loader data-testid="loader--spinner" />
-        ) : (
+        <>
           <ActivityTable
-            rows={activityQuery.data ?? []}
+            rows={activityRows}
             loading={activityQuery.isLoading}
             error={activityQuery.isError}
             errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
             onOpenActivity={openActivity}
           />
-        )
+          {!activityQuery.isLoading &&
+          !activityQuery.isError &&
+          activityRows.length > 0 &&
+          (activityCursors.length > 0 || canPageActivityNext) ? (
+            <PaginationControls
+              onPrevious={() => setActivityCursors((cursors) => cursors.slice(0, -1))}
+              onNext={() => {
+                const nextCursor = activityQuery.data?.nextCursor;
+                if (nextCursor) {
+                  setActivityCursors((cursors) => [...cursors, nextCursor]);
+                }
+              }}
+              previousDisabled={activityCursors.length === 0}
+              nextDisabled={!canPageActivityNext}
+              loading={activityQuery.isFetching}
+            />
+          ) : null}
+        </>
       ) : null}
     </PageStack>
+  );
+}
+
+type PaginationControlsProps = {
+  previousDisabled: boolean;
+  nextDisabled: boolean;
+  loading: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+};
+
+function PaginationControls({
+  previousDisabled,
+  nextDisabled,
+  loading,
+  onPrevious,
+  onNext,
+}: PaginationControlsProps) {
+  return (
+    <PaginationRow>
+      <Button
+        size="medium"
+        variant="secondary-fill"
+        onClick={onPrevious}
+        disabled={previousDisabled || loading}
+      >
+        Previous
+      </Button>
+      <Button
+        size="medium"
+        variant="secondary-fill"
+        onClick={onNext}
+        disabled={nextDisabled || loading}
+      >
+        Next
+      </Button>
+    </PaginationRow>
   );
 }
 
@@ -224,8 +292,9 @@ const NegativeDelta = styled.span`
   font-weight: 700;
 `;
 
-const LoadMoreRow = styled.div`
+const PaginationRow = styled.div`
   display: flex;
+  gap: 8px;
   justify-content: center;
   padding-top: 16px;
 `;

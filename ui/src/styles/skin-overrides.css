@@ -1,0 +1,146 @@
+/* ════════════════════════════════════════════════════════════════════
+   AFS Skin · Situation Room · Component overrides
+   Targets shared chrome (sidebar, app-bar, redis-ui Card surfaces) and
+   re-skins them under [data-skin="situation-room"] without touching
+   classic styling.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── App Bar (topbar) ────────────────────────────────────────────── */
+
+[data-skin="situation-room"] header[data-afs-app-bar] {
+  min-height: var(--afs-topbar-h);
+  padding: 10px 20px;
+  background: var(--afs-bg-1);
+  border-bottom: 1px solid var(--afs-line);
+  font-family: var(--afs-font-mono);
+}
+
+[data-skin="situation-room"] header[data-afs-app-bar] [data-afs-title-heading] {
+  font-family: var(--afs-font-mono);
+  font-size: 20px;
+  font-weight: var(--afs-fw-medium);
+  line-height:  1.00;
+  letter-spacing: var(--afs-tr-caps);
+  text-transform: uppercase;
+  color: var(--afs-ink-dim);
+}
+
+[data-skin="situation-room"] header[data-afs-app-bar] [data-afs-title-section] {
+  color: var(--afs-ink-dim);
+}
+
+[data-skin="situation-room"] header[data-afs-app-bar] [data-afs-title-page] {
+  color: var(--afs-accent);
+}
+
+[data-skin="situation-room"] header[data-afs-app-bar] [data-afs-subtitle] {
+  font-family: var(--afs-font-mono);
+  font-size: 14px;
+  line-height: 1.0;
+  margin-top: 2px;
+  color: var(--afs-ink-dim);
+  letter-spacing: var(--afs-tr-body);
+  text-transform: none;
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+
+[data-skin="situation-room"] [data-role="nav-bar"] {
+  background: var(--afs-bg-1) !important;
+  border-right: 1px solid var(--afs-line);
+  font-family: var(--afs-font-mono);
+}
+
+[data-skin="situation-room"] [data-role="nav-bar"] * {
+  font-family: var(--afs-font-mono);
+}
+
+/* SideBar.Item — square edges, lime active state, mono labels.
+   Redis UI emits <li data-role="navlink" data-state="active"|"" aria-current="page">. */
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"] {
+  border-radius: var(--afs-r-2) !important;
+  letter-spacing: 0.02em;
+  font-size: var(--afs-fz-sm);
+  color: var(--afs-ink-dim) !important;
+  border-left: 2px solid transparent;
+  transition: background var(--afs-dur-fast) var(--afs-ease),
+              color var(--afs-dur-fast) var(--afs-ease),
+              border-color var(--afs-dur-fast) var(--afs-ease);
+}
+
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"]:hover {
+  background: var(--afs-bg-2) !important;
+  color: var(--afs-ink) !important;
+}
+
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"][data-state="active"],
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"][aria-current="page"] {
+  background: var(--afs-accent-soft) !important;
+  color: var(--afs-accent) !important;
+  border-left-color: var(--afs-accent);
+}
+
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"][data-state="active"] *,
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="navlink"][aria-current="page"] * {
+  color: var(--afs-accent) !important;
+}
+
+/* Sidebar dividers + footer text */
+[data-skin="situation-room"] [data-role="nav-bar"] hr,
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="sidebar-divider"] {
+  border-color: var(--afs-line) !important;
+  background: var(--afs-line) !important;
+}
+
+[data-skin="situation-room"] [data-role="nav-bar"] [data-role="sidebar-footer"] {
+  border-top: 1px solid var(--afs-line);
+  background: var(--afs-bg-1);
+}
+
+/* ── Generic Redis-UI surfaces — square corners + flat shadows ──── */
+
+[data-skin="situation-room"] [class*="Card"],
+[data-skin="situation-room"] [data-role="card"],
+[data-skin="situation-room"] [class*="Panel"] {
+  border-radius: var(--afs-r-2) !important;
+  box-shadow: none !important;
+  border-color: var(--afs-line) !important;
+  background: var(--afs-bg-1) !important;
+}
+
+/* Buttons — square + uppercase for situation-room */
+[data-skin="situation-room"] button[data-role="button"],
+[data-skin="situation-room"] button[class*="Button"] {
+  border-radius: var(--afs-r-2) !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--afs-font-mono);
+  font-size: var(--afs-fz-sm);
+}
+
+/* ── Profile button (custom styled, not a redis-ui component) ───── */
+
+[data-skin="situation-room"] [data-afs-profile-button] {
+  border-radius: var(--afs-r-2) !important;
+  background: var(--afs-bg) !important;
+  border-color: var(--afs-line) !important;
+  font-family: var(--afs-font-mono);
+}
+
+[data-skin="situation-room"] [data-afs-profile-button]:hover {
+  border-color: var(--afs-line-strong) !important;
+  background: var(--afs-bg-2) !important;
+}
+
+[data-skin="situation-room"] [data-afs-profile-avatar] {
+  background: var(--afs-accent) !important;
+  color: var(--afs-ink-on-accent) !important;
+}
+
+/* ── Profile dropdown ──────────────────────────────────────────── */
+
+[data-skin="situation-room"] [data-afs-profile-dropdown] {
+  border-radius: var(--afs-r-2) !important;
+  background: var(--afs-bg-2) !important;
+  border-color: var(--afs-line-strong) !important;
+}

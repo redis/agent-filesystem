@@ -99,18 +99,20 @@ describe("buildClaudePlugin", () => {
     expect(skill).toBeDefined();
     expect(skill!.content).toContain("afs-team-memory");
     expect(skill!.content).not.toContain("{{serverName}}");
+    expect(skill!.content).not.toContain("{{toolPrefix}}");
     // Frontmatter present.
     expect(skill!.content.startsWith("---\nname: afs-team-memory\n")).toBe(
       true,
     );
   });
 
-  it("substitutes {{serverName}} in commands", () => {
+  it("substitutes template placeholders in commands", () => {
     const files = buildClaudePlugin(args);
     const search = files.find((f) => f.path.endsWith("/memory-search.md"));
     expect(search).toBeDefined();
-    expect(search!.content).toContain("mcp__afs-team-memory__file_grep");
+    expect(search!.content).toContain("mcp__afs_team_memory__file_grep");
     expect(search!.content).not.toContain("{{serverName}}");
+    expect(search!.content).not.toContain("{{toolPrefix}}");
   });
 
   it("throws for a template without an agentSkill spec", () => {

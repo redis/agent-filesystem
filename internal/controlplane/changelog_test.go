@@ -13,9 +13,9 @@ import (
 func TestManifestDiffAddsCreatedPaths(t *testing.T) {
 	parent := Manifest{Entries: map[string]ManifestEntry{}}
 	child := Manifest{Entries: map[string]ManifestEntry{
-		"/a.txt":  {Type: "file", Size: 10, BlobID: "blob-a"},
-		"/dir":    {Type: "dir"},
-		"/link":   {Type: "symlink", Target: "a.txt"},
+		"/a.txt": {Type: "file", Size: 10, BlobID: "blob-a"},
+		"/dir":   {Type: "dir"},
+		"/link":  {Type: "symlink", Target: "a.txt"},
 	}}
 
 	entries := manifestDiff(parent, child, ChangeEntry{Source: ChangeSourceCheckpoint})
@@ -146,9 +146,9 @@ func TestManifestDiffSkipsRootEntry(t *testing.T) {
 
 func TestManifestSeedEntriesEmitsOnePerPath(t *testing.T) {
 	m := Manifest{Entries: map[string]ManifestEntry{
-		"/a.txt":       {Type: "file", Size: 1, BlobID: "b1"},
-		"/sub":         {Type: "dir"},
-		"/sub/b.txt":   {Type: "file", Size: 2, BlobID: "b2"},
+		"/a.txt":     {Type: "file", Size: 1, BlobID: "b1"},
+		"/sub":       {Type: "dir"},
+		"/sub/b.txt": {Type: "file", Size: 2, BlobID: "b2"},
 	}}
 	entries := manifestSeedEntries(m, ChangeEntry{Source: ChangeSourceImport})
 	if len(entries) != 3 {
@@ -309,6 +309,55 @@ func TestListChangelogPaginationCursorsAreExclusive(t *testing.T) {
 	}
 	if rev2.Entries[0].ID == rev1.Entries[len(rev1.Entries)-1].ID {
 		t.Fatalf("reverse pagination duplicated cursor row %q", rev2.Entries[0].ID)
+	}
+}
+
+func TestWorkspaceActivityPaginationCursorsAreExclusive(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	cfg := Config{RedisConfig: RedisConfig{RedisAddr: mr.Addr()}}
+	store := NewStore(rdb)
+	ctx := context.Background()
+
+	if err := createWorkspaceWithMetadata(ctx, cfg, store, "repo", workspaceCreateSpec{
+		DatabaseID: "db", DatabaseName: "demo", Source: sourceBlank,
+	}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := store.Audit(ctx, "repo", "run_start", map[string]any{
+			"argv": "cmd-" + strconv.Itoa(i),
+		}); err != nil {
+			t.Fatalf("audit %d: %v", i, err)
+		}
+	}
+
+	service := NewService(cfg, store)
+	page1, err := service.ListWorkspaceActivityPage(ctx, "repo", ActivityListRequest{Limit: 2})
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page1.Items) != 2 {
+		t.Fatalf("page1 items = %d, want 2", len(page1.Items))
+	}
+	if page1.NextCursor == "" {
+		t.Fatal("page1 next cursor is empty")
+	}
+
+	page2, err := service.ListWorkspaceActivityPage(ctx, "repo", ActivityListRequest{
+		Limit: 2,
+		Until: page1.NextCursor,
+	})
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2.Items) != 2 {
+		t.Fatalf("page2 items = %d, want 2", len(page2.Items))
+	}
+	if page2.Items[0].ID == page1.Items[len(page1.Items)-1].ID {
+		t.Fatalf("activity pagination duplicated cursor row %q", page2.Items[0].ID)
 	}
 }
 

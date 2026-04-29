@@ -115,6 +115,11 @@ export type AFSChangelogResponse = {
   nextCursor?: string;
 };
 
+export type AFSActivityListResponse = {
+  items: AFSActivityEvent[];
+  nextCursor?: string;
+};
+
 export type AFSAgentSession = {
   sessionId: string;
   workspaceId: string;
@@ -225,10 +230,6 @@ export type AFSWorkspaceSummary = {
 
 export type AFSWorkspaceListResponse = {
   items: AFSWorkspaceSummary[];
-};
-
-export type AFSActivityListResponse = {
-  items: AFSActivityEvent[];
 };
 
 export type AFSWorkspaceDetail = AFSWorkspace;

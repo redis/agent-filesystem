@@ -6,7 +6,11 @@ import {
 } from "./codex-install";
 import { copyTextToClipboard } from "./clipboard";
 import { findTemplate } from "./templates-data";
-import { templateServerName, templateSkillName } from "./agent-install";
+import {
+  templateServerName,
+  templateSkillName,
+  templateToolPrefix,
+} from "./agent-install";
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 const originalExecCommand = Object.getOwnPropertyDescriptor(document, "execCommand");
@@ -93,8 +97,9 @@ describe("buildCodexSkillInstallCommand", () => {
       "cat > ~/.agents/skills/afs-team-memory/SKILL.md",
     );
     expect(command).toContain("name: afs-team-memory");
-    expect(command).toContain("mcp__afs-team-memory__file_grep");
+    expect(command).toContain("mcp__afs_team_memory__file_grep");
     expect(command).not.toContain("{{serverName}}");
+    expect(command).not.toContain("{{toolPrefix}}");
   });
 
   it("ships a unique skill for each non-blank template", () => {
@@ -112,7 +117,7 @@ describe("buildCodexSkillInstallCommand", () => {
           template,
         }),
         id,
-      ).toContain(`mcp__afs-${template.slug}-workspace__`);
+      ).toContain(`${templateToolPrefix(`${template.slug}-workspace`)}`);
     }
   });
 

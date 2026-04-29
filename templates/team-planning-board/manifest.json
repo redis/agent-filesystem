@@ -1,0 +1,17 @@
+{
+  "id": "team-planning-board",
+  "slug": "team-board",
+  "title": "Team Planning Board",
+  "tagline": "Shared spec, in-flight tasks, completed work, and open questions — for humans and agents coordinating together.",
+  "icon": "folders",
+  "accent": "#22c55e",
+  "profile": "workspace-rw-checkpoint",
+  "profileLabel": "Read / write + checkpoints",
+  "summary": [
+    "One workspace coordinates a whole team",
+    "Per-owner subdirs avoid write conflicts",
+    "Checkpoint at each milestone — full history recoverable"
+  ],
+  "whyItMatters": "Kanban boards are great at state but terrible at context. This template keeps state (tasks, owners, progress) and context (spec, roadmap, open questions) in the same shared filesystem, navigable by every agent on your team.",
+  "firstPrompt": "Read plan/spec.md and tasks/backlog.md, then help me claim the next task."
+}

@@ -1,0 +1,17 @@
+{
+  "id": "blank",
+  "slug": "blank",
+  "title": "Blank Workspace",
+  "tagline": "Start empty and shape it as you go.",
+  "icon": "sparkles",
+  "accent": "#94a3b8",
+  "profile": "workspace-rw",
+  "profileLabel": "Read / write",
+  "summary": [
+    "No seed files, no protocol — just a workspace",
+    "Reach for this when your use case doesn't fit the others",
+    "You can always add shape later"
+  ],
+  "whyItMatters": "Sometimes you just want a fresh Redis-backed workspace to experiment in. Pick this, connect your agent, go.",
+  "firstPrompt": "What shall we build in this workspace?"
+}

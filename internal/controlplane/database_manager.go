@@ -821,28 +821,56 @@ func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace
 	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
 }
 
-func (m *DatabaseManager) ListGlobalActivity(ctx context.Context, databaseID string, limit int) (activityListResponse, error) {
+func (m *DatabaseManager) ListGlobalActivity(ctx context.Context, databaseID string, req activityListRequest) (activityListResponse, error) {
 	service, _, err := m.serviceFor(ctx, databaseID)
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	return service.ListGlobalActivity(ctx, limit)
+	response, err := service.ListGlobalActivityPage(ctx, req)
+	if err != nil {
+		return activityListResponse{}, err
+	}
+	m.attachDatabaseToActivity(&response, databaseID)
+	return response, nil
 }
 
-func (m *DatabaseManager) ListWorkspaceActivity(ctx context.Context, databaseID, workspace string, limit int) (activityListResponse, error) {
+func (m *DatabaseManager) ListWorkspaceActivity(ctx context.Context, databaseID, workspace string, req activityListRequest) (activityListResponse, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	return service.ListWorkspaceActivity(ctx, route.WorkspaceID, limit)
+	response, err := service.ListWorkspaceActivityPage(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return activityListResponse{}, err
+	}
+	m.attachDatabaseToActivity(&response, route.DatabaseID)
+	return response, nil
 }
 
-func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, workspace string, limit int) (activityListResponse, error) {
+func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, workspace string, req activityListRequest) (activityListResponse, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return activityListResponse{}, err
 	}
-	return service.ListWorkspaceActivity(ctx, route.WorkspaceID, limit)
+	response, err := service.ListWorkspaceActivityPage(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return activityListResponse{}, err
+	}
+	m.attachDatabaseToActivity(&response, route.DatabaseID)
+	return response, nil
+}
+
+func (m *DatabaseManager) ListGlobalChangelog(ctx context.Context, databaseID string, req ChangelogListRequest) (ChangelogListResponse, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	response, err := service.ListGlobalChangelog(ctx, req)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	m.attachDatabaseToChangelog(&response, databaseID)
+	return response, nil
 }
 
 func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, workspace, checkpointID string) error {
@@ -1196,7 +1224,7 @@ func (m *DatabaseManager) reconcileListedAgentSessions(ctx context.Context, data
 	return nil
 }
 
-func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activityListResponse, error) {
+func (m *DatabaseManager) ListAllActivity(ctx context.Context, req activityListRequest) (activityListResponse, error) {
 	m.mu.Lock()
 	order := append([]string(nil), m.order...)
 	profiles := make(map[string]databaseProfile, len(m.profiles))
@@ -1206,6 +1234,11 @@ func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activ
 	m.mu.Unlock()
 	subject := authSubjectFromContext(ctx)
 
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 50
+		req.Limit = limit
+	}
 	items := make([]activityEvent, 0, limit)
 	for _, databaseID := range order {
 		if profile, ok := profiles[databaseID]; ok && !databaseProfileVisibleToSubject(profile, subject) {
@@ -1215,7 +1248,7 @@ func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activ
 		if err != nil {
 			continue
 		}
-		response, err := service.ListGlobalActivity(ctx, limit)
+		response, err := service.ListGlobalActivityPage(ctx, req)
 		if err != nil {
 			continue
 		}
@@ -1226,14 +1259,99 @@ func (m *DatabaseManager) ListAllActivity(ctx context.Context, limit int) (activ
 		}
 	}
 
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedAt > items[j].CreatedAt
-	})
+	sort.Slice(items, func(i, j int) bool { return compareActivityEvents(items[i], items[j]) > 0 })
 	if len(items) > limit {
 		items = items[:limit]
 	}
 
-	return activityListResponse{Items: items}, nil
+	response := activityListResponse{Items: items}
+	if len(items) > 0 {
+		response.NextCursor = items[len(items)-1].ID
+	}
+	return response, nil
+}
+
+func (m *DatabaseManager) ListAllChangelog(ctx context.Context, req ChangelogListRequest) (ChangelogListResponse, error) {
+	m.mu.Lock()
+	order := append([]string(nil), m.order...)
+	profiles := make(map[string]databaseProfile, len(m.profiles))
+	for id, profile := range m.profiles {
+		profiles[id] = profile
+	}
+	m.mu.Unlock()
+	subject := authSubjectFromContext(ctx)
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 100
+		req.Limit = limit
+	}
+	if limit > 1000 {
+		limit = 1000
+		req.Limit = limit
+	}
+	entries := make([]ChangelogEntryRow, 0, limit)
+	for _, databaseID := range order {
+		profile, ok := profiles[databaseID]
+		if ok && !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
+		service, _, err := m.serviceFor(ctx, databaseID)
+		if err != nil {
+			continue
+		}
+		response, err := service.ListGlobalChangelog(ctx, req)
+		if err != nil {
+			continue
+		}
+		for _, entry := range response.Entries {
+			entry.DatabaseID = databaseID
+			entry.DatabaseName = profile.Name
+			entries = append(entries, entry)
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		comparison := compareChangelogRows(entries[i], entries[j])
+		if req.Reverse {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	response := ChangelogListResponse{Entries: entries}
+	if len(entries) > 0 {
+		response.NextCursor = entries[len(entries)-1].ID
+	}
+	return response, nil
+}
+
+func (m *DatabaseManager) attachDatabaseToActivity(response *activityListResponse, databaseID string) {
+	m.mu.Lock()
+	profile, ok := m.profiles[databaseID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	for i := range response.Items {
+		response.Items[i].DatabaseID = databaseID
+		response.Items[i].DatabaseName = profile.Name
+	}
+}
+
+func (m *DatabaseManager) attachDatabaseToChangelog(response *ChangelogListResponse, databaseID string) {
+	m.mu.Lock()
+	profile, ok := m.profiles[databaseID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	for i := range response.Entries {
+		response.Entries[i].DatabaseID = databaseID
+		response.Entries[i].DatabaseName = profile.Name
+	}
 }
 
 func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) (workspaceSessionInfo, error) {

@@ -10,6 +10,12 @@ const panelSurface = css`
   border-radius: 16px;
   background: var(--afs-panel-strong);
   box-shadow: none;
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    background: var(--afs-bg-1);
+    border-color: var(--afs-line-strong);
+  }
 `;
 
 const insetSurface = css`
@@ -17,6 +23,12 @@ const insetSurface = css`
   border-radius: 16px;
   background: var(--afs-panel-strong);
   box-shadow: none;
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    background: var(--afs-bg);
+    border-color: var(--afs-line);
+  }
 `;
 
 export const PageStack = styled.div`
@@ -69,6 +81,14 @@ export const StatLabel = styled.span`
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    color: var(--afs-accent);
+    font-size: var(--afs-fz-xs);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-caps);
+  }
 `;
 
 export const StatValue = styled.span`
@@ -78,12 +98,25 @@ export const StatValue = styled.span`
   font-weight: 700;
   line-height: 0.95;
   letter-spacing: -0.04em;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    font-weight: var(--afs-fw-medium);
+    letter-spacing: var(--afs-tr-tight);
+  }
 `;
 
 export const StatDetail = styled.span`
   color: var(--afs-muted);
   font-size: 13px;
   line-height: 1.5;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    color: var(--afs-ink-dim);
+    font-size: var(--afs-fz-xs);
+    letter-spacing: var(--afs-tr-body);
+  }
 `;
 
 export const SectionGrid = styled.div`
@@ -173,6 +206,19 @@ export const Tag = styled.span`
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-1);
+    background: transparent;
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink-dim);
+    font-family: var(--afs-font-mono);
+    font-size: var(--afs-fz-xs);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-label);
+    text-transform: uppercase;
+    padding: 3px 8px;
+  }
 `;
 
 const toneStyles = {
@@ -203,6 +249,18 @@ export const ToneChip = styled.span<{
   letter-spacing: 0.08em;
   text-transform: uppercase;
   ${({ $tone }) => toneStyles[$tone]}
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-1);
+    border: 1px solid var(--afs-line-strong);
+    background: transparent;
+    color: var(--afs-accent);
+    font-family: var(--afs-font-mono);
+    font-size: var(--afs-fz-xs);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-caps);
+    padding: 3px 8px;
+  }
 `;
 
 export const FormGrid = styled.form`
@@ -216,6 +274,12 @@ const FieldGroupBox = styled.fieldset`
   padding: 18px 18px 14px;
   margin: 0;
   background: var(--afs-panel);
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    background: var(--afs-bg-1);
+    border-color: var(--afs-line-strong);
+  }
 `;
 
 const FieldGroupLegend = styled.legend`
@@ -225,6 +289,14 @@ const FieldGroupLegend = styled.legend`
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    color: var(--afs-accent);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-caps);
+    font-size: var(--afs-fz-xs);
+  }
 `;
 
 const FieldGroupContent = styled.div`
@@ -258,6 +330,15 @@ export const Field = styled.label`
   color: var(--afs-ink-soft);
   font-size: 13px;
   font-weight: 700;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    color: var(--afs-ink-dim);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-caps);
+    text-transform: uppercase;
+    font-size: var(--afs-fz-xs);
+  }
 `;
 
 const fieldBase = css`
@@ -281,6 +362,25 @@ const fieldBase = css`
     border-color: var(--afs-focus);
     box-shadow: 0 0 0 3px var(--afs-focus-soft);
     transform: translateY(-1px);
+  }
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    border-color: var(--afs-line-strong);
+    background: var(--afs-bg);
+    color: var(--afs-ink);
+    font-family: var(--afs-font-mono);
+    font-size: var(--afs-fz-md);
+
+    &::placeholder {
+      color: var(--afs-ink-faint);
+    }
+
+    &:focus {
+      border-color: var(--afs-accent);
+      box-shadow: 0 0 0 1px var(--afs-accent);
+      transform: none;
+    }
   }
 `;
 
@@ -320,6 +420,12 @@ export const NoticeTitle = styled.div`
   color: var(--afs-ink);
   font-size: 14px;
   font-weight: 700;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    font-weight: var(--afs-fw-medium);
+    letter-spacing: var(--afs-tr-body);
+  }
 `;
 
 export const NoticeBody = styled.div`
@@ -327,6 +433,11 @@ export const NoticeBody = styled.div`
   color: var(--afs-muted);
   font-size: 13px;
   line-height: 1.5;
+
+  [data-skin="situation-room"] && {
+    color: var(--afs-ink-dim);
+    font-family: var(--afs-font-mono);
+  }
 `;
 
 export const Tabs = styled.div`
@@ -338,6 +449,14 @@ export const Tabs = styled.div`
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 14px;
   background: var(--afs-panel, #fafafa);
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    border-color: var(--afs-line-strong);
+    background: var(--afs-bg-1);
+    padding: 4px;
+    gap: 2px;
+  }
 `;
 
 export const TabButton = styled.button<{ $active?: boolean }>`
@@ -355,6 +474,24 @@ export const TabButton = styled.button<{ $active?: boolean }>`
   &:hover {
     color: ${({ $active }) => ($active ? "#fff" : "var(--afs-ink, #18181b)")};
     transform: translateY(-1px);
+  }
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-1);
+    background: ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
+    color: ${({ $active }) => ($active ? "var(--afs-ink-on-accent)" : "var(--afs-ink-dim)")};
+    font-family: var(--afs-font-mono);
+    font-weight: var(--afs-fw-regular);
+    letter-spacing: var(--afs-tr-caps);
+    text-transform: uppercase;
+    font-size: var(--afs-fz-xs);
+    padding: 7px 12px;
+
+    &:hover {
+      transform: none;
+      color: ${({ $active }) => ($active ? "var(--afs-ink-on-accent)" : "var(--afs-ink)")};
+      background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-bg-2)")};
+    }
   }
 `;
 
@@ -395,6 +532,20 @@ export const FileButton = styled.button<{ $active?: boolean }>`
     transform: translateY(-1px);
     border-color: var(--afs-line-strong);
   }
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    border-left: 2px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
+    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-bg-1)")};
+    color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
+    font-family: var(--afs-font-mono);
+
+    &:hover {
+      transform: none;
+      background: var(--afs-bg-2);
+      color: var(--afs-ink);
+    }
+  }
 `;
 
 export const EditorPanel = styled(Card)`
@@ -410,6 +561,11 @@ export const EditorArea = styled.textarea`
   font-size: 13px;
   line-height: 1.6;
   background: var(--afs-panel);
+
+  [data-skin="situation-room"] && {
+    background: var(--afs-bg);
+    color: var(--afs-ink);
+  }
 `;
 
 export const SavepointGrid = styled.div`
@@ -466,6 +622,12 @@ export const PageDescription = styled.p`
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.5;
+
+  [data-skin="situation-room"] && {
+    color: var(--afs-ink-dim);
+    font-family: var(--afs-font-mono);
+    font-size: var(--afs-fz-md);
+  }
 `;
 
 export function SectionTitle(props: { title: string; body?: string }) {
@@ -488,6 +650,11 @@ export const DialogOverlay = styled.div`
   justify-content: center;
   padding: 24px;
   background: rgba(8, 6, 13, 0.36);
+
+  [data-skin="situation-room"] && {
+    background: rgba(9, 26, 35, 0.78);
+    backdrop-filter: blur(2px);
+  }
 `;
 
 export const DialogCard = styled.div`
@@ -499,6 +666,13 @@ export const DialogCard = styled.div`
   padding: 24px;
   background: var(--afs-panel-strong);
   box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-2);
+    border-color: var(--afs-line-strong);
+    background: var(--afs-bg-1);
+    box-shadow: var(--afs-shadow-2);
+  }
 `;
 
 export const DialogHeader = styled.div`
@@ -537,6 +711,12 @@ export const DialogTitle = styled.h2`
   font-size: 18px;
   font-weight: 700;
   line-height: 1.3;
+
+  [data-skin="situation-room"] && {
+    font-family: var(--afs-font-mono);
+    font-weight: var(--afs-fw-medium);
+    letter-spacing: var(--afs-tr-tight);
+  }
 `;
 
 export const DialogBody = styled.p`
@@ -544,6 +724,11 @@ export const DialogBody = styled.p`
   color: var(--afs-muted);
   font-size: 14px;
   line-height: 1.55;
+
+  [data-skin="situation-room"] && {
+    color: var(--afs-ink-dim);
+    font-family: var(--afs-font-mono);
+  }
 `;
 
 export const DialogCloseButton = styled.button`
@@ -565,6 +750,18 @@ export const DialogCloseButton = styled.button`
   &:hover {
     background: rgba(8, 6, 13, 0.05);
     border-color: var(--afs-line-strong);
+  }
+
+  [data-skin="situation-room"] && {
+    border-radius: var(--afs-r-1);
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink-dim);
+
+    &:hover {
+      background: var(--afs-bg-2);
+      color: var(--afs-accent);
+      border-color: var(--afs-accent);
+    }
   }
 `;
 

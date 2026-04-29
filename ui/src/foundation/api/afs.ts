@@ -13,6 +13,7 @@ import type {
   GetWorkspaceFileContentInput,
   GetWorkspaceTreeInput,
   AFSActivityEvent,
+  AFSActivityListResponse,
   AFSClientMode,
   AFSFile,
   AFSFileContent,
@@ -63,6 +64,7 @@ type AFSClient = {
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
+  listActivityPage: (input: ListActivityInput) => Promise<AFSActivityListResponse>;
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
@@ -94,9 +96,19 @@ export type ListChangelogInput = {
   direction?: "asc" | "desc";
 };
 
+export type ListActivityInput = {
+  databaseId?: string;
+  limit?: number;
+  until?: string;
+};
+
 type HTTPChangelogEntry = {
   id: string;
   occurred_at?: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  database_id?: string;
+  database_name?: string;
   session_id?: string;
   agent_id?: string;
   user?: string;
@@ -248,6 +260,7 @@ type HTTPWorkspaceDetail = {
 
 type HTTPActivityList = {
   items: HTTPActivity[];
+  next_cursor?: string;
 };
 
 type HTTPWorkspaceSessionInfo = {
@@ -1157,6 +1170,20 @@ This workspace was created from the AFS Web UI.
     ).slice(0, limit);
   },
 
+  async listActivityPage(input: ListActivityInput) {
+    await wait();
+    const state = loadState();
+    const limit = input.limit != null && input.limit > 0 ? input.limit : 50;
+    const events = allActivityForState(state)
+      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
+      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
+    const page = events.slice(0, limit);
+    return {
+      items: page,
+      nextCursor: page.length > 0 ? page[page.length - 1].id : undefined,
+    };
+  },
+
   async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
     await wait();
     return { entries: [] };
@@ -1436,6 +1463,16 @@ function mapActivity(
   };
 }
 
+function mapActivityList(
+  response: HTTPActivityList,
+  database?: { databaseId?: string; databaseName?: string },
+): AFSActivityListResponse {
+  return {
+    items: response.items.map((item) => mapActivity(item, database)),
+    nextCursor: response.next_cursor,
+  };
+}
+
 function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   return {
     id: input.id,
@@ -1464,10 +1501,10 @@ function mapChangelogEntry(
   return {
     id: input.id,
     occurredAt: input.occurred_at,
-    workspaceId: scope?.workspaceId,
-    workspaceName: scope?.workspaceName,
-    databaseId: scope?.databaseId,
-    databaseName: scope?.databaseName,
+    workspaceId: input.workspace_id ?? scope?.workspaceId,
+    workspaceName: input.workspace_name ?? scope?.workspaceName,
+    databaseId: input.database_id ?? scope?.databaseId,
+    databaseName: input.database_name ?? scope?.databaseName,
     sessionId: input.session_id,
     agentId: input.agent_id,
     user: input.user,
@@ -1484,6 +1521,26 @@ function mapChangelogEntry(
     checkpointId: input.checkpoint_id,
     source: input.source,
   };
+}
+
+function changelogSearchParams(input: ListChangelogInput): URLSearchParams {
+  const params = new URLSearchParams();
+  if (input.limit != null && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+  if (input.sessionId) {
+    params.set("session_id", input.sessionId);
+  }
+  if (input.since) {
+    params.set("since", input.since);
+  }
+  if (input.until) {
+    params.set("until", input.until);
+  }
+  if (input.direction) {
+    params.set("direction", input.direction);
+  }
+  return params;
 }
 
 function mapAgentSession(
@@ -1623,154 +1680,6 @@ function mapAccount(input: HTTPAccount): AFSAccount {
     deletedDatabaseCount: input.deleted_database_count,
     deletedWorkspaceCount: input.deleted_workspace_count,
     identityDeleted: input.identity_deleted,
-  };
-}
-
-type ChangelogWorkspaceScope = Pick<AFSWorkspaceSummary, "id" | "name" | "databaseId" | "databaseName">;
-
-type GlobalChangelogCursor = {
-  version: 1;
-  direction: "asc" | "desc";
-  id: string;
-  databaseId?: string;
-  workspaceId?: string;
-};
-
-const GLOBAL_CHANGELOG_CURSOR_PREFIX = "global-changelog:v1:";
-
-function parseStreamID(id: string): { ms: number; seq: number } | null {
-  const match = /^(\d+)-(\d+)$/.exec(id.trim());
-  if (match == null) {
-    return null;
-  }
-  const ms = Number(match[1]);
-  const seq = Number(match[2]);
-  if (!Number.isFinite(ms) || !Number.isFinite(seq)) {
-    return null;
-  }
-  return { ms, seq };
-}
-
-function compareStreamIDs(left: string, right: string): number {
-  const parsedLeft = parseStreamID(left);
-  const parsedRight = parseStreamID(right);
-  if (parsedLeft != null && parsedRight != null) {
-    if (parsedLeft.ms !== parsedRight.ms) {
-      return parsedLeft.ms - parsedRight.ms;
-    }
-    if (parsedLeft.seq !== parsedRight.seq) {
-      return parsedLeft.seq - parsedRight.seq;
-    }
-    return 0;
-  }
-  return left.localeCompare(right);
-}
-
-function compareChangelogIdentity(
-  left: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
-  right: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
-): number {
-  const idComparison = compareStreamIDs(left.id, right.id);
-  if (idComparison !== 0) {
-    return idComparison;
-  }
-
-  const databaseComparison = (left.databaseId ?? "").localeCompare(right.databaseId ?? "");
-  if (databaseComparison !== 0) {
-    return databaseComparison;
-  }
-
-  return (left.workspaceId ?? "").localeCompare(right.workspaceId ?? "");
-}
-
-function encodeGlobalChangelogCursor(
-  entry: Pick<AFSChangelogEntry, "id" | "databaseId" | "workspaceId">,
-  direction: "asc" | "desc",
-): string {
-  return `${GLOBAL_CHANGELOG_CURSOR_PREFIX}${encodeURIComponent(JSON.stringify({
-    version: 1,
-    direction,
-    id: entry.id,
-    databaseId: entry.databaseId,
-    workspaceId: entry.workspaceId,
-  } satisfies GlobalChangelogCursor))}`;
-}
-
-function decodeGlobalChangelogCursor(cursor?: string): GlobalChangelogCursor | null {
-  if (cursor == null || !cursor.startsWith(GLOBAL_CHANGELOG_CURSOR_PREFIX)) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(
-      decodeURIComponent(cursor.slice(GLOBAL_CHANGELOG_CURSOR_PREFIX.length)),
-    ) as Partial<GlobalChangelogCursor>;
-    if (parsed.version !== 1 || (parsed.direction !== "asc" && parsed.direction !== "desc")) {
-      return null;
-    }
-    if (typeof parsed.id !== "string" || parsed.id.trim() === "") {
-      return null;
-    }
-    return {
-      version: 1,
-      direction: parsed.direction,
-      id: parsed.id,
-      databaseId: parsed.databaseId,
-      workspaceId: parsed.workspaceId,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function entryIsBeyondGlobalCursor(
-  entry: AFSChangelogEntry,
-  cursor: GlobalChangelogCursor,
-): boolean {
-  const comparison = compareChangelogIdentity(entry, cursor);
-  return cursor.direction === "asc" ? comparison > 0 : comparison < 0;
-}
-
-function sortChangelogEntries(
-  entries: AFSChangelogEntry[],
-  direction: "asc" | "desc" = "desc",
-): AFSChangelogEntry[] {
-  return [...entries].sort((left, right) => {
-    const comparison = compareChangelogIdentity(left, right);
-    return direction === "asc" ? comparison : comparison * -1;
-  });
-}
-
-async function aggregateWorkspaceChangelog(
-  workspaces: ChangelogWorkspaceScope[],
-  input: ListChangelogInput,
-  loadWorkspaceChanges: (workspace: ChangelogWorkspaceScope) => Promise<AFSChangelogResponse>,
-): Promise<AFSChangelogResponse> {
-  const direction = input.direction ?? "desc";
-  const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
-  const pageCursor = direction === "asc" ? input.since : input.until;
-  const globalCursor = decodeGlobalChangelogCursor(pageCursor);
-  const settled = await Promise.allSettled(workspaces.map((workspace) => loadWorkspaceChanges(workspace)));
-  let entries = settled.flatMap((result) =>
-    result.status === "fulfilled" ? result.value.entries : [],
-  );
-  const firstRejected = settled.find((result) => result.status === "rejected");
-
-  if (entries.length === 0 && firstRejected?.status === "rejected") {
-    throw firstRejected.reason;
-  }
-
-  if (globalCursor != null) {
-    entries = entries.filter((entry) => entryIsBeyondGlobalCursor(entry, globalCursor));
-  }
-
-  const pageEntries = sortChangelogEntries(entries, direction).slice(0, limit);
-
-  return {
-    entries: pageEntries,
-    nextCursor:
-      pageEntries.length === limit
-        ? encodeGlobalChangelogCursor(pageEntries[pageEntries.length - 1], direction)
-        : undefined,
   };
 }
 
@@ -1931,70 +1840,50 @@ const httpAFSClient: AFSClient = {
   },
 
   async listActivity(databaseId = "", limit = 50) {
+    const response = await httpAFSClient.listActivityPage({ databaseId, limit });
+    return response.items;
+  },
+
+  async listActivityPage(input: ListActivityInput) {
+    const params = new URLSearchParams();
+    if (input.limit != null && input.limit > 0) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.until) {
+      params.set("until", input.until);
+    }
+    const query = params.toString();
+    const databaseId = input.databaseId?.trim() ?? "";
     if (databaseId !== "") {
       const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
-      const response = await requestJSON<HTTPActivityList>(`/databases/${databaseId}/activity?limit=${limit}`);
-      return response.items.map((item) =>
-        mapActivity(item, {
-          databaseId,
-          databaseName: database?.name,
-        }),
+      const response = await requestJSON<HTTPActivityList>(
+        query ? `/databases/${databaseId}/activity?${query}` : `/databases/${databaseId}/activity`,
       );
+      return mapActivityList(response, {
+        databaseId,
+        databaseName: database?.name,
+      });
     }
 
-    const response = await requestJSON<HTTPActivityList>(`/activity?limit=${limit}`);
-    return response.items.map((item) => mapActivity(item));
+    const response = await requestJSON<HTTPActivityList>(query ? `/activity?${query}` : "/activity");
+    return mapActivityList(response);
   },
 
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId === "") {
-      const direction = input.direction ?? "desc";
-      const pageCursor = direction === "asc" ? input.since : input.until;
-      const globalCursor = decodeGlobalChangelogCursor(pageCursor);
-      const workspaceCursor = globalCursor?.id ?? pageCursor;
-      const workspaces = await httpAFSClient.listWorkspaceSummaries(input.databaseId ?? "");
-      return aggregateWorkspaceChangelog(
-        workspaces,
-        input,
-        async (workspace) => {
-          const response = await httpAFSClient.listChangelog({
-            ...input,
-            databaseId: workspace.databaseId,
-            workspaceId: workspace.id,
-            since: direction === "asc" ? workspaceCursor : input.since,
-            until: direction === "desc" ? workspaceCursor : input.until,
-          });
-          return {
-            ...response,
-            entries: response.entries.map((entry) => ({
-              ...entry,
-              workspaceId: workspace.id,
-              workspaceName: workspace.name,
-              databaseId: workspace.databaseId,
-              databaseName: workspace.databaseName,
-            })),
-          };
-        },
-      );
+      const params = changelogSearchParams(input);
+      const query = params.toString();
+      const databaseId = input.databaseId?.trim() ?? "";
+      const base = databaseId === "" ? "/changes" : `/databases/${databaseId}/changes`;
+      const response = await requestJSON<HTTPChangelogResponse>(query ? `${base}?${query}` : base);
+      return {
+        entries: response.entries.map((entry) => mapChangelogEntry(entry)),
+        nextCursor: response.next_cursor,
+      };
     }
 
-    const params = new URLSearchParams();
-    if (input.limit != null && input.limit > 0) {
-      params.set("limit", String(input.limit));
-    }
-    if (input.sessionId) {
-      params.set("session_id", input.sessionId);
-    }
-    if (input.since) {
-      params.set("since", input.since);
-    }
-    if (input.until) {
-      params.set("until", input.until);
-    }
-    if (input.direction) {
-      params.set("direction", input.direction);
-    }
+    const params = changelogSearchParams(input);
     const query = params.toString();
     const base = `${workspaceBasePath(input.databaseId, workspaceId)}/changes`;
     const response = await requestJSON<HTTPChangelogResponse>(

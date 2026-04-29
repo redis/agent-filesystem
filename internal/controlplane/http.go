@@ -377,7 +377,34 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			writeError(w, err)
 			return
 		}
-		response, err := manager.ListAllActivity(r.Context(), limit)
+		response, err := manager.ListAllActivity(r.Context(), activityListRequest{
+			Limit: limit,
+			Until: strings.TrimSpace(r.URL.Query().Get("until")),
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
+	mux.HandleFunc("/v1/changes", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListAllChangelog(r.Context(), ChangelogListRequest{
+			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
+			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
+			Limit:     limit,
+			Reverse:   strings.EqualFold(r.URL.Query().Get("direction"), "desc"),
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -572,7 +599,32 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 				writeError(w, err)
 				return
 			}
-			response, err := manager.ListGlobalActivity(r.Context(), databaseID, limit)
+			response, err := manager.ListGlobalActivity(r.Context(), databaseID, activityListRequest{
+				Limit: limit,
+				Until: strings.TrimSpace(r.URL.Query().Get("until")),
+			})
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case rest == "changes":
+			if r.Method != http.MethodGet {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			limit, err := queryInt(r, "limit", 100)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			response, err := manager.ListGlobalChangelog(r.Context(), databaseID, ChangelogListRequest{
+				SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+				Since:     strings.TrimSpace(r.URL.Query().Get("since")),
+				Until:     strings.TrimSpace(r.URL.Query().Get("until")),
+				Limit:     limit,
+				Reverse:   strings.EqualFold(r.URL.Query().Get("direction"), "desc"),
+			})
 			if err != nil {
 				writeError(w, err)
 				return
@@ -978,7 +1030,10 @@ func handleWorkspaceRoute(
 			writeError(w, err)
 			return
 		}
-		response, err := manager.ListWorkspaceActivity(r.Context(), databaseID, workspace, limit)
+		response, err := manager.ListWorkspaceActivity(r.Context(), databaseID, workspace, activityListRequest{
+			Limit: limit,
+			Until: strings.TrimSpace(r.URL.Query().Get("until")),
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1288,7 +1343,10 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, err)
 			return
 		}
-		response, err := manager.ListResolvedWorkspaceActivity(r.Context(), workspace, limit)
+		response, err := manager.ListResolvedWorkspaceActivity(r.Context(), workspace, activityListRequest{
+			Limit: limit,
+			Until: strings.TrimSpace(r.URL.Query().Get("until")),
+		})
 		if err != nil {
 			writeError(w, err)
 			return

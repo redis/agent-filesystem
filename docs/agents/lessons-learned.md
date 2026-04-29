@@ -26,6 +26,10 @@ future agents should not have to rediscover.
 - In the workspace browser, treat `head` as the single canonical label for the
   current saved checkpoint. Do not also surface that same checkpoint by name,
   and only show `working-copy` when the live draft actually differs from head.
+- TanStack route files should only export their `Route`. If login/signup or
+  other sibling routes need shared UI, move the shared component and search
+  validators into `ui/src/features/` instead of importing from another route
+  file, or the dev server will warn that those exports cannot be code-split.
 
 ## Plugin Layout
 
@@ -35,3 +39,9 @@ future agents should not have to rediscover.
 - For the Codex AFS plugin, cloud vs localhost is an endpoint choice in
   `.mcp.json` (`url`), while the token stays outside the plugin in
   `AFS_CONTROL_PLANE_TOKEN`.
+
+## Workspace Templates
+
+- Template source files live under `templates/<template-id>/`. After changing
+  manifest, seed, skill, or command files, run `npm run templates:generate`
+  from `ui/` or `make templates-generate` before validating UI behavior.

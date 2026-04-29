@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AFS // login</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--afs-bg);
+    color: var(--afs-ink);
+    font-family: var(--afs-font-mono);
+    font-size: var(--afs-fz-md);
+    line-height: var(--afs-lh-base);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  /* bg grid + scanlines */
+  .bg-fx {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      linear-gradient(var(--afs-viz-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--afs-viz-grid) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, #000 40%, transparent 100%);
+  }
+  .bg-fx::after {
+    content:''; position:absolute; inset:0;
+    background: repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px);
+  }
+
+  /* intel ribbon */
+  .intel {
+    position: relative; z-index: 2;
+    background: var(--afs-redis-red);
+    color: #fff;
+    padding: 8px 24px;
+    font-size: var(--afs-fz-xs);
+    letter-spacing: var(--afs-tr-caps);
+    display: grid; grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    border-bottom: 1px solid rgba(0,0,0,.25);
+  }
+  .intel .l, .intel .r { display: flex; gap: 16px; align-items: center; }
+  .intel .r { justify-content: flex-end; }
+  .intel .led { width: 6px; height: 6px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px #fff; animation: afs-blink var(--afs-dur-tick) var(--afs-ease-step) infinite; }
+  .intel .c { font-weight: 500; letter-spacing: .2em; }
+
+  /* layout */
+  .stage {
+    position: relative; z-index: 1;
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    height: calc(100vh - 33px);
+    min-height: 640px;
+  }
+
+  /* LEFT — form */
+  .form-side {
+    padding: var(--afs-sp-9) var(--afs-sp-12);
+    display: grid; grid-template-rows: auto 1fr auto;
+    border-left: 1px solid var(--afs-line);
+    background: var(--afs-bg);
+    overflow-y: auto;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    text-decoration: none; color: inherit;
+  }
+  .brand img { height: 24px; }
+  .brand-bar { width: 1px; height: 22px; background: var(--afs-line-strong); }
+  .brand-name { font-size: 14px; color: var(--afs-accent); letter-spacing: 0.02em; }
+  .brand-name b { color: #fff; font-weight: 600; }
+  .brand-tag {
+    font-size: 9px; color: var(--afs-ink-dim); letter-spacing: var(--afs-tr-caps);
+    text-transform: uppercase; margin-top: 2px;
+  }
+
+  .form-card {
+    align-self: center;
+    width: 100%; max-width: 420px;
+    margin: 0 auto;
+    display: grid; gap: var(--afs-sp-6);
+  }
+  .eyebrow {
+    display: inline-flex; gap: 10px; align-items: center;
+    font-size: var(--afs-fz-xs); color: var(--afs-ink-dim);
+    letter-spacing: var(--afs-tr-caps);
+  }
+  .eyebrow .tag { border: 1px solid var(--afs-accent); color: var(--afs-accent); padding: 2px 8px; }
+  .form-title {
+    font-family: var(--afs-font-mono); font-weight: var(--afs-fw-medium);
+    font-size: clamp(36px, 4vw, 52px);
+    line-height: var(--afs-lh-tight); letter-spacing: var(--afs-tr-tight);
+    margin: 0; color: var(--afs-ink);
+  }
+  .form-title .accent { color: var(--afs-accent); }
+  .form-sub { color: var(--afs-ink-dim); font-size: var(--afs-fz-md); margin: 0; max-width: 50ch; line-height: var(--afs-lh-loose); }
+
+  .tabs {
+    display: grid; grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--afs-line);
+  }
+  .tab {
+    background: transparent; border: 0;
+    padding: 10px 12px;
+    color: var(--afs-ink-dim);
+    font-family: var(--afs-font-mono); font-size: var(--afs-fz-xs);
+    letter-spacing: var(--afs-tr-caps); text-transform: uppercase;
+    cursor: pointer;
+    border-right: 1px solid var(--afs-line);
+    transition: color var(--afs-dur-fast) var(--afs-ease), background var(--afs-dur-fast) var(--afs-ease);
+  }
+  .tab:last-child { border-right: 0; }
+  .tab[aria-selected="true"] {
+    background: var(--afs-accent-soft);
+    color: var(--afs-accent);
+  }
+  .tab:hover { color: var(--afs-ink); }
+  .tab[aria-selected="true"]:hover { color: var(--afs-accent); }
+
+  form { display: grid; gap: var(--afs-sp-4); }
+  .field { display: grid; gap: 6px; }
+  .field label {
+    font-size: var(--afs-fz-xs); color: var(--afs-ink-dim);
+    letter-spacing: var(--afs-tr-caps);
+    display: flex; justify-content: space-between;
+  }
+  .field label a { color: var(--afs-accent); text-decoration: none; font-size: var(--afs-fz-2xs); }
+  .field label a:hover { text-decoration: underline; }
+  .input {
+    background: var(--afs-bg); color: var(--afs-ink);
+    border: 1px solid var(--afs-line-strong);
+    padding: 12px 14px;
+    font-family: var(--afs-font-mono); font-size: var(--afs-fz-md);
+    letter-spacing: 0.02em;
+    width: 100%;
+    transition: border-color var(--afs-dur-fast);
+  }
+  .input::placeholder { color: var(--afs-ink-faint); }
+  .input:focus { outline: none; border-color: var(--afs-accent); box-shadow: 0 0 0 1px var(--afs-accent); }
+
+  .row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: var(--afs-fz-xs); color: var(--afs-ink-dim);
+  }
+  .check {
+    display: inline-flex; gap: 8px; align-items: center; cursor: pointer;
+    user-select: none;
+  }
+  .check input { appearance: none; width: 14px; height: 14px; border: 1px solid var(--afs-line-strong); background: var(--afs-bg); position: relative; cursor: pointer; }
+  .check input:checked { background: var(--afs-accent); border-color: var(--afs-accent); }
+  .check input:checked::after { content: '✓'; position: absolute; inset: 0; display: grid; place-items: center; color: var(--afs-bg); font-size: 10px; font-weight: 700; }
+
+  .btn {
+    font-family: var(--afs-font-mono); font-size: var(--afs-fz-sm);
+    padding: 12px 16px; border: 1px solid var(--afs-accent);
+    background: var(--afs-accent); color: var(--afs-ink-on-accent);
+    cursor: pointer; letter-spacing: 0.06em; text-transform: uppercase;
+    font-weight: var(--afs-fw-semi);
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    transition: all var(--afs-dur-fast) var(--afs-ease);
+  }
+  .btn:hover { background: var(--afs-ink); color: #000; border-color: var(--afs-ink); }
+
+  .legal {
+    color: var(--afs-ink-faint); font-size: var(--afs-fz-2xs);
+    letter-spacing: 0.05em; line-height: var(--afs-lh-loose);
+  }
+  .legal a { color: var(--afs-ink-dim); text-decoration: underline; text-decoration-color: var(--afs-line-strong); }
+
+  .form-foot {
+    border-top: 1px dashed var(--afs-line);
+    padding-top: var(--afs-sp-5);
+    display: flex; justify-content: space-between;
+    color: var(--afs-ink-faint); font-size: var(--afs-fz-2xs);
+    letter-spacing: 0.1em;
+  }
+  .form-foot .left { display: flex; gap: 16px; }
+  .form-foot a { color: var(--afs-ink-dim); text-decoration: none; }
+  .form-foot a:hover { color: var(--afs-accent); }
+
+  /* LEFT — context panel */
+  .room-side {
+    background: var(--afs-bg-1);
+    padding: var(--afs-sp-9) var(--afs-sp-9);
+    display: grid; gap: var(--afs-sp-6);
+    grid-template-rows: auto 1fr auto;
+    overflow: hidden;
+    position: relative;
+  }
+  .room-head { display: grid; gap: var(--afs-sp-3); }
+  .room-head .meta-row { display: flex; justify-content: space-between; align-items: center; color: var(--afs-ink-dim); font-size: var(--afs-fz-xs); letter-spacing: var(--afs-tr-label); }
+  .room-head .meta-row .led { width: 6px; height: 6px; border-radius: 50%; background: var(--afs-accent); box-shadow: 0 0 8px var(--afs-accent); animation: afs-blink var(--afs-dur-tick) var(--afs-ease-step) infinite; display: inline-block; margin-right: 8px; }
+  .room-head .num { color: var(--afs-accent); font-size: var(--afs-fz-xs); letter-spacing: var(--afs-tr-caps); }
+  .mega {
+    color: var(--afs-ink);
+    font-family: var(--afs-font-mono);
+    font-weight: var(--afs-fw-medium);
+    font-size: 120px;
+    line-height: 0.95;
+    letter-spacing: -0.03em;
+    margin: 0;
+    white-space: nowrap;
+    transform-origin: left top;
+  }
+  .mega-fit { display: block; overflow: hidden; }
+  .mega s { color: var(--afs-ink-faint); text-decoration-color: var(--afs-ink-dim); text-decoration-thickness: 4px; }
+  .mega .acc { color: var(--afs-accent); }
+  .mega .lo { color: var(--afs-ink-dim); }
+
+  .panel {
+    border: 1px solid var(--afs-line-strong);
+    background: var(--afs-bg);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .panel-head {
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 12px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--afs-line-strong);
+    background: var(--afs-bg-2);
+    font-size: var(--afs-fz-xs); color: var(--afs-ink-dim);
+    letter-spacing: var(--afs-tr-label);
+  }
+  .panel-head .dots { display: flex; gap: 6px; }
+  .panel-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--afs-line-strong); }
+  .panel-head .dot.r { background: var(--afs-err); }
+  .panel-head .dot.a { background: var(--afs-warn); }
+  .panel-head .dot.g { background: var(--afs-ok); }
+  .panel-head .ttl { color: var(--afs-ink); text-align: center; letter-spacing: 0.05em; }
+  .panel-head .meta { text-align: right; }
+
+  .term {
+    padding: 10px 12px;
+    font-family: var(--afs-font-mono); font-size: 11px;
+    line-height: 1.55;
+    color: var(--afs-ink);
+    overflow-y: auto;
+    max-height: 240px;
+  }
+  .term .pr { color: var(--afs-accent); }
+  .term .ok { color: var(--afs-ok); }
+  .term .out { color: var(--afs-ink-dim); }
+  .term .key { color: var(--afs-info); }
+  .term .str { color: var(--afs-warn); }
+  .term .num { color: var(--afs-accent); }
+  .term .cmt { color: var(--afs-ink-faint); }
+  .term .cursor { display: inline-block; width: 8px; height: 1em; background: var(--afs-accent); animation: afs-cursor 1s steps(2,end) infinite; vertical-align: -2px; margin-left: 2px; }
+
+  .room-foot {
+    display: grid; grid-template-columns: 1fr auto; gap: 16px;
+    align-items: end;
+    padding-top: var(--afs-sp-3);
+    border-top: 1px dashed var(--afs-line);
+    color: var(--afs-ink-faint); font-size: var(--afs-fz-2xs);
+    letter-spacing: 0.1em;
+  }
+  .quote {
+    color: var(--afs-ink); font-size: var(--afs-fz-md);
+    font-family: var(--afs-font-mono); letter-spacing: 0;
+    max-width: 50ch; line-height: 1.5;
+  }
+  .quote .accent { color: var(--afs-accent); }
+  .quote .src { color: var(--afs-ink-dim); font-size: var(--afs-fz-2xs); margin-top: 8px; letter-spacing: var(--afs-tr-label); }
+
+  /* tab panels */
+  .panes > [data-pane] { display: none; }
+  .panes > [data-pane].is-active { display: grid; gap: var(--afs-sp-4); }
+
+  /* responsive */
+  @media (max-width: 1024px) {
+    body { overflow: auto; }
+    .stage { grid-template-columns: 1fr; height: auto; min-height: 0; }
+    .form-side { padding: var(--afs-sp-7) var(--afs-sp-6); border-left: 0; border-top: 1px solid var(--afs-line); }
+    .room-side { padding: var(--afs-sp-6); }
+    .stat-bar { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<div class="bg-fx"></div>
+
+<div class="intel" data-screen-label="Intel ribbon">
+  <div class="l">
+    <span class="led"></span>
+    <span>AFS // ONLINE</span>
+  </div>
+  <div class="c">/* CLOUD CONTROL PLANE v0.8.12 */</div>
+  <div class="r"></div>
+</div>
+
+<main class="stage" data-screen-label="Login">
+
+  <!-- ─── LEFT · CONTEXT PANEL ─── -->
+  <section class="room-side" data-screen-label="Context panel">
+
+    <div class="room-head">
+      <div class="meta-row">
+        <div></div>
+        <div><span class="led"></span>12,884 agents online</div>
+      </div>
+      <div class="mega-fit">
+        <h2 class="mega" id="megaTitle"><span class="line">A&nbsp;filesystem</span><br><span class="line"><span class="lo">for</span> <s>humans</s> <span class="acc">agents.</span></span></h2>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div class="dots"><span class="dot r"></span><span class="dot a"></span><span class="dot g"></span></div>
+        <div class="ttl">~/operator/onboarding — afs</div>
+        <div class="meta">PID 0001 · TTY pts/0</div>
+      </div>
+      <div class="term">
+<div><span class="pr">root@afs ~$</span> afs welcome --new-operator</div>
+<div class="out">  <span class="ok">✓</span> provisioning identity · <span class="num">2.4ms</span></div>
+<div class="out">  <span class="ok">✓</span> creating org workspace <span class="key">your-org/main</span></div>
+<div class="out">  <span class="ok">✓</span> seeding 14-day pro trial · checkpoint <span class="key">c0.0001</span></div>
+<div class="out">  <span class="cmt"># next steps:</span></div>
+<div class="out">  <span class="cmt">    1. install the cli  →</span> <span class="key">brew install afs</span></div>
+<div class="out">  <span class="cmt">    2. login to device  →</span> <span class="key">afs login</span></div>
+<div class="out">  <span class="cmt">    3. point an agent   →</span> <span class="key">afs mount /ws/main</span></div>
+<div><span class="pr">root@afs ~$</span> afs fleet --tail</div>
+<div class="out"><span class="cmt">  streaming live signals from the fleet...</span></div>
+<div class="out"><span class="cmt">  04:21:17</span>  <span class="ok">●</span> us-east-1   <span class="num">221k ops/s</span>  p50 <span class="num">1.2ms</span></div>
+<div class="out"><span class="cmt">  04:21:17</span>  <span class="ok">●</span> eu-west-2   <span class="num">188k ops/s</span>  p50 <span class="num">1.5ms</span></div>
+<div class="out"><span class="cmt">  04:21:18</span>  <span class="ok">●</span> ap-south-1  <span class="num">147k ops/s</span>  p50 <span class="num">2.1ms</span></div>
+<div class="out"><span class="cmt">  04:21:18</span>  <span class="ok">+</span> writer-09 forked <span class="key">main</span> → <span class="key">exp/draft-3</span> · <span class="num">2.1ms</span></div>
+<div class="out"><span class="cmt">  04:21:19</span>  <span class="ok">M</span> researcher-07/notes/plan.md  <span class="num">+12 -3</span></div>
+<div><span class="pr">root@afs ~$</span> _<span class="cursor"></span></div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ─── RIGHT · FORM ─── -->
+  <section class="form-side" data-screen-label="Login form">
+
+    <a href="#" class="brand">
+      <img src="redis-logo.png" alt="Redis">
+      <span class="brand-bar"></span>
+      <div>
+        <div class="brand-name">afs<b>.cloud</b></div>
+        <div class="brand-tag">agent · filesystem</div>
+      </div>
+    </a>
+
+    <div class="form-card">
+      <div class="eyebrow">
+        <span class="tag">// AFS</span>
+        <span>SIGN&nbsp;IN&nbsp;//&nbsp;OR&nbsp;CREATE&nbsp;ACCOUNT</span>
+      </div>
+      <p class="form-sub">Sign in to your workspace — or stand up a new one in under 60 seconds. No credit card. No agents harmed in the making of this filesystem.</p>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true" data-tab="signin">// SIGN IN</button>
+        <button class="tab" role="tab" aria-selected="false" data-tab="signup">// CREATE ACCOUNT</button>
+      </div>
+
+      <div class="panes">
+
+        <!-- SIGN IN -->
+        <form data-pane="signin" class="is-active" onsubmit="return false;">
+          <div class="field">
+            <label for="si-email">// EMAIL</label>
+            <input id="si-email" class="input" type="email" placeholder="agent@yourcompany.com" autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="si-pw">// PASSPHRASE <a href="#">recover</a></label>
+            <input id="si-pw" class="input" type="password" placeholder="••••••••••••" autocomplete="current-password">
+          </div>
+          <div class="row">
+            <label class="check"><input type="checkbox" checked> remember this device</label>
+          </div>
+          <button class="btn" type="submit">$ afs login <span>→</span></button>
+        </form>
+
+        <!-- SIGN UP -->
+        <form data-pane="signup" onsubmit="return false;">
+          <div class="field">
+            <label for="su-name">// OPERATOR NAME</label>
+            <input id="su-name" class="input" type="text" placeholder="researcher-07" autocomplete="username">
+          </div>
+          <div class="field">
+            <label for="su-email">// EMAIL</label>
+            <input id="su-email" class="input" type="email" placeholder="agent@yourcompany.com" autocomplete="email">
+          </div>
+          <div class="field">
+            <label for="su-pw">// PASSPHRASE <span style="color:var(--afs-ink-faint);letter-spacing:.05em">12+ chars</span></label>
+            <input id="su-pw" class="input" type="password" placeholder="••••••••••••" autocomplete="new-password">
+          </div>
+          <div class="row">
+            <label class="check"><input type="checkbox" checked> i accept the rules of engagement (TOS &amp; privacy)</label>
+          </div>
+          <button class="btn" type="submit">$ afs init workspace <span>→</span></button>
+          <div class="legal">By creating an account you agree to the <a href="#">terms</a> &amp; <a href="#">privacy policy</a>. New accounts ship with a 14-day pro trial — no card, no auto-bill.</div>
+        </form>
+
+      </div>
+    </div>
+
+    <div class="form-foot">
+      <div></div>
+      <div>afs.cloud · build a8f3c2 · © 2026 redis</div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  // headline fit-to-width
+  (function fitMega() {
+    var el = document.getElementById('megaTitle');
+    if (!el) return;
+    var fit = el.parentElement;
+    function update() {
+      el.style.transform = 'scale(1)';
+      var w = fit.clientWidth;
+      // measure widest line
+      var lines = el.querySelectorAll('.line');
+      var max = 0;
+      lines.forEach(function (l) { if (l.scrollWidth > max) max = l.scrollWidth; });
+      if (max === 0) return;
+      var s = Math.min(1, w / max);
+      el.style.transform = 'scale(' + s + ')';
+      el.style.height = (el.scrollHeight * s) + 'px';
+    }
+    update();
+    window.addEventListener('resize', update);
+    // re-fit after fonts load
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(update);
+  })();
+
+  // tab switching
+  document.querySelectorAll('.tab').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.dataset.tab;
+      document.querySelectorAll('.tab').forEach(function (b) {
+        b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+      });
+      document.querySelectorAll('[data-pane]').forEach(function (p) {
+        p.classList.toggle('is-active', p.dataset.pane === key);
+      });
+    });
+  });
+</script>
+</body>
+</html>

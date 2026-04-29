@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { LoginRouteView, validateLoginSearch } from "./login";
+import { LoginView, validateAuthRedirectSearch } from "../features/auth/auth-route-views";
 
 export const Route = createFileRoute("/login/$clerkPath")({
-  validateSearch: validateLoginSearch,
-  component: LoginRouteView,
+  validateSearch: validateAuthRedirectSearch,
+  component: LoginClerkPathRoute,
 });
+
+function LoginClerkPathRoute() {
+  const { redirect } = Route.useSearch();
+  return <LoginView redirect={redirect} />;
+}

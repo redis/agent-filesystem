@@ -1,4 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import styled from "styled-components";
 import {
   DocPage,
   DocHero,
@@ -8,11 +10,8 @@ import {
   DocHeading,
   DocSubheading,
   DocProse,
-  CodeBlock,
   InlineCode,
   CalloutBox,
-  Step,
-  CmdTable,
   CrossLinkCard,
   CrossLinkText,
   CrossLinkTitle,
@@ -27,381 +26,165 @@ export const Route = createFileRoute("/docs")({
 function DocsPage() {
   return (
     <DocPage>
-      {/* ── Hero ── */}
       <DocHero>
-        <DocHeroTitle>Getting Started with Agent Filesystem</DocHeroTitle>
+        <Eyebrow>CLI first</Eyebrow>
+        <DocHeroTitle>Start with the AFS CLI</DocHeroTitle>
         <DocHeroSub>
-          AFS gives every agent a persistent, checkpointed workspace backed by
-          Redis. This guide walks you through the core concepts and gets you up
-          and running.
+          The fastest way to understand AFS is to log in, create a workspace,
+          and mount it as a normal directory. Everything else builds from those
+          commands.
         </DocHeroSub>
       </DocHero>
 
-      {/* ── What is AFS ── */}
+      <TerminalWindow title="Terminal">
+        <TerminalComment>// authenticate the CLI to the cloud/control plane</TerminalComment>
+        <TerminalCommand>afs login</TerminalCommand>
+        <TerminalSpacer />
+        <TerminalComment>// create a new workspace</TerminalComment>
+        <TerminalCommand>afs workspace create myworkspace</TerminalCommand>
+        <TerminalSpacer />
+        <TerminalComment>// mount the workspace at ~/afs</TerminalComment>
+        <TerminalCommand>afs up myworkspace ~/afs</TerminalCommand>
+      </TerminalWindow>
+
+      <CalloutBox $tone="tip">
+        <DocProse>
+          That is the core loop: authenticate once, create a workspace, then run
+          <InlineCode>afs up</InlineCode> to make the workspace available on
+          disk. Put files in <InlineCode>~/afs</InlineCode> and AFS keeps the
+          workspace state backed by Redis.
+        </DocProse>
+      </CalloutBox>
+
       <DocSection>
-        <DocHeading>What is AFS?</DocHeading>
-        <DocProse>
-          Agent Filesystem (AFS) is a workspace system for AI agents, backed by
-          Redis. It gives agents a filesystem-shaped way to work with data
-          without being tied to one machine's local disk.
-        </DocProse>
-        <DocProse>
-          Agents already know how to read files, write files, search trees, and
-          work in directories. AFS takes that familiar interface and adds
-          checkpointing, forking, and remote persistence so workspace state
-          survives restarts, moves between machines, and can be rolled back at
-          any time.
-        </DocProse>
-        <CalloutBox $tone="info">
-          <DocProse>
-            <strong>In short:</strong> AFS is a workspace system for agents,
-            backed by Redis, with real directories for real tools.
-          </DocProse>
-        </CalloutBox>
+        <DocHeading>What Those Commands Do</DocHeading>
+        <StepList>
+          <StepRow>
+            <StepIndex>01</StepIndex>
+            <StepBody>
+              <StepTitle>Sign in</StepTitle>
+              <DocProse>
+                <InlineCode>afs login</InlineCode> connects your local CLI to
+                AFS Cloud or a control plane. The CLI keeps the token locally so
+                future commands can create and mount workspaces without another
+                browser step.
+              </DocProse>
+            </StepBody>
+          </StepRow>
+          <StepRow>
+            <StepIndex>02</StepIndex>
+            <StepBody>
+              <StepTitle>Create a workspace</StepTitle>
+              <DocProse>
+                <InlineCode>afs workspace create myworkspace</InlineCode> creates
+                an empty workspace with an initial checkpoint. This workspace is
+                the shared state agents and tools will work against.
+              </DocProse>
+            </StepBody>
+          </StepRow>
+          <StepRow>
+            <StepIndex>03</StepIndex>
+            <StepBody>
+              <StepTitle>Mount it locally</StepTitle>
+              <DocProse>
+                <InlineCode>afs up myworkspace ~/afs</InlineCode> starts the
+                local AFS runtime and exposes the workspace at{" "}
+                <InlineCode>~/afs</InlineCode>. Use your editor, shell, and
+                agents there like any other directory.
+              </DocProse>
+            </StepBody>
+          </StepRow>
+        </StepList>
       </DocSection>
 
-      {/* ── How it works ── */}
       <DocSection>
-        <DocHeading>How It Works</DocHeading>
+        <DocHeading>Other Simple CLI Starts</DocHeading>
         <DocProse>
-          The architecture has four layers. Redis is the canonical source of
-          truth; everything else reads from or writes to it.
+          Pick the path that matches what you already have. Each one starts from
+          the terminal and keeps the workflow centered on the CLI.
         </DocProse>
 
-        <DocSubheading>Data flow</DocSubheading>
-        <CodeBlock>
-          <code>{`  AI Agents (Claude, GPT, custom)
-        │
-        ▼
-  AFS CLI / MCP Server          ◀── agents interact here
-        │
-        ▼
-  Redis (source of truth)       ◀── workspaces, files, checkpoints
-        │
-        ▼
-  Web UI (this app)             ◀── browse, monitor, manage`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Operating modes</DocSubheading>
-        <DocProse>
-          <strong>Sync mode (recommended)</strong> — Redis is canonical. AFS
-          keeps a local directory in sync with the workspace in Redis. Agents
-          work in the local directory with normal tools; changes sync back to
-          Redis automatically.
-        </DocProse>
-        <DocProse>
-          <strong>Mount mode</strong> — AFS exposes the Redis-backed workspace
-          as a POSIX filesystem via FUSE (Linux) or NFS (macOS). No local copy;
-          reads and writes go directly to Redis.
-        </DocProse>
-        <DocProse>
-          <strong>MCP mode</strong> — Agents interact with workspaces through
-          MCP tools exposed by{" "}
-          <InlineCode>afs mcp</InlineCode>. No local directory
-          needed.
-        </DocProse>
+        <ExampleList>
+          <CliExample
+            title="Start from existing code"
+            description="Import a local directory into a new AFS workspace, then keep working in that same directory."
+            commands={`afs login
+afs workspace import myworkspace ~/src/my-app
+afs up myworkspace ~/src/my-app`}
+          />
+          <CliExample
+            title="Use the default mount path"
+            description="Let AFS choose the mount path for the workspace, then reuse that selection on future runs."
+            commands={`afs login
+afs workspace create myworkspace
+afs up myworkspace`}
+          />
+          <CliExample
+            title="Checkpoint before a risky change"
+            description="Save the current live workspace state before a refactor, migration, or agent handoff."
+            commands={`afs checkpoint create myworkspace before-refactor
+afs checkpoint list myworkspace`}
+          />
+          <CliExample
+            title="Connect an agent over MCP"
+            description="Launch the stdio MCP server for a workspace so an agent can read and write through AFS tools."
+            commands={`afs login
+afs mcp --workspace myworkspace`}
+          />
+        </ExampleList>
       </DocSection>
 
-      {/* ── Deployment modes ── */}
       <DocSection>
-        <DocHeading>Deployment Modes</DocHeading>
-        <DocProse>
-          AFS supports two deployment modes depending on your needs.
-        </DocProse>
-
-        <DocSubheading>Managed mode (Docker)</DocSubheading>
-        <DocProse>
-          Docker Compose runs the full stack: Redis, the control plane, and the
-          web UI — all pre-configured. Best for teams, demos, or when you want
-          the full visual management experience. The CLI can connect to the
-          Docker Redis for local sync and mount.
-        </DocProse>
-        <CodeBlock>
-          <code>{`docker compose up
-# Open http://localhost:8091`}</code>
-        </CodeBlock>
-
-        <DocSubheading>Local mode (CLI only)</DocSubheading>
-        <DocProse>
-          Run the <InlineCode>afs</InlineCode> CLI directly against your own
-          Redis instance. No control plane or web UI required. Best for
-          single-developer or agent-only workflows where you just need
-          workspaces, sync, and checkpoints.
-        </DocProse>
-        <CodeBlock>
-          <code>{`afs setup          # configure Redis connection
-afs workspace create my-project
-afs up             # start syncing`}</code>
-        </CodeBlock>
-
-        <CalloutBox $tone="tip">
-          <DocProse>
-            See the{" "}
-            <Link to="/downloads" style={{ color: "var(--afs-accent)" }}>
-              Downloads page
-            </Link>{" "}
-            to download a pre-built CLI binary.
-          </DocProse>
-        </CalloutBox>
+        <DocHeading>Daily CLI Commands</DocHeading>
+        <CommandGrid>
+          <CommandItem>
+            <InlineCode>afs status</InlineCode>
+            <span>Check the current runtime and workspace selection.</span>
+          </CommandItem>
+          <CommandItem>
+            <InlineCode>afs down</InlineCode>
+            <span>Stop the local runtime when you are done.</span>
+          </CommandItem>
+          <CommandItem>
+            <InlineCode>afs workspace list</InlineCode>
+            <span>See every workspace available to this CLI.</span>
+          </CommandItem>
+          <CommandItem>
+            <InlineCode>afs workspace use myworkspace</InlineCode>
+            <span>Set the default workspace for commands that omit one.</span>
+          </CommandItem>
+          <CommandItem>
+            <InlineCode>afs checkpoint restore myworkspace initial</InlineCode>
+            <span>Roll a workspace back to a known checkpoint.</span>
+          </CommandItem>
+          <CommandItem>
+            <InlineCode>afs grep TODO</InlineCode>
+            <span>Search workspace files directly through AFS.</span>
+          </CommandItem>
+        </CommandGrid>
       </DocSection>
 
-      {/* ── Getting started: Managed ── */}
       <DocSection>
-        <DocHeading>Getting Started — Managed Mode</DocHeading>
+        <DocHeading>Need the CLI?</DocHeading>
         <DocProse>
-          The fastest path. Docker Compose handles Redis, the control plane, and
-          the web UI.
+          Download the pre-built binary, run <InlineCode>afs login</InlineCode>,
+          and come back to the terminal quickstart above.
         </DocProse>
-
-        <Step n={1} title="Start the stack">
-          <CodeBlock>
-            <code>{`git clone <repo-url>
-cd agent-filesystem
-docker compose up`}</code>
-          </CodeBlock>
-        </Step>
-
-        <Step n={2} title="Open the web UI">
-          Navigate to{" "}
-          <InlineCode>http://localhost:8091</InlineCode>.
-          Add the Docker Redis as a database at{" "}
-          <InlineCode>redis:6379</InlineCode>{" "}
-          (or <InlineCode>localhost:6379</InlineCode> from the host).
-        </Step>
-
-        <Step n={3} title="Create a workspace">
-          Use the web UI to create your first workspace, or connect the CLI:
-          <CodeBlock>
-            <code>{`afs setup   # point at localhost:6379
-afs workspace create my-project
-afs up`}</code>
-          </CodeBlock>
-        </Step>
-
-        <Step n={4} title="Manage from the UI">
-          Browse files, create checkpoints, view agent sessions, and track
-          activity — all from the web dashboard.
-        </Step>
-      </DocSection>
-
-      {/* ── Getting started: Local ── */}
-      <DocSection>
-        <DocHeading>Getting Started — Local Mode</DocHeading>
+        <DocSubheading>Install path</DocSubheading>
         <DocProse>
-          Build from source and use the CLI directly. Bring your own Redis.
+          The CLI is the primary workflow. The web UI is useful for browsing,
+          activity, and management, but getting started should begin with{" "}
+          <InlineCode>afs</InlineCode> in your shell.
         </DocProse>
-
-        <Step n={1} title="Prerequisites">
-          <CmdTable>
-            <thead>
-              <tr>
-                <th>Requirement</th>
-                <th>Version</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Go</td>
-                <td>1.22.2+</td>
-                <td>Required for CLI and control plane</td>
-              </tr>
-              <tr>
-                <td>Node.js</td>
-                <td>20+</td>
-                <td>Only needed if building the web UI</td>
-              </tr>
-              <tr>
-                <td>Redis</td>
-                <td>7+</td>
-                <td>Running instance (local or remote)</td>
-              </tr>
-            </tbody>
-          </CmdTable>
-        </Step>
-
-        <Step n={2} title="Build AFS">
-          <CodeBlock>
-            <code>{`git clone <repo-url>
-cd agent-filesystem
-
-# CLI only (no UI):
-make afs
-
-# CLI + control plane with embedded UI:
-make commands
-
-# Everything active in this repo:
-make`}</code>
-          </CodeBlock>
-        </Step>
-
-        <Step n={3} title="Install to PATH">
-          <CodeBlock>
-            <code>{`make install`}</code>
-          </CodeBlock>
-          <DocProse>
-            Installs <InlineCode>afs</InlineCode> to{" "}
-            <InlineCode>/usr/local/bin</InlineCode> so you can run it from
-            anywhere.
-          </DocProse>
-        </Step>
-
-        <Step n={4} title="Run setup">
-          The interactive setup wizard configures your Redis connection and local
-          sync directory.
-          <CodeBlock>
-            <code>{`afs setup`}</code>
-          </CodeBlock>
-          <CalloutBox $tone="tip">
-            <DocProse>
-              This creates <InlineCode>afs.config.json</InlineCode> next to the
-              binary. You can edit it directly later.
-            </DocProse>
-          </CalloutBox>
-        </Step>
-
-        <Step n={5} title="Create a workspace and start syncing">
-          <CodeBlock>
-            <code>{`afs workspace create my-project
-afs up`}</code>
-          </CodeBlock>
-          <DocProse>
-            Your workspace is now at{" "}
-            <InlineCode>~/afs/my-project/</InlineCode>. Use normal tools to
-            work with files — changes sync to Redis automatically.
-          </DocProse>
-        </Step>
-
-        <Step n={6} title="Create checkpoints">
-          Save a named snapshot. You can restore to any checkpoint later.
-          <CodeBlock>
-            <code>{`afs checkpoint create before-refactor`}</code>
-          </CodeBlock>
-        </Step>
+        <InlineLink to="/downloads">Download AFS CLI</InlineLink>
       </DocSection>
 
-      {/* ── CLI reference ── */}
-      <DocSection>
-        <DocHeading>Key CLI Commands</DocHeading>
-        <CmdTable>
-          <thead>
-            <tr>
-              <th>Command</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>
-                <InlineCode>afs login</InlineCode>
-              </td>
-              <td>
-                Connect this CLI to a control plane (cloud or self-hosted).
-                Pass <InlineCode>--self-hosted</InlineCode> or{" "}
-                <InlineCode>--cloud</InlineCode> to force a mode.
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs setup</InlineCode>
-              </td>
-              <td>
-                Interactive workspace + local path setup. Chains to{" "}
-                <InlineCode>afs login</InlineCode> on a fresh machine.
-              </td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs up</InlineCode>
-              </td>
-              <td>Start syncing (or mounting) workspaces</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs down</InlineCode>
-              </td>
-              <td>Stop services and unmount</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs status</InlineCode>
-              </td>
-              <td>Show current status</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs workspace create &lt;name&gt;</InlineCode>
-              </td>
-              <td>Create a new workspace</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs workspace list</InlineCode>
-              </td>
-              <td>List all workspaces</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs workspace use &lt;name&gt;</InlineCode>
-              </td>
-              <td>Set the current workspace</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>
-                  afs workspace import &lt;name&gt; &lt;dir&gt;
-                </InlineCode>
-              </td>
-              <td>Import existing directory as a workspace</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs workspace fork &lt;name&gt; &lt;new&gt;</InlineCode>
-              </td>
-              <td>Fork workspace for parallel work</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs checkpoint create &lt;name&gt;</InlineCode>
-              </td>
-              <td>Save current state as a checkpoint</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs checkpoint list</InlineCode>
-              </td>
-              <td>List all checkpoints</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs checkpoint restore &lt;name&gt;</InlineCode>
-              </td>
-              <td>Restore workspace to a checkpoint</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs mcp</InlineCode>
-              </td>
-              <td>Start the MCP server for agent integration</td>
-            </tr>
-            <tr>
-              <td>
-                <InlineCode>afs grep &lt;pattern&gt;</InlineCode>
-              </td>
-              <td>Search workspace files directly in Redis</td>
-            </tr>
-          </tbody>
-        </CmdTable>
-      </DocSection>
-
-      {/* ── Cross-link to Agent Guide ── */}
       <CrossLinkCard as={Link} to="/agent-guide">
         <CrossLinkText>
-          <CrossLinkTitle>Setting up for AI agents?</CrossLinkTitle>
+          <CrossLinkTitle>Setting up an AI agent?</CrossLinkTitle>
           <CrossLinkDesc>
-            See the Agent Guide for MCP configuration, available tools, and
-            agent-specific workflows.
+            Use the Agent Guide after the CLI is working to configure MCP tools
+            and agent-specific workflows.
           </CrossLinkDesc>
         </CrossLinkText>
         <CrossLinkArrow>&rarr;</CrossLinkArrow>
@@ -409,3 +192,271 @@ afs up`}</code>
     </DocPage>
   );
 }
+
+function CliExample(props: {
+  title: string;
+  description: string;
+  commands: string;
+}) {
+  const promptedCommands = props.commands
+    .split("\n")
+    .map((command) => `> ${command}`)
+    .join("\n");
+
+  return (
+    <ExampleRow>
+      <ExampleCopy>
+        <ExampleTitle>{props.title}</ExampleTitle>
+        <DocProse>{props.description}</DocProse>
+      </ExampleCopy>
+      <MiniTerminal>{promptedCommands}</MiniTerminal>
+    </ExampleRow>
+  );
+}
+
+function TerminalWindow(props: { title: string; children: ReactNode }) {
+  return (
+    <TerminalFrame>
+      <TerminalTopBar>
+        <TerminalDots aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </TerminalDots>
+        <TerminalTitle>{props.title}</TerminalTitle>
+      </TerminalTopBar>
+      <TerminalBody>{props.children}</TerminalBody>
+    </TerminalFrame>
+  );
+}
+
+function TerminalCommand({ children }: { children: ReactNode }) {
+  return (
+    <TerminalLine>
+      <Prompt>&gt;</Prompt>
+      <CommandText>{children}</CommandText>
+    </TerminalLine>
+  );
+}
+
+function TerminalComment({ children }: { children: ReactNode }) {
+  return <TerminalLine $muted>{children}</TerminalLine>;
+}
+
+function TerminalSpacer() {
+  return <TerminalGap aria-hidden="true" />;
+}
+
+const Eyebrow = styled.div`
+  margin-bottom: 8px;
+  color: var(--afs-accent, #064ea2);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const TerminalFrame = styled.div`
+  overflow: hidden;
+  border: 1px solid var(--afs-line, #e6e6e6);
+  border-radius: 8px;
+  background: #101820;
+  box-shadow: var(--afs-shadow, none);
+`;
+
+const TerminalTopBar = styled.div`
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 14px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a242e;
+`;
+
+const TerminalDots = styled.div`
+  display: flex;
+  gap: 6px;
+
+  span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #6d6e71;
+  }
+
+  span:nth-child(1) {
+    background: #dc2626;
+  }
+
+  span:nth-child(2) {
+    background: #f59e0b;
+  }
+
+  span:nth-child(3) {
+    background: #16a34a;
+  }
+`;
+
+const TerminalTitle = styled.div`
+  color: #d1d3d4;
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 12px;
+`;
+
+const TerminalBody = styled.div`
+  padding: 22px;
+  color: #f8f8f8;
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 14px;
+  line-height: 1.7;
+
+  @media (max-width: 640px) {
+    padding: 18px;
+    font-size: 12px;
+  }
+`;
+
+const TerminalLine = styled.div<{ $muted?: boolean }>`
+  display: flex;
+  min-height: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: ${({ $muted }) => ($muted ? "#a7a9ac" : "#ffffff")};
+`;
+
+const Prompt = styled.span`
+  flex: 0 0 auto;
+  width: 24px;
+  color: #16a34a;
+`;
+
+const CommandText = styled.span`
+  color: #ffffff;
+`;
+
+const TerminalGap = styled.div`
+  height: 12px;
+`;
+
+const StepList = styled.div`
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+`;
+
+const StepRow = styled.div`
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 14px;
+`;
+
+const StepIndex = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--afs-accent-soft, rgba(6, 78, 162, 0.1));
+  color: var(--afs-accent, #064ea2);
+  font-size: 12px;
+  font-weight: 800;
+`;
+
+const StepBody = styled.div`
+  min-width: 0;
+`;
+
+const StepTitle = styled.div`
+  margin-bottom: 4px;
+  color: var(--afs-ink, #282828);
+  font-size: 14px;
+  font-weight: 800;
+`;
+
+const ExampleList = styled.div`
+  display: grid;
+  gap: 22px;
+  margin-top: 20px;
+`;
+
+const ExampleRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+  padding-top: 22px;
+  border-top: 1px solid var(--afs-line, #e6e6e6);
+
+  &:first-child {
+    padding-top: 0;
+    border-top: none;
+  }
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ExampleCopy = styled.div`
+  min-width: 0;
+`;
+
+const ExampleTitle = styled.div`
+  margin-bottom: 4px;
+  color: var(--afs-ink, #282828);
+  font-size: 14px;
+  font-weight: 800;
+`;
+
+const MiniTerminal = styled.pre`
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 1px solid #1f2937;
+  border-radius: 8px;
+  background: #050807;
+  color: #22c55e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+`;
+
+const CommandGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+
+  @media (max-width: 760px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const CommandItem = styled.div`
+  display: grid;
+  gap: 7px;
+  padding: 12px 0;
+  border-top: 1px solid var(--afs-line, #e6e6e6);
+  color: var(--afs-muted, #6d6e71);
+  font-size: 13px;
+  line-height: 1.5;
+`;
+
+const InlineLink = styled(Link)`
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 16px;
+  color: var(--afs-accent, #064ea2);
+  font-size: 14px;
+  font-weight: 800;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;

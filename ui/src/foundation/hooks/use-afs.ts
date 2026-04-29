@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { afsApi } from "../api/afs";
-import type { ListChangelogInput } from "../api/afs";
+import type { ListActivityInput, ListChangelogInput } from "../api/afs";
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
@@ -42,8 +42,14 @@ export const afsKeys = {
     [...afsKeys.all, "workspaces", databaseId ?? "all", workspaceId] as const,
   agents: (databaseId: string | null) =>
     [...afsKeys.all, "agents", databaseId ?? "all"] as const,
-  activity: (databaseId: string | null, limit: number) =>
-    [...afsKeys.all, "activity", databaseId ?? "all", limit] as const,
+  activity: (input: ListActivityInput) =>
+    [
+      ...afsKeys.all,
+      "activity",
+      input.databaseId ?? "all",
+      input.limit ?? 50,
+      input.until ?? "",
+    ] as const,
   changelog: (input: ListChangelogInput) =>
     [
       ...afsKeys.all,
@@ -144,9 +150,18 @@ export function agentsQueryOptions(databaseId: string | null) {
   });
 }
 
-export function activityQueryOptions(databaseId: string | null, limit: number) {
+export function activityQueryOptions(input: ListActivityInput) {
   return queryOptions({
-    queryKey: afsKeys.activity(databaseId, limit),
+    queryKey: afsKeys.activity(input),
+    queryFn: () => afsApi.listActivityPage(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function activityItemsQueryOptions(databaseId: string | null, limit: number) {
+  return queryOptions({
+    queryKey: [...afsKeys.activity({ databaseId: databaseId ?? undefined, limit }), "items"] as const,
     queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
@@ -289,7 +304,16 @@ export function useAgents(databaseId: string | null, enabled = true) {
 export function useActivity(databaseId: string | null, limit = 50, enabled = true) {
   return useQuery(
     {
-      ...activityQueryOptions(databaseId, limit),
+      ...activityItemsQueryOptions(databaseId, limit),
+      enabled,
+    },
+  );
+}
+
+export function useActivityPage(input: ListActivityInput, enabled = true) {
+  return useQuery(
+    {
+      ...activityQueryOptions(input),
       enabled,
     },
   );

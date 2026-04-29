@@ -7,6 +7,9 @@ import { themesRebrand, CommonStyles } from "@redis-ui/styles";
 import "modern-normalize/modern-normalize.css";
 import "@redis-ui/styles/normalized-styles.css";
 import "@redis-ui/styles/fonts.css";
+import "./styles/skin-classic.css";
+import "./styles/skin-situation-room.css";
+import "./styles/skin-overrides.css";
 import "./index.css";
 
 // Import the generated route tree
@@ -16,6 +19,7 @@ import { AppErrorBoundary } from "./error-boundaries/app-error-boundary";
 import { AuthProvider } from "./foundation/auth-context";
 import { DatabaseScopeProvider } from "./foundation/database-scope";
 import { ColorModeProvider } from "./foundation/theme-context";
+import { SkinProvider } from "./foundation/skin-context";
 import { queryClient } from "./foundation/query-client";
 
 // Create a new router instance
@@ -44,22 +48,24 @@ if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <StrictMode>
-      <ColorModeProvider>
-        {(colorMode) => (
-          <ThemeProvider theme={themesRebrand[colorMode]}>
-            <CommonStyles />
-            <AppErrorBoundary>
-              <QueryClientProvider client={queryClient}>
-                <AuthProvider>
-                  <DatabaseScopeProvider>
-                    <RouterProvider router={router} />
-                  </DatabaseScopeProvider>
-                </AuthProvider>
-              </QueryClientProvider>
-            </AppErrorBoundary>
-          </ThemeProvider>
-        )}
-      </ColorModeProvider>
+      <SkinProvider>
+        <ColorModeProvider>
+          {(colorMode) => (
+            <ThemeProvider theme={themesRebrand[colorMode]}>
+              <CommonStyles />
+              <AppErrorBoundary>
+                <QueryClientProvider client={queryClient}>
+                  <AuthProvider>
+                    <DatabaseScopeProvider>
+                      <RouterProvider router={router} />
+                    </DatabaseScopeProvider>
+                  </AuthProvider>
+                </QueryClientProvider>
+              </AppErrorBoundary>
+            </ThemeProvider>
+          )}
+        </ColorModeProvider>
+      </SkinProvider>
     </StrictMode>
   );
 }

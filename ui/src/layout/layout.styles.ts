@@ -12,6 +12,8 @@ export const FlexCol = styled(FlexRow)`
 
 export const FlexColItem = styled(FlexCol)`
   flex: 1;
+  height: 100vh;
+  min-width: 0;
   overflow: hidden;
 `;
 

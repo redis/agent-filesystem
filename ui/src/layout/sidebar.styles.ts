@@ -103,7 +103,7 @@ export const ProfileMenuContainer = styled.div<{ $isExpanded: boolean }>`
   padding: ${({ $isExpanded }) => ($isExpanded ? "12px 12px 8px" : "12px 8px 8px")};
 `;
 
-export const ProfileButton = styled.button<{ $isExpanded: boolean }>`
+export const ProfileButton = styled.button.attrs({ "data-afs-profile-button": "" })<{ $isExpanded: boolean }>`
   width: 100%;
   display: flex;
   align-items: center;
@@ -129,7 +129,7 @@ export const ProfileButton = styled.button<{ $isExpanded: boolean }>`
   }
 `;
 
-export const ProfileAvatar = styled.div`
+export const ProfileAvatar = styled.div.attrs({ "data-afs-profile-avatar": "" })`
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -179,7 +179,7 @@ export const ProfileChevron = styled.div<{ $isOpen: boolean; $isExpanded: boolea
   transition: transform 0.18s ease;
 `;
 
-export const ProfileDropdown = styled.div<{ $isExpanded: boolean }>`
+export const ProfileDropdown = styled.div.attrs({ "data-afs-profile-dropdown": "" })<{ $isExpanded: boolean }>`
   position: absolute;
   left: ${({ $isExpanded }) => ($isExpanded ? "12px" : "calc(100% + 8px)")};
   right: ${({ $isExpanded }) => ($isExpanded ? "12px" : "auto")};

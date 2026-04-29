@@ -1,0 +1,17 @@
+{
+  "id": "org-coding-standards",
+  "slug": "coding-standards",
+  "title": "Org Coding Standards",
+  "tagline": "Read-only source of truth for your team's coding standards and review rules.",
+  "icon": "book-open",
+  "accent": "#0ea5e9",
+  "profile": "workspace-ro",
+  "profileLabel": "Read-only",
+  "summary": [
+    "Every agent reads the same canonical standards",
+    "Update once — every developer's agent sees it immediately",
+    "Read-only MCP token means agents can't clobber the rules"
+  ],
+  "whyItMatters": "Coding standards go stale the moment they live in a Notion page nobody reads. Here they live in a workspace your agents consult automatically, gated by a read-only MCP profile so nothing can edit them by accident.",
+  "firstPrompt": "Summarize every standard in this workspace in one paragraph each."
+}
