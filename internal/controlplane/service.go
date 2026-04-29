@@ -1309,7 +1309,14 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 		return RestoreCheckpointResult{}, err
 	}
 	template := s.buildChangelogTemplate(ctx, storageID, checkpointID, ChangeSourceServerRestore)
-	writeChangeEntries(ctx, s.store.rdb, storageID, manifestDiff(priorManifest, manifestValue, template))
+	versionsByPath, err := s.store.RecordManifestVersionChangesWithResults(ctx, storageID, priorManifest, manifestValue, FileVersionMutationMetadata{
+		Source:       "checkpoint_restore",
+		CheckpointID: checkpointID,
+	})
+	if err != nil {
+		return RestoreCheckpointResult{}, err
+	}
+	writeChangeEntries(ctx, s.store.rdb, annotateChangeEntriesWithVersions(manifestDiff(priorManifest, manifestValue, template), versionsByPath))
 	fields := map[string]any{
 		"checkpoint": checkpointID,
 		"mode":       "canonical-only",

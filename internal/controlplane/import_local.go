@@ -13,10 +13,11 @@ import (
 
 // ImportLocalRequest describes a local directory to import as a workspace.
 type ImportLocalRequest struct {
-	DatabaseID  string `json:"database_id,omitempty"`
-	Name        string `json:"name"`
-	Path        string `json:"path"`
-	Description string `json:"description"`
+	DatabaseID       string                     `json:"database_id,omitempty"`
+	Name             string                     `json:"name"`
+	Path             string                     `json:"path"`
+	Description      string                     `json:"description"`
+	VersioningPolicy *WorkspaceVersioningPolicy `json:"versioning_policy,omitempty"`
 }
 
 // ImportLocalResponse is returned on successful local import.
@@ -130,6 +131,11 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 	if err := store.PutWorkspaceMeta(ctx, meta); err != nil {
 		return ImportLocalResponse{}, err
 	}
+	if input.VersioningPolicy != nil {
+		if err := store.PutWorkspaceVersioningPolicy(ctx, workspaceID, *input.VersioningPolicy); err != nil {
+			return ImportLocalResponse{}, err
+		}
+	}
 	if err := store.PutSavepoint(ctx, checkpoint, manifest); err != nil {
 		return ImportLocalResponse{}, err
 	}
@@ -137,7 +143,14 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 		return ImportLocalResponse{}, err
 	}
 	template := service.buildChangelogTemplate(ctx, workspaceID, initialCheckpointName, ChangeSourceImport)
-	writeChangeEntries(ctx, store.rdb, workspaceID, manifestSeedEntries(manifest, template))
+	versionsByPath, err := store.RecordManifestVersionChangesWithResults(ctx, workspaceID, Manifest{}, manifest, FileVersionMutationMetadata{
+		Source:       ChangeSourceImport,
+		CheckpointID: initialCheckpointName,
+	})
+	if err != nil {
+		return ImportLocalResponse{}, err
+	}
+	writeChangeEntries(ctx, store.rdb, workspaceID, annotateChangeEntriesWithVersions(manifestSeedEntries(manifest, template), versionsByPath))
 	if err := store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      dirPath,

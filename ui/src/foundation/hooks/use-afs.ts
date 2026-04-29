@@ -7,17 +7,23 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { afsApi } from "../api/afs";
-import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../api/afs";
+import type { ListActivityInput, ListChangelogInput } from "../api/afs";
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
+  DiffFileVersionsInput,
+  GetFileHistoryInput,
+  GetFileVersionContentInput,
   GetWorkspaceFileContentInput,
-  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
+  GetWorkspaceVersioningPolicyInput,
   RestoreSavepointInput,
+  RestoreFileVersionInput,
   SaveDatabaseInput,
+  UndeleteFileVersionInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
+  UpdateWorkspaceVersioningPolicyInput,
   QuickstartInput,
   ImportLocalInput,
   CreateMCPTokenInput,
@@ -48,21 +54,8 @@ export const afsKeys = {
       ...afsKeys.all,
       "activity",
       input.databaseId ?? "all",
-      input.limit ?? 50,
-      input.until ?? "",
-    ] as const,
-  events: (input: ListEventsInput) =>
-    [
-      ...afsKeys.all,
-      "events",
-      input.databaseId ?? "all",
       input.workspaceId ?? "all",
-      input.kind ?? "all",
-      input.sessionId ?? "all",
-      input.path ?? "all",
-      input.limit ?? 100,
-      input.direction ?? "desc",
-      input.since ?? "",
+      input.limit ?? 50,
       input.until ?? "",
     ] as const,
   changelog: (input: ListChangelogInput) =>
@@ -74,6 +67,7 @@ export const afsKeys = {
       input.workspaceId ?? "all",
       "changes",
       input.sessionId ?? "all",
+      input.path ?? "",
       input.limit ?? 100,
       input.direction ?? "desc",
       input.since ?? "",
@@ -88,6 +82,7 @@ export const afsKeys = {
       input.workspaceId ?? "all",
       "changes-feed",
       input.sessionId ?? "all",
+      input.path ?? "",
       input.limit ?? 100,
       input.direction ?? "desc",
     ] as const,
@@ -114,26 +109,43 @@ export const afsKeys = {
       input.view,
       input.path,
     ] as const,
-  workspaceDiff: (input: GetWorkspaceDiffInput) =>
+  workspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) =>
     [
       ...afsKeys.all,
       "databases",
       input.databaseId ?? "all",
       "workspaces",
       input.workspaceId,
-      "diff",
-      input.base,
-      input.head,
+      "versioning",
+    ] as const,
+  fileHistory: (input: GetFileHistoryInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "file-history",
+      input.path,
+      input.direction ?? "desc",
+      input.limit ?? 50,
+      input.cursor ?? "",
+    ] as const,
+  fileVersionContent: (input: GetFileVersionContentInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "file-version-content",
+      input.path,
+      "versionId" in input ? input.versionId : `${input.fileId}@${input.ordinal}`,
     ] as const,
   mcpTokens: (databaseId: string | null, workspaceId: string) =>
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
   allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
   controlPlaneTokens: () => [...afsKeys.all, "mcp-tokens", "control-plane"] as const,
-  adminOverview: () => [...afsKeys.all, "admin", "overview"] as const,
-  adminUsers: () => [...afsKeys.all, "admin", "users"] as const,
-  adminDatabases: () => [...afsKeys.all, "admin", "databases"] as const,
-  adminWorkspaces: () => [...afsKeys.all, "admin", "workspaces"] as const,
-  adminAgents: () => [...afsKeys.all, "admin", "agents"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -199,15 +211,6 @@ export function activityItemsQueryOptions(databaseId: string | null, limit: numb
   });
 }
 
-export function eventsQueryOptions(input: ListEventsInput) {
-  return queryOptions({
-    queryKey: afsKeys.events(input),
-    queryFn: () => afsApi.listEvents(input),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
 export function changelogQueryOptions(input: ListChangelogInput) {
   return queryOptions({
     queryKey: afsKeys.changelog(input),
@@ -252,10 +255,28 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
   });
 }
 
-export function workspaceDiffQueryOptions(input: GetWorkspaceDiffInput) {
+export function workspaceVersioningPolicyQueryOptions(input: GetWorkspaceVersioningPolicyInput) {
   return queryOptions({
-    queryKey: afsKeys.workspaceDiff(input),
-    queryFn: () => afsApi.getWorkspaceDiff(input),
+    queryKey: afsKeys.workspaceVersioningPolicy(input),
+    queryFn: () => afsApi.getWorkspaceVersioningPolicy(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function fileHistoryQueryOptions(input: GetFileHistoryInput) {
+  return queryOptions({
+    queryKey: afsKeys.fileHistory(input),
+    queryFn: () => afsApi.getFileHistory(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function fileVersionContentQueryOptions(input: GetFileVersionContentInput) {
+  return queryOptions({
+    queryKey: afsKeys.fileVersionContent(input),
+    queryFn: () => afsApi.getFileVersionContent(input),
     staleTime: FILESYSTEM_QUERY_STALE_MS,
     gcTime: FILESYSTEM_QUERY_GC_MS,
   });
@@ -285,51 +306,6 @@ export function controlPlaneTokensQueryOptions() {
     queryFn: () => afsApi.listControlPlaneTokens(),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminOverviewQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminOverview(),
-    queryFn: () => afsApi.getAdminOverview(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminUsersQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminUsers(),
-    queryFn: () => afsApi.listAdminUsers(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminDatabasesQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminDatabases(),
-    queryFn: () => afsApi.listAdminDatabases(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminWorkspacesQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminWorkspaces(),
-    queryFn: () => afsApi.listAdminWorkspaceSummaries(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminAgentsQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminAgents(),
-    queryFn: () => afsApi.listAdminAgents(),
-    staleTime: AGENT_QUERY_STALE_MS,
-    gcTime: AGENT_QUERY_GC_MS,
   });
 }
 
@@ -386,41 +362,6 @@ export function useControlPlaneTokens(enabled = true) {
   });
 }
 
-export function useAdminOverview(enabled = true) {
-  return useQuery({
-    ...adminOverviewQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminUsers(enabled = true) {
-  return useQuery({
-    ...adminUsersQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminDatabases(enabled = true) {
-  return useQuery({
-    ...adminDatabasesQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminWorkspaceSummaries(enabled = true) {
-  return useQuery({
-    ...adminWorkspacesQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminAgents(enabled = true) {
-  return useQuery({
-    ...adminAgentsQueryOptions(),
-    enabled,
-  });
-}
-
 export function useAgents(databaseId: string | null, enabled = true) {
   return useQuery(
     {
@@ -443,15 +384,6 @@ export function useActivityPage(input: ListActivityInput, enabled = true) {
   return useQuery(
     {
       ...activityQueryOptions(input),
-      enabled,
-    },
-  );
-}
-
-export function useEvents(input: ListEventsInput, enabled = true) {
-  return useQuery(
-    {
-      ...eventsQueryOptions(input),
       enabled,
     },
   );
@@ -491,13 +423,25 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
   );
 }
 
-export function useWorkspaceDiff(input: GetWorkspaceDiffInput, enabled = true) {
-  return useQuery(
-    {
-      ...workspaceDiffQueryOptions(input),
-      enabled: enabled && input.workspaceId !== "",
-    },
-  );
+export function useWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput, enabled = true) {
+  return useQuery({
+    ...workspaceVersioningPolicyQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "",
+  });
+}
+
+export function useFileHistory(input: GetFileHistoryInput, enabled = true) {
+  return useQuery({
+    ...fileHistoryQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "" && input.path.trim() !== "",
+  });
+}
+
+export function useFileVersionContent(input: GetFileVersionContentInput, enabled = true) {
+  return useQuery({
+    ...fileVersionContentQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "" && input.path.trim() !== "",
+  });
 }
 
 function useWorkspaceInvalidation() {
@@ -653,6 +597,45 @@ export function useUpdateWorkspaceFileMutation() {
 
   return useMutation({
     mutationFn: (input: UpdateWorkspaceFileInput) => afsApi.updateWorkspaceFile(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useUpdateWorkspaceVersioningPolicyMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UpdateWorkspaceVersioningPolicyInput) => afsApi.updateWorkspaceVersioningPolicy(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useDiffFileVersionsMutation() {
+  return useMutation({
+    mutationFn: (input: DiffFileVersionsInput) => afsApi.diffFileVersions(input),
+  });
+}
+
+export function useRestoreFileVersionMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: RestoreFileVersionInput) => afsApi.restoreFileVersion(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useUndeleteFileVersionMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UndeleteFileVersionInput) => afsApi.undeleteFileVersion(input),
     onSuccess: async () => {
       await invalidate();
     },

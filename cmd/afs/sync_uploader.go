@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
@@ -151,8 +152,120 @@ func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
 	default:
 		return
 	}
+	if version := u.recordVersionMutation(ctx, r); version != nil {
+		entry.FileID = version.FileID
+		entry.VersionID = version.VersionID
+	}
 
 	controlplane.WriteChangeEntries(ctx, u.rdb, u.storageID, []controlplane.ChangeEntry{entry})
+}
+
+func (u *uploader) recordVersionMutation(ctx context.Context, r uploadResult) *controlplane.FileVersion {
+	before := versionedSnapshotFromSyncEntry(absoluteRemotePath(r.Op.Path), r.Op.StoredEntry, r.Op.HasStored)
+	after, shouldTrack, err := versionedSnapshotFromUploadResult(r)
+	if err != nil {
+		if u.log != nil {
+			u.log.Err("version history", err.Error())
+		}
+		return nil
+	}
+	if !shouldTrack {
+		return nil
+	}
+	version, err := controlplane.NewStore(u.rdb).RecordFileVersionMutation(ctx, u.storageID, before, after, controlplane.FileVersionMutationMetadata{
+		Source:    controlplane.ChangeSourceAgentSync,
+		SessionID: u.sessionID,
+		AgentID:   u.agentID,
+		User:      u.user,
+	})
+	if err != nil {
+		if u.log != nil {
+			u.log.Err("version history", err.Error())
+		}
+		return nil
+	}
+	return version
+}
+
+func versionedSnapshotFromSyncEntry(path string, entry SyncEntry, hasStored bool) controlplane.VersionedFileSnapshot {
+	if !hasStored || entry.Type == "dir" {
+		return controlplane.VersionedFileSnapshot{Path: path}
+	}
+	snapshot := controlplane.VersionedFileSnapshot{
+		Path:   path,
+		Exists: !entry.Deleted,
+		Mode:   entry.Mode,
+	}
+	switch entry.Type {
+	case "symlink":
+		snapshot.Kind = "symlink"
+		snapshot.Target = entry.Target
+		snapshot.ContentHash = entry.RemoteHash
+		snapshot.SizeBytes = int64(len(entry.Target))
+	default:
+		snapshot.Kind = "file"
+		snapshot.ContentHash = entry.RemoteHash
+		snapshot.BlobID = entry.RemoteHash
+		snapshot.SizeBytes = entry.Size
+	}
+	return snapshot
+}
+
+func versionedSnapshotFromUploadResult(r uploadResult) (controlplane.VersionedFileSnapshot, bool, error) {
+	path := absoluteRemotePath(r.Op.Path)
+	switch r.Op.Kind {
+	case opUploadFile:
+		mode := r.Op.Mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		snapshot := controlplane.VersionedFileSnapshot{
+			Path:        path,
+			Exists:      true,
+			Kind:        "file",
+			Mode:        mode,
+			ContentHash: r.Op.LocalHash,
+			BlobID:      r.Op.LocalHash,
+		}
+		if r.Op.Chunked {
+			data, err := os.ReadFile(r.Op.AbsPath)
+			if err != nil {
+				return controlplane.VersionedFileSnapshot{}, true, fmt.Errorf("read chunked upload %s: %w", r.Op.AbsPath, err)
+			}
+			snapshot.Content = data
+			snapshot.SizeBytes = int64(len(data))
+		} else {
+			snapshot.Content = append([]byte(nil), r.Op.Content...)
+			snapshot.SizeBytes = int64(len(snapshot.Content))
+		}
+		if snapshot.SizeBytes == 0 && r.RemoteStat != nil {
+			snapshot.SizeBytes = r.RemoteStat.Size
+		}
+		return snapshot, true, nil
+	case opUploadSymlink:
+		return controlplane.VersionedFileSnapshot{
+			Path:   path,
+			Exists: true,
+			Kind:   "symlink",
+			Mode:   r.Op.Mode,
+			Target: r.Op.Symlink,
+		}, true, nil
+	case opUploadDelete:
+		if r.Op.HasStored && r.Op.StoredEntry.Type == "dir" {
+			return controlplane.VersionedFileSnapshot{Path: path}, false, nil
+		}
+		return controlplane.VersionedFileSnapshot{Path: path}, true, nil
+	case opUploadChmod:
+		before := versionedSnapshotFromSyncEntry(path, r.Op.StoredEntry, r.Op.HasStored)
+		if !before.Exists {
+			return controlplane.VersionedFileSnapshot{}, false, nil
+		}
+		after := before
+		after.Mode = r.Op.Mode
+		return after, true, nil
+	default:
+		return controlplane.VersionedFileSnapshot{}, false, nil
+	}
 }
 
 // run drains in until ctx is cancelled. Each op is processed serially so the

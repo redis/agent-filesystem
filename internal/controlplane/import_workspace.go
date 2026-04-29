@@ -10,14 +10,15 @@ import (
 // ImportWorkspaceRequest uploads a client-built manifest and blob set to create
 // a workspace with an initial checkpoint.
 type ImportWorkspaceRequest struct {
-	DatabaseID  string            `json:"database_id,omitempty"`
-	Name        string            `json:"name"`
-	Description string            `json:"description,omitempty"`
-	Manifest    Manifest          `json:"manifest"`
-	Blobs       map[string][]byte `json:"blobs,omitempty"`
-	FileCount   int               `json:"file_count"`
-	DirCount    int               `json:"dir_count"`
-	TotalBytes  int64             `json:"total_bytes"`
+	DatabaseID       string                     `json:"database_id,omitempty"`
+	Name             string                     `json:"name"`
+	Description      string                     `json:"description,omitempty"`
+	Manifest         Manifest                   `json:"manifest"`
+	Blobs            map[string][]byte          `json:"blobs,omitempty"`
+	FileCount        int                        `json:"file_count"`
+	DirCount         int                        `json:"dir_count"`
+	TotalBytes       int64                      `json:"total_bytes"`
+	VersioningPolicy *WorkspaceVersioningPolicy `json:"versioning_policy,omitempty"`
 }
 
 // ImportWorkspaceResponse is returned after a successful uploaded import.
@@ -99,6 +100,11 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 	if err := s.store.PutWorkspaceMeta(ctx, meta); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
+	if input.VersioningPolicy != nil {
+		if err := s.store.PutWorkspaceVersioningPolicy(ctx, workspaceID, *input.VersioningPolicy); err != nil {
+			return ImportWorkspaceResponse{}, err
+		}
+	}
 	if err := s.store.PutSavepoint(ctx, checkpoint, manifest); err != nil {
 		return ImportWorkspaceResponse{}, err
 	}
@@ -106,7 +112,14 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 		return ImportWorkspaceResponse{}, err
 	}
 	template := s.buildChangelogTemplate(ctx, workspaceID, initialCheckpointName, ChangeSourceImport)
-	writeChangeEntries(ctx, s.store.rdb, workspaceID, manifestSeedEntries(manifest, template))
+	versionsByPath, err := s.store.RecordManifestVersionChangesWithResults(ctx, workspaceID, Manifest{}, manifest, FileVersionMutationMetadata{
+		Source:       ChangeSourceImport,
+		CheckpointID: initialCheckpointName,
+	})
+	if err != nil {
+		return ImportWorkspaceResponse{}, err
+	}
+	writeChangeEntries(ctx, s.store.rdb, workspaceID, annotateChangeEntriesWithVersions(manifestSeedEntries(manifest, template), versionsByPath))
 	if err := s.store.Audit(ctx, workspaceID, "import", map[string]any{
 		"checkpoint":  initialCheckpointName,
 		"source":      "client-upload",

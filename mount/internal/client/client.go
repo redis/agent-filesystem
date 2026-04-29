@@ -156,12 +156,20 @@ type PathCacheWarmer interface {
 // New creates a filesystem client for the given Redis key.
 // It uses the native HASH/SET backend that works with any Redis instance.
 func New(rdb *redis.Client, key string) Client {
-	return newNativeClient(rdb, key)
+	return newNativeClient(rdb, key, nil)
 }
 
 // NewWithCache creates a filesystem client with an inode cache.
 // Repeated path lookups within the TTL window skip Redis round-trips.
 // All write operations automatically invalidate affected cache entries.
 func NewWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
-	return newNativeClientWithCache(rdb, key, ttl)
+	return newNativeClientWithCache(rdb, key, ttl, nil)
+}
+
+func NewWithObserver(rdb *redis.Client, key string, observer MutationObserver) Client {
+	return newNativeClient(rdb, key, observer)
+}
+
+func NewWithCacheAndObserver(rdb *redis.Client, key string, ttl time.Duration, observer MutationObserver) Client {
+	return newNativeClientWithCache(rdb, key, ttl, observer)
 }

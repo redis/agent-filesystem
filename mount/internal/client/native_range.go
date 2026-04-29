@@ -94,6 +94,10 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	if data.Type != "file" {
 		return errors.New("not a file")
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+	if snapErr != nil {
+		return snapErr
+	}
 	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
 		return err
 	}
@@ -119,7 +123,17 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	}
 
 	if len(payload) == 0 {
-		return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), delta)
+		if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), delta); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	var searchFields map[string]interface{}
@@ -152,10 +166,30 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 			return err
 		}
-		return c.finishRangeWriteCache(ctx, data, path)
+		if err := c.finishRangeWriteCache(ctx, data, path); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
 	}
 
-	return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta)
+	if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TruncateInode is the legacy entry point. Prefer TruncateInodeAtPath from
@@ -182,6 +216,10 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	if data.Type != "file" {
 		return errors.New("not a file")
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+	if snapErr != nil {
+		return snapErr
+	}
 	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
 		return err
 	}
@@ -200,7 +238,17 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	}
 
 	if delta == 0 {
-		return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), 0)
+		if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields), 0); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	var searchFields map[string]interface{}
@@ -251,10 +299,30 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 			return err
 		}
-		return c.finishRangeWriteCache(ctx, data, path)
+		if err := c.finishRangeWriteCache(ctx, data, path); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
 	}
 
-	return c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta)
+	if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) ensureExternalContentForRangeIO(ctx context.Context, inode *inodeData) error {

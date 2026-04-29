@@ -142,6 +142,8 @@ export function ChangesTable({
       return [
         row.path ?? "",
         row.prevPath ?? "",
+        row.versionId ?? "",
+        row.fileId ?? "",
         row.workspaceName ?? "",
         row.databaseName ?? "",
         row.agentId ?? "",
@@ -216,6 +218,28 @@ export function ChangesTable({
           maxSize: 320,
           enableSorting: true,
           cell: ({ row }) => <HistoryDetailCell row={row.original} />,
+        },
+        {
+          id: "version",
+          header: "Version",
+          size: 120,
+          enableSorting: false,
+          cell: ({ row }) => (
+            row.original.versionId ? (
+              <S.Stack>
+                <S.SingleLineText title={row.original.versionId}>
+                  {row.original.versionId.slice(0, 12)}
+                </S.SingleLineText>
+                {row.original.fileId ? (
+                  <Typography.Body color="secondary" component="span">
+                    {row.original.fileId.slice(0, 12)}
+                  </Typography.Body>
+                ) : null}
+              </S.Stack>
+            ) : (
+              <Typography.Body color="secondary" component="span">—</Typography.Body>
+            )
+          ),
         },
         ...(showWorkspaceContext
           ? [

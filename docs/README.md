@@ -34,6 +34,8 @@ It is the single root for docs, active backlog notes, and longer design plans.
   `up`/`down` local lifecycle with `mount`/`unmount`.
 - `plans/event-history-merge.md` - plan to merge audit and changelog streams.
 - `plans/observability.md` - observability research and milestone notes.
+- `plans/transparent-file-versioning.md` - proposed design for optional
+  automatic per-file history.
 
 ## Removed From Active Roots
 

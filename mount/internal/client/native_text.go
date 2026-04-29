@@ -112,6 +112,10 @@ func (c *nativeClient) Insert(ctx context.Context, p string, afterLine int, cont
 	if inode.Type != "file" {
 		return errors.New("not a file")
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
 	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
 		return err
@@ -141,7 +145,17 @@ func (c *nativeClient) Insert(ctx context.Context, p string, afterLine int, cont
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
-	return c.adjustTotalData(ctx, delta)
+	if err := c.adjustTotalData(ctx, delta); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) Replace(ctx context.Context, p string, old, new string, all bool) (int64, error) {
@@ -151,6 +165,10 @@ func (c *nativeClient) Replace(ctx context.Context, p string, old, new string, a
 	}
 	if inode.Type != "file" {
 		return 0, errors.New("not a file")
+	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return 0, snapErr
 	}
 	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
@@ -186,6 +204,13 @@ func (c *nativeClient) Replace(ctx context.Context, p string, old, new string, a
 	if err := c.adjustTotalData(ctx, delta); err != nil {
 		return 0, err
 	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return 0, snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return 0, err
+	}
 	return count, nil
 }
 
@@ -196,6 +221,10 @@ func (c *nativeClient) DeleteLines(ctx context.Context, p string, start, end int
 	}
 	if inode.Type != "file" {
 		return 0, errors.New("not a file")
+	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return 0, snapErr
 	}
 	existing, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
@@ -229,6 +258,13 @@ func (c *nativeClient) DeleteLines(ctx context.Context, p string, start, end int
 		return 0, err
 	}
 	if err := c.adjustTotalData(ctx, delta); err != nil {
+		return 0, err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return 0, snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
 		return 0, err
 	}
 	return deleted, nil

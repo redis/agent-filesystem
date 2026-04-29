@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/internal/afsfs"
 	"github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/agent-filesystem/mount/internal/redisconn"
@@ -111,7 +112,7 @@ func main() {
 		log.Fatalf("cannot connect to Redis at %s: %v", *redisAddr, err)
 	}
 
-	c := client.New(rdb, redisKey)
+	c := client.NewWithObserver(rdb, redisKey, controlplane.NewMountVersionObserver(rdb))
 
 	uid, gid := afsfs.GetOwnership()
 

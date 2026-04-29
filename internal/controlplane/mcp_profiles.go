@@ -15,19 +15,26 @@ const (
 
 var (
 	workspaceReadTools = map[string]struct{}{
-		"file_read":  {},
-		"file_lines": {},
-		"file_list":  {},
-		"file_glob":  {},
-		"file_grep":  {},
+		"file_read":                       {},
+		"file_history":                    {},
+		"file_read_version":               {},
+		"file_diff_versions":              {},
+		"file_lines":                      {},
+		"file_list":                       {},
+		"file_glob":                       {},
+		"file_grep":                       {},
+		"workspace_get_versioning_policy": {},
 	}
 	workspaceWriteTools = map[string]struct{}{
-		"file_write":            {},
-		"file_create_exclusive": {},
-		"file_replace":          {},
-		"file_insert":           {},
-		"file_delete_lines":     {},
-		"file_patch":            {},
+		"file_write":                      {},
+		"file_create_exclusive":           {},
+		"file_replace":                    {},
+		"file_insert":                     {},
+		"file_delete_lines":               {},
+		"file_patch":                      {},
+		"file_restore_version":            {},
+		"file_undelete":                   {},
+		"workspace_set_versioning_policy": {},
 	}
 	workspaceCheckpointTools = map[string]struct{}{
 		"checkpoint_list":    {},
@@ -35,12 +42,14 @@ var (
 		"checkpoint_restore": {},
 	}
 	adminTools = map[string]struct{}{
-		"afs_status":        {},
-		"workspace_list":    {},
-		"workspace_current": {},
-		"workspace_use":     {},
-		"workspace_create":  {},
-		"workspace_fork":    {},
+		"afs_status":                      {},
+		"workspace_list":                  {},
+		"workspace_current":               {},
+		"workspace_use":                   {},
+		"workspace_create":                {},
+		"workspace_fork":                  {},
+		"workspace_get_versioning_policy": {},
+		"workspace_set_versioning_policy": {},
 	}
 )
 

@@ -358,6 +358,7 @@ function WorkspaceStudioPage() {
         <HistoryTab
           databaseId={workspace.databaseId}
           workspaceId={workspaceId}
+          editable={workspace.capabilities.editWorkingCopy === true}
         />
       ) : null}
 

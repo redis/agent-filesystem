@@ -80,4 +80,35 @@ describe("afsApi", () => {
     expect(workspace?.databaseName).toBe("payments-portal-prod-us-east-1");
     expect(workspace?.region).toBe("us-east-2");
   });
+
+  test("persists workspace versioning policy in demo mode", async () => {
+    await afsApi.updateWorkspaceVersioningPolicy({
+      databaseId: paymentsDatabaseId,
+      workspaceId: "payments-portal",
+      policy: {
+        mode: "paths",
+        includeGlobs: ["src/**"],
+        excludeGlobs: ["**/*.log"],
+        maxVersionsPerFile: 10,
+        maxAgeDays: 14,
+        maxTotalBytes: 8192,
+        largeFileCutoffBytes: 2048,
+      },
+    });
+
+    const policy = await afsApi.getWorkspaceVersioningPolicy({
+      databaseId: paymentsDatabaseId,
+      workspaceId: "payments-portal",
+    });
+
+    expect(policy).toEqual({
+      mode: "paths",
+      includeGlobs: ["src/**"],
+      excludeGlobs: ["**/*.log"],
+      maxVersionsPerFile: 10,
+      maxAgeDays: 14,
+      maxTotalBytes: 8192,
+      largeFileCutoffBytes: 2048,
+    });
+  });
 });

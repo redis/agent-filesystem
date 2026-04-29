@@ -36,8 +36,12 @@ func main() {
 	}
 
 	switch args[0] {
-	case "auth":
-		if err := cmdAuth(args); err != nil {
+	case "login":
+		if err := cmdLogin(args[1:]); err != nil {
+			fatal(err)
+		}
+	case "logout":
+		if err := cmdLogout(args[1:]); err != nil {
 			fatal(err)
 		}
 	case "setup":
@@ -52,19 +56,43 @@ func main() {
 		if err := cmdConfig(args); err != nil {
 			fatal(err)
 		}
-	case "status":
-		if err := cmdStatusArgs(args[1:]); err != nil {
+	case "up":
+		if err := cmdUpArgs(args[1:]); err != nil {
 			fatal(err)
 		}
-	case "fs":
-		if err := cmdFS(args); err != nil {
+	case "down":
+		if len(args) > 1 && isHelpArg(args[1]) {
+			fmt.Fprint(os.Stderr, downUsageText(filepath.Base(os.Args[0])))
+			return
+		}
+		if err := cmdDown(); err != nil {
+			fatal(err)
+		}
+	case "status":
+		if len(args) > 1 && isHelpArg(args[1]) {
+			fmt.Fprint(os.Stderr, statusUsageText(filepath.Base(os.Args[0])))
+			return
+		}
+		if err := cmdStatus(); err != nil {
+			fatal(err)
+		}
+	case "file":
+		if err := cmdFile(args); err != nil {
+			fatal(err)
+		}
+	case "sync":
+		if err := cmdSync(args); err != nil {
+			fatal(err)
+		}
+	case "grep":
+		if err := cmdGrep(args); err != nil {
 			fatal(err)
 		}
 	case "mcp":
 		if err := cmdMCP(args); err != nil {
 			fatal(err)
 		}
-	case "ws":
+	case "workspace":
 		if err := cmdWorkspace(args); err != nil {
 			fatal(err)
 		}
@@ -72,12 +100,24 @@ func main() {
 		if err := cmdDatabase(args); err != nil {
 			fatal(err)
 		}
-	case "cp":
+	case "checkpoint":
 		if err := cmdCheckpoint(args); err != nil {
 			fatal(err)
 		}
-	case "log":
-		if err := cmdLog(args); err != nil {
+	case "versioning":
+		if err := cmdVersioning(args); err != nil {
+			fatal(err)
+		}
+	case "session":
+		if err := cmdSession(args); err != nil {
+			fatal(err)
+		}
+	case "reset":
+		if len(args) > 1 && isHelpArg(args[1]) {
+			fmt.Fprint(os.Stderr, resetUsageText(filepath.Base(os.Args[0])))
+			return
+		}
+		if err := cmdReset(); err != nil {
 			fatal(err)
 		}
 	case "_sync-daemon":
@@ -93,32 +133,10 @@ func main() {
 	case "help", "--help", "-h":
 		printUsage()
 	default:
-		if isWorkspaceRootShortcut(args[0]) {
-			if err := cmdWorkspace(workspaceRootShortcutArgs(args)); err != nil {
-				fatal(err)
-			}
-			return
-		}
-		fmt.Fprint(os.Stderr, formatCLIError(fmt.Errorf("unknown command %q", args[0])))
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
 		printUsage()
 		os.Exit(1)
 	}
-}
-
-func isWorkspaceRootShortcut(command string) bool {
-	switch command {
-	case "mount", "unmount", "create", "list", "info", "import", "fork", "delete":
-		return true
-	default:
-		return false
-	}
-}
-
-func workspaceRootShortcutArgs(args []string) []string {
-	rewritten := make([]string, 0, len(args)+1)
-	rewritten = append(rewritten, "ws")
-	rewritten = append(rewritten, args...)
-	return rewritten
 }
 
 func printUsage() {
@@ -130,6 +148,8 @@ func printUsage() {
 	reset := ansiReset
 
 	printBrandHeader(w)
+	fmt.Fprintf(w, "  %sFast Filesystem for AI Agents%s\n\n", dim, reset)
+
 	fmt.Fprintf(w, "%sUsage:%s %s [options] [command]\n\n", bold, reset, bin)
 
 	fmt.Fprintf(w, "%sOptions:%s\n", bold, reset)
@@ -138,28 +158,37 @@ func printUsage() {
 	fmt.Fprintf(w, "  %s-V, --version%s        %sOutput the version number%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sstatus%s             %sShow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
-
-	fmt.Fprintf(w, "  %sws%s (workspace)     %sMount, unmount, create, list, import, fork, delete%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sRead, search, and safely write workspace files%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %scp%s (checkpoint)    %sCreate, list, show, diff, restore%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
-
-	fmt.Fprintf(w, "  %sauth%s               %sLogin, logout, and inspect authentication%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %ssetup%s              %sConfigure basic connection defaults%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sconfig%s             %sGet, set, list, unset, reset config%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sdatabase%s           %sAdvanced database operations%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %smcp%s                %sStart the MCP server%s\n\n", bold, reset, dim, reset)
+	// Setup / auth
+	fmt.Fprintf(w, "  %slogin%s                %sConnect this CLI to a control plane%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %slogout%s               %sDrop the cloud login; return to local-only%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %ssetup%s                %sInteractive workspace + local-path setup%s\n", bold, reset, dim, reset)
+	// Lifecycle
+	fmt.Fprintf(w, "  %sup%s [flags]           %sStart sync/mount for the current workspace%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sdown%s                 %sStop and unmount%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sstatus%s               %sShow connection, workspace, and sync status%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %ssync%s                 %sExplicit operations for a running sync daemon%s\n", bold, reset, dim, reset)
+	// Data
+	fmt.Fprintf(w, "  %sworkspace%s            %sWorkspace ops — create, list, use, clone, fork, delete, import%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sdatabase%s             %sDatabase ops — list, use%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %scheckpoint%s           %sCheckpoint ops — create, list, show, diff, restore%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sversioning%s           %sWorkspace versioning policy ops — get, set%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sfile%s                 %sFile history ops — history, show, diff, restore, undelete%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %ssession%s              %sSession ops — log, summary%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sgrep%s <pattern>       %sSearch a workspace in Redis%s\n", bold, reset, dim, reset)
+	// Integrations
+	fmt.Fprintf(w, "  %sconfig%s               %sConfig helpers — get, set, list, unset%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sreset%s                %sReset local config and state (keeps the CLI installed)%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %smcp%s                  %sStart the workspace-first MCP server over stdio%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %s%s auth login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws mount getting-started ~/getting-started%s\n    Mount a workspace to a local folder.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws unmount getting-started%s\n    Stop managing that workspace; keep local files.\n\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s setup%s\n    Guided workspace setup for a fresh install.\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s up%s\n    Start syncing the current workspace.\n\n", orange, bin, reset)
 
 	fmt.Fprintf(w, "%sCommon Flows:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s ws mount getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sNew workspace:%s %s%s ws create demo%s → %s%s ws mount demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sImport existing files:%s %s%s ws import --mount-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sFresh setup:%s %s%s login%s → %s%s setup%s → %s%s up%s\n", dim, reset, orange, bin, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sNew workspace:%s %s%s workspace create demo%s → %s%s workspace use demo%s → %s%s up%s\n", dim, reset, orange, bin, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sImport existing code:%s %s%s workspace import demo ~/src/demo%s → %s%s up demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset, orange, bin, reset)
 
 	fmt.Fprintf(w, "%sConfig:%s %s%s%s\n", bold, reset, dim, compactDisplayPath(configPath()), reset)
 }
@@ -172,13 +201,27 @@ Open the interactive setup flow for connection settings.
 `, bin)
 }
 
+func downUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s down
+
+Stop AFS, unmount the local surface, and clean up the active runtime state.
+`, bin)
+}
+
 func statusUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s status [--verbose]
+  %s status
 
-Show AFS daemon status, configuration, and mounted workspaces.
+Show connection, workspace, and sync or mount status for this machine.
+`, bin)
+}
 
-Flags:
-  --verbose, -v   Include control-plane, session, and process details
+func resetUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s reset
+
+Reset local config and runtime state, while keeping the CLI installed.
+If AFS is running, this command stops it first.
 `, bin)
 }

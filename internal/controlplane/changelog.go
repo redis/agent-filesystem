@@ -20,11 +20,14 @@ import (
 // live-sync FS write apart from an explicit checkpoint save, a restore, or
 // the initial import seed.
 const (
-	ChangeSourceCheckpoint    = "checkpoint"
-	ChangeSourceAgentSync     = "agent_sync"
-	ChangeSourceMCP           = "mcp"
-	ChangeSourceServerRestore = "server_restore"
-	ChangeSourceImport        = "import"
+	ChangeSourceCheckpoint      = "checkpoint"
+	ChangeSourceAgentSync       = "agent_sync"
+	ChangeSourceMCP             = "mcp"
+	ChangeSourceMount           = "mount"
+	ChangeSourceVersionRestore  = "version_restore"
+	ChangeSourceVersionUndelete = "version_undelete"
+	ChangeSourceServerRestore   = "server_restore"
+	ChangeSourceImport          = "import"
 )
 
 // Change ops. Derived from manifest-entry diffs.
@@ -33,6 +36,7 @@ const (
 	ChangeOpDelete  = "delete"  // remove a path
 	ChangeOpMkdir   = "mkdir"   // create a directory
 	ChangeOpRmdir   = "rmdir"   // remove a directory
+	ChangeOpRename  = "rename"  // move a tracked file lineage to a new path
 	ChangeOpSymlink = "symlink" // create/replace a symlink
 	ChangeOpChmod   = "chmod"   // mode-only change on an existing entry
 )
@@ -57,6 +61,8 @@ type ChangeEntry struct {
 	ContentHash  string // post-op blob hash or manifest-entry hash proxy
 	PrevHash     string // pre-op blob hash
 	Mode         uint32 // final mode bits
+	FileID       string // exact versioned-file lineage id when available
+	VersionID    string // exact file version id produced by the operation when available
 	CheckpointID string // set when op was part of a checkpoint save
 	Source       string // one of ChangeSource*
 }
@@ -100,6 +106,12 @@ func (e ChangeEntry) fields() map[string]any {
 	}
 	if e.Mode != 0 {
 		fields["mode"] = strconv.FormatUint(uint64(e.Mode), 10)
+	}
+	if e.FileID != "" {
+		fields["file_id"] = e.FileID
+	}
+	if e.VersionID != "" {
+		fields["version_id"] = e.VersionID
 	}
 	if e.CheckpointID != "" {
 		fields["checkpoint_id"] = e.CheckpointID
@@ -249,6 +261,21 @@ func manifestSeedEntries(manifest Manifest, template ChangeEntry) []ChangeEntry 
 	return manifestDiff(Manifest{}, manifest, template)
 }
 
+func annotateChangeEntriesWithVersions(entries []ChangeEntry, versionsByPath map[string]*FileVersion) []ChangeEntry {
+	if len(entries) == 0 || len(versionsByPath) == 0 {
+		return entries
+	}
+	for i := range entries {
+		version := versionsByPath[entries[i].Path]
+		if version == nil {
+			continue
+		}
+		entries[i].FileID = version.FileID
+		entries[i].VersionID = version.VersionID
+	}
+	return entries
+}
+
 func createOpFor(entryType string) string {
 	switch entryType {
 	case "dir":
@@ -396,6 +423,8 @@ type ChangelogEntryRow struct {
 	ContentHash   string `json:"content_hash,omitempty"`
 	PrevHash      string `json:"prev_hash,omitempty"`
 	Mode          uint32 `json:"mode,omitempty"`
+	FileID        string `json:"file_id,omitempty"`
+	VersionID     string `json:"version_id,omitempty"`
 	CheckpointID  string `json:"checkpoint_id,omitempty"`
 	Source        string `json:"source,omitempty"`
 }
@@ -421,6 +450,8 @@ func rowFromStreamMessage(msg redis.XMessage) ChangelogEntryRow {
 	row.Op = getField("op")
 	row.Path = getField("path")
 	row.PrevPath = getField("prev_path")
+	row.FileID = getField("file_id")
+	row.VersionID = getField("version_id")
 	if raw := getField("size_bytes"); raw != "" {
 		if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
 			row.SizeBytes = n

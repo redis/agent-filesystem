@@ -9,7 +9,6 @@ export type AFSAuthUser = {
   name?: string;
   email?: string;
   groups?: string[];
-  isAdmin?: boolean;
 };
 
 export type AFSProductMode = "cloud" | "self-hosted";
@@ -65,14 +64,6 @@ export type AFSSavepoint = {
   author: string;
   createdAt: string;
   note: string;
-  kind?: string;
-  source?: string;
-  createdBy?: string;
-  sessionId?: string;
-  agentId?: string;
-  agentName?: string;
-  parentCheckpointId?: string;
-  manifestHash?: string;
   fileCount: number;
   folderCount: number;
   totalBytes: number;
@@ -118,6 +109,8 @@ export type AFSChangelogEntry = {
   mode?: number;
   checkpointId?: string;
   source?: string;
+  fileId?: string;
+  versionId?: string;
 };
 
 export type AFSChangelogResponse = {
@@ -125,40 +118,109 @@ export type AFSChangelogResponse = {
   nextCursor?: string;
 };
 
-export type AFSActivityListResponse = {
-  items: AFSActivityEvent[];
+export type AFSWorkspaceVersioningMode = "off" | "all" | "paths";
+
+export type AFSWorkspaceVersioningPolicy = {
+  mode: AFSWorkspaceVersioningMode;
+  includeGlobs: string[];
+  excludeGlobs: string[];
+  maxVersionsPerFile: number;
+  maxAgeDays: number;
+  maxTotalBytes: number;
+  largeFileCutoffBytes: number;
+};
+
+export type AFSFileVersion = {
+  versionId: string;
+  fileId: string;
+  ordinal: number;
+  path: string;
+  prevPath?: string;
+  op: string;
+  kind: "file" | "symlink" | "tombstone";
+  blobId?: string;
+  contentHash?: string;
+  prevHash?: string;
+  sizeBytes?: number;
+  deltaBytes?: number;
+  mode?: number;
+  target?: string;
+  source?: string;
+  sessionId?: string;
+  agentId?: string;
+  user?: string;
+  checkpointIds?: string[];
+  createdAt: string;
+};
+
+export type AFSFileHistoryLineage = {
+  fileId: string;
+  state: string;
+  currentPath: string;
+  versions: AFSFileVersion[];
+};
+
+export type AFSFileHistoryResponse = {
+  workspaceId: string;
+  path: string;
+  order: "asc" | "desc";
+  lineages: AFSFileHistoryLineage[];
   nextCursor?: string;
 };
 
-export type AFSEventEntry = {
-  id: string;
-  workspaceId?: string;
-  workspaceName?: string;
-  databaseId?: string;
-  databaseName?: string;
-  createdAt?: string;
-  kind: string;
-  op: string;
+export type AFSFileVersionContent = {
+  workspaceId: string;
+  fileId: string;
+  versionId: string;
+  ordinal: number;
+  path: string;
+  kind: "file" | "symlink" | "tombstone";
   source?: string;
-  actor?: string;
-  sessionId?: string;
-  user?: string;
-  label?: string;
-  agentVersion?: string;
-  hostname?: string;
-  path?: string;
-  prevPath?: string;
-  sizeBytes?: number;
-  deltaBytes?: number;
-  contentHash?: string;
-  prevHash?: string;
-  mode?: number;
-  checkpointId?: string;
-  extras?: Record<string, string>;
+  content?: string;
+  target?: string;
+  binary?: boolean;
+  encoding?: string;
+  contentType?: string;
+  language?: string;
+  size: number;
+  createdAt: string;
 };
 
-export type AFSEventListResponse = {
-  items: AFSEventEntry[];
+export type AFSFileVersionSelector =
+  | { versionId: string }
+  | { fileId: string; ordinal: number }
+  | { ref: "head" | "working-copy" };
+
+export type AFSFileVersionDiff = {
+  path: string;
+  from: string;
+  to: string;
+  binary: boolean;
+  diff?: string;
+};
+
+export type AFSFileVersionRestoreResponse = {
+  workspaceId: string;
+  path: string;
+  restoredFromVersionId: string;
+  restoredFromFileId: string;
+  restoredFromOrdinal: number;
+  versionId: string;
+  fileId: string;
+};
+
+export type AFSFileVersionUndeleteResponse = {
+  workspaceId: string;
+  path: string;
+  undeletedFromVersionId: string;
+  undeletedFromFileId: string;
+  undeletedFromOrdinal: number;
+  versionId: string;
+  fileId: string;
+};
+
+export type AFSActivityListResponse = {
+  items: AFSActivityEvent[];
   nextCursor?: string;
 };
 
@@ -168,8 +230,6 @@ export type AFSAgentSession = {
   workspaceName: string;
   databaseId?: string;
   databaseName?: string;
-  ownerSubject?: string;
-  ownerLabel?: string;
   agentId?: string;
   clientKind: string;
   afsVersion: string;
@@ -214,76 +274,6 @@ export type AFSFileContent = {
   binary: boolean;
   content?: string;
   target?: string;
-};
-
-export type AFSDiffOp = "create" | "update" | "delete" | "rename" | "metadata";
-
-export type AFSDiffState = {
-  view: AFSWorkspaceView;
-  checkpointId?: string;
-  manifestHash?: string;
-  fileCount: number;
-  folderCount: number;
-  totalBytes: number;
-};
-
-export type AFSDiffSummary = {
-  total: number;
-  created: number;
-  updated: number;
-  deleted: number;
-  renamed: number;
-  metadataChanged: number;
-  bytesAdded: number;
-  bytesRemoved: number;
-};
-
-export type AFSTextDiffLine = {
-  kind: "context" | "delete" | "insert";
-  oldLine?: number;
-  newLine?: number;
-  text: string;
-};
-
-export type AFSTextDiffHunk = {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: AFSTextDiffLine[];
-};
-
-export type AFSTextDiff = {
-  available: boolean;
-  skippedReason?: string;
-  language?: string;
-  maxBytes?: number;
-  hunks?: AFSTextDiffHunk[];
-};
-
-export type AFSDiffEntry = {
-  op: AFSDiffOp;
-  path: string;
-  previousPath?: string;
-  kind?: AFSTreeItemKind;
-  previousKind?: AFSTreeItemKind;
-  sizeBytes?: number;
-  previousSizeBytes?: number;
-  deltaBytes?: number;
-  contentHash?: string;
-  previousHash?: string;
-  mode?: number;
-  previousMode?: number;
-  textDiff?: AFSTextDiff;
-};
-
-export type AFSWorkspaceDiffResponse = {
-  workspaceId: string;
-  workspaceName?: string;
-  base: AFSDiffState;
-  head: AFSDiffState;
-  summary: AFSDiffSummary;
-  entries: AFSDiffEntry[];
 };
 
 export type AFSWorkspace = {
@@ -395,29 +385,6 @@ export type AFSDatabaseListResponse = {
   items: AFSDatabase[];
 };
 
-export type AFSAdminOverview = {
-  userCount: number;
-  databaseCount: number;
-  workspaceCount: number;
-  agentCount: number;
-  activeAgentCount: number;
-  staleAgentCount: number;
-  unavailableDatabaseCount: number;
-  totalBytes: number;
-  fileCount: number;
-};
-
-export type AFSAdminUser = {
-  subject: string;
-  label?: string;
-  databaseCount: number;
-  workspaceCount: number;
-  mcpTokenCount: number;
-  agentSessionCount: number;
-  lastSeenAt?: string;
-  sources: string[];
-};
-
 export type AFSState = {
   workspaces: AFSWorkspace[];
 };
@@ -436,8 +403,8 @@ export type CreateWorkspaceInput = {
 export type UpdateWorkspaceInput = {
   databaseId?: string;
   workspaceId: string;
-  name?: string;
-  description?: string;
+  name: string;
+  description: string;
   cloudAccount?: string;
   databaseName?: string;
   region?: string;
@@ -479,12 +446,59 @@ export type GetWorkspaceFileContentInput = {
   path: string;
 };
 
-export type GetWorkspaceDiffInput = {
+export type GetWorkspaceVersioningPolicyInput = {
   databaseId?: string;
   workspaceId: string;
-  base: AFSWorkspaceView;
-  head: AFSWorkspaceView;
 };
+
+export type UpdateWorkspaceVersioningPolicyInput = GetWorkspaceVersioningPolicyInput & {
+  policy: AFSWorkspaceVersioningPolicy;
+};
+
+export type GetFileHistoryInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path: string;
+  direction?: "asc" | "desc";
+  limit?: number;
+  cursor?: string;
+};
+
+export type GetFileVersionContentInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path: string;
+} & (
+  | { versionId: string; fileId?: never; ordinal?: never }
+  | { versionId?: never; fileId: string; ordinal: number }
+);
+
+export type DiffFileVersionsInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path: string;
+  from: AFSFileVersionSelector;
+  to?: AFSFileVersionSelector;
+};
+
+export type RestoreFileVersionInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path: string;
+} & (
+  | { versionId: string; fileId?: never; ordinal?: never }
+  | { versionId?: never; fileId: string; ordinal: number }
+);
+
+export type UndeleteFileVersionInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path: string;
+} & (
+  | { versionId?: string; fileId?: string; ordinal?: number }
+  | { versionId: string; fileId?: never; ordinal?: never }
+  | { versionId?: never; fileId: string; ordinal: number }
+);
 
 export type SaveDatabaseInput = {
   id?: string;

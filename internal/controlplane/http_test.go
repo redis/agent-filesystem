@@ -1,14 +1,17 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -407,6 +410,307 @@ func TestHTTPCheckpointDetailAndEvents(t *testing.T) {
 	}
 	if len(fileEvents.Items) == 0 || fileEvents.Items[0].CheckpointID != "event-snapshot" || fileEvents.Items[0].Path != "/README.md" {
 		t.Fatalf("file events = %#v, want README event for event-snapshot", fileEvents.Items)
+	}
+}
+
+func TestHTTPWorkspaceVersioningPolicyRoutes(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/versioning")
+	if err != nil {
+		t.Fatalf("GET scoped workspace versioning returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var scoped WorkspaceVersioningPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&scoped); err != nil {
+		t.Fatalf("Decode(scoped versioning) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET scoped workspace versioning status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if scoped.Mode != WorkspaceVersioningModeOff {
+		t.Fatalf("scoped mode = %q, want %q", scoped.Mode, WorkspaceVersioningModeOff)
+	}
+
+	payload := `{"mode":"paths","include_globs":["src/**","docs/**"],"exclude_globs":["**/*.log"],"max_versions_per_file":7,"max_age_days":30,"max_total_bytes":2048,"large_file_cutoff_bytes":4096}`
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/databases/"+databaseID+"/workspaces/repo/versioning", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("NewRequest(PUT scoped versioning) returned error: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT scoped workspace versioning returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var updated WorkspaceVersioningPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		t.Fatalf("Decode(updated scoped versioning) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT scoped workspace versioning status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if updated.Mode != WorkspaceVersioningModePaths {
+		t.Fatalf("updated mode = %q, want %q", updated.Mode, WorkspaceVersioningModePaths)
+	}
+	if len(updated.IncludeGlobs) != 2 || updated.IncludeGlobs[0] != "src/**" || updated.IncludeGlobs[1] != "docs/**" {
+		t.Fatalf("updated include_globs = %#v, want [src/** docs/**]", updated.IncludeGlobs)
+	}
+	if len(updated.ExcludeGlobs) != 1 || updated.ExcludeGlobs[0] != "**/*.log" {
+		t.Fatalf("updated exclude_globs = %#v, want [**/*.log]", updated.ExcludeGlobs)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo/versioning")
+	if err != nil {
+		t.Fatalf("GET resolved workspace versioning returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var resolved WorkspaceVersioningPolicy
+	if err := json.NewDecoder(resp.Body).Decode(&resolved); err != nil {
+		t.Fatalf("Decode(resolved versioning) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET resolved workspace versioning status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if !reflect.DeepEqual(resolved, updated) {
+		t.Fatalf("resolved policy = %+v, want %+v", resolved, updated)
+	}
+}
+
+func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	version, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/notes/http.txt"}, VersionedFileSnapshot{
+		Path:    "/notes/http.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("http history\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation() returned error: %v", err)
+	}
+	secondVersion, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/http.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("http history\n"),
+	}, VersionedFileSnapshot{
+		Path:    "/notes/http.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("http history v2\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(second version) returned error: %v", err)
+	}
+	fsKey, _, _, err := EnsureWorkspaceRoot(context.Background(), service.store, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	if err := mountclient.New(service.store.rdb, fsKey).EchoCreate(context.Background(), "/notes/http.txt", []byte("http working copy\n"), 0o644); err != nil {
+		t.Fatalf("EchoCreate() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/files/history?path=/notes/http.txt&direction=asc&limit=1")
+	if err != nil {
+		t.Fatalf("GET scoped file history returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var history FileHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
+		t.Fatalf("Decode(file history) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET scoped file history status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if history.Order != "asc" {
+		t.Fatalf("history.Order = %q, want asc", history.Order)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 1 {
+		t.Fatalf("history lineages = %#v, want one lineage with one version", history.Lineages)
+	}
+	if history.Lineages[0].Versions[0].VersionID != version.VersionID {
+		t.Fatalf("first page version_id = %q, want %q", history.Lineages[0].Versions[0].VersionID, version.VersionID)
+	}
+	if history.NextCursor == "" {
+		t.Fatal("history.NextCursor = empty, want cursor for second page")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/files/history?path=/notes/http.txt&direction=asc&limit=1&cursor=" + url.QueryEscape(history.NextCursor))
+	if err != nil {
+		t.Fatalf("GET scoped file history second page returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var historyPage2 FileHistoryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&historyPage2); err != nil {
+		t.Fatalf("Decode(file history page 2) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET scoped file history second page status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if len(historyPage2.Lineages) != 1 || len(historyPage2.Lineages[0].Versions) != 1 {
+		t.Fatalf("historyPage2 lineages = %#v, want one lineage with one version", historyPage2.Lineages)
+	}
+	if historyPage2.Lineages[0].Versions[0].VersionID != secondVersion.VersionID {
+		t.Fatalf("second page version_id = %q, want %q", historyPage2.Lineages[0].Versions[0].VersionID, secondVersion.VersionID)
+	}
+	if historyPage2.NextCursor != "" {
+		t.Fatalf("historyPage2.NextCursor = %q, want empty", historyPage2.NextCursor)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo/files/version-content?version_id=" + version.VersionID)
+	if err != nil {
+		t.Fatalf("GET resolved file version content returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var content FileVersionContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&content); err != nil {
+		t.Fatalf("Decode(file version content) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET resolved file version content status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if content.Content != "http history\n" {
+		t.Fatalf("content.Content = %q, want %q", content.Content, "http history\n")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo/files/version-content?file_id=" + version.FileID + "&ordinal=1")
+	if err != nil {
+		t.Fatalf("GET resolved file version content by ordinal returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var ordinalContent FileVersionContentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&ordinalContent); err != nil {
+		t.Fatalf("Decode(file version content by ordinal) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET resolved file version content by ordinal status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if ordinalContent.VersionID != version.VersionID {
+		t.Fatalf("ordinal content version_id = %q, want %q", ordinalContent.VersionID, version.VersionID)
+	}
+
+	diffReq := diffFileVersionsRequest{
+		Path: "/notes/http.txt",
+		From: FileVersionDiffOperand{VersionID: version.VersionID},
+		To:   FileVersionDiffOperand{Ref: "working-copy"},
+	}
+	body, err := json.Marshal(diffReq)
+	if err != nil {
+		t.Fatalf("Marshal(diffReq) returned error: %v", err)
+	}
+	resp, err = http.Post(server.URL+"/v1/workspaces/repo/files/diff", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST file diff returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var diff FileVersionDiffResponse
+	if err := json.NewDecoder(resp.Body).Decode(&diff); err != nil {
+		t.Fatalf("Decode(file diff) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST file diff status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if diff.Binary {
+		t.Fatal("diff.Binary = true, want false")
+	}
+	if !strings.Contains(diff.Diff, "http history\n") || !strings.Contains(diff.Diff, "http working copy\n") {
+		t.Fatalf("diff.Diff = %q, want both historical and working-copy content", diff.Diff)
+	}
+
+	restoreReq := restoreFileVersionRequest{
+		Path:      "/notes/http.txt",
+		VersionID: version.VersionID,
+	}
+	body, err = json.Marshal(restoreReq)
+	if err != nil {
+		t.Fatalf("Marshal(restoreReq) returned error: %v", err)
+	}
+	resp, err = http.Post(server.URL+"/v1/workspaces/repo:restore-version", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST restore version returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var restored FileVersionRestoreResponse
+	if err := json.NewDecoder(resp.Body).Decode(&restored); err != nil {
+		t.Fatalf("Decode(restore response) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST restore version status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if restored.RestoredFromVersionID != version.VersionID {
+		t.Fatalf("restored.RestoredFromVersionID = %q, want %q", restored.RestoredFromVersionID, version.VersionID)
+	}
+
+	deletedVersion, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/notes/deleted-http.txt"}, VersionedFileSnapshot{
+		Path:    "/notes/deleted-http.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("deleted http\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(undelete create) returned error: %v", err)
+	}
+	if _, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/deleted-http.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("deleted http\n"),
+	}, VersionedFileSnapshot{
+		Path: "/notes/deleted-http.txt",
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP}); err != nil {
+		t.Fatalf("RecordFileVersionMutation(undelete delete) returned error: %v", err)
+	}
+
+	undeleteReq := undeleteFileVersionRequest{Path: "/notes/deleted-http.txt"}
+	body, err = json.Marshal(undeleteReq)
+	if err != nil {
+		t.Fatalf("Marshal(undeleteReq) returned error: %v", err)
+	}
+	resp, err = http.Post(server.URL+"/v1/workspaces/repo:undelete", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("POST undelete returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var undeleted FileVersionUndeleteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&undeleted); err != nil {
+		t.Fatalf("Decode(undelete response) returned error: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST undelete status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if undeleted.UndeletedFromVersionID != deletedVersion.VersionID {
+		t.Fatalf("undeleted.UndeletedFromVersionID = %q, want %q", undeleted.UndeletedFromVersionID, deletedVersion.VersionID)
 	}
 }
 

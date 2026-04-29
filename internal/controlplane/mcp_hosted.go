@@ -196,6 +196,27 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
+			Name:        "workspace_get_versioning_policy",
+			Description: "Fetch the versioning policy for the current workspace",
+			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			Name:        "workspace_set_versioning_policy",
+			Description: "Update the versioning policy for the current workspace. Omitted fields keep their current values; array fields can be cleared with an empty array.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":                    map[string]any{"type": "string", "enum": []string{WorkspaceVersioningModeOff, WorkspaceVersioningModeAll, WorkspaceVersioningModePaths}},
+					"include_globs":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"exclude_globs":           map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"max_versions_per_file":   map[string]any{"type": "integer"},
+					"max_age_days":            map[string]any{"type": "integer"},
+					"max_total_bytes":         map[string]any{"type": "integer"},
+					"large_file_cutoff_bytes": map[string]any{"type": "integer"},
+				},
+			},
+		},
+		{
 			Name:        "checkpoint_list",
 			Description: "List checkpoints for the current workspace",
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
@@ -228,6 +249,77 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"path": map[string]string{"type": "string", "description": "Absolute path inside the workspace"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			Name:        "file_history",
+			Description: "List ordered file history for a path in the current workspace",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":      map[string]string{"type": "string", "description": "Absolute file path inside the workspace"},
+					"direction": map[string]string{"type": "string", "description": "History order: desc (default) or asc"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			Name:        "file_read_version",
+			Description: "Read the exact historical content for a file version by version_id",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"version_id": map[string]string{"type": "string", "description": "Stable file version identifier"},
+					"file_id":    map[string]string{"type": "string", "description": "Stable file lineage identifier used with ordinal"},
+					"ordinal":    map[string]string{"type": "integer", "description": "Per-lineage version ordinal used with file_id"},
+				},
+			},
+		},
+		{
+			Name:        "file_diff_versions",
+			Description: "Diff one file version selector against another selector such as head or working-copy",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":            map[string]string{"type": "string", "description": "Absolute file path inside the workspace"},
+					"from_ref":        map[string]string{"type": "string", "description": "Source selector ref: head or working-copy"},
+					"from_version_id": map[string]string{"type": "string", "description": "Source stable file version identifier"},
+					"from_file_id":    map[string]string{"type": "string", "description": "Source stable file lineage identifier used with from_ordinal"},
+					"from_ordinal":    map[string]string{"type": "integer", "description": "Source per-lineage version ordinal used with from_file_id"},
+					"to_ref":          map[string]string{"type": "string", "description": "Destination selector ref: head or working-copy"},
+					"to_version_id":   map[string]string{"type": "string", "description": "Destination stable file version identifier"},
+					"to_file_id":      map[string]string{"type": "string", "description": "Destination stable file lineage identifier used with to_ordinal"},
+					"to_ordinal":      map[string]string{"type": "integer", "description": "Destination per-lineage version ordinal used with to_file_id"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			Name:        "file_restore_version",
+			Description: "Restore historical file content into the live workspace and create a new latest version",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":       map[string]string{"type": "string", "description": "Absolute file path inside the workspace"},
+					"version_id": map[string]string{"type": "string", "description": "Stable file version identifier"},
+					"file_id":    map[string]string{"type": "string", "description": "Stable file lineage identifier used with ordinal"},
+					"ordinal":    map[string]string{"type": "integer", "description": "Per-lineage version ordinal used with file_id"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
+			Name:        "file_undelete",
+			Description: "Revive the latest deleted lineage at a path or restore a selected historical version from a deleted lineage",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":       map[string]string{"type": "string", "description": "Absolute file path inside the workspace"},
+					"version_id": map[string]string{"type": "string", "description": "Stable file version identifier"},
+					"file_id":    map[string]string{"type": "string", "description": "Stable file lineage identifier used with ordinal"},
+					"ordinal":    map[string]string{"type": "integer", "description": "Per-lineage version ordinal used with file_id"},
 				},
 				"required": []string{"path"},
 			},
@@ -419,6 +511,27 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 			"profile":   p.profile,
 			"readonly":  p.readonly,
 		}
+	case "workspace_get_versioning_policy":
+		value, err = p.manager.GetWorkspaceVersioningPolicy(ctx, p.databaseID, p.workspace)
+		if err == nil {
+			value = map[string]any{"workspace": p.workspace, "policy": value}
+		}
+	case "workspace_set_versioning_policy":
+		err = p.ensureWritable()
+		if err == nil {
+			var current WorkspaceVersioningPolicy
+			current, err = p.manager.GetWorkspaceVersioningPolicy(ctx, p.databaseID, p.workspace)
+			if err == nil {
+				var patch mcpWorkspaceVersioningPolicyPatch
+				patch, err = mcpWorkspaceVersioningPolicyPatchFromArgs(args)
+				if err == nil {
+					value, err = p.manager.UpdateWorkspaceVersioningPolicy(ctx, p.databaseID, p.workspace, applyMCPWorkspaceVersioningPolicyPatch(current, patch))
+					if err == nil {
+						value = map[string]any{"workspace": p.workspace, "policy": value}
+					}
+				}
+			}
+		}
 	case "checkpoint_list":
 		value, err = p.manager.ListCheckpoints(ctx, p.databaseID, p.workspace, 100)
 		if err == nil {
@@ -470,6 +583,22 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 		}
 	case "file_read":
 		value, err = p.toolFileRead(ctx, args)
+	case "file_history":
+		value, err = p.toolFileHistory(ctx, args)
+	case "file_read_version":
+		value, err = p.toolFileReadVersion(ctx, args)
+	case "file_diff_versions":
+		value, err = p.toolFileDiffVersions(ctx, args)
+	case "file_restore_version":
+		err = p.ensureWritable()
+		if err == nil {
+			value, err = p.toolFileRestoreVersion(ctx, args)
+		}
+	case "file_undelete":
+		err = p.ensureWritable()
+		if err == nil {
+			value, err = p.toolFileUndelete(ctx, args)
+		}
 	case "file_lines":
 		value, err = p.toolFileLines(ctx, args)
 	case "file_list":
@@ -533,6 +662,237 @@ func (p *hostedMCPProvider) toolFileRead(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	return readWorkspaceFSEntry(ctx, p.workspace, normalizedPath, fsClient, stat)
+}
+
+func (p *hostedMCPProvider) toolFileHistory(ctx context.Context, args map[string]any) (any, error) {
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	direction, err := mcpStringDefault(args, "direction", "desc")
+	if err != nil {
+		return nil, err
+	}
+	newestFirst, err := mcpHistoryDirection(direction)
+	if err != nil {
+		return nil, err
+	}
+	limit, err := mcpOptionalInt(args, "limit")
+	if err != nil {
+		return nil, err
+	}
+	cursor, err := mcpOptionalString(args, "cursor")
+	if err != nil {
+		return nil, err
+	}
+	limitValue := 0
+	if limit != nil {
+		limitValue = *limit
+	}
+	history, err := p.manager.GetResolvedFileHistoryPage(ctx, p.workspace, FileHistoryRequest{
+		Path:        rawPath,
+		NewestFirst: newestFirst,
+		Limit:       limitValue,
+		Cursor:      cursor,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"history":   history,
+	}, nil
+}
+
+func (p *hostedMCPProvider) toolFileReadVersion(ctx context.Context, args map[string]any) (any, error) {
+	versionID, err := mcpOptionalString(args, "version_id")
+	if err != nil {
+		return nil, err
+	}
+	fileID, err := mcpOptionalString(args, "file_id")
+	if err != nil {
+		return nil, err
+	}
+	ordinal, err := mcpOptionalInt(args, "ordinal")
+	if err != nil {
+		return nil, err
+	}
+	var version FileVersionContentResponse
+	switch {
+	case versionID != "":
+		version, err = p.manager.GetResolvedFileVersionContent(ctx, p.workspace, versionID)
+	case fileID != "" && ordinal != nil:
+		version, err = p.manager.GetResolvedFileVersionContentAtOrdinal(ctx, p.workspace, fileID, int64(*ordinal))
+	default:
+		err = fmt.Errorf("version_id or file_id+ordinal is required")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"version":   version,
+	}, nil
+}
+
+func (p *hostedMCPProvider) toolFileDiffVersions(ctx context.Context, args map[string]any) (any, error) {
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	from, err := hostedMCPDiffOperand(args, "from")
+	if err != nil {
+		return nil, err
+	}
+	to, err := hostedMCPDiffOperandWithDefault(args, "to", FileVersionDiffOperand{Ref: "head"})
+	if err != nil {
+		return nil, err
+	}
+	diff, err := p.manager.DiffResolvedFileVersions(ctx, p.workspace, rawPath, from, to)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"diff":      diff,
+	}, nil
+}
+
+func (p *hostedMCPProvider) toolFileRestoreVersion(ctx context.Context, args map[string]any) (any, error) {
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	versionID, err := mcpOptionalString(args, "version_id")
+	if err != nil {
+		return nil, err
+	}
+	fileID, err := mcpOptionalString(args, "file_id")
+	if err != nil {
+		return nil, err
+	}
+	ordinal, err := mcpOptionalInt(args, "ordinal")
+	if err != nil {
+		return nil, err
+	}
+	selector := FileVersionSelector{
+		VersionID: versionID,
+		FileID:    fileID,
+	}
+	if ordinal != nil {
+		selector.Ordinal = int64(*ordinal)
+	}
+	response, err := p.manager.RestoreResolvedFileVersion(ctx, p.workspace, rawPath, selector)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"restore":   response,
+	}, nil
+}
+
+func (p *hostedMCPProvider) toolFileUndelete(ctx context.Context, args map[string]any) (any, error) {
+	rawPath, err := mcpRequiredString(args, "path")
+	if err != nil {
+		return nil, err
+	}
+	versionID, err := mcpOptionalString(args, "version_id")
+	if err != nil {
+		return nil, err
+	}
+	fileID, err := mcpOptionalString(args, "file_id")
+	if err != nil {
+		return nil, err
+	}
+	ordinal, err := mcpOptionalInt(args, "ordinal")
+	if err != nil {
+		return nil, err
+	}
+	selector := FileVersionSelector{
+		VersionID: versionID,
+		FileID:    fileID,
+	}
+	if ordinal != nil {
+		selector.Ordinal = int64(*ordinal)
+	}
+	response, err := p.manager.UndeleteResolvedFileVersion(ctx, p.workspace, rawPath, selector)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"workspace": p.workspace,
+		"undelete":  response,
+	}, nil
+}
+
+func hostedMCPDiffOperand(args map[string]any, prefix string) (FileVersionDiffOperand, error) {
+	return hostedMCPDiffOperandWithDefault(args, prefix, FileVersionDiffOperand{})
+}
+
+func hostedMCPDiffOperandWithDefault(args map[string]any, prefix string, fallback FileVersionDiffOperand) (FileVersionDiffOperand, error) {
+	ref, err := mcpOptionalString(args, prefix+"_ref")
+	if err != nil {
+		return FileVersionDiffOperand{}, err
+	}
+	ref = strings.ToLower(strings.TrimSpace(ref))
+	versionID, err := mcpOptionalString(args, prefix+"_version_id")
+	if err != nil {
+		return FileVersionDiffOperand{}, err
+	}
+	fileID, err := mcpOptionalString(args, prefix+"_file_id")
+	if err != nil {
+		return FileVersionDiffOperand{}, err
+	}
+	ordinal, err := mcpOptionalInt(args, prefix+"_ordinal")
+	if err != nil {
+		return FileVersionDiffOperand{}, err
+	}
+	operand := FileVersionDiffOperand{
+		Ref:       ref,
+		VersionID: versionID,
+		FileID:    fileID,
+	}
+	if ordinal != nil {
+		operand.Ordinal = int64(*ordinal)
+	}
+	if !hostedMCPDiffOperandProvided(operand) {
+		if !hostedMCPDiffOperandProvided(fallback) {
+			return FileVersionDiffOperand{}, fmt.Errorf("%s_ref, %s_version_id, or %s_file_id+%s_ordinal is required", prefix, prefix, prefix, prefix)
+		}
+		return fallback, nil
+	}
+	if err := validateHostedMCPDiffOperand(prefix, operand); err != nil {
+		return FileVersionDiffOperand{}, err
+	}
+	return operand, nil
+}
+
+func hostedMCPDiffOperandProvided(operand FileVersionDiffOperand) bool {
+	return strings.TrimSpace(operand.Ref) != "" || strings.TrimSpace(operand.VersionID) != "" || strings.TrimSpace(operand.FileID) != "" || operand.Ordinal > 0
+}
+
+func validateHostedMCPDiffOperand(prefix string, operand FileVersionDiffOperand) error {
+	selectors := 0
+	if strings.TrimSpace(operand.Ref) != "" {
+		selectors++
+		if operand.Ref != "head" && operand.Ref != "working-copy" {
+			return fmt.Errorf("%s_ref must be head or working-copy", prefix)
+		}
+	}
+	if strings.TrimSpace(operand.VersionID) != "" {
+		selectors++
+	}
+	if strings.TrimSpace(operand.FileID) != "" || operand.Ordinal > 0 {
+		if strings.TrimSpace(operand.FileID) == "" || operand.Ordinal <= 0 {
+			return fmt.Errorf("%s_file_id and %s_ordinal must be used together", prefix, prefix)
+		}
+		selectors++
+	}
+	if selectors > 1 {
+		return fmt.Errorf("choose exactly one %s selector", prefix)
+	}
+	return nil
 }
 
 func (p *hostedMCPProvider) toolFileLines(ctx context.Context, args map[string]any) (any, error) {
@@ -702,44 +1062,28 @@ func (p *hostedMCPProvider) toolFileCreateExclusive(ctx context.Context, args ma
 	if err != nil {
 		return nil, err
 	}
-	rawPath, err := mcpRequiredString(args, "path")
-	if err != nil {
-		return nil, err
-	}
-	normalizedPath := normalizeAFSGrepPath(rawPath)
-	fsClient, err := p.fsClient(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if stat, statErr := fsClient.Stat(ctx, normalizedPath); statErr == nil && stat != nil {
-		if stat.Type == "dir" {
-			return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
+		if stat != nil {
+			if stat.Type == "dir" {
+				return nil, fmt.Errorf("path %q is a directory", normalizedPath)
+			}
+			return nil, fmt.Errorf("path %q already exists", normalizedPath)
 		}
-		return nil, fmt.Errorf("path %q already exists", normalizedPath)
-	} else if statErr != nil && !errors.Is(statErr, redis.Nil) {
-		return nil, statErr
-	}
-
-	if err := ensureHostedWorkspaceParentDirs(ctx, fsClient, normalizedPath); err != nil {
-		return nil, err
-	}
-
-	_, _, err = fsClient.CreateFile(ctx, normalizedPath, 0o644, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
-		return nil, err
-	}
-
-	return map[string]any{
-		"workspace": p.workspace,
-		"path":      normalizedPath,
-		"operation": "create_exclusive",
-		"created":   true,
-		"bytes":     len(content),
-	}, nil
+		if err := ensureHostedWorkspaceParentDirs(ctx, fsClient, normalizedPath); err != nil {
+			return nil, err
+		}
+		if _, _, err := fsClient.CreateFile(ctx, normalizedPath, 0o644, true); err != nil {
+			return nil, err
+		}
+		if err := fsClient.Echo(ctx, normalizedPath, []byte(content)); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation": "create_exclusive",
+			"created":   true,
+			"bytes":     len(content),
+		}, nil
+	})
 }
 
 func (p *hostedMCPProvider) toolFileReplace(ctx context.Context, args map[string]any) (any, error) {
@@ -1135,16 +1479,9 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	if errors.Is(err, redis.Nil) {
 		stat = nil
 	}
-	var (
-		prevHash string
-		prevSize int64
-	)
-	if stat != nil && stat.Type == "file" {
-		prevContent, readErr := fsClient.Cat(ctx, normalizedPath)
-		if readErr == nil {
-			prevHash = textSHA256(string(prevContent))
-			prevSize = int64(len(prevContent))
-		}
+	beforeSnapshot, err := hostedVersionedSnapshot(ctx, fsClient, normalizedPath, stat)
+	if err != nil {
+		return nil, err
 	}
 	payload, err := mutate(ctx, fsClient, normalizedPath, stat)
 	if err != nil {
@@ -1164,25 +1501,42 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	payload["workspace"] = p.workspace
 	payload["path"] = normalizedPath
 	payload["dirty"] = true
+	afterSnapshot, err := hostedVersionedSnapshot(ctx, fsClient, normalizedPath, updatedStat)
+	if err != nil {
+		return nil, err
+	}
 	if updatedStat != nil {
 		payload["kind"] = updatedStat.Type
 		payload["size"] = updatedStat.Size
 		payload["modified_at"] = mcpFileModifiedAt(updatedStat.Mtime)
 	}
 	template := resolved.service.buildChangelogTemplate(ctx, resolved.storageID, strings.TrimSpace(resolved.meta.HeadSavepoint), ChangeSourceMCP)
+	version, err := resolved.service.store.RecordFileVersionMutation(ctx, resolved.storageID, beforeSnapshot, afterSnapshot, FileVersionMutationMetadata{
+		Source:       ChangeSourceMCP,
+		SessionID:    template.SessionID,
+		AgentID:      template.AgentID,
+		User:         template.User,
+		CheckpointID: strings.TrimSpace(resolved.meta.HeadSavepoint),
+	})
+	if err != nil {
+		return nil, err
+	}
 	entry := template
 	entry.Path = normalizedPath
 	entry.Op = ChangeOpPut
-	entry.PrevHash = prevHash
-	entry.DeltaBytes = -prevSize
-	if updatedStat != nil && updatedStat.Type == "file" {
-		nextContent, readErr := fsClient.Cat(ctx, normalizedPath)
-		if readErr == nil {
-			entry.ContentHash = textSHA256(string(nextContent))
-			entry.SizeBytes = int64(len(nextContent))
-			entry.DeltaBytes = entry.SizeBytes - prevSize
-			entry.Mode = 0o644
-		}
+	entry.PrevHash = beforeSnapshot.ContentHash
+	entry.DeltaBytes = -beforeSnapshot.SizeBytes
+	if afterSnapshot.Exists {
+		entry.ContentHash = afterSnapshot.ContentHash
+		entry.SizeBytes = afterSnapshot.SizeBytes
+		entry.DeltaBytes = afterSnapshot.SizeBytes - beforeSnapshot.SizeBytes
+		entry.Mode = afterSnapshot.Mode
+	}
+	if version != nil {
+		payload["file_id"] = version.FileID
+		payload["version_id"] = version.VersionID
+		entry.FileID = version.FileID
+		entry.VersionID = version.VersionID
 	}
 	WriteChangeEntries(ctx, resolved.service.store.rdb, resolved.storageID, []ChangeEntry{entry})
 	return payload, nil
@@ -1210,6 +1564,34 @@ func ensureHostedWorkspaceParentDirs(ctx context.Context, fsClient afsclient.Cli
 		}
 	}
 	return nil
+}
+
+func hostedVersionedSnapshot(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (VersionedFileSnapshot, error) {
+	snapshot := VersionedFileSnapshot{Path: normalizedPath}
+	if stat == nil {
+		return snapshot, nil
+	}
+	snapshot.Exists = true
+	snapshot.Kind = stat.Type
+	snapshot.Mode = stat.Mode
+	switch stat.Type {
+	case "file":
+		content, err := fsClient.Cat(ctx, normalizedPath)
+		if err != nil {
+			return VersionedFileSnapshot{}, err
+		}
+		snapshot.Content = content
+		snapshot.SizeBytes = int64(len(content))
+	case "symlink":
+		target, err := fsClient.Readlink(ctx, normalizedPath)
+		if err != nil {
+			return VersionedFileSnapshot{}, err
+		}
+		snapshot.Target = target
+	default:
+		snapshot.Exists = false
+	}
+	return completeVersionedSnapshot(snapshot), nil
 }
 
 func mcpErrorResult(err error) mcpproto.ToolResult {
@@ -1317,6 +1699,17 @@ func mcpFileModifiedAt(mtimeMs int64) string {
 		return ""
 	}
 	return time.UnixMilli(mtimeMs).UTC().Format(time.RFC3339)
+}
+
+func mcpHistoryDirection(raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "desc":
+		return true, nil
+	case "asc":
+		return false, nil
+	default:
+		return false, fmt.Errorf("direction must be asc or desc")
+	}
 }
 
 func mcpRequiredString(args map[string]any, key string) (string, error) {

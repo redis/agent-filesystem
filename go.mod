@@ -12,6 +12,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/clerk/clerk-sdk-go/v2 v2.4.2
 	github.com/fsnotify/fsnotify v1.7.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/redis/agent-filesystem/mount v0.0.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 )

@@ -27,12 +27,48 @@ func (s stubAFSControlPlane) GetWorkspace(context.Context, string) (controlplane
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected GetWorkspace call")
 }
 
+func (s stubAFSControlPlane) GetWorkspaceVersioningPolicy(context.Context, string) (controlplane.WorkspaceVersioningPolicy, error) {
+	return controlplane.WorkspaceVersioningPolicy{}, fmt.Errorf("unexpected GetWorkspaceVersioningPolicy call")
+}
+
+func (s stubAFSControlPlane) GetFileHistory(context.Context, string, string, bool) (controlplane.FileHistoryResponse, error) {
+	return controlplane.FileHistoryResponse{}, fmt.Errorf("unexpected GetFileHistory call")
+}
+
+func (s stubAFSControlPlane) GetFileHistoryPage(context.Context, string, controlplane.FileHistoryRequest) (controlplane.FileHistoryResponse, error) {
+	return controlplane.FileHistoryResponse{}, fmt.Errorf("unexpected GetFileHistoryPage call")
+}
+
+func (s stubAFSControlPlane) GetFileVersionContent(context.Context, string, string) (controlplane.FileVersionContentResponse, error) {
+	return controlplane.FileVersionContentResponse{}, fmt.Errorf("unexpected GetFileVersionContent call")
+}
+
+func (s stubAFSControlPlane) GetFileVersionContentAtOrdinal(context.Context, string, string, int64) (controlplane.FileVersionContentResponse, error) {
+	return controlplane.FileVersionContentResponse{}, fmt.Errorf("unexpected GetFileVersionContentAtOrdinal call")
+}
+
+func (s stubAFSControlPlane) DiffFileVersions(context.Context, string, string, controlplane.FileVersionDiffOperand, controlplane.FileVersionDiffOperand) (controlplane.FileVersionDiffResponse, error) {
+	return controlplane.FileVersionDiffResponse{}, fmt.Errorf("unexpected DiffFileVersions call")
+}
+
+func (s stubAFSControlPlane) RestoreFileVersion(context.Context, string, string, controlplane.FileVersionSelector) (controlplane.FileVersionRestoreResponse, error) {
+	return controlplane.FileVersionRestoreResponse{}, fmt.Errorf("unexpected RestoreFileVersion call")
+}
+
+func (s stubAFSControlPlane) UndeleteFileVersion(context.Context, string, string, controlplane.FileVersionSelector) (controlplane.FileVersionUndeleteResponse, error) {
+	return controlplane.FileVersionUndeleteResponse{}, fmt.Errorf("unexpected UndeleteFileVersion call")
+}
+
 func (s stubAFSControlPlane) CreateWorkspace(context.Context, controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected CreateWorkspace call")
 }
 
 func (s stubAFSControlPlane) ImportWorkspace(context.Context, controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error) {
 	return controlplane.ImportWorkspaceResponse{}, fmt.Errorf("unexpected ImportWorkspace call")
+}
+
+func (s stubAFSControlPlane) UpdateWorkspaceVersioningPolicy(context.Context, string, controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error) {
+	return controlplane.WorkspaceVersioningPolicy{}, fmt.Errorf("unexpected UpdateWorkspaceVersioningPolicy call")
 }
 
 func (s stubAFSControlPlane) DeleteWorkspace(context.Context, string) error {

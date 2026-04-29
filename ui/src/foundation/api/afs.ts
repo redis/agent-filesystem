@@ -11,18 +11,17 @@ import type {
   CreateControlPlaneTokenInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
-  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
   AFSActivityEvent,
   AFSActivityListResponse,
-  AFSEventEntry,
-  AFSEventListResponse,
   AFSClientMode,
   AFSFile,
   AFSFileContent,
-  AFSDiffEntry,
-  AFSDiffOp,
-  AFSTextDiff,
+  AFSFileHistoryResponse,
+  AFSFileVersionContent,
+  AFSFileVersionDiff,
+  AFSFileVersionRestoreResponse,
+  AFSFileVersionUndeleteResponse,
   AFSSavepoint,
   AFSState,
   AFSTreeItem,
@@ -32,12 +31,19 @@ import type {
   AFSWorkspaceDetail,
   AFSWorkspaceSource,
   AFSWorkspaceSummary,
+  AFSWorkspaceVersioningPolicy,
   AFSWorkspaceView,
-  AFSWorkspaceDiffResponse,
+  DiffFileVersionsInput,
+  GetFileHistoryInput,
+  GetFileVersionContentInput,
+  GetWorkspaceVersioningPolicyInput,
   RestoreSavepointInput,
   SaveDatabaseInput,
+  RestoreFileVersionInput,
+  UndeleteFileVersionInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
+  UpdateWorkspaceVersioningPolicyInput,
   QuickstartInput,
   QuickstartResponse,
   OnboardingTokenResponse,
@@ -46,12 +52,11 @@ import type {
   AFSAuthConfig,
   AFSAccount,
   AFSServerVersion,
-  AFSAdminOverview,
-  AFSAdminUser,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
 const DATABASE_STORAGE_KEY = "afs-ui-demo-databases-v1";
+const VERSIONING_POLICY_STORAGE_KEY = "afs-ui-demo-versioning-policies-v1";
 const DEMO_DELAY_MS = 120;
 const CLIENT_MODE_OVERRIDE = String(import.meta.env.VITE_AFS_CLIENT_MODE ?? "").trim().toLowerCase();
 const HTTP_REQUEST_TIMEOUT_MS = 8000;
@@ -70,15 +75,20 @@ type AFSClient = {
   deleteWorkspace: (databaseId: string, workspaceId: string) => Promise<void>;
   updateWorkspace: (input: UpdateWorkspaceInput) => Promise<AFSWorkspaceDetail | null>;
   updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<AFSWorkspaceDetail | null>;
+  getWorkspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) => Promise<AFSWorkspaceVersioningPolicy>;
+  updateWorkspaceVersioningPolicy: (input: UpdateWorkspaceVersioningPolicyInput) => Promise<AFSWorkspaceVersioningPolicy>;
+  getFileHistory: (input: GetFileHistoryInput) => Promise<AFSFileHistoryResponse>;
+  getFileVersionContent: (input: GetFileVersionContentInput) => Promise<AFSFileVersionContent | null>;
+  diffFileVersions: (input: DiffFileVersionsInput) => Promise<AFSFileVersionDiff>;
+  restoreFileVersion: (input: RestoreFileVersionInput) => Promise<AFSFileVersionRestoreResponse>;
+  undeleteFileVersion: (input: UndeleteFileVersionInput) => Promise<AFSFileVersionUndeleteResponse>;
   createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
   listActivityPage: (input: ListActivityInput) => Promise<AFSActivityListResponse>;
-  listEvents: (input: ListEventsInput) => Promise<AFSEventListResponse>;
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
-  getWorkspaceDiff: (input: GetWorkspaceDiffInput) => Promise<AFSWorkspaceDiffResponse>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   listAllMCPAccessTokens: () => Promise<AFSMCPToken[]>;
@@ -94,11 +104,6 @@ type AFSClient = {
   getAccount: () => Promise<AFSAccount>;
   resetAccountData: () => Promise<AFSAccount>;
   deleteAccount: () => Promise<AFSAccount>;
-  getAdminOverview: () => Promise<AFSAdminOverview>;
-  listAdminUsers: () => Promise<AFSAdminUser[]>;
-  listAdminDatabases: () => Promise<AFSDatabase[]>;
-  listAdminWorkspaceSummaries: () => Promise<AFSWorkspaceSummary[]>;
-  listAdminAgents: () => Promise<AFSAgentSession[]>;
   resetDemo: () => AFSState;
 };
 
@@ -106,6 +111,7 @@ export type ListChangelogInput = {
   databaseId?: string;
   workspaceId?: string;
   sessionId?: string;
+  path?: string;
   since?: string;
   until?: string;
   limit?: number;
@@ -114,20 +120,9 @@ export type ListChangelogInput = {
 
 export type ListActivityInput = {
   databaseId?: string;
-  limit?: number;
-  until?: string;
-};
-
-export type ListEventsInput = {
-  databaseId?: string;
   workspaceId?: string;
-  kind?: string;
-  sessionId?: string;
-  path?: string;
-  since?: string;
-  until?: string;
   limit?: number;
-  direction?: "asc" | "desc";
+  until?: string;
 };
 
 type HTTPChangelogEntry = {
@@ -152,6 +147,8 @@ type HTTPChangelogEntry = {
   mode?: number;
   checkpoint_id?: string;
   source?: string;
+  file_id?: string;
+  version_id?: string;
 };
 
 type HTTPChangelogResponse = {
@@ -225,16 +222,7 @@ type HTTPCheckpoint = {
   id: string;
   name: string;
   author?: string;
-  description?: string;
   note?: string;
-  kind?: string;
-  source?: string;
-  created_by?: string;
-  session_id?: string;
-  agent_id?: string;
-  agent_name?: string;
-  parent_checkpoint_id?: string;
-  manifest_hash?: string;
   created_at: string;
   file_count: number;
   folder_count: number;
@@ -252,6 +240,7 @@ type HTTPActivity = {
   created_at: string;
   detail: string;
   kind: string;
+  path?: string;
   scope: string;
   title: string;
 };
@@ -300,38 +289,6 @@ type HTTPActivityList = {
   next_cursor?: string;
 };
 
-type HTTPEventEntry = {
-  id: string;
-  workspace_id?: string;
-  workspace_name?: string;
-  database_id?: string;
-  database_name?: string;
-  created_at?: string;
-  kind: string;
-  op: string;
-  source?: string;
-  actor?: string;
-  session_id?: string;
-  user?: string;
-  label?: string;
-  agent_version?: string;
-  hostname?: string;
-  path?: string;
-  prev_path?: string;
-  size_bytes?: number;
-  delta_bytes?: number;
-  content_hash?: string;
-  prev_hash?: string;
-  mode?: number;
-  checkpoint_id?: string;
-  extras?: Record<string, string>;
-};
-
-type HTTPEventList = {
-  items: HTTPEventEntry[];
-  next_cursor?: string;
-};
-
 type HTTPWorkspaceSessionInfo = {
   session_id: string;
   workspace: string;
@@ -339,8 +296,6 @@ type HTTPWorkspaceSessionInfo = {
   workspace_name?: string;
   database_id?: string;
   database_name?: string;
-  owner_subject?: string;
-  owner_label?: string;
   agent_id?: string;
   client_kind?: string;
   afs_version?: string;
@@ -391,72 +346,108 @@ type HTTPFileContent = {
   target?: string;
 };
 
-type HTTPDiffState = {
-  view: AFSWorkspaceView;
-  checkpoint_id?: string;
-  manifest_hash?: string;
-  file_count: number;
-  folder_count: number;
-  total_bytes: number;
+type HTTPWorkspaceVersioningPolicy = {
+  mode: AFSWorkspaceVersioningPolicy["mode"];
+  include_globs?: string[];
+  exclude_globs?: string[];
+  max_versions_per_file?: number;
+  max_age_days?: number;
+  max_total_bytes?: number;
+  large_file_cutoff_bytes?: number;
 };
 
-type HTTPDiffSummary = {
-  total: number;
-  created: number;
-  updated: number;
-  deleted: number;
-  renamed: number;
-  metadata_changed: number;
-  bytes_added: number;
-  bytes_removed: number;
-};
-
-type HTTPTextDiffLine = {
-  kind: "context" | "delete" | "insert";
-  old_line?: number;
-  new_line?: number;
-  text: string;
-};
-
-type HTTPTextDiffHunk = {
-  old_start: number;
-  old_lines: number;
-  new_start: number;
-  new_lines: number;
-  lines: HTTPTextDiffLine[];
-};
-
-type HTTPTextDiff = {
-  available: boolean;
-  skipped_reason?: string;
-  language?: string;
-  max_bytes?: number;
-  hunks?: HTTPTextDiffHunk[];
-};
-
-type HTTPDiffEntry = {
-  op: AFSDiffOp;
+type HTTPFileVersion = {
+  version_id: string;
+  file_id: string;
+  ordinal: number;
   path: string;
-  previous_path?: string;
-  kind?: AFSDiffEntry["kind"];
-  previous_kind?: AFSDiffEntry["previousKind"];
-  size_bytes?: number;
-  previous_size_bytes?: number;
-  delta_bytes?: number;
+  prev_path?: string;
+  op: string;
+  kind: "file" | "symlink" | "tombstone";
+  blob_id?: string;
   content_hash?: string;
-  previous_hash?: string;
+  prev_hash?: string;
+  size_bytes?: number;
+  delta_bytes?: number;
   mode?: number;
-  previous_mode?: number;
-  text_diff?: HTTPTextDiff;
+  target?: string;
+  source?: string;
+  session_id?: string;
+  agent_id?: string;
+  user?: string;
+  checkpoint_ids?: string[];
+  created_at: string;
 };
 
-type HTTPWorkspaceDiffResponse = {
+type HTTPFileHistoryLineage = {
+  file_id: string;
+  state: string;
+  current_path: string;
+  versions: HTTPFileVersion[];
+};
+
+type HTTPFileHistoryResponse = {
   workspace_id: string;
-  workspace_name?: string;
-  base: HTTPDiffState;
-  head: HTTPDiffState;
-  summary: HTTPDiffSummary;
-  entries: HTTPDiffEntry[];
+  path: string;
+  order: "asc" | "desc";
+  lineages: HTTPFileHistoryLineage[];
+  next_cursor?: string;
+};
+
+type HTTPFileVersionContent = {
+  workspace_id: string;
+  file_id: string;
+  version_id: string;
+  ordinal: number;
+  path: string;
+  kind: "file" | "symlink" | "tombstone";
+  source?: string;
+  content?: string;
+  target?: string;
+  binary?: boolean;
+  encoding?: string;
+  content_type?: string;
+  language?: string;
+  size: number;
+  created_at: string;
+};
+
+type HTTPFileVersionSelector = {
+  ref?: "head" | "working-copy";
+  version_id?: string;
+  file_id?: string;
+  ordinal?: number;
+};
+
+type HTTPFileVersionDiff = {
+  workspace_id: string;
+  path: string;
+  from: string;
+  to: string;
+  binary: boolean;
+  diff?: string;
+};
+
+type HTTPFileVersionRestoreResponse = {
+  workspace_id: string;
+  path: string;
+  dirty: boolean;
+  file_id?: string;
+  version_id?: string;
+  restored_from_version_id?: string;
+  restored_from_file_id?: string;
+  restored_from_ordinal?: number;
+};
+
+type HTTPFileVersionUndeleteResponse = {
+  workspace_id: string;
+  path: string;
+  dirty: boolean;
+  file_id?: string;
+  version_id?: string;
+  undeleted_from_version_id?: string;
+  undeleted_from_file_id?: string;
+  undeleted_from_ordinal?: number;
 };
 
 type HTTPOnboardingTokenResponse = {
@@ -520,7 +511,6 @@ type HTTPAuthConfig = {
     name?: string;
     email?: string;
     groups?: string[];
-    is_admin?: boolean;
   };
 };
 
@@ -534,29 +524,6 @@ type HTTPAccount = {
   deleted_database_count?: number;
   deleted_workspace_count?: number;
   identity_deleted?: boolean;
-};
-
-type HTTPAdminOverview = {
-  user_count: number;
-  database_count: number;
-  workspace_count: number;
-  agent_count: number;
-  active_agent_count: number;
-  stale_agent_count: number;
-  unavailable_database_count: number;
-  total_bytes: number;
-  file_count: number;
-};
-
-type HTTPAdminUser = {
-  subject: string;
-  label?: string;
-  database_count: number;
-  workspace_count: number;
-  mcp_token_count: number;
-  agent_session_count: number;
-  last_seen_at?: string;
-  sources?: string[];
 };
 
 class HTTPError extends Error {
@@ -669,14 +636,14 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
     totalBytes: savepoint.totalBytes,
     sizeLabel: savepoint.sizeLabel || bytesLabel(savepoint.filesSnapshot),
   }));
-  normalized.activity = workspace.activity.map((event) => ({
+  normalized.activity = (workspace.activity ?? []).map((event) => ({
     ...event,
     workspaceId: event.workspaceId ?? workspace.id,
     workspaceName: event.workspaceName ?? workspace.name,
     databaseId: event.databaseId ?? workspace.databaseId,
     databaseName: event.databaseName ?? workspace.databaseName,
   }));
-  normalized.agents = workspace.agents.map((agent) => ({
+  normalized.agents = (workspace.agents ?? []).map((agent) => ({
     ...agent,
     workspaceId: agent.workspaceId || workspace.id,
     workspaceName: agent.workspaceName || workspace.name,
@@ -715,7 +682,6 @@ function createSavepointRecord(
   note: string,
   author: string,
   files: AFSFile[],
-  metadata: Partial<Pick<AFSSavepoint, "kind" | "source" | "createdBy" | "agentName">> = {},
 ): AFSSavepoint {
   return {
     id: makeId("sp"),
@@ -723,7 +689,6 @@ function createSavepointRecord(
     author,
     createdAt: nowISO(),
     note,
-    ...metadata,
     fileCount: files.length,
     folderCount: folderCount(files),
     totalBytes: bytesCount(files),
@@ -872,8 +837,8 @@ function deriveDemoDatabases(state: AFSState) {
     const existing = grouped.get(database.id);
     grouped.set(database.id, {
       ...database,
-      workspaceCount: existing?.workspaceCount ?? database.workspaceCount,
-      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount,
+      workspaceCount: existing?.workspaceCount ?? database.workspaceCount ?? 0,
+      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount ?? 0,
     });
   }
 
@@ -919,261 +884,6 @@ function demoFilesForView(workspace: AFSWorkspace, view: AFSWorkspaceView): AFSF
     ...file,
     path: normalizeFilePath(file.path),
   }));
-}
-
-function fileSizeBytes(file: AFSFile) {
-  return new TextEncoder().encode(file.content).length;
-}
-
-function demoTextDiff(previous: AFSFile | undefined, next: AFSFile | undefined): AFSTextDiff {
-  const previousText = previous?.content ?? "";
-  const nextText = next?.content ?? "";
-  if (new TextEncoder().encode(previousText + nextText).length > 128 * 1024) {
-    return {
-      available: false,
-      skippedReason: "file is larger than the demo text diff limit",
-      maxBytes: 128 * 1024,
-    };
-  }
-  const previousLines = previousText === "" ? [] : previousText.split(/\r?\n/);
-  const nextLines = nextText === "" ? [] : nextText.split(/\r?\n/);
-  let prefix = 0;
-  while (
-    prefix < previousLines.length &&
-    prefix < nextLines.length &&
-    previousLines[prefix] === nextLines[prefix]
-  ) {
-    prefix += 1;
-  }
-  let suffix = 0;
-  while (
-    suffix < previousLines.length - prefix &&
-    suffix < nextLines.length - prefix &&
-    previousLines[previousLines.length - 1 - suffix] === nextLines[nextLines.length - 1 - suffix]
-  ) {
-    suffix += 1;
-  }
-  const removed = previousLines.slice(prefix, previousLines.length - suffix);
-  const inserted = nextLines.slice(prefix, nextLines.length - suffix);
-  return {
-    available: true,
-    language: next?.language ?? previous?.language ?? "text",
-    hunks: [
-      {
-        oldStart: prefix + 1,
-        oldLines: removed.length,
-        newStart: prefix + 1,
-        newLines: inserted.length,
-        lines: [
-          ...removed.map((text, index) => ({
-            kind: "delete" as const,
-            oldLine: prefix + index + 1,
-            text,
-          })),
-          ...inserted.map((text, index) => ({
-            kind: "insert" as const,
-            newLine: prefix + index + 1,
-            text,
-          })),
-        ],
-      },
-    ],
-  };
-}
-
-function demoDiffState(workspace: AFSWorkspace, view: AFSWorkspaceView, files: AFSFile[]) {
-  const checkpointId =
-    view === "head"
-      ? workspace.headSavepointId
-      : view.startsWith("checkpoint:")
-        ? view.replace(/^checkpoint:/, "")
-        : undefined;
-  return {
-    view,
-    checkpointId,
-    fileCount: files.length,
-    folderCount: folderCount(files),
-    totalBytes: bytesCount(files),
-  };
-}
-
-function demoDiffEntryKey(file: AFSFile) {
-  return `${file.language}\0${file.content}`;
-}
-
-function summarizeDiffEntries(entries: AFSDiffEntry[]) {
-  return entries.reduce(
-    (summary, entry) => {
-      summary.total += 1;
-      switch (entry.op) {
-        case "create":
-          summary.created += 1;
-          break;
-        case "update":
-          summary.updated += 1;
-          break;
-        case "delete":
-          summary.deleted += 1;
-          break;
-        case "rename":
-          summary.renamed += 1;
-          break;
-        case "metadata":
-          summary.metadataChanged += 1;
-          break;
-        default:
-          break;
-      }
-      const deltaBytes = entry.deltaBytes ?? 0;
-      if (deltaBytes > 0) {
-        summary.bytesAdded += deltaBytes;
-      } else if (deltaBytes < 0) {
-        summary.bytesRemoved += Math.abs(deltaBytes);
-      }
-      return summary;
-    },
-    {
-      total: 0,
-      created: 0,
-      updated: 0,
-      deleted: 0,
-      renamed: 0,
-      metadataChanged: 0,
-      bytesAdded: 0,
-      bytesRemoved: 0,
-    },
-  );
-}
-
-function compareDemoFiles(
-  workspace: AFSWorkspace,
-  baseView: AFSWorkspaceView,
-  headView: AFSWorkspaceView,
-): AFSWorkspaceDiffResponse {
-  const baseFiles = demoFilesForView(workspace, baseView);
-  const headFiles = demoFilesForView(workspace, headView);
-  const baseByPath = new Map(baseFiles.map((file) => [normalizeFilePath(file.path), file]));
-  const headByPath = new Map(headFiles.map((file) => [normalizeFilePath(file.path), file]));
-  const deleted = new Map<string, AFSFile>();
-  const created = new Map<string, AFSFile>();
-  const entries: AFSDiffEntry[] = [];
-
-  for (const [path, file] of baseByPath) {
-    if (!headByPath.has(path)) {
-      deleted.set(path, file);
-    }
-  }
-  for (const [path, file] of headByPath) {
-    if (!baseByPath.has(path)) {
-      created.set(path, file);
-    }
-  }
-
-  const deletedByKey = new Map<string, string[]>();
-  const createdByKey = new Map<string, string[]>();
-  for (const [path, file] of deleted) {
-    const key = demoDiffEntryKey(file);
-    deletedByKey.set(key, [...(deletedByKey.get(key) ?? []), path]);
-  }
-  for (const [path, file] of created) {
-    const key = demoDiffEntryKey(file);
-    createdByKey.set(key, [...(createdByKey.get(key) ?? []), path]);
-  }
-  const renameKeys = [...deletedByKey.keys()].filter((key) => createdByKey.has(key)).sort();
-  for (const key of renameKeys) {
-    const oldPaths = [...(deletedByKey.get(key) ?? [])].sort();
-    const newPaths = [...(createdByKey.get(key) ?? [])].sort();
-    const limit = Math.min(oldPaths.length, newPaths.length);
-    for (let index = 0; index < limit; index += 1) {
-      const previousPath = oldPaths[index];
-      const path = newPaths[index];
-      const previous = deleted.get(previousPath);
-      const next = created.get(path);
-      if (previous == null || next == null) continue;
-      entries.push({
-        op: "rename",
-        path,
-        previousPath,
-        kind: "file",
-        previousKind: "file",
-        sizeBytes: fileSizeBytes(next),
-        previousSizeBytes: fileSizeBytes(previous),
-      });
-      deleted.delete(previousPath);
-      created.delete(path);
-    }
-  }
-
-  for (const [path, file] of created) {
-    const sizeBytes = fileSizeBytes(file);
-    entries.push({
-      op: "create",
-      path,
-      kind: "file",
-      sizeBytes,
-      deltaBytes: sizeBytes,
-      textDiff: demoTextDiff(undefined, file),
-    });
-  }
-
-  for (const [path, file] of deleted) {
-    const previousSizeBytes = fileSizeBytes(file);
-    entries.push({
-      op: "delete",
-      path,
-      previousPath: path,
-      previousKind: "file",
-      previousSizeBytes,
-      deltaBytes: previousSizeBytes * -1,
-      textDiff: demoTextDiff(file, undefined),
-    });
-  }
-
-  for (const [path, previous] of baseByPath) {
-    const next = headByPath.get(path);
-    if (next == null) continue;
-    const previousSizeBytes = fileSizeBytes(previous);
-    const sizeBytes = fileSizeBytes(next);
-    if (previous.content !== next.content) {
-      entries.push({
-        op: "update",
-        path,
-        kind: "file",
-        previousKind: "file",
-        sizeBytes,
-        previousSizeBytes,
-        deltaBytes: sizeBytes - previousSizeBytes,
-        textDiff: demoTextDiff(previous, next),
-      });
-      continue;
-    }
-    if (previous.language !== next.language) {
-      entries.push({
-        op: "metadata",
-        path,
-        kind: "file",
-        previousKind: "file",
-        sizeBytes,
-        previousSizeBytes,
-      });
-    }
-  }
-
-  entries.sort((left, right) => {
-    if (left.path === right.path) {
-      return (left.previousPath ?? "").localeCompare(right.previousPath ?? "");
-    }
-    return left.path.localeCompare(right.path);
-  });
-
-  return {
-    workspaceId: workspace.id,
-    workspaceName: workspace.name,
-    base: demoDiffState(workspace, baseView, baseFiles),
-    head: demoDiffState(workspace, headView, headFiles),
-    summary: summarizeDiffEntries(entries),
-    entries,
-  };
 }
 
 function parentPath(value: string) {
@@ -1273,29 +983,6 @@ function allActivityForState(state: AFSState) {
 
 function activityForState(state: AFSState, limit: number) {
   return allActivityForState(state).slice(0, limit);
-}
-
-function allEventsForState(state: AFSState): AFSEventEntry[] {
-  return allActivityForState(state).map((event) => {
-    const [kind, op] = event.kind.split(".", 2);
-    return {
-      id: event.id,
-      workspaceId: event.workspaceId,
-      workspaceName: event.workspaceName,
-      databaseId: event.databaseId,
-      databaseName: event.databaseName,
-      createdAt: event.createdAt,
-      kind: event.scope || kind || "workspace",
-      op: op || event.kind,
-      source: "demo",
-      actor: event.actor,
-      path: event.path,
-      extras: {
-        title: event.title,
-        detail: event.detail,
-      },
-    };
-  });
 }
 
 const demoAFSClient: AFSClient = {
@@ -1415,7 +1102,6 @@ This workspace was created from the AFS Web UI.
         "Workspace created from the Web UI.",
         "webui",
         baseFiles,
-        { kind: "system", source: "browser" },
       );
 
       const workspace = normalizeWorkspace({
@@ -1539,12 +1225,67 @@ This workspace was created from the AFS Web UI.
           "file",
           workspace.id,
           workspace.name,
-          normalizeFilePath(normalizedPath),
         ),
       );
     });
 
     return normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+  },
+
+  async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
+    await wait();
+    const policies = loadDemoVersioningPolicies();
+    return policies[input.workspaceId] ?? {
+      mode: "off",
+      includeGlobs: [],
+      excludeGlobs: [],
+      maxVersionsPerFile: 0,
+      maxAgeDays: 0,
+      maxTotalBytes: 0,
+      largeFileCutoffBytes: 0,
+    };
+  },
+
+  async updateWorkspaceVersioningPolicy(input: UpdateWorkspaceVersioningPolicyInput) {
+    await wait();
+    const policies = loadDemoVersioningPolicies();
+    policies[input.workspaceId] = input.policy;
+    saveDemoVersioningPolicies(policies);
+    return input.policy;
+  },
+
+  async getFileHistory(input: GetFileHistoryInput) {
+    await wait();
+    return {
+      workspaceId: input.workspaceId,
+      path: normalizeFilePath(input.path),
+      order: input.direction ?? "desc",
+      lineages: [],
+    };
+  },
+
+  async getFileVersionContent() {
+    await wait();
+    return null;
+  },
+
+  async diffFileVersions(input: DiffFileVersionsInput) {
+    await wait();
+    return {
+      path: normalizeFilePath(input.path),
+      from: "unavailable",
+      to: "unavailable",
+      binary: false,
+      diff: "",
+    };
+  },
+
+  async restoreFileVersion() {
+    throw new Error("File version restore is not available in demo mode.");
+  },
+
+  async undeleteFileVersion() {
+    throw new Error("File version undelete is not available in demo mode.");
   },
 
   async createSavepoint(input: CreateSavepointInput) {
@@ -1559,7 +1300,6 @@ This workspace was created from the AFS Web UI.
         input.note.trim(),
         "webui",
         workspace.files,
-        { kind: "manual", source: "browser" },
       );
       workspace.savepoints.unshift(savepoint);
       workspace.draftState = "clean";
@@ -1632,24 +1372,6 @@ This workspace was created from the AFS Web UI.
     };
   },
 
-  async listEvents(input: ListEventsInput) {
-    await wait();
-    const state = loadState();
-    const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
-    const events = allEventsForState(state)
-      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
-      .filter((event) => input.workspaceId == null || input.workspaceId === "" || event.workspaceId === input.workspaceId)
-      .filter((event) => input.kind == null || input.kind === "" || event.kind === input.kind)
-      .filter((event) => input.sessionId == null || input.sessionId === "" || event.sessionId === input.sessionId)
-      .filter((event) => input.path == null || input.path === "" || event.path === input.path)
-      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
-    const page = events.slice(0, limit);
-    return {
-      items: page,
-      nextCursor: page.length > 0 ? page[page.length - 1].id : undefined,
-    };
-  },
-
   async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
     await wait();
     return { entries: [] };
@@ -1700,16 +1422,6 @@ This workspace was created from the AFS Web UI.
       binary: false,
       content: file.content,
     };
-  },
-
-  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
-    await wait();
-    const state = loadState();
-    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
-    if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
-    }
-    return compareDemoFiles(workspace, input.base, input.head);
   },
 
   async quickstart() {
@@ -1783,36 +1495,6 @@ This workspace was created from the AFS Web UI.
 
   async deleteAccount() {
     throw new Error("Account deletion is not available in demo mode.");
-  },
-
-  async getAdminOverview() {
-    return {
-      userCount: 0,
-      databaseCount: 0,
-      workspaceCount: 0,
-      agentCount: 0,
-      activeAgentCount: 0,
-      staleAgentCount: 0,
-      unavailableDatabaseCount: 0,
-      totalBytes: 0,
-      fileCount: 0,
-    };
-  },
-
-  async listAdminUsers() {
-    return [] as AFSAdminUser[];
-  },
-
-  async listAdminDatabases() {
-    return deriveDemoDatabases(loadState());
-  },
-
-  async listAdminWorkspaceSummaries() {
-    return demoAFSClient.listWorkspaceSummaries("");
-  },
-
-  async listAdminAgents() {
-    return demoAFSClient.listAgents("");
   },
 
   resetDemo() {
@@ -1890,6 +1572,28 @@ function workspaceBasePath(databaseId: string | undefined, workspaceId: string) 
   return `/databases/${resolvedDatabaseID}/workspaces/${workspaceId}`;
 }
 
+function loadDemoVersioningPolicies(): Record<string, AFSWorkspaceVersioningPolicy> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(VERSIONING_POLICY_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    return JSON.parse(raw) as Record<string, AFSWorkspaceVersioningPolicy>;
+  } catch {
+    return {};
+  }
+}
+
+function saveDemoVersioningPolicies(policies: Record<string, AFSWorkspaceVersioningPolicy>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(VERSIONING_POLICY_STORAGE_KEY, JSON.stringify(policies));
+}
+
 function resolveAFSClient() {
   if (CLIENT_MODE_OVERRIDE === "demo") {
     return demoAFSClient;
@@ -1964,6 +1668,7 @@ function mapActivity(
     createdAt: input.created_at,
     detail: input.detail,
     kind: input.kind,
+    path: input.path,
     scope: input.scope,
     title: input.title,
   };
@@ -1979,73 +1684,13 @@ function mapActivityList(
   };
 }
 
-function mapEventEntry(
-  input: HTTPEventEntry,
-  scope?: {
-    workspaceId?: string;
-    workspaceName?: string;
-    databaseId?: string;
-    databaseName?: string;
-  },
-): AFSEventEntry {
-  return {
-    id: input.id,
-    workspaceId: input.workspace_id ?? scope?.workspaceId,
-    workspaceName: input.workspace_name ?? scope?.workspaceName,
-    databaseId: input.database_id ?? scope?.databaseId,
-    databaseName: input.database_name ?? scope?.databaseName,
-    createdAt: input.created_at,
-    kind: input.kind,
-    op: input.op,
-    source: input.source,
-    actor: input.actor,
-    sessionId: input.session_id,
-    user: input.user,
-    label: input.label,
-    agentVersion: input.agent_version,
-    hostname: input.hostname,
-    path: input.path,
-    prevPath: input.prev_path,
-    sizeBytes: input.size_bytes,
-    deltaBytes: input.delta_bytes,
-    contentHash: input.content_hash,
-    prevHash: input.prev_hash,
-    mode: input.mode,
-    checkpointId: input.checkpoint_id,
-    extras: input.extras,
-  };
-}
-
-function mapEventList(
-  response: HTTPEventList,
-  scope?: {
-    workspaceId?: string;
-    workspaceName?: string;
-    databaseId?: string;
-    databaseName?: string;
-  },
-): AFSEventListResponse {
-  return {
-    items: response.items.map((item) => mapEventEntry(item, scope)),
-    nextCursor: response.next_cursor,
-  };
-}
-
 function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   return {
     id: input.id,
     name: input.name,
     author: input.author ?? "afs",
     createdAt: input.created_at,
-    note: input.description ?? input.note ?? "",
-    kind: input.kind,
-    source: input.source,
-    createdBy: input.created_by,
-    sessionId: input.session_id,
-    agentId: input.agent_id,
-    agentName: input.agent_name,
-    parentCheckpointId: input.parent_checkpoint_id,
-    manifestHash: input.manifest_hash,
+    note: input.note ?? "",
     fileCount: input.file_count,
     folderCount: input.folder_count,
     totalBytes: input.total_bytes,
@@ -2086,6 +1731,8 @@ function mapChangelogEntry(
     mode: input.mode,
     checkpointId: input.checkpoint_id,
     source: input.source,
+    fileId: input.file_id,
+    versionId: input.version_id,
   };
 }
 
@@ -2093,29 +1740,6 @@ function changelogSearchParams(input: ListChangelogInput): URLSearchParams {
   const params = new URLSearchParams();
   if (input.limit != null && input.limit > 0) {
     params.set("limit", String(input.limit));
-  }
-  if (input.sessionId) {
-    params.set("session_id", input.sessionId);
-  }
-  if (input.since) {
-    params.set("since", input.since);
-  }
-  if (input.until) {
-    params.set("until", input.until);
-  }
-  if (input.direction) {
-    params.set("direction", input.direction);
-  }
-  return params;
-}
-
-function eventSearchParams(input: ListEventsInput): URLSearchParams {
-  const params = new URLSearchParams();
-  if (input.limit != null && input.limit > 0) {
-    params.set("limit", String(input.limit));
-  }
-  if (input.kind) {
-    params.set("kind", input.kind);
   }
   if (input.sessionId) {
     params.set("session_id", input.sessionId);
@@ -2148,8 +1772,6 @@ function mapAgentSession(
     workspaceName: input.workspace_name ?? workspaceName,
     databaseId: input.database_id ?? databaseId,
     databaseName: input.database_name ?? databaseName,
-    ownerSubject: input.owner_subject,
-    ownerLabel: input.owner_label,
     agentId: input.agent_id,
     clientKind: input.client_kind ?? "",
     afsVersion: input.afs_version ?? "",
@@ -2162,33 +1784,6 @@ function mapAgentSession(
     startedAt: input.started_at,
     lastSeenAt: input.last_seen_at,
     leaseExpiresAt: input.lease_expires_at,
-  };
-}
-
-function mapAdminOverview(input: HTTPAdminOverview): AFSAdminOverview {
-  return {
-    userCount: input.user_count,
-    databaseCount: input.database_count,
-    workspaceCount: input.workspace_count,
-    agentCount: input.agent_count,
-    activeAgentCount: input.active_agent_count,
-    staleAgentCount: input.stale_agent_count,
-    unavailableDatabaseCount: input.unavailable_database_count,
-    totalBytes: input.total_bytes,
-    fileCount: input.file_count,
-  };
-}
-
-function mapAdminUser(input: HTTPAdminUser): AFSAdminUser {
-  return {
-    subject: input.subject,
-    label: input.label,
-    databaseCount: input.database_count,
-    workspaceCount: input.workspace_count,
-    mcpTokenCount: input.mcp_token_count,
-    agentSessionCount: input.agent_session_count,
-    lastSeenAt: input.last_seen_at,
-    sources: input.sources ?? [],
   };
 }
 
@@ -2290,70 +1885,119 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
   };
 }
 
-function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffResponse {
+function mapWorkspaceVersioningPolicy(input: HTTPWorkspaceVersioningPolicy): AFSWorkspaceVersioningPolicy {
+  return {
+    mode: input.mode ?? "off",
+    includeGlobs: input.include_globs ?? [],
+    excludeGlobs: input.exclude_globs ?? [],
+    maxVersionsPerFile: input.max_versions_per_file ?? 0,
+    maxAgeDays: input.max_age_days ?? 0,
+    maxTotalBytes: input.max_total_bytes ?? 0,
+    largeFileCutoffBytes: input.large_file_cutoff_bytes ?? 0,
+  };
+}
+
+function mapFileVersion(input: HTTPFileVersion) {
+  return {
+    versionId: input.version_id,
+    fileId: input.file_id,
+    ordinal: input.ordinal,
+    path: input.path,
+    prevPath: input.prev_path,
+    op: input.op,
+    kind: input.kind,
+    blobId: input.blob_id,
+    contentHash: input.content_hash,
+    prevHash: input.prev_hash,
+    sizeBytes: input.size_bytes,
+    deltaBytes: input.delta_bytes,
+    mode: input.mode,
+    target: input.target,
+    source: input.source,
+    sessionId: input.session_id,
+    agentId: input.agent_id,
+    user: input.user,
+    checkpointIds: input.checkpoint_ids ?? [],
+    createdAt: input.created_at,
+  };
+}
+
+function mapFileHistoryResponse(input: HTTPFileHistoryResponse): AFSFileHistoryResponse {
   return {
     workspaceId: input.workspace_id,
-    workspaceName: input.workspace_name,
-    base: {
-      view: input.base.view,
-      checkpointId: input.base.checkpoint_id,
-      manifestHash: input.base.manifest_hash,
-      fileCount: input.base.file_count,
-      folderCount: input.base.folder_count,
-      totalBytes: input.base.total_bytes,
-    },
-    head: {
-      view: input.head.view,
-      checkpointId: input.head.checkpoint_id,
-      manifestHash: input.head.manifest_hash,
-      fileCount: input.head.file_count,
-      folderCount: input.head.folder_count,
-      totalBytes: input.head.total_bytes,
-    },
-    summary: {
-      total: input.summary.total,
-      created: input.summary.created,
-      updated: input.summary.updated,
-      deleted: input.summary.deleted,
-      renamed: input.summary.renamed,
-      metadataChanged: input.summary.metadata_changed,
-      bytesAdded: input.summary.bytes_added,
-      bytesRemoved: input.summary.bytes_removed,
-    },
-    entries: input.entries.map((entry) => ({
-      op: entry.op,
-      path: entry.path,
-      previousPath: entry.previous_path,
-      kind: entry.kind,
-      previousKind: entry.previous_kind,
-      sizeBytes: entry.size_bytes,
-      previousSizeBytes: entry.previous_size_bytes,
-      deltaBytes: entry.delta_bytes,
-      contentHash: entry.content_hash,
-      previousHash: entry.previous_hash,
-      mode: entry.mode,
-      previousMode: entry.previous_mode,
-      textDiff: entry.text_diff
-        ? {
-            available: entry.text_diff.available,
-            skippedReason: entry.text_diff.skipped_reason,
-            language: entry.text_diff.language,
-            maxBytes: entry.text_diff.max_bytes,
-            hunks: entry.text_diff.hunks?.map((hunk) => ({
-              oldStart: hunk.old_start,
-              oldLines: hunk.old_lines,
-              newStart: hunk.new_start,
-              newLines: hunk.new_lines,
-              lines: hunk.lines.map((line) => ({
-                kind: line.kind,
-                oldLine: line.old_line,
-                newLine: line.new_line,
-                text: line.text,
-              })),
-            })),
-          }
-        : undefined,
+    path: input.path,
+    order: input.order,
+    lineages: input.lineages.map((lineage) => ({
+      fileId: lineage.file_id,
+      state: lineage.state,
+      currentPath: lineage.current_path,
+      versions: lineage.versions.map(mapFileVersion),
     })),
+    nextCursor: input.next_cursor,
+  };
+}
+
+function mapFileVersionContent(input: HTTPFileVersionContent): AFSFileVersionContent {
+  return {
+    workspaceId: input.workspace_id,
+    fileId: input.file_id,
+    versionId: input.version_id,
+    ordinal: input.ordinal,
+    path: input.path,
+    kind: input.kind,
+    source: input.source,
+    content: input.content,
+    target: input.target,
+    binary: input.binary,
+    encoding: input.encoding,
+    contentType: input.content_type,
+    language: input.language,
+    size: input.size,
+    createdAt: input.created_at,
+  };
+}
+
+function mapFileVersionSelector(input: DiffFileVersionsInput["from"]): HTTPFileVersionSelector {
+  if ("ref" in input) {
+    return { ref: input.ref };
+  }
+  if ("versionId" in input) {
+    return { version_id: input.versionId };
+  }
+  return { file_id: input.fileId, ordinal: input.ordinal };
+}
+
+function mapFileVersionDiff(input: HTTPFileVersionDiff): AFSFileVersionDiff {
+  return {
+    path: input.path,
+    from: input.from,
+    to: input.to,
+    binary: input.binary,
+    diff: input.diff,
+  };
+}
+
+function mapFileVersionRestoreResponse(input: HTTPFileVersionRestoreResponse): AFSFileVersionRestoreResponse {
+  return {
+    workspaceId: input.workspace_id,
+    path: input.path,
+    fileId: input.file_id ?? "",
+    versionId: input.version_id ?? "",
+    restoredFromVersionId: input.restored_from_version_id ?? "",
+    restoredFromFileId: input.restored_from_file_id ?? "",
+    restoredFromOrdinal: input.restored_from_ordinal ?? 0,
+  };
+}
+
+function mapFileVersionUndeleteResponse(input: HTTPFileVersionUndeleteResponse): AFSFileVersionUndeleteResponse {
+  return {
+    workspaceId: input.workspace_id,
+    path: input.path,
+    fileId: input.file_id ?? "",
+    versionId: input.version_id ?? "",
+    undeletedFromVersionId: input.undeleted_from_version_id ?? "",
+    undeletedFromFileId: input.undeleted_from_file_id ?? "",
+    undeletedFromOrdinal: input.undeleted_from_ordinal ?? 0,
   };
 }
 
@@ -2512,6 +2156,112 @@ const httpAFSClient: AFSClient = {
     throw new Error("Working-copy editing is not available in the hosted HTTP control plane yet.");
   },
 
+  async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
+    return mapWorkspaceVersioningPolicy(
+      await requestJSON<HTTPWorkspaceVersioningPolicy>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`),
+    );
+  },
+
+  async updateWorkspaceVersioningPolicy(input: UpdateWorkspaceVersioningPolicyInput) {
+    return mapWorkspaceVersioningPolicy(
+      await requestJSON<HTTPWorkspaceVersioningPolicy>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`, {
+        method: "PUT",
+        body: JSON.stringify({
+          mode: input.policy.mode,
+          include_globs: input.policy.includeGlobs,
+          exclude_globs: input.policy.excludeGlobs,
+          max_versions_per_file: input.policy.maxVersionsPerFile,
+          max_age_days: input.policy.maxAgeDays,
+          max_total_bytes: input.policy.maxTotalBytes,
+          large_file_cutoff_bytes: input.policy.largeFileCutoffBytes,
+        }),
+      }),
+    );
+  },
+
+  async getFileHistory(input: GetFileHistoryInput) {
+    const params = new URLSearchParams();
+    params.set("path", input.path);
+    if (input.direction) {
+      params.set("direction", input.direction);
+    }
+    if (input.limit != null && input.limit > 0) {
+      params.set("limit", String(input.limit));
+    }
+    if (input.cursor) {
+      params.set("cursor", input.cursor);
+    }
+    return mapFileHistoryResponse(
+      await requestJSON<HTTPFileHistoryResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/history?${params.toString()}`),
+    );
+  },
+
+  async getFileVersionContent(input: GetFileVersionContentInput) {
+    const params = new URLSearchParams();
+    params.set("path", input.path);
+    if ("versionId" in input) {
+      params.set("version_id", input.versionId);
+    } else {
+      params.set("file_id", input.fileId);
+      params.set("ordinal", String(input.ordinal));
+    }
+    try {
+      return mapFileVersionContent(
+        await requestJSON<HTTPFileVersionContent>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/version-content?${params.toString()}`),
+      );
+    } catch (error) {
+      if (error instanceof HTTPError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  },
+
+  async diffFileVersions(input: DiffFileVersionsInput) {
+    return mapFileVersionDiff(
+      await requestJSON<HTTPFileVersionDiff>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/diff`, {
+        method: "POST",
+        body: JSON.stringify({
+          path: input.path,
+          from: mapFileVersionSelector(input.from),
+          to: input.to ? mapFileVersionSelector(input.to) : { ref: "head" },
+        }),
+      }),
+    );
+  },
+
+  async restoreFileVersion(input: RestoreFileVersionInput) {
+    const body: Record<string, unknown> = { path: input.path };
+    if ("versionId" in input) {
+      body.version_id = input.versionId;
+    } else {
+      body.file_id = input.fileId;
+      body.ordinal = input.ordinal;
+    }
+    return mapFileVersionRestoreResponse(
+      await requestJSON<HTTPFileVersionRestoreResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:restore-version`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+  },
+
+  async undeleteFileVersion(input: UndeleteFileVersionInput) {
+    const body: Record<string, unknown> = { path: input.path };
+    if ("versionId" in input && input.versionId) {
+      body.version_id = input.versionId;
+    } else if ("fileId" in input && input.fileId) {
+      body.file_id = input.fileId;
+      body.ordinal = input.ordinal;
+    }
+    return mapFileVersionUndeleteResponse(
+      await requestJSON<HTTPFileVersionUndeleteResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:undelete`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+  },
+
   async createSavepoint() {
     throw new Error("Checkpoint creation requires a connected working copy and is not available in the hosted HTTP control plane yet.");
   },
@@ -2542,6 +2292,14 @@ const httpAFSClient: AFSClient = {
     }
     const query = params.toString();
     const databaseId = input.databaseId?.trim() ?? "";
+    const workspaceId = input.workspaceId?.trim() ?? "";
+    if (workspaceId !== "") {
+      const base = `${workspaceBasePath(input.databaseId, workspaceId)}/activity`;
+      const response = await requestJSON<HTTPActivityList>(query ? `${base}?${query}` : base);
+      return mapActivityList(response, {
+        databaseId: input.databaseId,
+      });
+    }
     if (databaseId !== "") {
       const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
       const response = await requestJSON<HTTPActivityList>(
@@ -2555,34 +2313,6 @@ const httpAFSClient: AFSClient = {
 
     const response = await requestJSON<HTTPActivityList>(query ? `/activity?${query}` : "/activity");
     return mapActivityList(response);
-  },
-
-  async listEvents(input: ListEventsInput): Promise<AFSEventListResponse> {
-    const params = eventSearchParams(input);
-    const query = params.toString();
-    const workspaceId = input.workspaceId?.trim() ?? "";
-    if (workspaceId !== "") {
-      const base = `${workspaceBasePath(input.databaseId, workspaceId)}/events`;
-      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
-      return mapEventList(response, {
-        workspaceId,
-        databaseId: input.databaseId,
-      });
-    }
-
-    const databaseId = input.databaseId?.trim() ?? "";
-    if (databaseId !== "") {
-      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
-      const base = `/databases/${databaseId}/events`;
-      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
-      return mapEventList(response, {
-        databaseId,
-        databaseName: database?.name,
-      });
-    }
-
-    const response = await requestJSON<HTTPEventList>(query ? `/events?${query}` : "/events");
-    return mapEventList(response);
   },
 
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
@@ -2637,18 +2367,6 @@ const httpAFSClient: AFSClient = {
       }
       throw error;
     }
-  },
-
-  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
-    const params = new URLSearchParams({
-      base: input.base,
-      head: input.head,
-    });
-    return mapWorkspaceDiff(
-      await requestJSON<HTTPWorkspaceDiffResponse>(
-        `${workspaceBasePath(input.databaseId, input.workspaceId)}/diff?${params.toString()}`,
-      ),
-    );
   },
 
   async quickstart(input: QuickstartInput) {
@@ -2783,7 +2501,6 @@ const httpAFSClient: AFSClient = {
         name: response.user.name,
         email: response.user.email,
         groups: response.user.groups ?? [],
-        isAdmin: response.user.is_admin,
       },
     } as AFSAuthConfig;
   },
@@ -2811,40 +2528,6 @@ const httpAFSClient: AFSClient = {
     return mapAccount(await requestJSON<HTTPAccount>("/account", {
       method: "DELETE",
     }));
-  },
-
-  async getAdminOverview() {
-    return mapAdminOverview(await requestJSON<HTTPAdminOverview>("/admin/overview"));
-  },
-
-  async listAdminUsers() {
-    const response = await requestJSON<{ items: HTTPAdminUser[] }>("/admin/users");
-    return response.items.map(mapAdminUser);
-  },
-
-  async listAdminDatabases() {
-    const response = await requestJSON<{ items: HTTPDatabase[] }>("/admin/databases");
-    return response.items.map(mapDatabase);
-  },
-
-  async listAdminWorkspaceSummaries() {
-    const response = await requestJSON<{ items: HTTPWorkspaceSummary[] }>("/admin/workspaces");
-    return response.items.map(mapWorkspaceSummary);
-  },
-
-  async listAdminAgents() {
-    const response = await requestJSON<HTTPWorkspaceSessionList>("/admin/agents");
-    return response.items
-      .map((item) =>
-        mapAgentSession(
-          item,
-          item.workspace_id ?? item.workspace,
-          item.workspace_name ?? item.workspace,
-          item.database_id,
-          item.database_name,
-        ),
-      )
-      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
   resetDemo() {
