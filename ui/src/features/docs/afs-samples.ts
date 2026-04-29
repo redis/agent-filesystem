@@ -1,0 +1,47 @@
+export const typescriptSdkSample = `import { AFS } from "@redis/afs-sdk";
+
+const afs = new AFS({ apiKey: process.env.AFS_API_KEY });
+const repo = await afs.repo.create({ name: "foobar" });
+const fs = await afs.fs.mount({
+  repos: [{ name: repo.name }],
+  mode: "rw",
+});
+
+await fs.writeFile("/src/README.md", "hello world");
+const result = await fs.bash().exec("cat /foobar/src/README.md");
+console.log(result.stdout);
+await fs.close();`;
+
+export const pythonSdkSample = `import os
+from redis_afs import AFS
+
+afs = AFS(api_key=os.environ["AFS_API_KEY"])
+repo = afs.repo.create(name="foobar")
+fs = afs.fs.mount(
+    repos=[{"name": repo["name"]}],
+    mode="rw",
+)
+
+fs.write_file("/src/README.md", "hello world")
+result = fs.bash().exec("cat /foobar/src/README.md")
+print(result.stdout)
+fs.close()`;
+
+export const cliGettingStartedSample = `afs login
+afs workspace create foobar
+afs up foobar ~/afs/foobar
+
+echo "hello world" > ~/afs/foobar/src/README.md
+cat ~/afs/foobar/src/README.md
+afs checkpoint create foobar first-readme`;
+
+export const mcpGettingStartedSample = `{
+  "mcpServers": {
+    "agent-filesystem": {
+      "url": "https://afs.cloud/mcp",
+      "headers": {
+        "Authorization": "Bearer \${AFS_TOKEN}"
+      }
+    }
+  }
+}`;

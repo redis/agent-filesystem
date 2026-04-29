@@ -5,11 +5,106 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 )
+
+func TestResolveLoginModePromptsForFreshLogin(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input string
+		cfg   config
+		want  string
+	}{
+		{name: "default cloud", input: "\n", cfg: defaultConfig(), want: productModeCloud},
+		{name: "self managed choice", input: "2\n", cfg: defaultConfig(), want: productModeSelfHosted},
+		{name: "saved self managed defaults to self managed", input: "\n", cfg: config{ProductMode: productModeSelfHosted}, want: productModeSelfHosted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withStdin(t, tc.input)
+			out, err := captureStdout(t, func() error {
+				got, err := resolveLoginMode(tc.cfg, false, false, "", "")
+				if err != nil {
+					return err
+				}
+				if got != tc.want {
+					t.Fatalf("resolveLoginMode() = %q, want %q", got, tc.want)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("resolveLoginMode() returned error: %v", err)
+			}
+			if !strings.Contains(out, "Connect to a control plane") || !strings.Contains(out, "Self-managed") {
+				t.Fatalf("prompt output = %q, want login mode choices", out)
+			}
+		})
+	}
+}
+
+func withStdin(t *testing.T, input string) {
+	t.Helper()
+
+	stdinPath := t.TempDir() + "/stdin.txt"
+	if err := os.WriteFile(stdinPath, []byte(input), 0o644); err != nil {
+		t.Fatalf("WriteFile(stdin) returned error: %v", err)
+	}
+	stdinFile, err := os.Open(stdinPath)
+	if err != nil {
+		t.Fatalf("Open(stdin) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = stdinFile.Close()
+	})
+
+	origStdin := os.Stdin
+	os.Stdin = stdinFile
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+	})
+}
+
+func TestResolveLoginModeInfersCloudFromKnownURL(t *testing.T) {
+	for _, rawURL := range []string{
+		"https://afs.cloud",
+		"https://www.afs.cloud",
+		"https://agentfilesystem.ai",
+		"https://www.agentfilesystem.ai",
+		"https://redis-afs.com",
+		"https://agentfilesystem.vercel.app",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "")
+			if err != nil {
+				t.Fatalf("resolveLoginMode() returned error: %v", err)
+			}
+			if got != productModeCloud {
+				t.Fatalf("resolveLoginMode() = %q, want %q", got, productModeCloud)
+			}
+		})
+	}
+}
+
+func TestResolveLoginModeInfersSelfHostedFromUnknownURL(t *testing.T) {
+	for _, rawURL := range []string{
+		"http://127.0.0.1:8091",
+		"https://afs.cloud.example.com",
+		"https://control-plane.internal.example",
+	} {
+		t.Run(rawURL, func(t *testing.T) {
+			got, err := resolveLoginMode(defaultConfig(), false, false, rawURL, "")
+			if err != nil {
+				t.Fatalf("resolveLoginMode() returned error: %v", err)
+			}
+			if got != productModeSelfHosted {
+				t.Fatalf("resolveLoginMode() = %q, want %q", got, productModeSelfHosted)
+			}
+		})
+	}
+}
 
 func TestCmdLoginPersistsCloudConfig(t *testing.T) {
 	t.Helper()

@@ -21,6 +21,7 @@ import {
   InlineCode,
 } from "../../components/doc-kit";
 import { searchBenchmark } from "../../foundation/performance-data";
+import { pythonSdkSample, typescriptSdkSample } from "./afs-samples";
 
 export type DocsTopicId =
   | "how-it-works"
@@ -533,6 +534,30 @@ const mcpAgentsTopic: DocsTopic = {
     }
   }
 }`}</code>
+          </CodeBlock>
+        </>
+      ),
+    },
+    {
+      heading: "SDK Mounts",
+      body: (
+        <>
+          <DocProse>
+            Use the TypeScript or Python SDK when an agent application should
+            create workspaces, mint workspace-scoped access, and run commands
+            against an isolated in-process mount.
+          </DocProse>
+          <DocProse>
+            Install with <InlineCode>npm install @redis/afs-sdk</InlineCode> or{" "}
+            <InlineCode>pip install redis-afs-sdk</InlineCode>.
+          </DocProse>
+          <DocSubheading>TypeScript</DocSubheading>
+          <CodeBlock>
+            <code>{typescriptSdkSample}</code>
+          </CodeBlock>
+          <DocSubheading>Python</DocSubheading>
+          <CodeBlock>
+            <code>{pythonSdkSample}</code>
           </CodeBlock>
         </>
       ),

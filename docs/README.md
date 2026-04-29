@@ -20,6 +20,8 @@ It is the single root for docs, active backlog notes, and longer design plans.
 
 - `backlog/storage-and-sync.md` - active storage, sync, mounted checkpoint, and
   large-file follow-up backlog.
+- `plans/versioned-filesystem-v1-1.md` - draft PRD for AFS-native
+  versioned-filesystem behavior.
 - `plans/event-history-merge.md` - plan to merge audit and changelog streams.
 - `plans/observability.md` - observability research and milestone notes.
 

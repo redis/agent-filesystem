@@ -19,6 +19,7 @@ import {
   CrossLinkArrow,
 } from "../components/doc-kit";
 import { DocsTopicLinks } from "../features/docs/docs-topics";
+import { pythonSdkSample, typescriptSdkSample } from "../features/docs/afs-samples";
 import { searchBenchmark } from "../foundation/performance-data";
 
 export const Route = createFileRoute("/docs")({
@@ -33,7 +34,7 @@ function DocsPage() {
         <DocHeroTitle>What is AFS and How Does It Work?</DocHeroTitle>
         <DocHeroSub>
           AFS gives agents a filesystem-shaped workspace backed by Redis, with
-          the CLI as the fastest way to start.
+          SDKs and the CLI as the fastest ways to start.
         </DocHeroSub>
       </DocHero>
 
@@ -52,6 +53,32 @@ function DocsPage() {
           checkpoints are explicit saved moments you can restore or fork from.
         </DocProse>
       </PrimerPanel>
+
+      <DocSection>
+        <DocHeading>Start With The SDKs</DocHeading>
+        <DocProse>
+          Use the SDKs when an agent or app should create workspaces, mount
+          them in process, read and write files, and run shell commands without
+          asking the user to manage a local mount first.
+        </DocProse>
+        <DocProse>
+          Install with <InlineCode>npm install @redis/afs-sdk</InlineCode> for
+          TypeScript or <InlineCode>pip install redis-afs-sdk</InlineCode> for
+          Python.
+        </DocProse>
+        <ExampleList>
+          <SdkExample
+            title="TypeScript"
+            description="Create a repo-backed workspace, write a file, and run a command through the SDK mount."
+            code={typescriptSdkSample}
+          />
+          <SdkExample
+            title="Python"
+            description="The Python SDK mirrors the TypeScript shape with snake_case methods."
+            code={pythonSdkSample}
+          />
+        </ExampleList>
+      </DocSection>
 
       <DocSection>
         <DocHeading>Start With The AFS CLI</DocHeading>
@@ -141,6 +168,122 @@ function DocsPage() {
           guides for each part of AFS.
         </DocProse>
         <DocsTopicLinks />
+      </DocSection>
+
+      <DocSection>
+        <DocHeading>Common Questions</DocHeading>
+        <FAQList>
+          <FAQItem>
+            <FAQQuestion>
+              My data lives in GitHub, GitLab, S3, or Drive. Can I sync it to AFS?
+            </FAQQuestion>
+            <DocProse>
+              Today, the clean path is to bring that data into a local
+              directory first, then import or sync it with AFS. For Git
+              upstreams, clone or check out the repo the way you already do,
+              then run <InlineCode>afs workspace import</InlineCode> or{" "}
+              <InlineCode>afs up --mode sync</InlineCode>. For non-Git systems
+              like S3 or Google Drive, use their API or CLI in a small script
+              and let AFS own the workspace state after the files land locally.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>How does egress metering work?</FAQQuestion>
+            <DocProse>
+              Local and Self-managed AFS do not add an AFS egress meter. Reads
+              happen through sync, live mount, MCP tools, the CLI, or the
+              control-plane API against your configured Redis/control-plane
+              deployment. If you run AFS on hosted infrastructure, the normal
+              provider bandwidth and Redis network policies still apply.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>
+              Does AFS handle large files like datasets, models, and media?
+            </FAQQuestion>
+            <DocProse>
+              Yes, within the shape of an agent workspace. AFS stores file
+              content in Redis-backed external content keys, supports
+              byte-range reads and writes in the mount path, and syncs changed
+              large files in chunks. The default sync per-file cap is 2 GB, so
+              keep generated artifacts and temporary bulk data out with{" "}
+              <InlineCode>.afsignore</InlineCode> when they do not belong in
+              the workspace timeline.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Does my agent really need versioning?</FAQQuestion>
+            <DocProse>
+              If the agent is doing throwaway scratch work, maybe not. If the
+              work needs human review, rollback, audit history, or parallel
+              exploration, versioning becomes the safety rail. In AFS, edits
+              update the live workspace, checkpoints save deliberate restore
+              points, and forks let another agent explore a second line of work
+              without clobbering the first one.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Why can't I just use GitHub or GitLab?</FAQQuestion>
+            <DocProse>
+              You can, and you should keep using Git providers for source
+              control, pull requests, and long-lived project history. AFS is
+              for the live workspace around that source: generated files,
+              prompts, logs, datasets, agent scratch state, checkpoints, forks,
+              local sync, live mount, and MCP file tools. It gives agents a
+              filesystem-shaped place to work before everything is ready to
+              become a Git commit.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>
+              How is this different from S3 or S3-style filesystems?
+            </FAQQuestion>
+            <DocProse>
+              Object storage is excellent for durable blobs. AFS is a workspace
+              system: it keeps a file tree, live edits, search, checkpoints,
+              forks, and local execution surfaces together. Use S3-style
+              storage for large durable objects and archival data; use AFS when
+              agents need to edit a working tree, checkpoint the state, fork
+              into parallel attempts, and keep normal tools pointed at a local
+              path.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Is AFS POSIX compatible?</FAQQuestion>
+            <DocProse>
+              AFS is designed to feel like a normal filesystem to editors,
+              shells, agents, and sandboxes. Sync mode gives you a real local
+              directory on disk. Live mount mode exposes the workspace through
+              NFS on macOS and FUSE on Linux. That covers the everyday Unix tool
+              workflow, but AFS does not pretend to be a perfect replacement
+              for a mature shared POSIX filesystem in every multi-writer edge
+              case.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>How fast is AFS?</FAQQuestion>
+            <DocProse>
+              For the current Redis Search benchmark, indexed literal{" "}
+              <InlineCode>afs grep</InlineCode> runs in tens of milliseconds:
+              17.35 ms for a rare literal and 42.56 ms for a common literal on
+              a 4,000-file markdown corpus. Sync mode keeps a real local
+              directory on disk for editors and tools, while live mount and MCP
+              give agents direct access to the same Redis-backed workspace.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Okay, but is AFS fast enough for agents?</FAQQuestion>
+            <DocProse>
+              AFS is built around time-to-useful-work. An agent can start from
+              a workspace, search the tree, read the files it needs, write
+              changes, and checkpoint the result without cloning or
+              materializing everything up front. For regex-heavy searches, use{" "}
+              <InlineCode>rg</InlineCode> on a synced or mounted workspace; for
+              ordinary literal search, <InlineCode>afs grep</InlineCode> uses
+              the indexed fast path when Redis Search is available.
+            </DocProse>
+          </FAQItem>
+        </FAQList>
       </DocSection>
 
       <DocSection>
@@ -290,6 +433,22 @@ function CliExample(props: {
         <DocProse>{props.description}</DocProse>
       </ExampleCopy>
       <MiniTerminal>{promptedCommands}</MiniTerminal>
+    </ExampleRow>
+  );
+}
+
+function SdkExample(props: {
+  title: string;
+  description: string;
+  code: string;
+}) {
+  return (
+    <ExampleRow>
+      <ExampleCopy>
+        <ExampleTitle>{props.title}</ExampleTitle>
+        <DocProse>{props.description}</DocProse>
+      </ExampleCopy>
+      <MiniTerminal>{props.code}</MiniTerminal>
     </ExampleRow>
   );
 }
@@ -518,6 +677,26 @@ const MiniTerminal = styled.pre`
   font-size: 12.5px;
   line-height: 1.65;
   white-space: pre-wrap;
+`;
+
+const FAQList = styled.div`
+  display: grid;
+  margin-top: 18px;
+  border-top: 1px solid var(--afs-line, #e6e6e6);
+`;
+
+const FAQItem = styled.div`
+  display: grid;
+  gap: 7px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--afs-line, #e6e6e6);
+`;
+
+const FAQQuestion = styled.div`
+  color: var(--afs-ink, #282828);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
 `;
 
 const CommandGrid = styled.div`

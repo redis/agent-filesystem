@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,9 @@ const (
 
 var knownCloudControlPlaneHosts = []string{
 	"afs.cloud",
+	"agentfilesystem.ai",
 	"agentfilesystem.vercel.app",
+	"redis-afs.com",
 }
 
 type authExchangeResponse struct {
@@ -38,13 +41,15 @@ func cmdLogout(args []string) error {
 	return cmdAuthLogout(args)
 }
 
-// cmdLogin connects the CLI to a control plane. It handles both AFS Cloud
-// (browser flow + token exchange) and self-hosted deployments (URL prompt,
-// no auth token). Choice of mode:
+// cmdLogin connects the CLI to a control plane. Plain `afs login` asks whether
+// to use AFS Cloud or a Self-managed control plane before opening any browser
+// flow. Flags and token handoff stay noninteractive for install/script paths.
+//
+// Choice of mode:
 //
 //   - --cloud         → force cloud
 //   - --self-hosted   → force self-hosted (optional --url, default 127.0.0.1:8091)
-//   - neither         → reuse prior config; if empty, prompt interactively
+//   - neither         → token/URL inference, then prompt interactively
 func cmdLogin(args []string) error {
 	for _, a := range args {
 		if isHelpArg(a) {
@@ -94,8 +99,9 @@ func cmdLogin(args []string) error {
 	}
 }
 
-// resolveLoginMode picks cloud vs self-hosted based on flags, then prior
-// config, then falls back to an interactive prompt on stdin.
+// resolveLoginMode picks cloud vs self-hosted based on flags, token/URL
+// inference, then asks the user. Saved config only influences the default
+// prompt choice; it does not skip the question.
 func resolveLoginMode(cfg config, cloud, selfHosted bool, overrideURL, overrideToken string) (string, error) {
 	if cloud {
 		return productModeCloud, nil
@@ -109,48 +115,74 @@ func resolveLoginMode(cfg config, cloud, selfHosted bool, overrideURL, overrideT
 	if strings.TrimSpace(overrideToken) != "" {
 		return productModeCloud, nil
 	}
-	if strings.TrimSpace(overrideURL) != "" && looksLikeSelfHostedURL(overrideURL) {
+	if strings.TrimSpace(overrideURL) != "" {
+		if looksLikeCloudControlPlaneURL(overrideURL) {
+			return productModeCloud, nil
+		}
 		return productModeSelfHosted, nil
 	}
-	switch strings.TrimSpace(cfg.ProductMode) {
-	case productModeSelfHosted:
-		return productModeSelfHosted, nil
-	case productModeCloud:
-		return productModeCloud, nil
+	return promptLoginMode(cfg)
+}
+
+func looksLikeCloudControlPlaneURL(raw string) bool {
+	host, ok := controlPlaneURLHostname(raw)
+	if !ok {
+		return false
 	}
-	return promptLoginMode()
+	for _, known := range knownCloudControlPlaneHosts {
+		known = strings.ToLower(strings.TrimSpace(known))
+		if host == known || strings.HasSuffix(host, "."+known) {
+			return true
+		}
+	}
+	return false
+}
+
+func controlPlaneURLHostname(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return "", false
+	}
+	return host, true
 }
 
 // looksLikeSelfHostedURL returns true for URLs that are clearly not the AFS
-// cloud host. Used to infer `--self-hosted` when the user passed `--url`
-// without a mode flag.
+// cloud host. Used when reusing prior config or deciding whether a carried URL
+// belongs to the self-managed path.
 func looksLikeSelfHostedURL(raw string) bool {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
+	if strings.TrimSpace(raw) == "" {
 		return false
 	}
-	for _, host := range knownCloudControlPlaneHosts {
-		if strings.Contains(raw, host) {
-			return false
-		}
-	}
-	return true
+	return !looksLikeCloudControlPlaneURL(raw)
 }
 
-func promptLoginMode() (string, error) {
+func promptLoginMode(cfg config) (string, error) {
 	r := bufio.NewReader(os.Stdin)
+	defaultChoice := "1"
+	if strings.TrimSpace(cfg.ProductMode) == productModeSelfHosted {
+		defaultChoice = "2"
+	}
+
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Connect to a control plane"))
 	fmt.Fprintln(os.Stdout)
 	fmt.Fprintln(os.Stdout, "    "+clr(ansiCyan, "1")+"  "+clr(ansiBold, "Cloud")+"        "+clr(ansiDim, "— sign in to AFS Cloud via browser"))
 	fmt.Fprintln(os.Stdout, "    "+clr(ansiCyan, "2")+"  "+clr(ansiBold, "Self-managed")+"  "+clr(ansiDim, "— point this CLI at your own control plane"))
 	fmt.Fprintln(os.Stdout)
-	choice, err := promptString(r, os.Stdout, "  Choose", "1")
+	choice, err := promptString(r, os.Stdout, "  Choose", defaultChoice)
 	if err != nil {
 		return "", err
 	}
 	switch strings.TrimSpace(strings.ToLower(choice)) {
-	case "2", "self", "self-hosted", "selfhosted":
+	case "2", "self", "self-hosted", "selfhosted", "self-managed", "selfmanaged":
 		return productModeSelfHosted, nil
 	default:
 		return productModeCloud, nil
@@ -358,7 +390,8 @@ func authConnectionInfo(bin string) ([]boxRow, bool) {
 
 func loginUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s login [--cloud | --self-hosted [--url <url>]]
+  %s login [--cloud] [--url <cloud-url>]
+  %s login --self-hosted [--url <url>]
   %s login --control-plane-url <url> --token <token>
 
 Flags:
@@ -374,7 +407,7 @@ Examples:
   %s login --self-hosted
   %s login --self-hosted --url http://my-host:8091
   %s login --cloud
-`, bin, bin, defaultSelfHostedControlPlaneURL, bin, bin, bin, bin)
+`, bin, bin, bin, defaultSelfHostedControlPlaneURL, bin, bin, bin, bin)
 }
 
 func logoutUsageText(bin string) string {

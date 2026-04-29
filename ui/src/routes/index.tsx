@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
+import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import styled from "styled-components";
 import {
@@ -9,10 +10,18 @@ import {
   StatDetail,
   StatLabel,
   StatValue,
+  TabButton,
+  Tabs,
 } from "../components/afs-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { LiveTopologyCard } from "../components/live-topology-card";
+import {
+  cliGettingStartedSample,
+  mcpGettingStartedSample,
+  pythonSdkSample,
+  typescriptSdkSample,
+} from "../features/docs/afs-samples";
 import { formatBytes } from "../foundation/api/afs";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
@@ -22,7 +31,45 @@ import {
   useQuickstartMutation,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
-import type { AFSWorkspaceDetail } from "../foundation/types/afs";
+import type { AFSWorkspaceDetail, AFSWorkspaceSummary } from "../foundation/types/afs";
+
+const gettingStartedSamples = [
+  {
+    label: "CLI",
+    title: "Install the CLI, log in, then work in a local workspace.",
+    terminalTitle: "AFS CLI",
+    setupCommand: "curl -fsSL https://afs.cloud/install.sh | bash",
+    language: "shell",
+    code: cliGettingStartedSample,
+  },
+  {
+    label: "MCP",
+    title: "Register the hosted MCP endpoint and keep the bearer token in AFS_TOKEN.",
+    terminalTitle: "MCP config",
+    setupCommand: "codex mcp add agent-filesystem --transport http https://afs.cloud/mcp --bearer-token-env AFS_TOKEN",
+    language: "json",
+    code: mcpGettingStartedSample,
+  },
+  {
+    label: "TypeScript",
+    title: "Install the SDK; the client reads AFS_API_KEY from the environment.",
+    terminalTitle: "TypeScript SDK",
+    setupCommand: "npm install @redis/afs-sdk",
+    language: "typescript",
+    code: typescriptSdkSample,
+  },
+  {
+    label: "Python",
+    title: "Install the SDK; the client reads AFS_API_KEY from the environment.",
+    terminalTitle: "Python SDK",
+    setupCommand: "pip install redis-afs-sdk",
+    language: "python",
+    code: pythonSdkSample,
+  },
+] as const;
+
+type GettingStartedSample = (typeof gettingStartedSamples)[number];
+type GettingStartedLanguage = (typeof gettingStartedSamples)[number]["language"];
 
 export const Route = createFileRoute("/")({
   loader: async () => {
@@ -95,7 +142,7 @@ function OverviewPage() {
 
 function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
   databases: { length: number };
-  workspaces: { length: number }[];
+  workspaces: AFSWorkspaceSummary[];
   agents: unknown[];
   checkpointCount: number;
   checkpointCoverage: number;
@@ -106,15 +153,14 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 
   return (
     <PageStack>
-      <StatGrid>
+      <OverviewStatGrid>
         <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
           <div>
             <StatLabel>Workspaces</StatLabel>
             <StatValue>{workspaces.length}</StatValue>
           </div>
           <StatDetail>
-            {workspaces.length} workspace{workspaces.length === 1 ? "" : "s"} registered across{" "}
-            {databases.length} database{databases.length === 1 ? "" : "s"}.
+            Across {databases.length} database{databases.length === 1 ? "" : "s"}.
           </StatDetail>
         </ClickableStatCard>
         <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
@@ -122,27 +168,27 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
             <StatLabel>Stored Data</StatLabel>
             <StatValue>{formatBytes(totalBytes)}</StatValue>
           </div>
-          <StatDetail>Total durable content tracked across all workspaces.</StatDetail>
+          <StatDetail>Durable content in Redis.</StatDetail>
         </ClickableStatCard>
         <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
           <div>
             <StatLabel>Checkpoints</StatLabel>
             <StatValue>{checkpointCount}</StatValue>
           </div>
-          <StatDetail>{checkpointCoverage}% of workspaces have checkpoint history.</StatDetail>
+          <StatDetail>{checkpointCoverage}% with history.</StatDetail>
         </ClickableStatCard>
         <ClickableStatCard onClick={() => navigate({ to: "/agents" })}>
           <div>
-            <StatLabel>Connected Agents</StatLabel>
+            <StatLabel>Agents</StatLabel>
             <StatValue>{connectedAgents}</StatValue>
           </div>
           <StatDetail>
             {connectedAgents === 0
-              ? "No agents are currently connected."
-              : `${connectedAgents} live ${connectedAgents === 1 ? "agent" : "agents"} reporting workspace sessions.`}
+              ? "No live agents."
+              : `${connectedAgents} live ${connectedAgents === 1 ? "session" : "sessions"}.`}
           </StatDetail>
         </ClickableStatCard>
-      </StatGrid>
+      </OverviewStatGrid>
       <LiveTopologyCard agents={agents as any} workspaces={workspaces as any} />
       <CliQuickstartCard />
       <TemplatesLinkCard as={Link} to="/templates">
@@ -161,24 +207,46 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
 }
 
 function CliQuickstartCard() {
+  const [activeHintIndex, setActiveHintIndex] = useState(0);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const activeHint = gettingStartedSamples[activeHintIndex];
+
+  function copySnippet(key: string, value: string) {
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopiedKey(key);
+      window.setTimeout(() => {
+        setCopiedKey((current) => (current === key ? null : current));
+      }, 1600);
+    });
+  }
+
   return (
     <CliQuickstart>
       <CliQuickstartCopy>
-        <CliQuickstartEyebrow>Next workspace</CliQuickstartEyebrow>
-        <CliQuickstartTitle>Create your next workspace from the CLI</CliQuickstartTitle>
-        <CliQuickstartText>
-          The fastest way to get started is to create a workspace, then mount it
-          as a normal directory. Work in that folder with your editor, shell,
-          and agents while AFS keeps the workspace state backed by Redis.
-        </CliQuickstartText>
+        <CliQuickstartEyebrow>Getting Started</CliQuickstartEyebrow>
+        <CliQuickstartTitle>Start from the AFS CLI or an SDK.</CliQuickstartTitle>
+        <CliLessonTabs role="tablist" aria-label="Getting started examples">
+          {gettingStartedSamples.map((hint, index) => (
+            <CliLessonTab
+              key={hint.label}
+              type="button"
+              role="tab"
+              aria-selected={activeHintIndex === index}
+              $active={activeHintIndex === index}
+              onClick={() => setActiveHintIndex(index)}
+            >
+              {hint.label}
+            </CliLessonTab>
+          ))}
+        </CliLessonTabs>
+        <CliLessonDetail>
+          <CliLessonTitle>{activeHint.title}</CliLessonTitle>
+        </CliLessonDetail>
       </CliQuickstartCopy>
-      <OverviewTerminal title="Terminal">
-        <OverviewTerminalComment>// create a new workspace</OverviewTerminalComment>
-        <OverviewTerminalCommand>afs workspace create myworkspace</OverviewTerminalCommand>
-        <OverviewTerminalGap />
-        <OverviewTerminalComment>// mount it as a local directory</OverviewTerminalComment>
-        <OverviewTerminalCommand>afs up myworkspace ~/myworkspace</OverviewTerminalCommand>
-      </OverviewTerminal>
+      <OverviewTerminal sample={activeHint} copiedKey={copiedKey} onCopy={copySnippet} />
     </CliQuickstart>
   );
 }
@@ -444,7 +512,109 @@ const FooterLink = styled.a`
   }
 `;
 
-function OverviewTerminal(props: { title: string; children: React.ReactNode }) {
+const OverviewStatGrid = styled(StatGrid)`
+  container-type: inline-size;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+
+  @media (max-width: 1080px) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  @media (max-width: 700px) {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  ${StatCard} {
+    min-width: 0;
+  }
+
+  ${StatLabel},
+  ${StatValue},
+  ${StatDetail} {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  ${StatLabel} {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  ${StatValue} {
+    font-size: clamp(1.8rem, 3vw, 2.55rem);
+  }
+
+  ${StatDetail} {
+    display: -webkit-box;
+    overflow: hidden;
+    line-height: 1.35;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  @container (max-width: 760px) {
+    ${StatCard} {
+      min-height: 82px;
+      justify-content: flex-start;
+    }
+
+    ${StatDetail} {
+      display: none;
+    }
+  }
+
+  @container (max-width: 520px) {
+    gap: 8px;
+
+    ${StatCard} {
+      gap: 6px;
+      min-height: 74px;
+      padding: 12px 10px;
+    }
+
+    ${StatLabel} {
+      font-size: 10px;
+      letter-spacing: 0;
+    }
+
+    ${StatValue} {
+      font-size: 1.6rem;
+      letter-spacing: 0;
+    }
+  }
+
+  @container (max-width: 380px) {
+    gap: 6px;
+
+    ${StatCard} {
+      min-height: 68px;
+      padding: 10px 8px;
+    }
+
+    ${StatLabel} {
+      font-size: 9px;
+    }
+
+    ${StatValue} {
+      font-size: 1.3rem;
+    }
+  }
+`;
+
+function OverviewTerminal({
+  sample,
+  copiedKey,
+  onCopy,
+}: {
+  sample: GettingStartedSample;
+  copiedKey: string | null;
+  onCopy: (key: string, value: string) => void;
+}) {
+  const setupKey = `${sample.label}-setup`;
+
   return (
     <OverviewTerminalFrame>
       <OverviewTerminalTopBar>
@@ -453,46 +623,134 @@ function OverviewTerminal(props: { title: string; children: React.ReactNode }) {
           <span />
           <span />
         </OverviewTerminalDots>
-        <OverviewTerminalTitle>{props.title}</OverviewTerminalTitle>
+        <OverviewTerminalTitle>{sample.terminalTitle}</OverviewTerminalTitle>
       </OverviewTerminalTopBar>
-      <OverviewTerminalBody>{props.children}</OverviewTerminalBody>
+      <OverviewTerminalBody>
+        <OverviewSetupLine>
+          <OverviewSetupCode>
+            <code className="language-shell">{highlightCode(sample.setupCommand, "shell")}</code>
+          </OverviewSetupCode>
+          <OverviewCopyButton
+            type="button"
+            aria-label={`Copy ${sample.label} setup command`}
+            title={copiedKey === setupKey ? "Copied" : "Copy setup command"}
+            onClick={() => onCopy(setupKey, sample.setupCommand)}
+          >
+            {copiedKey === setupKey ? <Check size={16} strokeWidth={1.9} /> : <Copy size={16} strokeWidth={1.9} />}
+          </OverviewCopyButton>
+        </OverviewSetupLine>
+        <OverviewCodePane>
+          <HighlightedOverviewCode code={sample.code} language={sample.language} />
+        </OverviewCodePane>
+      </OverviewTerminalBody>
     </OverviewTerminalFrame>
   );
 }
 
-function OverviewTerminalCommand({ children }: { children: React.ReactNode }) {
+function HighlightedOverviewCode({
+  code,
+  language,
+}: {
+  code: string;
+  language: GettingStartedLanguage;
+}) {
   return (
-    <OverviewTerminalLine>
-      <OverviewTerminalPrompt>&gt;</OverviewTerminalPrompt>
-      <OverviewTerminalCommandText>{children}</OverviewTerminalCommandText>
-    </OverviewTerminalLine>
+    <OverviewTerminalCode>
+      <code className={`language-${language}`}>{highlightCode(code, language)}</code>
+    </OverviewTerminalCode>
   );
 }
 
-function OverviewTerminalComment({ children }: { children: React.ReactNode }) {
-  return <OverviewTerminalLine $muted>{children}</OverviewTerminalLine>;
+function highlightCode(code: string, language: GettingStartedLanguage) {
+  const lines = code.split("\n");
+  return lines.flatMap((line, index) => {
+    const parts = highlightLine(line, language, index);
+    if (index === lines.length - 1) {
+      return parts;
+    }
+    return [...parts, "\n"];
+  });
 }
 
-function OverviewTerminalGap() {
-  return <OverviewTerminalSpacer aria-hidden="true" />;
+function highlightLine(line: string, language: GettingStartedLanguage, lineIndex: number) {
+  const pattern = highlightPattern(language);
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of line.matchAll(pattern)) {
+    const value = match[0];
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push(line.slice(cursor, index));
+    }
+    parts.push(
+      <span key={`${language}-${lineIndex}-${index}-${value}`} className={highlightClass(value, line, index, language)}>
+        {value}
+      </span>,
+    );
+    cursor = index + value.length;
+  }
+  if (cursor < line.length) {
+    parts.push(line.slice(cursor));
+  }
+  return parts;
+}
+
+function highlightPattern(language: GettingStartedLanguage) {
+  switch (language) {
+    case "typescript":
+      return /\/\/.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|\b(?:await|const|from|import|new|process)\b|\b[A-Z][A-Za-z0-9_]*\b|\b\d+\b/g;
+    case "python":
+      return /#.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:from|import|as|print)\b|\b[A-Z][A-Za-z0-9_]*\b|\b\d+\b/g;
+    case "shell":
+      return /#.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:afs|bash|cat|codex|curl|echo|export|npm|pip|sh)\b|--[A-Za-z0-9-]+|\$[A-Za-z_][A-Za-z0-9_]*/g;
+    case "json":
+      return /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|\b\d+\b/g;
+  }
+}
+
+function highlightClass(
+  value: string,
+  line: string,
+  index: number,
+  language: GettingStartedLanguage,
+) {
+  if (value.startsWith("//") || value.startsWith("#")) {
+    return "code-token-comment";
+  }
+  if (language === "json" && line.slice(index + value.length).trimStart().startsWith(":")) {
+    return "code-token-key";
+  }
+  if (value.startsWith("\"") || value.startsWith("'") || value.startsWith("`")) {
+    return "code-token-string";
+  }
+  if (value.startsWith("--") || value.startsWith("$")) {
+    return "code-token-option";
+  }
+  if (/^\d+$/.test(value) || /^(true|false|null)$/.test(value)) {
+    return "code-token-number";
+  }
+  if (/^[A-Z]/.test(value)) {
+    return "code-token-type";
+  }
+  return "code-token-keyword";
 }
 
 const CliQuickstart = styled.section`
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
-  gap: 24px;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 20px;
   align-items: stretch;
   border: 1px solid var(--afs-line);
   border-radius: 16px;
   background: var(--afs-panel-strong);
-  padding: 24px;
+  padding: 20px;
 
   @media (max-width: 980px) {
     grid-template-columns: 1fr;
   }
 
   @media (max-width: 640px) {
-    padding: 18px;
+    padding: 16px;
   }
 
   [data-skin="situation-room"] && {
@@ -506,7 +764,7 @@ const CliQuickstartCopy = styled.div`
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   min-width: 0;
 `;
 
@@ -521,23 +779,56 @@ const CliQuickstartEyebrow = styled.div`
 const CliQuickstartTitle = styled.h2`
   margin: 0;
   color: var(--afs-ink);
-  font-size: 26px;
+  font-size: 18px;
   font-weight: 750;
-  line-height: 1.2;
+  line-height: 1.25;
   letter-spacing: 0;
 `;
 
-const CliQuickstartText = styled.p`
+const CliLessonTabs = styled(Tabs)`
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: visible;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+
+  @media (max-width: 640px) {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+`;
+
+const CliLessonTab = styled(TabButton)`
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  white-space: nowrap;
+
+  [data-skin="situation-room"] && {
+    letter-spacing: 0;
+  }
+`;
+
+const CliLessonDetail = styled.div`
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+`;
+
+const CliLessonTitle = styled.h3`
   margin: 0;
-  max-width: 62ch;
-  color: var(--afs-muted);
-  font-size: 14px;
-  line-height: 1.6;
+  color: var(--afs-ink);
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.25;
 `;
 
 const OverviewTerminalFrame = styled.div`
   overflow: hidden;
   align-self: stretch;
+  min-width: 0;
   border: 1px solid var(--afs-line, #e6e6e6);
   border-radius: 8px;
   background: #101820;
@@ -551,10 +842,10 @@ const OverviewTerminalFrame = styled.div`
 
 const OverviewTerminalTopBar = styled.div`
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 14px;
-  min-height: 38px;
+  min-height: 34px;
   padding: 0 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: #1a242e;
@@ -585,44 +876,122 @@ const OverviewTerminalDots = styled.div`
 `;
 
 const OverviewTerminalTitle = styled.div`
+  min-width: 0;
+  overflow: hidden;
   color: #d1d3d4;
   font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const OverviewTerminalBody = styled.div`
-  padding: 22px;
   color: #f8f8f8;
   font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
-  font-size: 14px;
-  line-height: 1.7;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow: hidden;
 
   @media (max-width: 640px) {
-    padding: 18px;
     font-size: 12px;
   }
 `;
 
-const OverviewTerminalLine = styled.div<{ $muted?: boolean }>`
-  display: flex;
-  min-height: 24px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: ${({ $muted }) => ($muted ? "#a7a9ac" : "#ffffff")};
+const OverviewSetupLine = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 46px;
+  padding: 8px 12px 8px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
 `;
 
-const OverviewTerminalPrompt = styled.span`
+const OverviewSetupCode = styled.pre`
+  margin: 0;
+  min-width: 0;
+  overflow-x: auto;
+  color: #d1d3d4;
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre;
+
+  code {
+    font: inherit;
+  }
+`;
+
+const OverviewCopyButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
-  width: 24px;
-  color: #16a34a;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #aab4c0;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+
+  &:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent, #dc2626);
+    outline-offset: 1px;
+  }
 `;
 
-const OverviewTerminalCommandText = styled.span`
+const OverviewCodePane = styled.div`
+  min-height: 286px;
+  max-height: 420px;
+  padding: 18px;
+  overflow-x: auto;
+
+  @media (max-width: 640px) {
+    padding: 18px;
+  }
+`;
+
+const OverviewTerminalCode = styled.pre`
+  margin: 0;
   color: #ffffff;
-`;
+  white-space: pre;
 
-const OverviewTerminalSpacer = styled.div`
-  height: 12px;
+  code {
+    font: inherit;
+  }
+
+  .code-token-comment {
+    color: #8fa1b3;
+  }
+
+  .code-token-keyword {
+    color: #7dd3fc;
+  }
+
+  .code-token-string {
+    color: #bef264;
+  }
+
+  .code-token-key {
+    color: #c4b5fd;
+  }
+
+  .code-token-type {
+    color: #f0abfc;
+  }
+
+  .code-token-option,
+  .code-token-number {
+    color: #fdba74;
+  }
 `;
 
 const TemplatesLinkCard = styled.a`
@@ -691,6 +1060,7 @@ const TemplatesLinkArrow = styled.span`
 
 const ClickableStatCardWrap = styled.div`
   height: 100%;
+  min-width: 0;
   cursor: pointer;
   transition: border-color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
   border-radius: 16px;

@@ -12,6 +12,9 @@ future agents should not have to rediscover.
   allowlist problem. When the public cloud domain changes, update that list
   alongside the default cloud URL or `afs login --url <new-cloud-host>` will
   silently route users into the self-managed flow.
+- Plain `afs login` should ask Cloud vs Self-managed before opening any browser
+  login. Keep `--cloud`, `--self-hosted`, and token handoff noninteractive for
+  scripted install paths.
 - Keep docs, active backlog notes, and long-form plans under the single `docs/`
   root. Raw benchmark output belongs in `/tmp` or another artifact directory,
   with durable conclusions summarized in `docs/performance.md`.
@@ -23,6 +26,10 @@ future agents should not have to rediscover.
 
 - Quote route filenames that contain `$` when running shell or git commands in
   `zsh`, for example `git add "ui/src/routes/workspaces.$workspaceId.tsx"`.
+- If `afs login` reports `Unknown command: login`, check whether the user is
+  running a stale local `./afs` binary from an old checkout or worktree. The
+  current PATH install should print `login` in `afs --help`; rebuild or use the
+  repo-root binary before debugging auth flow code.
 
 ## UI Semantics
 

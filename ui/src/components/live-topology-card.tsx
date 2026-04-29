@@ -1,4 +1,4 @@
-import { useMemo, useRef, useLayoutEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useLayoutEffect, useState, useCallback } from "react";
 import styled, { keyframes } from "styled-components";
 import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
@@ -85,17 +85,34 @@ const ColumnLabel = styled.div`
 `;
 
 /* ---- Agent nodes ---- */
-const AgentNode = styled.div<{ $i: number }>`
+const AgentNode = styled.button<{ $i: number; $canCopy: boolean; $copied: boolean }>`
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid var(--afs-line, #e4e4e7);
+  border: 1px solid ${({ $copied }) => ($copied ? "#22c55e" : "var(--afs-line, #e4e4e7)")};
   border-radius: 10px;
   background: var(--afs-panel-strong);
+  color: inherit;
+  cursor: ${({ $canCopy }) => ($canCopy ? "copy" : "default")};
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease;
   animation: ${fadeIn} 0.24s ease forwards;
   animation-delay: ${({ $i }) => $i * 0.06}s;
   opacity: 0;
+
+  &:hover {
+    border-color: ${({ $canCopy, $copied }) =>
+      $copied ? "#22c55e" : $canCopy ? "var(--afs-accent, #dc2626)" : "var(--afs-line, #e4e4e7)"};
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent, #dc2626);
+    outline-offset: 2px;
+  }
 `;
 
 const AgentIcon = styled.div<{ $hue: number }>`
@@ -114,12 +131,18 @@ const AgentIcon = styled.div<{ $hue: number }>`
 
 const AgentLabel = styled.span`
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--afs-ink, #18181b);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 130px;
+`;
+
+const AgentText = styled.div`
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 `;
 
 const AgentMeta = styled.span`
@@ -129,6 +152,16 @@ const AgentMeta = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 130px;
+`;
+
+const AgentPath = styled.span`
+  max-width: 130px;
+  overflow: hidden;
+  color: var(--afs-muted, #71717a);
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 /* ---- Hub ---- */
@@ -291,6 +324,19 @@ function agentVisual(clientKind: string): { icon: string; hue: number } {
   return { icon: lower === "" ? "A" : lower[0].toUpperCase(), hue };
 }
 
+function displayLocalPath(path: string): string {
+  return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
+}
+
+function displayAgentName(agent: AFSAgentSession): string {
+  return (
+    agent.label?.trim() ||
+    agent.agentId?.trim() ||
+    agent.hostname.trim() ||
+    "agent"
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -302,10 +348,12 @@ type Props = {
 
 export function LiveTopologyCard({ agents, workspaces }: Props) {
   const topologyRef = useRef<HTMLDivElement>(null);
-  const agentRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const agentRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const wsRefs = useRef<(HTMLDivElement | null)[]>([]);
   const hubRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const copyResetTimeoutRef = useRef<number | null>(null);
+  const [copiedAgentId, setCopiedAgentId] = useState<string | null>(null);
   const [lines, setLines] = useState<
     {
       x1: number;
@@ -340,6 +388,26 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     });
     return pairs;
   }, [agents, wsIndexMap]);
+
+  const copyAgentId = useCallback(async (agentId: string) => {
+    if (!agentId) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(agentId);
+      setCopiedAgentId(agentId);
+      if (copyResetTimeoutRef.current != null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        setCopiedAgentId(null);
+        copyResetTimeoutRef.current = null;
+      }, 1400);
+    } catch {
+      // Clipboard permissions are browser-controlled; ignore denied writes.
+    }
+  }, []);
 
   const computeLines = useCallback(() => {
     const container = topologyRef.current;
@@ -411,7 +479,7 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
       hubRef.current,
       ...agentRefs.current.slice(0, agents.length),
       ...wsRefs.current.slice(0, workspaces.length),
-    ].filter((element): element is HTMLDivElement => element != null);
+    ].filter((element): element is HTMLElement => element != null);
 
     observedElements.forEach((element) => resizeObserver?.observe(element));
 
@@ -427,6 +495,14 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
       }
     };
   }, [agents.length, workspaces.length, scheduleLineCompute]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current != null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const activeAgents = agents.filter((a) => a.state === "active").length;
 
@@ -493,30 +569,39 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
           ) : (
             agents.map((agent, i) => {
               const vis = agentVisual(agent.clientKind);
+              const localPath = displayLocalPath(agent.localPath);
+              const agentName = displayAgentName(agent);
+              const methodLabel = agent.clientKind.trim() || "agent";
+              const agentId = agent.agentId?.trim() ?? "";
+              const copied = agentId !== "" && copiedAgentId === agentId;
               return (
                 <AgentNode
                   key={agent.sessionId}
                   $i={i}
+                  $canCopy={agentId !== ""}
+                  $copied={copied}
+                  aria-label={agentId ? `Copy agent ID ${agentId}` : "Agent ID not reported"}
+                  title={agentId ? (copied ? "Copied agent ID" : "Copy agent ID") : "Agent ID not reported"}
+                  onClick={() => {
+                    void copyAgentId(agentId);
+                  }}
                   ref={(el) => {
                     agentRefs.current[i] = el;
                   }}
                 >
                   <StatusDot $active={agent.state === "active"} />
-                  <AgentIcon $hue={vis.hue}>{vis.icon}</AgentIcon>
-                  <div
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      minWidth: 0,
-                    }}
-                  >
-                    <AgentLabel>
-                      {agent.clientKind || "agent"}
-                    </AgentLabel>
+                  <AgentIcon $hue={vis.hue} title={methodLabel}>
+                    {vis.icon}
+                  </AgentIcon>
+                  <AgentText>
+                    <AgentLabel>{agentName}</AgentLabel>
                     <AgentMeta>
                       {agent.hostname || agent.sessionId.slice(0, 8)}
                     </AgentMeta>
-                  </div>
+                    {localPath ? (
+                      <AgentPath title={localPath}>{localPath}</AgentPath>
+                    ) : null}
+                  </AgentText>
                 </AgentNode>
               );
             })

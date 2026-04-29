@@ -177,6 +177,16 @@ func appendUptimeRows(rows []boxRow, st state) []boxRow {
 	return rows
 }
 
+func appendConnectedAgentRows(rows []boxRow, cfg config, st state) []boxRow {
+	if strings.TrimSpace(st.SessionID) == "" {
+		return rows
+	}
+	if id := strings.TrimSpace(cfg.ID); id != "" {
+		rows = append(rows, boxRow{Label: "agent id", Value: id})
+	}
+	return rows
+}
+
 // loadSyncStateForStatus loads the sync snapshot for a workspace, returning
 // nil if the workspace is empty or the state cannot be loaded.
 func loadSyncStateForStatus(workspace string) *SyncState {
@@ -250,6 +260,7 @@ func cmdStatusSync(st state) {
 	rows := statusRows(cfg, workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
 	rows = appendConfigRows(rows, cfg)
 	rows = appendAuthStatusRows(rows)
+	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
 	if snap := loadSyncStateForStatus(workspace); snap != nil {
 		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
@@ -289,6 +300,7 @@ func cmdStatusMount(st state) error {
 	rows := statusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
 	rows = appendConfigRows(rows, cfg)
 	rows = appendAuthStatusRows(rows)
+	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
 		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})

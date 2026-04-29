@@ -164,6 +164,39 @@ func TestStatusRowsIncludesMountBackendForFuse(t *testing.T) {
 	}
 }
 
+func TestAppendConnectedAgentRowsIncludesAgentIDForActiveSession(t *testing.T) {
+	t.Helper()
+
+	rows := appendConnectedAgentRows(nil, config{
+		agentSettings: agentSettings{
+			ID: "agt_test123",
+		},
+	}, state{
+		SessionID: "sess_123",
+	})
+
+	if len(rows) != 1 {
+		t.Fatalf("len(rows) = %d, want 1", len(rows))
+	}
+	if rows[0].Label != "agent id" || rows[0].Value != "agt_test123" {
+		t.Fatalf("rows[0] = %+v, want agent id=agt_test123", rows[0])
+	}
+}
+
+func TestAppendConnectedAgentRowsSkipsAgentIDWhenNotConnected(t *testing.T) {
+	t.Helper()
+
+	rows := appendConnectedAgentRows(nil, config{
+		agentSettings: agentSettings{
+			ID: "agt_test123",
+		},
+	}, state{})
+
+	if len(rows) != 0 {
+		t.Fatalf("len(rows) = %d, want 0", len(rows))
+	}
+}
+
 func TestStatusTitleShowsRunningWithPID(t *testing.T) {
 	t.Helper()
 
