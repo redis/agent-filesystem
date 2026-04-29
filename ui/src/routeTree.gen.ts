@@ -28,6 +28,13 @@ import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$
 import { Route as SignupClerkPathRouteImport } from './routes/signup.$clerkPath'
 import { Route as McpConnectRouteImport } from './routes/mcp_.connect'
 import { Route as LoginClerkPathRouteImport } from './routes/login.$clerkPath'
+import { Route as DocsWorkspacesRouteImport } from './routes/docs_.workspaces'
+import { Route as DocsSelfManagedRouteImport } from './routes/docs_.self-managed'
+import { Route as DocsPerformanceRouteImport } from './routes/docs_.performance'
+import { Route as DocsMcpAgentsRouteImport } from './routes/docs_.mcp-agents'
+import { Route as DocsLocalFilesRouteImport } from './routes/docs_.local-files'
+import { Route as DocsHowItWorksRouteImport } from './routes/docs_.how-it-works'
+import { Route as DocsCliRouteImport } from './routes/docs_.cli'
 import { Route as AgentsAddRouteImport } from './routes/agents_.add'
 import { Route as TemplatesInstalledWorkspaceIdRouteImport } from './routes/templates.installed.$workspaceId'
 
@@ -126,6 +133,41 @@ const LoginClerkPathRoute = LoginClerkPathRouteImport.update({
   path: '/$clerkPath',
   getParentRoute: () => LoginRoute,
 } as any)
+const DocsWorkspacesRoute = DocsWorkspacesRouteImport.update({
+  id: '/docs_/workspaces',
+  path: '/docs/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsSelfManagedRoute = DocsSelfManagedRouteImport.update({
+  id: '/docs_/self-managed',
+  path: '/docs/self-managed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPerformanceRoute = DocsPerformanceRouteImport.update({
+  id: '/docs_/performance',
+  path: '/docs/performance',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsMcpAgentsRoute = DocsMcpAgentsRouteImport.update({
+  id: '/docs_/mcp-agents',
+  path: '/docs/mcp-agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsLocalFilesRoute = DocsLocalFilesRouteImport.update({
+  id: '/docs_/local-files',
+  path: '/docs/local-files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsHowItWorksRoute = DocsHowItWorksRouteImport.update({
+  id: '/docs_/how-it-works',
+  path: '/docs/how-it-works',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsCliRoute = DocsCliRouteImport.update({
+  id: '/docs_/cli',
+  path: '/docs/cli',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AgentsAddRoute = AgentsAddRouteImport.update({
   id: '/agents_/add',
   path: '/agents/add',
@@ -155,6 +197,13 @@ export interface FileRoutesByFullPath {
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
+  '/docs/cli': typeof DocsCliRoute
+  '/docs/how-it-works': typeof DocsHowItWorksRoute
+  '/docs/local-files': typeof DocsLocalFilesRoute
+  '/docs/mcp-agents': typeof DocsMcpAgentsRoute
+  '/docs/performance': typeof DocsPerformanceRoute
+  '/docs/self-managed': typeof DocsSelfManagedRoute
+  '/docs/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
@@ -178,6 +227,13 @@ export interface FileRoutesByTo {
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
+  '/docs/cli': typeof DocsCliRoute
+  '/docs/how-it-works': typeof DocsHowItWorksRoute
+  '/docs/local-files': typeof DocsLocalFilesRoute
+  '/docs/mcp-agents': typeof DocsMcpAgentsRoute
+  '/docs/performance': typeof DocsPerformanceRoute
+  '/docs/self-managed': typeof DocsSelfManagedRoute
+  '/docs/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
@@ -202,6 +258,13 @@ export interface FileRoutesById {
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents_/add': typeof AgentsAddRoute
+  '/docs_/cli': typeof DocsCliRoute
+  '/docs_/how-it-works': typeof DocsHowItWorksRoute
+  '/docs_/local-files': typeof DocsLocalFilesRoute
+  '/docs_/mcp-agents': typeof DocsMcpAgentsRoute
+  '/docs_/performance': typeof DocsPerformanceRoute
+  '/docs_/self-managed': typeof DocsSelfManagedRoute
+  '/docs_/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp_/connect': typeof McpConnectRoute
   '/signup/$clerkPath': typeof SignupClerkPathRoute
@@ -227,6 +290,13 @@ export interface FileRouteTypes {
     | '/templates'
     | '/workspaces'
     | '/agents/add'
+    | '/docs/cli'
+    | '/docs/how-it-works'
+    | '/docs/local-files'
+    | '/docs/mcp-agents'
+    | '/docs/performance'
+    | '/docs/self-managed'
+    | '/docs/workspaces'
     | '/login/$clerkPath'
     | '/mcp/connect'
     | '/signup/$clerkPath'
@@ -250,6 +320,13 @@ export interface FileRouteTypes {
     | '/templates'
     | '/workspaces'
     | '/agents/add'
+    | '/docs/cli'
+    | '/docs/how-it-works'
+    | '/docs/local-files'
+    | '/docs/mcp-agents'
+    | '/docs/performance'
+    | '/docs/self-managed'
+    | '/docs/workspaces'
     | '/login/$clerkPath'
     | '/mcp/connect'
     | '/signup/$clerkPath'
@@ -273,6 +350,13 @@ export interface FileRouteTypes {
     | '/templates'
     | '/workspaces'
     | '/agents_/add'
+    | '/docs_/cli'
+    | '/docs_/how-it-works'
+    | '/docs_/local-files'
+    | '/docs_/mcp-agents'
+    | '/docs_/performance'
+    | '/docs_/self-managed'
+    | '/docs_/workspaces'
     | '/login/$clerkPath'
     | '/mcp_/connect'
     | '/signup/$clerkPath'
@@ -297,6 +381,13 @@ export interface RootRouteChildren {
   TemplatesRoute: typeof TemplatesRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AgentsAddRoute: typeof AgentsAddRoute
+  DocsCliRoute: typeof DocsCliRoute
+  DocsHowItWorksRoute: typeof DocsHowItWorksRoute
+  DocsLocalFilesRoute: typeof DocsLocalFilesRoute
+  DocsMcpAgentsRoute: typeof DocsMcpAgentsRoute
+  DocsPerformanceRoute: typeof DocsPerformanceRoute
+  DocsSelfManagedRoute: typeof DocsSelfManagedRoute
+  DocsWorkspacesRoute: typeof DocsWorkspacesRoute
   McpConnectRoute: typeof McpConnectRoute
 }
 
@@ -435,6 +526,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginClerkPathRouteImport
       parentRoute: typeof LoginRoute
     }
+    '/docs_/workspaces': {
+      id: '/docs_/workspaces'
+      path: '/docs/workspaces'
+      fullPath: '/docs/workspaces'
+      preLoaderRoute: typeof DocsWorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/self-managed': {
+      id: '/docs_/self-managed'
+      path: '/docs/self-managed'
+      fullPath: '/docs/self-managed'
+      preLoaderRoute: typeof DocsSelfManagedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/performance': {
+      id: '/docs_/performance'
+      path: '/docs/performance'
+      fullPath: '/docs/performance'
+      preLoaderRoute: typeof DocsPerformanceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/mcp-agents': {
+      id: '/docs_/mcp-agents'
+      path: '/docs/mcp-agents'
+      fullPath: '/docs/mcp-agents'
+      preLoaderRoute: typeof DocsMcpAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/local-files': {
+      id: '/docs_/local-files'
+      path: '/docs/local-files'
+      fullPath: '/docs/local-files'
+      preLoaderRoute: typeof DocsLocalFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/how-it-works': {
+      id: '/docs_/how-it-works'
+      path: '/docs/how-it-works'
+      fullPath: '/docs/how-it-works'
+      preLoaderRoute: typeof DocsHowItWorksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/cli': {
+      id: '/docs_/cli'
+      path: '/docs/cli'
+      fullPath: '/docs/cli'
+      preLoaderRoute: typeof DocsCliRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/agents_/add': {
       id: '/agents_/add'
       path: '/agents/add'
@@ -514,6 +654,13 @@ const rootRouteChildren: RootRouteChildren = {
   TemplatesRoute: TemplatesRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AgentsAddRoute: AgentsAddRoute,
+  DocsCliRoute: DocsCliRoute,
+  DocsHowItWorksRoute: DocsHowItWorksRoute,
+  DocsLocalFilesRoute: DocsLocalFilesRoute,
+  DocsMcpAgentsRoute: DocsMcpAgentsRoute,
+  DocsPerformanceRoute: DocsPerformanceRoute,
+  DocsSelfManagedRoute: DocsSelfManagedRoute,
+  DocsWorkspacesRoute: DocsWorkspacesRoute,
   McpConnectRoute: McpConnectRoute,
 }
 export const routeTree = rootRouteImport

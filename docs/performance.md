@@ -1,6 +1,6 @@
 # Performance Notes
 
-Last reviewed: 2026-04-24.
+Last reviewed: 2026-04-29.
 
 This file is the durable replacement for old one-off benchmark output
 directories. Keep raw benchmark runs out of the repo; rerun them into `/tmp` or
@@ -32,6 +32,22 @@ Historical benchmark context from the removed task artifacts:
   the low tens of milliseconds once Redis 8 search was available.
 - Regex-style escalation remained much slower than local `ripgrep` because it
   still needed content verification over the AFS client path.
+
+Latest local rerun on macOS/arm64, 4,000 markdown files, 31.5 MiB, 5 measured
+rounds:
+
+- With Docker `redis:8` and RediSearch available, indexed `afs grep` took
+  17.35 ms for a rare literal and 42.56 ms for a common literal. Local BSD
+  `grep` took 371.74 ms and 381.71 ms for the same searches; `ripgrep` took
+  37.99 ms and 41.10 ms.
+- Regex escalation still used the advanced non-indexed path: `afs grep` took
+  1078.74 ms versus 213.16 ms for BSD `grep` and 67.53 ms for `ripgrep`.
+- On the existing local control plane at `http://127.0.0.1:8091`, the backing
+  `localhost:6379` Redis did not expose RediSearch commands. The same corpus
+  imported through the control plane used `fast_backend_grep` with
+  `search_unavailable`: literal `afs grep` was about 187 ms, and regex
+  escalation was about 196 ms. Treat those as non-indexed local-database
+  numbers, not the indexed Redis 8 baseline.
 
 ## NFS Hot Path Findings
 

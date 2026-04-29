@@ -18,6 +18,8 @@ import {
   CrossLinkDesc,
   CrossLinkArrow,
 } from "../components/doc-kit";
+import { DocsTopicLinks } from "../features/docs/docs-topics";
+import { searchBenchmark } from "../foundation/performance-data";
 
 export const Route = createFileRoute("/docs")({
   component: DocsPage,
@@ -27,37 +29,61 @@ function DocsPage() {
   return (
     <DocPage>
       <DocHero>
-        <Eyebrow>CLI first</Eyebrow>
-        <DocHeroTitle>Start with the AFS CLI</DocHeroTitle>
+        <Eyebrow>One-page primer</Eyebrow>
+        <DocHeroTitle>What is AFS and How Does It Work?</DocHeroTitle>
         <DocHeroSub>
-          The fastest way to understand AFS is to log in, create a workspace,
-          and mount it as a normal directory. Everything else builds from those
-          commands.
+          AFS gives agents a filesystem-shaped workspace backed by Redis, with
+          the CLI as the fastest way to start.
         </DocHeroSub>
       </DocHero>
 
-      <TerminalWindow title="Terminal">
-        <TerminalComment>// authenticate the CLI to the cloud/control plane</TerminalComment>
-        <TerminalCommand>afs login</TerminalCommand>
-        <TerminalSpacer />
-        <TerminalComment>// create a new workspace</TerminalComment>
-        <TerminalCommand>afs workspace create myworkspace</TerminalCommand>
-        <TerminalSpacer />
-        <TerminalComment>// mount the workspace at ~/afs</TerminalComment>
-        <TerminalCommand>afs up myworkspace ~/afs</TerminalCommand>
-      </TerminalWindow>
-
-      <CalloutBox $tone="tip">
+      <PrimerPanel>
         <DocProse>
-          That is the core loop: authenticate once, create a workspace, then run
-          <InlineCode>afs up</InlineCode> to make the workspace available on
-          disk. Put files in <InlineCode>~/afs</InlineCode> and AFS keeps the
-          workspace state backed by Redis.
+          Agent Filesystem (AFS) is a workspace system for AI agents. It gives
+          agents a normal directory-shaped way to read files, write files,
+          search trees, run tools, and share project state without being trapped
+          on one machine's local disk.
         </DocProse>
-      </CalloutBox>
+        <DocProse>
+          AFS works by keeping Redis as the canonical store for workspace
+          metadata, manifests, blobs, live roots, checkpoints, and activity.
+          The CLI, web UI, local sync or mount runtime, and MCP agent tools all
+          operate on that same workspace model. Edits update live state;
+          checkpoints are explicit saved moments you can restore or fork from.
+        </DocProse>
+      </PrimerPanel>
 
       <DocSection>
-        <DocHeading>What Those Commands Do</DocHeading>
+        <DocHeading>Start With The AFS CLI</DocHeading>
+        <DocProse>
+          The fastest way to understand AFS is to log in, create a workspace,
+          and expose it as a normal local directory. Everything else builds from
+          this loop.
+        </DocProse>
+
+        <TerminalWindow title="Terminal">
+          <TerminalComment>// authenticate the CLI to the cloud/control plane</TerminalComment>
+          <TerminalCommand>afs login</TerminalCommand>
+          <TerminalSpacer />
+          <TerminalComment>// create a new workspace</TerminalComment>
+          <TerminalCommand>afs workspace create myworkspace</TerminalCommand>
+          <TerminalSpacer />
+          <TerminalComment>// mount or sync the workspace at ~/afs</TerminalComment>
+          <TerminalCommand>afs up myworkspace ~/afs</TerminalCommand>
+        </TerminalWindow>
+
+        <CalloutBox $tone="tip">
+          <DocProse>
+            That is the core loop: authenticate once, create a workspace, then
+            run <InlineCode>afs up</InlineCode> to make the workspace available
+            on disk. Put files in <InlineCode>~/afs</InlineCode> and AFS keeps
+            the workspace state backed by Redis.
+          </DocProse>
+        </CalloutBox>
+      </DocSection>
+
+      <DocSection>
+        <DocHeading>The Whole Loop</DocHeading>
         <StepList>
           <StepRow>
             <StepIndex>01</StepIndex>
@@ -85,7 +111,7 @@ function DocsPage() {
           <StepRow>
             <StepIndex>03</StepIndex>
             <StepBody>
-              <StepTitle>Mount it locally</StepTitle>
+              <StepTitle>Expose it locally</StepTitle>
               <DocProse>
                 <InlineCode>afs up myworkspace ~/afs</InlineCode> starts the
                 local AFS runtime and exposes the workspace at{" "}
@@ -94,7 +120,27 @@ function DocsPage() {
               </DocProse>
             </StepBody>
           </StepRow>
+          <StepRow>
+            <StepIndex>04</StepIndex>
+            <StepBody>
+              <StepTitle>Checkpoint the good state</StepTitle>
+              <DocProse>
+                <InlineCode>afs checkpoint create myworkspace before-refactor</InlineCode>{" "}
+                saves a named restore point. Live edits are immediate, while
+                checkpoints are deliberate moments in the workspace timeline.
+              </DocProse>
+            </StepBody>
+          </StepRow>
         </StepList>
+      </DocSection>
+
+      <DocSection>
+        <DocHeading>Docs Map</DocHeading>
+        <DocProse>
+          Use this page as the one-page primer, then jump into the detailed
+          guides for each part of AFS.
+        </DocProse>
+        <DocsTopicLinks />
       </DocSection>
 
       <DocSection>
@@ -162,6 +208,40 @@ afs mcp --workspace myworkspace`}
             <span>Search workspace files directly through AFS.</span>
           </CommandItem>
         </CommandGrid>
+      </DocSection>
+
+      <DocSection>
+        <DocHeading>Search Performance</DocHeading>
+        <DocProse>
+          Simple literal <InlineCode>afs grep</InlineCode> uses the Redis Search
+          index when it is available, then verifies candidate file contents
+          through AFS. The latest local benchmark used{" "}
+          {searchBenchmark.corpus} on {searchBenchmark.environment}.
+        </DocProse>
+
+        <PerformanceRows>
+          {searchBenchmark.metrics.map((metric) => (
+            <PerformanceRow key={metric.name}>
+              <PerformanceName>{metric.name}</PerformanceName>
+              <PerformanceValue>{metric.afs}</PerformanceValue>
+              <PerformanceDetail>
+                <span>BSD grep: {metric.grep}</span>
+                <span>ripgrep: {metric.ripgrep}</span>
+              </PerformanceDetail>
+              <PerformanceSummary>{metric.summary}</PerformanceSummary>
+            </PerformanceRow>
+          ))}
+        </PerformanceRows>
+
+        <CalloutBox $tone="info">
+          <DocProse>
+            Literal searches are the indexed fast path. Regex searches are still
+            honest about the work they do: they fall back to the advanced
+            traversal path, so use <InlineCode>rg</InlineCode> on a mounted or
+            synced workspace for regex-heavy scans.
+          </DocProse>
+        </CalloutBox>
+        <InlineLink to="/docs/performance">Read the full performance notes</InlineLink>
       </DocSection>
 
       <DocSection>
@@ -256,8 +336,22 @@ const Eyebrow = styled.div`
   text-transform: uppercase;
 `;
 
+const PrimerPanel = styled.div`
+  display: grid;
+  gap: 12px;
+  padding: 24px 28px;
+  border: 1px solid var(--afs-line, #e6e6e6);
+  border-radius: 8px;
+  background: var(--afs-panel-strong, #ffffff);
+
+  @media (max-width: 720px) {
+    padding: 20px;
+  }
+`;
+
 const TerminalFrame = styled.div`
   overflow: hidden;
+  margin-top: 18px;
   border: 1px solid var(--afs-line, #e6e6e6);
   border-radius: 8px;
   background: #101820;
@@ -442,6 +536,55 @@ const CommandItem = styled.div`
   gap: 7px;
   padding: 12px 0;
   border-top: 1px solid var(--afs-line, #e6e6e6);
+  color: var(--afs-muted, #6d6e71);
+  font-size: 13px;
+  line-height: 1.5;
+`;
+
+const PerformanceRows = styled.div`
+  display: grid;
+  margin-top: 18px;
+  border-top: 1px solid var(--afs-line, #e6e6e6);
+`;
+
+const PerformanceRow = styled.div`
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(96px, auto) minmax(180px, 1.4fr) minmax(180px, 1.5fr);
+  gap: 14px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--afs-line, #e6e6e6);
+
+  @media (max-width: 780px) {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 6px;
+  }
+`;
+
+const PerformanceName = styled.div`
+  color: var(--afs-ink, #282828);
+  font-size: 14px;
+  font-weight: 800;
+`;
+
+const PerformanceValue = styled.div`
+  color: var(--afs-ink, #282828);
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.1;
+`;
+
+const PerformanceDetail = styled.div`
+  display: grid;
+  gap: 3px;
+  color: var(--afs-muted, #6d6e71);
+  font-size: 12px;
+  line-height: 1.35;
+`;
+
+const PerformanceSummary = styled.div`
   color: var(--afs-muted, #6d6e71);
   font-size: 13px;
   line-height: 1.5;

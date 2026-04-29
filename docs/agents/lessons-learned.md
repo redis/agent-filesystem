@@ -15,6 +15,9 @@ future agents should not have to rediscover.
 - Keep docs, active backlog notes, and long-form plans under the single `docs/`
   root. Raw benchmark output belongs in `/tmp` or another artifact directory,
   with durable conclusions summarized in `docs/performance.md`.
+- Benchmark helpers that open the Redis filesystem client directly must resolve
+  the workspace storage ID after import. New imports use opaque workspace IDs,
+  so `client.New(rdb, workspaceName)` can silently point at an empty namespace.
 
 ## Git & Shell
 

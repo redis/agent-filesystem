@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import styled, { createGlobalStyle } from "styled-components";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
 import { useColorMode } from "../../foundation/theme-context";
+import { searchBenchmark } from "../../foundation/performance-data";
 
 /**
  * @redis-ui/styles normalizes the root font-size to 62.5% (10px) so that
@@ -59,25 +60,18 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
             </TerminalWindow>
             <BenchmarkPanel>
               <BenchmarkHeader>
-                <BenchmarkEyebrow>Performance snapshot</BenchmarkEyebrow>
-                <BenchmarkTitle>Median macOS NFS benchmark</BenchmarkTitle>
+                <BenchmarkEyebrow>Indexed search</BenchmarkEyebrow>
+                <BenchmarkTitle>{searchBenchmark.title}</BenchmarkTitle>
+                <BenchmarkContext>{searchBenchmark.corpus}</BenchmarkContext>
               </BenchmarkHeader>
               <BenchmarkGrid>
-                <BenchmarkItem>
-                  <BenchmarkName>Read source file</BenchmarkName>
-                  <BenchmarkValue>0.01 ms</BenchmarkValue>
-                  <BenchmarkMeta>AFS matched local</BenchmarkMeta>
-                </BenchmarkItem>
-                <BenchmarkItem>
-                  <BenchmarkName>Grep literal</BenchmarkName>
-                  <BenchmarkValue>1.26 ms</BenchmarkValue>
-                  <BenchmarkMeta>local: 0.95 ms</BenchmarkMeta>
-                </BenchmarkItem>
-                <BenchmarkItem>
-                  <BenchmarkName>Walk tree</BenchmarkName>
-                  <BenchmarkValue>0.11 ms</BenchmarkValue>
-                  <BenchmarkMeta>local: 0.15 ms</BenchmarkMeta>
-                </BenchmarkItem>
+                {searchBenchmark.metrics.map((metric) => (
+                  <BenchmarkItem key={metric.name}>
+                    <BenchmarkName>{metric.name}</BenchmarkName>
+                    <BenchmarkValue>{metric.afs}</BenchmarkValue>
+                    <BenchmarkMeta>{metric.summary}</BenchmarkMeta>
+                  </BenchmarkItem>
+                ))}
               </BenchmarkGrid>
             </BenchmarkPanel>
           </BrandBody>
@@ -321,6 +315,13 @@ const BenchmarkTitle = styled.h2`
   color: #ffffff;
   font-size: 17px;
   line-height: 1.25;
+`;
+
+const BenchmarkContext = styled.p`
+  margin: 0;
+  color: rgba(246, 241, 236, 0.58);
+  font-size: 12px;
+  line-height: 1.45;
 `;
 
 const BenchmarkGrid = styled.div`

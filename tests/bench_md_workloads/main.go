@@ -274,7 +274,12 @@ func main() {
 	must(importWorkspace(env.afsBin, configPath, *workspace, corpusRoot))
 	fmt.Printf("Import completed in %s\n", time.Since(importStarted).Round(time.Millisecond))
 
-	env.fs = client.New(env.rdb, *workspace)
+	storageID, err := resolveWorkspaceStorageID(ctx, env.rdb, *workspace)
+	must(err)
+	if storageID != *workspace {
+		fmt.Printf("Resolved workspace storage ID: %s\n", storageID)
+	}
+	env.fs = client.New(env.rdb, storageID)
 	must(validateCorpus(ctx, corpus, corpusRoot, env.fs))
 
 	env.report.TimestampUTC = time.Now().UTC().Format(time.RFC3339)
@@ -592,6 +597,21 @@ func importWorkspace(afsBin, configPath, workspace, source string) error {
 		return fmt.Errorf("afs workspace import failed: %w\n%s", err, string(out))
 	}
 	return nil
+}
+
+func resolveWorkspaceStorageID(ctx context.Context, rdb *redis.Client, workspace string) (string, error) {
+	storageID, err := rdb.HGet(ctx, "afs:workspace:index:names", workspace).Result()
+	if errors.Is(err, redis.Nil) {
+		return workspace, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	storageID = strings.TrimSpace(storageID)
+	if storageID == "" {
+		return workspace, nil
+	}
+	return storageID, nil
 }
 
 func generateCorpus(root, workspace string, markdownFiles, targetBytes, hotReads int) corpusSpec {
