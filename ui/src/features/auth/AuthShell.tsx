@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import styled, { createGlobalStyle, keyframes } from "styled-components";
+import styled, { createGlobalStyle } from "styled-components";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
 import { useColorMode } from "../../foundation/theme-context";
 
@@ -29,8 +29,6 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
     <Page>
       <AuthRootFontSize />
       <BrandPanel>
-        <BrandOrbA />
-        <BrandOrbB />
         <BrandInner>
           <BrandLogo>
             <RedisLogoDarkFullIcon />
@@ -39,35 +37,49 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
           <BrandBody>
             <Pill>Agent Filesystem · Cloud</Pill>
             <Headline>
-              The filesystem <em>built</em> for autonomous agents.
+              a filesystem for <s>humans</s> agents
             </Headline>
-            <Lede>
-              Give every agent a durable workspace, a shared memory, and a clean trail of
-              everything it touched — powered by Redis.
-            </Lede>
-            <FeatureList>
-              <Feature>
-                <FeatureDot />
-                <FeatureText>
-                  <strong>Durable workspaces</strong>
-                  <span>Files, folders, and checkpoints that survive every run.</span>
-                </FeatureText>
-              </Feature>
-              <Feature>
-                <FeatureDot />
-                <FeatureText>
-                  <strong>Shared memory for agents</strong>
-                  <span>One context store, real-time sync, no stale snapshots.</span>
-                </FeatureText>
-              </Feature>
-              <Feature>
-                <FeatureDot />
-                <FeatureText>
-                  <strong>Auditable by default</strong>
-                  <span>Every read, write, and revision — captured automatically.</span>
-                </FeatureText>
-              </Feature>
-            </FeatureList>
+            <TerminalWindow aria-label="CLI quickstart example">
+              <TerminalHeader>
+                <TerminalLights aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </TerminalLights>
+                <TerminalTitle>terminal</TerminalTitle>
+              </TerminalHeader>
+              <TerminalBody>
+                <TerminalComment>// Create a new workspace && mount it</TerminalComment>
+                <TerminalLine>&gt; afs create myworkspace</TerminalLine>
+                <TerminalLine>&gt; afs up myworkspace ~/myworkspace</TerminalLine>
+                <TerminalGap />
+                <TerminalComment>// Create a checkpoint</TerminalComment>
+                <TerminalLine>&gt; afs checkpoint create myworkspace</TerminalLine>
+              </TerminalBody>
+            </TerminalWindow>
+            <BenchmarkPanel>
+              <BenchmarkHeader>
+                <BenchmarkEyebrow>Performance snapshot</BenchmarkEyebrow>
+                <BenchmarkTitle>Median macOS NFS benchmark</BenchmarkTitle>
+              </BenchmarkHeader>
+              <BenchmarkGrid>
+                <BenchmarkItem>
+                  <BenchmarkName>Read source file</BenchmarkName>
+                  <BenchmarkValue>0.01 ms</BenchmarkValue>
+                  <BenchmarkMeta>AFS matched local</BenchmarkMeta>
+                </BenchmarkItem>
+                <BenchmarkItem>
+                  <BenchmarkName>Grep literal</BenchmarkName>
+                  <BenchmarkValue>1.26 ms</BenchmarkValue>
+                  <BenchmarkMeta>local: 0.95 ms</BenchmarkMeta>
+                </BenchmarkItem>
+                <BenchmarkItem>
+                  <BenchmarkName>Walk tree</BenchmarkName>
+                  <BenchmarkValue>0.11 ms</BenchmarkValue>
+                  <BenchmarkMeta>local: 0.15 ms</BenchmarkMeta>
+                </BenchmarkItem>
+              </BenchmarkGrid>
+            </BenchmarkPanel>
           </BrandBody>
 
           <BrandFooter>Trusted by teams shipping production agents on Redis.</BrandFooter>
@@ -116,11 +128,6 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
   );
 }
 
-const float = keyframes`
-  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  50% { transform: translate3d(10px, -16px, 0) scale(1.04); }
-`;
-
 const Page = styled.div`
   min-height: 100vh;
   display: grid;
@@ -137,38 +144,19 @@ const BrandPanel = styled.aside`
   overflow: hidden;
   display: flex;
   color: #f6f1ec;
-  background:
-    radial-gradient(120% 80% at 10% 0%, rgba(220, 56, 44, 0.32) 0%, rgba(220, 56, 44, 0) 55%),
-    radial-gradient(80% 60% at 100% 100%, rgba(255, 138, 92, 0.2) 0%, rgba(255, 138, 92, 0) 60%),
-    linear-gradient(160deg, #0d2330 0%, #091a23 48%, #050d13 100%);
+  background: #071922;
 
-  @media (max-width: 880px) {
-    display: none;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 42px 42px;
+    opacity: 0.36;
+    pointer-events: none;
   }
-`;
-
-const BrandOrbA = styled.div`
-  position: absolute;
-  width: 520px;
-  height: 520px;
-  top: -180px;
-  right: -160px;
-  background: radial-gradient(circle, rgba(220, 56, 44, 0.3), rgba(220, 56, 44, 0) 70%);
-  filter: blur(4px);
-  animation: ${float} 12s ease-in-out infinite;
-  pointer-events: none;
-`;
-
-const BrandOrbB = styled.div`
-  position: absolute;
-  width: 420px;
-  height: 420px;
-  bottom: -140px;
-  left: -120px;
-  background: radial-gradient(circle, rgba(255, 138, 92, 0.18), rgba(255, 138, 92, 0) 70%);
-  filter: blur(2px);
-  animation: ${float} 16s ease-in-out infinite reverse;
-  pointer-events: none;
 `;
 
 const BrandInner = styled.div`
@@ -176,14 +164,20 @@ const BrandInner = styled.div`
   z-index: 1;
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 32px;
   padding: 48px 56px;
   width: 100%;
-  max-width: 620px;
+  max-width: 680px;
   margin-left: auto;
 
   @media (max-width: 1080px) {
     padding: 40px 40px;
+  }
+
+  @media (max-width: 880px) {
+    max-width: none;
+    margin: 0;
+    padding: 32px 24px;
   }
 `;
 
@@ -201,7 +195,7 @@ const BrandBody = styled.div`
   margin-top: auto;
   margin-bottom: auto;
   display: grid;
-  gap: 24px;
+  gap: 22px;
 `;
 
 const Pill = styled.div`
@@ -221,64 +215,151 @@ const Headline = styled.h1`
   margin: 0;
   font-size: clamp(32px, 3.8vw, 48px);
   line-height: 1.04;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
   font-weight: 700;
   color: #ffffff;
 
-  em {
+  s {
     font-style: normal;
-    background: linear-gradient(120deg, #ff6a4d 0%, #dc382c 50%, #ff9170 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    color: rgba(246, 241, 236, 0.58);
+    text-decoration-color: #ff6a4d;
+    text-decoration-thickness: 0.12em;
   }
 `;
 
-const Lede = styled.p`
-  margin: 0;
-  font-size: 16px;
-  line-height: 1.55;
-  color: rgba(246, 241, 236, 0.76);
-  max-width: 48ch;
+const TerminalWindow = styled.div`
+  overflow: hidden;
+  border: 1px solid rgba(246, 241, 236, 0.14);
+  border-radius: 16px;
+  background: rgba(3, 10, 14, 0.86);
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
 `;
 
-const FeatureList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
+const TerminalHeader = styled.div`
+  height: 38px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid rgba(246, 241, 236, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+`;
+
+const TerminalLights = styled.span`
+  display: inline-flex;
+  gap: 7px;
+
+  span {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #dc382c;
+  }
+
+  span:nth-child(2) {
+    background: #f5a524;
+  }
+
+  span:nth-child(3) {
+    background: #4ac97a;
+  }
+`;
+
+const TerminalTitle = styled.span`
+  color: rgba(246, 241, 236, 0.54);
+  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+`;
+
+const TerminalBody = styled.div`
+  padding: 18px 20px 20px;
+  display: grid;
+  gap: 7px;
+  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: clamp(13px, 1.15vw, 15px);
+  line-height: 1.5;
+`;
+
+const TerminalLine = styled.div`
+  color: #f6f1ec;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+`;
+
+const TerminalComment = styled(TerminalLine)`
+  color: rgba(246, 241, 236, 0.56);
+`;
+
+const TerminalGap = styled.div`
+  height: 8px;
+`;
+
+const BenchmarkPanel = styled.section`
+  border: 1px solid rgba(246, 241, 236, 0.12);
+  border-radius: 16px;
+  padding: 18px;
+  background: rgba(246, 241, 236, 0.06);
   display: grid;
   gap: 16px;
 `;
 
-const Feature = styled.li`
+const BenchmarkHeader = styled.div`
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 14px;
-  align-items: start;
+  gap: 4px;
 `;
 
-const FeatureDot = styled.span`
-  margin-top: 6px;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: linear-gradient(135deg, #ff6a4d, #dc382c);
-  box-shadow: 0 0 0 4px rgba(220, 56, 44, 0.14);
+const BenchmarkEyebrow = styled.span`
+  color: #ff8b70;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 `;
 
-const FeatureText = styled.div`
+const BenchmarkTitle = styled.h2`
+  margin: 0;
+  color: #ffffff;
+  font-size: 17px;
+  line-height: 1.25;
+`;
+
+const BenchmarkGrid = styled.div`
   display: grid;
-  gap: 2px;
-  strong {
-    color: #ffffff;
-    font-weight: 600;
-    font-size: 15px;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  @media (max-width: 1180px) {
+    grid-template-columns: 1fr;
   }
-  span {
-    color: rgba(246, 241, 236, 0.62);
-    font-size: 14px;
-    line-height: 1.5;
-  }
+`;
+
+const BenchmarkItem = styled.div`
+  min-width: 0;
+  border: 1px solid rgba(246, 241, 236, 0.1);
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(3, 10, 14, 0.42);
+  display: grid;
+  gap: 6px;
+`;
+
+const BenchmarkName = styled.span`
+  color: rgba(246, 241, 236, 0.62);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+`;
+
+const BenchmarkValue = styled.span`
+  color: #ffffff;
+  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 24px;
+  line-height: 1;
+`;
+
+const BenchmarkMeta = styled.span`
+  color: rgba(246, 241, 236, 0.54);
+  font-size: 12px;
 `;
 
 const BrandFooter = styled.p`

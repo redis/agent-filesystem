@@ -22,7 +22,8 @@ import {
 import { useAuthSession } from "../foundation/auth-context";
 import { accountQueryOptions, useAccount, useDeleteAccountMutation, useResetAccountDataMutation } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
-import { useSkin, type Skin } from "../foundation/skin-context";
+import { useSkin } from "../foundation/skin-context";
+import type { Skin } from "../foundation/skin-context";
 
 export const Route = createFileRoute("/settings")({
   loader: () =>
@@ -80,8 +81,8 @@ function SkinSwitcher() {
     <SectionCard $span={12}>
       <SectionHeader>
         <SectionTitle
-          title="UI skin (dev only)"
-          body="Switch between visual skins for the AFS console. The setting is stored locally and is not exposed to end users."
+          title="UI skin"
+          body="Switch between visual skins for the AFS console. This setting is stored locally in your browser."
         />
       </SectionHeader>
       <SkinGrid>

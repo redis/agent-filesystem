@@ -5,8 +5,8 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from "react";
+import type { ReactNode } from "react";
 
 export type Skin = "classic" | "situation-room";
 
@@ -14,7 +14,7 @@ interface SkinContextValue {
   skin: Skin;
   setSkin: (skin: Skin) => void;
   toggleSkin: () => void;
-  /** Whether the skin switcher should be exposed in the UI. Dev only for now. */
+  /** Whether the skin switcher should be exposed in the UI. */
   isSwitcherEnabled: boolean;
 }
 
@@ -61,7 +61,7 @@ export function SkinProvider({ children }: { children: ReactNode }) {
       skin,
       setSkin,
       toggleSkin,
-      isSwitcherEnabled: import.meta.env.DEV,
+      isSwitcherEnabled: true,
     }),
     [skin, setSkin, toggleSkin],
   );
