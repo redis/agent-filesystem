@@ -28,6 +28,8 @@ It is the single root for docs, active backlog notes, and longer design plans.
   large-file follow-up backlog.
 - `plans/versioned-filesystem-v1-1.md` - draft PRD for checkpoint-backed
   versioned-filesystem behavior.
+- `plans/usage-feedback-tracker-2026-04-30.md` - working tracker for the
+  2026-04-30 usage feedback, bug triage, and implementation plan.
 - `plans/cli-attach-detach-command-surface.md` - draft plan for replacing the
   `up`/`down` local lifecycle with `attach`/`detach`.
 - `plans/event-history-merge.md` - plan to merge audit and changelog streams.
