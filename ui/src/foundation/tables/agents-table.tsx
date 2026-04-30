@@ -1,7 +1,8 @@
 import { Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
 import type { AFSAgentSession } from "../types/afs";
 import * as S from "./workspace-table.styles";
@@ -50,6 +51,10 @@ function uptimeLabel(iso: string): string {
   return `${seconds}s`;
 }
 
+function displayMountPath(path: string): string {
+  return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
+}
+
 /** Hook that ticks every second so uptime counters stay live. */
 function useTick(intervalMs = 1000) {
   const [, setTick] = useState(0);
@@ -82,10 +87,11 @@ const ActiveDot = styled.span<{ $active: boolean }>`
     `}
 `;
 
-const AgentNameWrap = styled.div`
+const NameCell = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 `;
 
 const NameIconBox = styled.span`
@@ -94,6 +100,51 @@ const NameIconBox = styled.span`
   justify-content: center;
   flex-shrink: 0;
   color: var(--afs-muted, #71717a);
+`;
+
+const NameStack = styled.div`
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+`;
+
+const NameLine = styled.div`
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+  min-width: 0;
+`;
+
+const SystemNameText = styled.span`
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--afs-ink, #18181b);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const AgentNameRow = styled.div`
+  min-width: 0;
+  padding-left: 16px;
+`;
+
+const AgentNameText = styled.span`
+  display: block;
+  min-width: 0;
+  color: var(--afs-muted, #71717a);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 /* ---- Detail dialog ---- */
@@ -439,44 +490,31 @@ export function AgentsTable({
       [
         {
           accessorKey: "hostname",
-          header: "System Name",
-          size: 200,
+          header: "Name",
+          size: 260,
           enableSorting: true,
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
+            const systemName = row.original.hostname || "unknown host";
+            const agentName =
+              row.original.label?.trim() ||
+              row.original.agentId?.trim() ||
+              "Agent name not set";
             return (
-              <AgentNameWrap>
+              <NameCell>
                 <NameIconBox>
                   <BotIcon customSize={18} />
                 </NameIconBox>
-                <ActiveDot $active={active} />
-                <S.SingleLineText title={row.original.hostname || "unknown host"}>
-                  {row.original.hostname || "unknown host"}
-                </S.SingleLineText>
-              </AgentNameWrap>
-            );
-          },
-        },
-        {
-          accessorKey: "label",
-          header: "Agent",
-          size: 160,
-          enableSorting: true,
-          cell: ({ row }) => {
-            const label = row.original.label?.trim();
-            const agentId = row.original.agentId?.trim();
-            const display = label || agentId;
-            if (!display) {
-              return (
-                <Typography.Body component="span" color="secondary">
-                  &mdash;
-                </Typography.Body>
-              );
-            }
-            return (
-              <S.SingleLineText title={[label, agentId].filter(Boolean).join(" · ") || display}>
-                {display}
-              </S.SingleLineText>
+                <NameStack>
+                  <NameLine>
+                    <ActiveDot $active={active} />
+                    <SystemNameText title={systemName}>{systemName}</SystemNameText>
+                  </NameLine>
+                  <AgentNameRow>
+                    <AgentNameText title={agentName}>{agentName}</AgentNameText>
+                  </AgentNameRow>
+                </NameStack>
+              </NameCell>
             );
           },
         },
@@ -490,6 +528,28 @@ export function AgentsTable({
               {row.original.workspaceName}
             </S.SingleLineText>
           ),
+        },
+        {
+          accessorKey: "localPath",
+          header: "Mount Path",
+          size: 240,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const mountPath = row.original.localPath.trim();
+            const displayPath = displayMountPath(mountPath);
+            if (!mountPath) {
+              return (
+                <Typography.Body component="span" color="secondary">
+                  &mdash;
+                </Typography.Body>
+              );
+            }
+            return (
+              <S.SingleLineText title={mountPath}>
+                {displayPath}
+              </S.SingleLineText>
+            );
+          },
         },
         {
           accessorKey: "lastSeenAt",
@@ -580,6 +640,8 @@ export function AgentsTable({
         <CardGrid>
           {filteredRows.map((agent) => {
             const active = isAgentActive(agent);
+            const mountPath = agent.localPath.trim();
+            const displayPath = displayMountPath(mountPath);
             return (
               <AgentCard
                 key={agent.sessionId}
@@ -596,7 +658,7 @@ export function AgentsTable({
 
                 <CardWorkspace>
                   {agent.workspaceName}
-                  {agent.localPath ? <> &rarr; {agent.localPath}</> : null}
+                  {mountPath ? <> &rarr; {displayPath}</> : null}
                 </CardWorkspace>
 
                 <CardMeta>
