@@ -33,13 +33,12 @@ import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import { getDefaultWorkspaceBrowserView } from "../foundation/workspace-browser-views";
 import { displayWorkspaceName } from "../foundation/workspace-display";
-import { studioTabSchema } from "../foundation/workspace-tabs";
+import { normalizeStudioTab, studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
 import type { AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
-import { ActivityTab } from "./workspace-studio/-activity-tab";
-import { ChangesTab } from "./workspace-studio/-changes-tab";
+import { HistoryTab } from "./workspace-studio/-changes-tab";
 import { SettingsTab } from "./workspace-studio/-settings-tab";
 
 const workspaceStudioSearchSchema = z.object({
@@ -79,7 +78,7 @@ function WorkspaceStudioPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const workspace = workspaceQuery.data;
-  const tab = search.tab ?? "browse";
+  const tab = normalizeStudioTab(search.tab);
   const agentCount = workspace?.agents.length ?? 0;
   const hasAgents = agentCount > 0;
   const showBanner = workspace != null && !bannerDismissed && userRequestedBanner;
@@ -327,13 +326,10 @@ function WorkspaceStudioPage() {
         <TabButton $active={tab === "browse"} onClick={() => setStudioTab("browse")}>
           Browse Files
         </TabButton>
-        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
-          Changelog
-        </TabButton>
         <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
           Checkpoints
         </TabButton>
-        <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
+        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
           History
         </TabButton>
         <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
@@ -358,17 +354,8 @@ function WorkspaceStudioPage() {
         />
       ) : null}
 
-      {tab === "activity" ? (
-        <ActivityTab
-          databaseId={workspace.databaseId}
-          workspaceId={workspaceId}
-          updatedAt={workspace.updatedAt}
-          onTabChange={setStudioTab}
-        />
-      ) : null}
-
       {tab === "changes" ? (
-        <ChangesTab
+        <HistoryTab
           databaseId={workspace.databaseId}
           workspaceId={workspaceId}
         />

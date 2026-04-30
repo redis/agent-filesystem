@@ -58,8 +58,9 @@ Implemented in the current branch:
 - The UI Checkpoints tab has compare-with-active and restore-preview flows
   backed by the diff API, including inline text hunks for supported files.
 - Checkpoint rows in the UI expand to show details and changed paths.
-- The workspace History tab reads from the unified event stream instead of the
-  older summary activity array.
+- The workspace History tab is the single workspace-level history surface. It
+  keeps the file changelog table UX and merges in non-file lifecycle events
+  from the unified event stream.
 - The Browse drawer has a first path-history surface that filters recent events
   for the selected path and links checkpoint-backed rows back to Checkpoints.
 - Restore creates a safety checkpoint when active state has uncheckpointed
@@ -492,9 +493,11 @@ should expand into the file events they produced.
 
 For the current v1.1 UI slice:
 
-- Workspace detail uses a visible **History** tab backed by `workspace:events`.
-- The route/search value can remain `activity` for compatibility; the visible
-  noun should be History.
+- Workspace detail uses a visible **History** tab. It merges file changelog rows
+  with non-file lifecycle rows from `workspace:events`.
+- The visible **Changelog** tab is removed. The route/search value can remain
+  `changes` for compatibility, and legacy `activity` links should normalize to
+  the same History view.
 - Browse file drawers expose a compact Path history panel for the selected
   path, backed by `events?path=...`.
 - The global Activity page keeps Changelog first and exposes Events as the

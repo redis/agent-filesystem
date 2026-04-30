@@ -8,13 +8,27 @@ import * as S from "./workspace-table.styles";
 
 type ChangesSortField = "occurredAt" | "op" | "path" | "sessionId" | "deltaBytes";
 
+export type HistoryTableRow = Omit<AFSChangelogEntry, "path"> & {
+  path?: string;
+  actor?: string;
+  eventDetail?: string;
+  eventTitle?: string;
+  historyType?: "file" | "event";
+  hostname?: string;
+  kind?: string;
+};
+
 type Props = {
-  rows: AFSChangelogEntry[];
+  rows: HistoryTableRow[];
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
   emptyStateText?: string;
-  onOpenChange?: (entry: AFSChangelogEntry) => void;
+  detailHeader?: string;
+  filterAllLabel?: string;
+  loadingText?: string;
+  searchPlaceholder?: string;
+  onOpenChange?: (entry: HistoryTableRow) => void;
 };
 
 function compareValues(
@@ -39,7 +53,11 @@ function formatSignedBytes(n?: number): string {
   return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-function changeOperationLabel(row: Pick<AFSChangelogEntry, "op" | "prevHash" | "prevPath">): string {
+function changeOperationLabel(row: Pick<HistoryTableRow, "historyType" | "kind" | "op" | "prevHash" | "prevPath">): string {
+  if (row.historyType === "event" && row.kind !== "file") {
+    return lifecycleOperationLabel(row.kind, row.op);
+  }
+
   const hasPrevious = Boolean(row.prevHash?.trim() || row.prevPath?.trim());
   switch (row.op) {
     case "put":
@@ -59,12 +77,45 @@ function changeOperationLabel(row: Pick<AFSChangelogEntry, "op" | "prevHash" | "
   }
 }
 
+function lifecycleOperationLabel(kind?: string, op?: string): string {
+  switch (`${kind ?? ""}.${op ?? ""}`) {
+    case "checkpoint.save":
+      return "Checkpoint created";
+    case "checkpoint.restore":
+      return "Checkpoint restored";
+    case "workspace.create":
+      return "Workspace created";
+    case "workspace.import":
+      return "Workspace imported";
+    case "workspace.fork":
+      return "Workspace forked";
+    case "workspace.update":
+      return "Workspace updated";
+    case "session.start":
+      return "Session started";
+    case "session.close":
+      return "Session closed";
+    case "session.stale":
+      return "Session stale";
+    case "process.start":
+      return "Process started";
+    case "process.exit":
+      return "Process exited";
+    default:
+      return [formatToken(kind), formatToken(op)].filter(Boolean).join(" ") || "Event";
+  }
+}
+
 export function ChangesTable({
   rows,
   loading = false,
   error = false,
   errorMessage = "Unable to load changes. Please retry.",
   emptyStateText = "No changes have been recorded for this workspace yet.",
+  detailHeader = "Path",
+  filterAllLabel = "All changes",
+  loadingText = "Loading changes...",
+  searchPlaceholder = "Search by path, agent, user...",
   onOpenChange,
 }: Props) {
   const [search, setSearch] = useState("");
@@ -87,7 +138,7 @@ export function ChangesTable({
       if (opFilter !== "all" && operation !== opFilter) return false;
       if (query === "") return true;
       return [
-        row.path,
+        row.path ?? "",
         row.prevPath ?? "",
         row.workspaceName ?? "",
         row.databaseName ?? "",
@@ -95,6 +146,12 @@ export function ChangesTable({
         row.sessionId ?? "",
         row.label ?? "",
         row.user ?? "",
+        row.actor ?? "",
+        row.checkpointId ?? "",
+        row.eventTitle ?? "",
+        row.eventDetail ?? "",
+        row.hostname ?? "",
+        row.kind ?? "",
         operation,
         row.source ?? "",
       ].some((value) => value.toLowerCase().includes(query));
@@ -151,21 +208,10 @@ export function ChangesTable({
         },
         {
           accessorKey: "path",
-          header: "Path",
+          header: detailHeader,
           size: 240,
           enableSorting: true,
-          cell: ({ row }) => (
-            <S.Stack>
-              <S.SingleLineText title={row.original.path}>
-                {row.original.path}
-              </S.SingleLineText>
-              {row.original.prevPath ? (
-                <Typography.Body color="secondary" component="span">
-                  from {row.original.prevPath}
-                </Typography.Body>
-              ) : null}
-            </S.Stack>
-          ),
+          cell: ({ row }) => <HistoryDetailCell row={row.original} />,
         },
         ...(showWorkspaceContext
           ? [
@@ -211,8 +257,9 @@ export function ChangesTable({
             const label = row.original.label?.trim();
             const agentId = row.original.agentId?.trim();
             const sessionId = row.original.sessionId ?? "";
-            const display = label || agentId || sessionId.slice(0, 8) || "—";
-            const tooltip = [label, agentId, sessionId].filter(Boolean).join(" · ");
+            const actor = row.original.actor?.trim();
+            const display = label || actor || agentId || sessionId.slice(0, 8) || "—";
+            const tooltip = [label, actor, agentId, sessionId].filter(Boolean).join(" · ");
             return (
               <S.SingleLineText title={tooltip || display}>
                 {display}
@@ -220,9 +267,9 @@ export function ChangesTable({
             );
           },
         },
-      ] as ColumnDef<AFSChangelogEntry>[];
+      ] as ColumnDef<HistoryTableRow>[];
     },
-    [rows],
+    [detailHeader, rows],
   );
 
   return (
@@ -231,18 +278,19 @@ export function ChangesTable({
         <S.SearchInput
           value={search}
           onChange={setSearch}
-          placeholder="Search by path, agent, user..."
+          placeholder={searchPlaceholder}
         />
         {operations.length > 1 ? (
           <OpFilter
             value={opFilter}
             ops={operations}
+            allLabel={filterAllLabel}
             onChange={setOpFilter}
           />
         ) : null}
       </S.HeadingWrap>
 
-      {loading ? <S.EmptyState>Loading changes...</S.EmptyState> : null}
+      {loading ? <S.EmptyState>{loadingText}</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
         <S.EmptyState>{emptyStateText}</S.EmptyState>
@@ -283,18 +331,20 @@ export function ChangesTable({
 function OpFilter({
   value,
   ops,
+  allLabel,
   onChange,
 }: {
   value: string;
   ops: string[];
+  allLabel: string;
   onChange: (next: string) => void;
 }) {
   const options = useMemo(
     () => [
-      { value: "all", label: "All changes" },
+      { value: "all", label: allLabel },
       ...ops.map((op) => ({ value: op, label: op })),
     ],
-    [ops],
+    [allLabel, ops],
   );
 
   return (
@@ -303,8 +353,82 @@ function OpFilter({
         options={options}
         value={value}
         onChange={(next) => onChange(next)}
-        placeholder="All changes"
+        placeholder={allLabel}
       />
     </div>
   );
+}
+
+function HistoryDetailCell({ row }: { row: HistoryTableRow }) {
+  if (row.historyType === "event" && row.kind !== "file") {
+    const detail = lifecycleDetail(row);
+    const secondary = lifecycleSecondary(row, detail);
+    return (
+      <S.Stack>
+        <S.SingleLineText title={detail}>{detail}</S.SingleLineText>
+        {secondary ? (
+          <Typography.Body color="secondary" component="span">
+            {secondary}
+          </Typography.Body>
+        ) : null}
+      </S.Stack>
+    );
+  }
+
+  return (
+    <S.Stack>
+      <S.SingleLineText title={row.path ?? ""}>
+        {row.path || "—"}
+      </S.SingleLineText>
+      {row.prevPath ? (
+        <Typography.Body color="secondary" component="span">
+          from {row.prevPath}
+        </Typography.Body>
+      ) : null}
+    </S.Stack>
+  );
+}
+
+function lifecycleDetail(row: HistoryTableRow): string {
+  return row.eventTitle
+    || row.eventDetail
+    || checkpointLabel(row.checkpointId)
+    || sessionLabel(row.sessionId)
+    || row.hostname
+    || row.source
+    || "Workspace event";
+}
+
+function lifecycleSecondary(row: HistoryTableRow, detail: string): string {
+  return [
+    row.eventTitle && row.eventDetail ? row.eventDetail : "",
+    checkpointLabel(row.checkpointId),
+    sessionLabel(row.sessionId),
+    row.hostname,
+    row.source,
+  ]
+    .filter((part): part is string => Boolean(part && part.trim() !== "" && part !== detail))
+    .join(" · ");
+}
+
+function checkpointLabel(value?: string): string {
+  if (!value) return "";
+  return `checkpoint ${shortID(value)}`;
+}
+
+function sessionLabel(value?: string): string {
+  if (!value) return "";
+  return `session ${shortID(value)}`;
+}
+
+function shortID(value: string): string {
+  return value.length <= 12 ? value : value.slice(0, 12);
+}
+
+function formatToken(value?: string) {
+  return (value ?? "")
+    .split(/[-_.]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
 }

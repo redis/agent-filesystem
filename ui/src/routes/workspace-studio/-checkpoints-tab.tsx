@@ -27,6 +27,7 @@ import {
 import { shortDateTime } from "../../foundation/time-format";
 import * as S from "../../foundation/tables/workspace-table.styles";
 import { getActiveWorkspaceView } from "../../foundation/workspace-browser-views";
+import type { StudioTab } from "../../foundation/workspace-tabs";
 import type {
   AFSDiffEntry,
   AFSSavepoint,
@@ -35,7 +36,6 @@ import type {
   AFSWorkspaceView,
 } from "../../foundation/types/afs";
 
-type StudioTab = "browse" | "checkpoints" | "activity" | "settings";
 type CheckpointSortField = "createdAt" | "name" | "actor" | "totalBytes";
 type DiffDialogMode = "compare" | "restore";
 type DiffDialogState = {

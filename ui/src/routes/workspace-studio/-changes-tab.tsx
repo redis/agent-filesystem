@@ -8,40 +8,75 @@ import {
   SectionTitle,
 } from "../../components/afs-kit";
 import { computeChangelogTotals, formatChangelogBytes } from "../../foundation/changelog-utils";
-import { useInfiniteChangelog } from "../../foundation/hooks/use-afs";
+import { useEvents, useInfiniteChangelog } from "../../foundation/hooks/use-afs";
 import { ChangesTable } from "../../foundation/tables/changes-table";
+import type { HistoryTableRow } from "../../foundation/tables/changes-table";
+import type { AFSEventEntry } from "../../foundation/types/afs";
 
 const CHANGELOG_PAGE_SIZE = 100;
+const LIFECYCLE_EVENT_PAGE_SIZE = 100;
 
 type Props = {
   databaseId?: string;
   workspaceId: string;
 };
 
-export function ChangesTab({ databaseId, workspaceId }: Props) {
-  const query = useInfiniteChangelog({
+export function HistoryTab({ databaseId, workspaceId }: Props) {
+  const changelogQuery = useInfiniteChangelog({
     databaseId,
     workspaceId,
     limit: CHANGELOG_PAGE_SIZE,
     direction: "desc",
   });
+  const eventsQuery = useEvents({
+    databaseId,
+    workspaceId,
+    limit: LIFECYCLE_EVENT_PAGE_SIZE,
+    direction: "desc",
+  });
 
   const entries = useMemo(
-    () => query.data?.pages.flatMap((page) => page.entries) ?? [],
-    [query.data],
+    () => changelogQuery.data?.pages.flatMap((page) => page.entries) ?? [],
+    [changelogQuery.data],
+  );
+  const lifecycleRows = useMemo(
+    () => (eventsQuery.data?.items ?? []).flatMap(eventToHistoryRow),
+    [eventsQuery.data],
+  );
+  const historyRows = useMemo(
+    () =>
+      [
+        ...entries.map((entry): HistoryTableRow => ({ ...entry, historyType: "file" })),
+        ...lifecycleRows,
+      ].sort((left, right) => {
+        const leftTime = Date.parse(left.occurredAt ?? "") || 0;
+        const rightTime = Date.parse(right.occurredAt ?? "") || 0;
+        return rightTime - leftTime;
+      }),
+    [entries, lifecycleRows],
   );
   const totals = useMemo(() => computeChangelogTotals(entries), [entries]);
-  const hasEntries = entries.length > 0;
+  const hasHistory = historyRows.length > 0;
+  const lifecycleCount = lifecycleRows.length;
+  const loading = changelogQuery.isLoading || eventsQuery.isLoading;
+  const error = changelogQuery.isError || eventsQuery.isError;
+  const errorMessage = changelogQuery.error instanceof Error
+    ? changelogQuery.error.message
+    : eventsQuery.error instanceof Error
+      ? eventsQuery.error.message
+      : "Unable to load history. Please retry.";
 
   return (
     <SectionGrid>
       <SectionCard $span={12}>
         <SectionHeader>
-          <SectionTitle title="Changelog" />
+          <SectionTitle title="History" />
           <HeaderSummary>
-            {hasEntries ? (
+            {hasHistory ? (
               <>
-                Showing <strong>{entries.length}</strong> recent changes ·{" "}
+                Showing <strong>{historyRows.length}</strong> recent rows ·{" "}
+                <strong>{entries.length}</strong> file changes ·{" "}
+                <strong>{lifecycleCount}</strong> events ·{" "}
                 <strong>{totals.added}</strong> added ·{" "}
                 <strong>{totals.modified}</strong> modified ·{" "}
                 <strong>{totals.deleted}</strong> deleted ·{" "}
@@ -50,35 +85,70 @@ export function ChangesTab({ databaseId, workspaceId }: Props) {
                 <NegativeDelta>−{formatChangelogBytes(totals.bytesRemoved)}</NegativeDelta>
               </>
             ) : (
-              "No changes yet"
+              "No history yet"
             )}
           </HeaderSummary>
         </SectionHeader>
         <ChangesTable
-          rows={entries}
-          loading={query.isLoading}
-          error={query.isError}
-          errorMessage={
-            query.error instanceof Error
-              ? query.error.message
-              : "Unable to load changes. Please retry."
-          }
+          rows={historyRows}
+          loading={loading}
+          error={error}
+          errorMessage={errorMessage}
+          emptyStateText="No history has been recorded for this workspace yet."
+          detailHeader="Path / Detail"
+          filterAllLabel="All history"
+          loadingText="Loading history..."
+          searchPlaceholder="Search by path, event, agent, user..."
         />
-        {!query.isLoading && !query.isError && hasEntries && query.hasNextPage ? (
+        {!loading && !error && entries.length > 0 && changelogQuery.hasNextPage ? (
           <LoadMoreRow>
             <Button
               size="medium"
               variant="secondary-fill"
-              onClick={() => void query.fetchNextPage()}
-              disabled={query.isFetchingNextPage}
+              onClick={() => void changelogQuery.fetchNextPage()}
+              disabled={changelogQuery.isFetchingNextPage}
             >
-              {query.isFetchingNextPage ? "Loading more…" : "Load more changes"}
+              {changelogQuery.isFetchingNextPage ? "Loading more..." : "Load more file changes"}
             </Button>
           </LoadMoreRow>
         ) : null}
       </SectionCard>
     </SectionGrid>
   );
+}
+
+function eventToHistoryRow(event: AFSEventEntry): HistoryTableRow[] {
+  if (event.kind === "file") {
+    return [];
+  }
+
+  return [{
+    id: `event:${event.id}`,
+    occurredAt: event.createdAt,
+    workspaceId: event.workspaceId,
+    workspaceName: event.workspaceName,
+    databaseId: event.databaseId,
+    databaseName: event.databaseName,
+    sessionId: event.sessionId,
+    user: event.user,
+    label: event.label,
+    op: event.op,
+    path: event.path,
+    prevPath: event.prevPath,
+    sizeBytes: event.sizeBytes,
+    deltaBytes: event.deltaBytes,
+    contentHash: event.contentHash,
+    prevHash: event.prevHash,
+    mode: event.mode,
+    checkpointId: event.checkpointId,
+    source: event.source,
+    actor: event.actor,
+    eventDetail: event.extras?.detail,
+    eventTitle: event.extras?.title,
+    historyType: "event",
+    hostname: event.hostname,
+    kind: event.kind,
+  }];
 }
 
 const HeaderSummary = styled.span`

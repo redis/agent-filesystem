@@ -19,8 +19,9 @@ import { useDatabaseScope } from "../foundation/database-scope";
 import { computeChangelogTotals, formatChangelogBytes } from "../foundation/changelog-utils";
 import { useChangelog, useEvents } from "../foundation/hooks/use-afs";
 import { ChangesTable } from "../foundation/tables/changes-table";
+import type { HistoryTableRow } from "../foundation/tables/changes-table";
 import { EventsTable } from "../foundation/tables/events-table";
-import type { AFSChangelogEntry, AFSEventEntry } from "../foundation/types/afs";
+import type { AFSEventEntry } from "../foundation/types/afs";
 
 const ACTIVITY_PAGE_SIZE = 25;
 
@@ -92,14 +93,12 @@ function ActivityPage() {
           ? { tab: "checkpoints" }
           : event.kind === "file"
             ? { tab: "browse" }
-            : event.kind === "workspace"
-              ? {}
-              : { tab: "activity" }),
+            : { tab: "changes" }),
       },
     });
   }
 
-  function openChange(entry: AFSChangelogEntry) {
+  function openChange(entry: HistoryTableRow) {
     if (entry.workspaceId == null) {
       return;
     }
