@@ -34,11 +34,13 @@ const (
 	authClerkPublishableKeyLegacyEnvVar = "CLERK_PUBLISHABLE_KEY"
 	authClerkJWTKeyEnvVar               = "CLERK_JWT_KEY"
 	authClerkProxyURLEnvVar             = "CLERK_PROXY_URL"
+	authAdminSubjectsEnvVar             = "AFS_ADMIN_SUBJECTS"
 	clerkSessionCookieName              = "__session"
 	clerkJWKCacheTTL                    = time.Hour
 )
 
 var ErrUnauthorized = fmt.Errorf("authentication required")
+var ErrForbidden = fmt.Errorf("forbidden")
 
 type AuthConfig struct {
 	Mode                AuthMode
@@ -53,12 +55,12 @@ type AuthConfig struct {
 }
 
 type AuthIdentity struct {
-	Subject           string
-	Name              string
-	Email             string
-	Groups            []string
-	Provider          string
-	TokenID           string
+	Subject  string
+	Name     string
+	Email    string
+	Groups   []string
+	Provider string
+	TokenID  string
 	// Scope carries the MCP-token scope on token-authenticated requests:
 	//   "workspace:<workspace-id>" for workspace-bound tokens,
 	//   "control-plane"            for user-scoped control-plane tokens,
@@ -87,6 +89,7 @@ type authRuntimeUser struct {
 	Name    string   `json:"name,omitempty"`
 	Email   string   `json:"email,omitempty"`
 	Groups  []string `json:"groups,omitempty"`
+	IsAdmin bool     `json:"is_admin"`
 }
 
 type authContextKey string
@@ -289,6 +292,7 @@ func (a *AuthHandler) RuntimeConfig(r *http.Request) authRuntimeConfigResponse {
 			Name:    identity.Name,
 			Email:   identity.Email,
 			Groups:  append([]string(nil), identity.Groups...),
+			IsAdmin: isCloudAdminIdentity(identity),
 		}
 		return response
 	}
@@ -300,6 +304,7 @@ func (a *AuthHandler) RuntimeConfig(r *http.Request) authRuntimeConfigResponse {
 				Name:    identity.Name,
 				Email:   identity.Email,
 				Groups:  append([]string(nil), identity.Groups...),
+				IsAdmin: isCloudAdminIdentity(*identity),
 			}
 			return response
 		}

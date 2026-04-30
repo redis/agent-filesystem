@@ -46,6 +46,8 @@ import type {
   AFSAuthConfig,
   AFSAccount,
   AFSServerVersion,
+  AFSAdminOverview,
+  AFSAdminUser,
 } from "../types/afs";
 
 const STORAGE_KEY = "afs-ui-demo-state-v1";
@@ -92,6 +94,11 @@ type AFSClient = {
   getAccount: () => Promise<AFSAccount>;
   resetAccountData: () => Promise<AFSAccount>;
   deleteAccount: () => Promise<AFSAccount>;
+  getAdminOverview: () => Promise<AFSAdminOverview>;
+  listAdminUsers: () => Promise<AFSAdminUser[]>;
+  listAdminDatabases: () => Promise<AFSDatabase[]>;
+  listAdminWorkspaceSummaries: () => Promise<AFSWorkspaceSummary[]>;
+  listAdminAgents: () => Promise<AFSAgentSession[]>;
   resetDemo: () => AFSState;
 };
 
@@ -332,6 +339,8 @@ type HTTPWorkspaceSessionInfo = {
   workspace_name?: string;
   database_id?: string;
   database_name?: string;
+  owner_subject?: string;
+  owner_label?: string;
   agent_id?: string;
   client_kind?: string;
   afs_version?: string;
@@ -511,6 +520,7 @@ type HTTPAuthConfig = {
     name?: string;
     email?: string;
     groups?: string[];
+    is_admin?: boolean;
   };
 };
 
@@ -524,6 +534,29 @@ type HTTPAccount = {
   deleted_database_count?: number;
   deleted_workspace_count?: number;
   identity_deleted?: boolean;
+};
+
+type HTTPAdminOverview = {
+  user_count: number;
+  database_count: number;
+  workspace_count: number;
+  agent_count: number;
+  active_agent_count: number;
+  stale_agent_count: number;
+  unavailable_database_count: number;
+  total_bytes: number;
+  file_count: number;
+};
+
+type HTTPAdminUser = {
+  subject: string;
+  label?: string;
+  database_count: number;
+  workspace_count: number;
+  mcp_token_count: number;
+  agent_session_count: number;
+  last_seen_at?: string;
+  sources?: string[];
 };
 
 class HTTPError extends Error {
@@ -1748,6 +1781,36 @@ This workspace was created from the AFS Web UI.
     throw new Error("Account deletion is not available in demo mode.");
   },
 
+  async getAdminOverview() {
+    return {
+      userCount: 0,
+      databaseCount: 0,
+      workspaceCount: 0,
+      agentCount: 0,
+      activeAgentCount: 0,
+      staleAgentCount: 0,
+      unavailableDatabaseCount: 0,
+      totalBytes: 0,
+      fileCount: 0,
+    };
+  },
+
+  async listAdminUsers() {
+    return [] as AFSAdminUser[];
+  },
+
+  async listAdminDatabases() {
+    return deriveDemoDatabases(loadState());
+  },
+
+  async listAdminWorkspaceSummaries() {
+    return demoAFSClient.listWorkspaceSummaries("");
+  },
+
+  async listAdminAgents() {
+    return demoAFSClient.listAgents("");
+  },
+
   resetDemo() {
     const seeded = cloneInitialAFSState();
     saveState(seeded);
@@ -2081,6 +2144,8 @@ function mapAgentSession(
     workspaceName: input.workspace_name ?? workspaceName,
     databaseId: input.database_id ?? databaseId,
     databaseName: input.database_name ?? databaseName,
+    ownerSubject: input.owner_subject,
+    ownerLabel: input.owner_label,
     agentId: input.agent_id,
     clientKind: input.client_kind ?? "",
     afsVersion: input.afs_version ?? "",
@@ -2093,6 +2158,33 @@ function mapAgentSession(
     startedAt: input.started_at,
     lastSeenAt: input.last_seen_at,
     leaseExpiresAt: input.lease_expires_at,
+  };
+}
+
+function mapAdminOverview(input: HTTPAdminOverview): AFSAdminOverview {
+  return {
+    userCount: input.user_count,
+    databaseCount: input.database_count,
+    workspaceCount: input.workspace_count,
+    agentCount: input.agent_count,
+    activeAgentCount: input.active_agent_count,
+    staleAgentCount: input.stale_agent_count,
+    unavailableDatabaseCount: input.unavailable_database_count,
+    totalBytes: input.total_bytes,
+    fileCount: input.file_count,
+  };
+}
+
+function mapAdminUser(input: HTTPAdminUser): AFSAdminUser {
+  return {
+    subject: input.subject,
+    label: input.label,
+    databaseCount: input.database_count,
+    workspaceCount: input.workspace_count,
+    mcpTokenCount: input.mcp_token_count,
+    agentSessionCount: input.agent_session_count,
+    lastSeenAt: input.last_seen_at,
+    sources: input.sources ?? [],
   };
 }
 
@@ -2687,6 +2779,7 @@ const httpAFSClient: AFSClient = {
         name: response.user.name,
         email: response.user.email,
         groups: response.user.groups ?? [],
+        isAdmin: response.user.is_admin,
       },
     } as AFSAuthConfig;
   },
@@ -2714,6 +2807,40 @@ const httpAFSClient: AFSClient = {
     return mapAccount(await requestJSON<HTTPAccount>("/account", {
       method: "DELETE",
     }));
+  },
+
+  async getAdminOverview() {
+    return mapAdminOverview(await requestJSON<HTTPAdminOverview>("/admin/overview"));
+  },
+
+  async listAdminUsers() {
+    const response = await requestJSON<{ items: HTTPAdminUser[] }>("/admin/users");
+    return response.items.map(mapAdminUser);
+  },
+
+  async listAdminDatabases() {
+    const response = await requestJSON<{ items: HTTPDatabase[] }>("/admin/databases");
+    return response.items.map(mapDatabase);
+  },
+
+  async listAdminWorkspaceSummaries() {
+    const response = await requestJSON<{ items: HTTPWorkspaceSummary[] }>("/admin/workspaces");
+    return response.items.map(mapWorkspaceSummary);
+  },
+
+  async listAdminAgents() {
+    const response = await requestJSON<HTTPWorkspaceSessionList>("/admin/agents");
+    return response.items
+      .map((item) =>
+        mapAgentSession(
+          item,
+          item.workspace_id ?? item.workspace,
+          item.workspace_name ?? item.workspace,
+          item.database_id,
+          item.database_name,
+        ),
+      )
+      .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
 
   resetDemo() {

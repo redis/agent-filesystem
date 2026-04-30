@@ -16,7 +16,7 @@ import { Moon, Sun } from "lucide-react";
 import * as S from "./sidebar.styles";
 import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
-import { useAuthSession } from "../foundation/auth-context";
+import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
 import { useColorMode } from "../foundation/theme-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { afsApi } from "../foundation/api/afs";
@@ -44,7 +44,7 @@ function profileInitials(displayName: string) {
 }
 
 /** Routes that remain active even when no databases are configured. */
-const ALWAYS_ENABLED_PATHS = new Set(["/", "/docs", "/agent-guide", "/downloads"]);
+const ALWAYS_ENABLED_PATHS = new Set(["/", "/admin", "/docs", "/agent-guide", "/downloads"]);
 
 const serverVersionQueryOptions = () =>
   queryOptions({
@@ -77,6 +77,9 @@ export function AppSidebar() {
   const serverVersion = useQuery(serverVersionQueryOptions());
 
   const isEmpty = !isLoading && databases.length === 0;
+  const visibleNavigationItems = navigationItems.filter(
+    (item) => item.kind !== "route" || !item.adminOnly || isCloudAdminConfig(auth.config),
+  );
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_LOCALSTORAGE_KEY, JSON.stringify(isExpanded));
@@ -168,7 +171,7 @@ export function AppSidebar() {
         </S.CenterSidebarHeader>
 
         <SideBar.ScrollContainer>
-          <SideBar.ItemsContainer>{navigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
+          <SideBar.ItemsContainer>{visibleNavigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
 
           <S.Spacer />
           <SideBar.Divider fullWidth />

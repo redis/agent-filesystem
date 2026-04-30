@@ -12,6 +12,7 @@ import {
   PieChart,
   Plug,
   RefreshCw,
+  Shield,
   Sparkles,
 } from "lucide-react";
 
@@ -65,3 +66,4 @@ export const LifeBuoyIcon = makeLucideIcon(LifeBuoy, "Life buoy");
 export const SparklesIcon = makeLucideIcon(Sparkles, "Sparkles");
 export const PlugIcon = makeLucideIcon(Plug, "Plug");
 export const RefreshCwIcon = makeLucideIcon(RefreshCw, "Refresh");
+export const ShieldIcon = makeLucideIcon(Shield, "Shield");

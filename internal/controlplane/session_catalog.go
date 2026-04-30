@@ -250,6 +250,74 @@ func (c *workspaceCatalog) ListSessions(ctx context.Context, databaseID string) 
 	return items, rows.Err()
 }
 
+func (c *workspaceCatalog) ListAllSessions(ctx context.Context) ([]sessionCatalogRecord, error) {
+	if c == nil || c.db == nil {
+		return nil, nil
+	}
+
+	rows, err := c.queryContext(ctx, `SELECT
+			session_id,
+			workspace_id,
+			database_id,
+			workspace_name,
+			agent_id,
+			client_kind,
+			afs_version,
+			hostname,
+			os,
+			local_path,
+			readonly,
+			state,
+			started_at,
+			last_seen_at,
+			lease_expires_at,
+			closed_at,
+			close_reason,
+			updated_at
+		FROM session_catalog
+		WHERE state IN (?, ?, ?)
+		ORDER BY last_seen_at DESC, session_id`,
+		workspaceSessionStateStarting,
+		workspaceSessionStateActive,
+		workspaceSessionStateStale,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]sessionCatalogRecord, 0)
+	for rows.Next() {
+		var item sessionCatalogRecord
+		var readonly int
+		if err := rows.Scan(
+			&item.SessionID,
+			&item.WorkspaceID,
+			&item.DatabaseID,
+			&item.WorkspaceName,
+			&item.AgentID,
+			&item.ClientKind,
+			&item.AFSVersion,
+			&item.Hostname,
+			&item.OperatingSystem,
+			&item.LocalPath,
+			&readonly,
+			&item.State,
+			&item.StartedAt,
+			&item.LastSeenAt,
+			&item.LeaseExpiresAt,
+			&item.ClosedAt,
+			&item.CloseReason,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.Readonly = readonly != 0
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (c *workspaceCatalog) GetSession(ctx context.Context, sessionID string) (sessionCatalogRecord, error) {
 	if c == nil || c.db == nil {
 		return sessionCatalogRecord{}, os.ErrNotExist

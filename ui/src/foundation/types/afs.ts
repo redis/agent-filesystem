@@ -9,6 +9,7 @@ export type AFSAuthUser = {
   name?: string;
   email?: string;
   groups?: string[];
+  isAdmin?: boolean;
 };
 
 export type AFSProductMode = "cloud" | "self-hosted";
@@ -166,6 +167,8 @@ export type AFSAgentSession = {
   workspaceName: string;
   databaseId?: string;
   databaseName?: string;
+  ownerSubject?: string;
+  ownerLabel?: string;
   agentId?: string;
   clientKind: string;
   afsVersion: string;
@@ -389,6 +392,29 @@ export type AFSDatabase = {
 
 export type AFSDatabaseListResponse = {
   items: AFSDatabase[];
+};
+
+export type AFSAdminOverview = {
+  userCount: number;
+  databaseCount: number;
+  workspaceCount: number;
+  agentCount: number;
+  activeAgentCount: number;
+  staleAgentCount: number;
+  unavailableDatabaseCount: number;
+  totalBytes: number;
+  fileCount: number;
+};
+
+export type AFSAdminUser = {
+  subject: string;
+  label?: string;
+  databaseCount: number;
+  workspaceCount: number;
+  mcpTokenCount: number;
+  agentSessionCount: number;
+  lastSeenAt?: string;
+  sources: string[];
 };
 
 export type AFSState = {

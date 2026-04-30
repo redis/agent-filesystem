@@ -285,6 +285,8 @@ type workspaceSessionInfo struct {
 	WorkspaceName   string `json:"workspace_name,omitempty"`
 	DatabaseID      string `json:"database_id,omitempty"`
 	DatabaseName    string `json:"database_name,omitempty"`
+	OwnerSubject    string `json:"owner_subject,omitempty"`
+	OwnerLabel      string `json:"owner_label,omitempty"`
 	AgentID         string `json:"agent_id,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`

@@ -83,6 +83,7 @@ function ClerkAuthBridge(props: PropsWithChildren<{ config: AFSAuthConfig }>) {
         name: name ?? undefined,
         email: email ?? undefined,
         groups: props.config.user?.groups,
+        isAdmin: props.config.user?.isAdmin,
       } : undefined,
     };
   }, [isSignedIn, props.config, user]);
@@ -166,4 +167,8 @@ export function useAuthSession() {
     throw new Error("useAuthSession must be used inside AuthProvider.");
   }
   return context;
+}
+
+export function isCloudAdminConfig(config: AFSAuthConfig) {
+  return config.productMode === "cloud" && config.user?.isAdmin === true;
 }

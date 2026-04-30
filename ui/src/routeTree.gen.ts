@@ -22,6 +22,7 @@ import { Route as DatabasesRouteImport } from './routes/databases'
 import { Route as ConnectCliRouteImport } from './routes/connect-cli'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as AgentGuideRouteImport } from './routes/agent-guide'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
@@ -104,6 +105,11 @@ const AgentsRoute = AgentsRouteImport.update({
 const AgentGuideRoute = AgentGuideRouteImport.update({
   id: '/agent-guide',
   path: '/agent-guide',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ActivityRoute = ActivityRouteImport.update({
@@ -201,6 +207,7 @@ const TemplatesInstalledWorkspaceIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/connect-cli': typeof ConnectCliRoute
@@ -234,6 +241,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/connect-cli': typeof ConnectCliRoute
@@ -268,6 +276,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/activity': typeof ActivityRoute
+  '/admin': typeof AdminRoute
   '/agent-guide': typeof AgentGuideRoute
   '/agents': typeof AgentsRoute
   '/connect-cli': typeof ConnectCliRoute
@@ -303,6 +312,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/activity'
+    | '/admin'
     | '/agent-guide'
     | '/agents'
     | '/connect-cli'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/activity'
+    | '/admin'
     | '/agent-guide'
     | '/agents'
     | '/connect-cli'
@@ -369,6 +380,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/activity'
+    | '/admin'
     | '/agent-guide'
     | '/agents'
     | '/connect-cli'
@@ -403,6 +415,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ActivityRoute: typeof ActivityRoute
+  AdminRoute: typeof AdminRoute
   AgentGuideRoute: typeof AgentGuideRoute
   AgentsRoute: typeof AgentsRoute
   ConnectCliRoute: typeof ConnectCliRoute
@@ -521,6 +534,13 @@ declare module '@tanstack/react-router' {
       path: '/agent-guide'
       fullPath: '/agent-guide'
       preLoaderRoute: typeof AgentGuideRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/activity': {
@@ -700,6 +720,7 @@ const WorkspacesRouteWithChildren = WorkspacesRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ActivityRoute: ActivityRoute,
+  AdminRoute: AdminRoute,
   AgentGuideRoute: AgentGuideRoute,
   AgentsRoute: AgentsRoute,
   ConnectCliRoute: ConnectCliRoute,

@@ -129,6 +129,11 @@ export const afsKeys = {
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
   allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
   controlPlaneTokens: () => [...afsKeys.all, "mcp-tokens", "control-plane"] as const,
+  adminOverview: () => [...afsKeys.all, "admin", "overview"] as const,
+  adminUsers: () => [...afsKeys.all, "admin", "users"] as const,
+  adminDatabases: () => [...afsKeys.all, "admin", "databases"] as const,
+  adminWorkspaces: () => [...afsKeys.all, "admin", "workspaces"] as const,
+  adminAgents: () => [...afsKeys.all, "admin", "agents"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -283,6 +288,51 @@ export function controlPlaneTokensQueryOptions() {
   });
 }
 
+export function adminOverviewQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminOverview(),
+    queryFn: () => afsApi.getAdminOverview(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminUsersQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminUsers(),
+    queryFn: () => afsApi.listAdminUsers(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminDatabasesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminDatabases(),
+    queryFn: () => afsApi.listAdminDatabases(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminWorkspacesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminWorkspaces(),
+    queryFn: () => afsApi.listAdminWorkspaceSummaries(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminAgentsQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminAgents(),
+    queryFn: () => afsApi.listAdminAgents(),
+    staleTime: AGENT_QUERY_STALE_MS,
+    gcTime: AGENT_QUERY_GC_MS,
+  });
+}
+
 export function useDatabases(enabled = true) {
   return useQuery({
     ...databasesQueryOptions(),
@@ -332,6 +382,41 @@ export function useAllMCPAccessTokens(enabled = true) {
 export function useControlPlaneTokens(enabled = true) {
   return useQuery({
     ...controlPlaneTokensQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminOverview(enabled = true) {
+  return useQuery({
+    ...adminOverviewQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminUsers(enabled = true) {
+  return useQuery({
+    ...adminUsersQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminDatabases(enabled = true) {
+  return useQuery({
+    ...adminDatabasesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminWorkspaceSummaries(enabled = true) {
+  return useQuery({
+    ...adminWorkspacesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminAgents(enabled = true) {
+  return useQuery({
+    ...adminAgentsQueryOptions(),
     enabled,
   });
 }

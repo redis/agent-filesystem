@@ -9,6 +9,7 @@ import {
   LifeBuoyIcon,
   PieChartIcon,
   PlugIcon,
+  ShieldIcon,
   SparklesIcon,
 } from "../components/lucide-icons";
 
@@ -20,6 +21,7 @@ export type NavigationRouteItem = {
   path: string;
   icon: IconType;
   title?: string;
+  adminOnly?: boolean;
 };
 
 export type NavigationPanelItem = {
@@ -43,6 +45,7 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Agents", path: "/agents", icon: BotIcon },
   { kind: "route", label: "MCP", path: "/mcp", icon: PlugIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
+  { kind: "route", label: "Admin", path: "/admin", icon: ShieldIcon, adminOnly: true },
   {
     kind: "route",
     label: "Events",
@@ -97,6 +100,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
 
   if (pathname.startsWith("/agent-guide")) {
     return { page: "Agent Guide" };
+  }
+
+  if (pathname.startsWith("/admin")) {
+    return { page: "Admin", subtitle: "Cloud operator visibility across users, databases, workspaces, and agents." };
   }
 
   if (pathname.startsWith("/databases")) {

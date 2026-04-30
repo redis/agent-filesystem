@@ -362,6 +362,57 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/admin/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		if !requireCloudAdmin(w, r) {
+			return
+		}
+
+		resource := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/admin/"), "/")
+		switch resource {
+		case "overview":
+			response, err := manager.AdminOverview(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case "users":
+			response, err := manager.AdminUsers(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case "databases":
+			response, err := manager.AdminDatabases(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case "workspaces":
+			response, err := manager.AdminWorkspaces(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case "agents":
+			response, err := manager.AdminAgents(r.Context())
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, os.ErrNotExist)
+		}
+	})
+
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -755,6 +806,15 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 	})
 
 	return mux
+}
+
+func requireCloudAdmin(w http.ResponseWriter, r *http.Request) bool {
+	identity, ok := AuthIdentityFromContext(r.Context())
+	if !ok || !isCloudAdminIdentity(identity) {
+		writeError(w, ErrForbidden)
+		return false
+	}
+	return true
 }
 
 func newClientMux(manager *DatabaseManager) *http.ServeMux {
@@ -1817,6 +1877,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status = http.StatusNotImplemented
 	case errors.Is(err, ErrOnboardingTokenInvalid):
 		status = http.StatusUnauthorized
+	case errors.Is(err, ErrForbidden):
+		status = http.StatusForbidden
 	case errors.Is(err, ErrFreeTierLimitReached):
 		status = http.StatusPaymentRequired
 	case strings.Contains(strings.ToLower(err.Error()), "already exists"):

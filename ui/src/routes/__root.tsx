@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import styled from "styled-components";
 import { Loader } from "@redis-ui/components";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
-import { useAuthSession } from "../foundation/auth-context";
+import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
 import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
@@ -25,9 +25,11 @@ function isAuthPath(pathname: string) {
 function RouteWarmup() {
   const router = useRouter();
   const location = useLocation();
+  const auth = useAuthSession();
 
   useEffect(() => {
     const targets = [...navigationItems, ...bottomNavigationItems]
+      .filter((item) => !item.adminOnly || isCloudAdminConfig(auth.config))
       .map((item) => item.path)
       .filter((path, index, values) => path !== location.pathname && values.indexOf(path) === index);
 
@@ -44,7 +46,7 @@ function RouteWarmup() {
 
     const timeout = window.setTimeout(preload, 250);
     return () => window.clearTimeout(timeout);
-  }, [location.pathname, router]);
+  }, [auth.config, location.pathname, router]);
 
   return null;
 }
