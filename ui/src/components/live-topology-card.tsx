@@ -108,10 +108,18 @@ const AgentNode = styled.button<{ $i: number }>`
   animation-delay: ${({ $i }) => $i * 0.06}s;
   opacity: 0;
 
+  [data-theme="dark"] & {
+    border-color: var(--afs-ok, #dcff1e);
+  }
+
   &:hover {
     border-color: var(--afs-accent, #dc2626);
     box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
     transform: translateY(-1px);
+  }
+
+  [data-theme="dark"] &:hover {
+    border-color: var(--afs-ok, #dcff1e);
   }
 
   &:focus-visible {
@@ -226,10 +234,18 @@ const WorkspaceNode = styled.button<{ $i: number }>`
   animation-delay: ${({ $i }) => 0.18 + $i * 0.06}s;
   opacity: 0;
 
+  [data-theme="dark"] & {
+    border-color: var(--afs-ok, #dcff1e);
+  }
+
   &:hover {
     border-color: var(--afs-accent, #dc2626);
     box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
     transform: translateY(-1px);
+  }
+
+  [data-theme="dark"] &:hover {
+    border-color: var(--afs-ok, #dcff1e);
   }
 
   &:focus-visible {
