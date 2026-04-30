@@ -27,36 +27,45 @@ export type AFSOptions = {
   headers?: Record<string, string>;
 };
 
-export type RepoRef = {
+export type WorkspaceRef = {
   name: string;
 };
+
+export type RepoRef = WorkspaceRef;
 
 export type MountMode = "ro" | "rw" | "rw-checkpoint";
 
 export type MountInput = {
-  repos: RepoRef[];
+  workspaces?: WorkspaceRef[];
+  repos?: RepoRef[];
   mode?: MountMode;
   tokenName?: string;
 };
 
-export type CreateRepoInput = {
+export type CreateWorkspaceInput = {
   name: string;
   description?: string;
   templateSlug?: string;
 };
 
-export type ForkRepoInput = {
+export type CreateRepoInput = CreateWorkspaceInput;
+
+export type ForkWorkspaceInput = {
   source: string;
   name: string;
 };
 
+export type ForkRepoInput = ForkWorkspaceInput;
+
 export type CheckpointInput = {
-  repo: string;
+  repo?: string;
+  workspace?: string;
   checkpoint?: string;
 };
 
 export type RestoreCheckpointInput = {
-  repo: string;
+  repo?: string;
+  workspace?: string;
   checkpoint: string;
 };
 
@@ -81,7 +90,7 @@ export type MCPToolResult<T> = {
   isError?: boolean;
 };
 
-export type Repo = {
+export type Workspace = {
   id?: string;
   name: string;
   description?: string;
@@ -90,6 +99,8 @@ export type Repo = {
   template_slug?: string;
   [key: string]: unknown;
 };
+
+export type Repo = Workspace;
 
 export type Checkpoint = {
   id: string;
@@ -146,8 +157,10 @@ export class AFSError extends Error {
 }
 
 export class AFS {
-  readonly repo: RepoClient;
-  readonly repos: RepoClient;
+  readonly workspace: WorkspaceClient;
+  readonly workspaces: WorkspaceClient;
+  readonly repo: WorkspaceClient;
+  readonly repos: WorkspaceClient;
   readonly checkpoint: CheckpointClient;
   readonly checkpoints: CheckpointClient;
   readonly fs: FSClient;
@@ -156,8 +169,10 @@ export class AFS {
 
   constructor(options: AFSOptions = {}) {
     this.controlPlane = new MCPHttpClient(options);
-    this.repo = new RepoClient(this.controlPlane);
-    this.repos = this.repo;
+    this.workspace = new WorkspaceClient(this.controlPlane);
+    this.workspaces = this.workspace;
+    this.repo = this.workspace;
+    this.repos = this.workspace;
     this.checkpoint = new CheckpointClient(this.controlPlane);
     this.checkpoints = this.checkpoint;
     this.fs = new FSClient(this.controlPlane);
@@ -168,62 +183,72 @@ export class AFS {
   }
 }
 
-export class RepoClient {
+export class WorkspaceClient {
   constructor(private readonly mcp: MCPHttpClient) {}
 
-  async create(input: CreateRepoInput): Promise<Repo> {
-    return this.mcp.callTool<Repo>("workspace_create", {
+  async create(input: CreateWorkspaceInput): Promise<Workspace> {
+    return this.mcp.callTool<Workspace>("workspace_create", {
       name: input.name,
       description: input.description,
       template_slug: input.templateSlug,
     });
   }
 
-  async list(): Promise<Repo[]> {
-    const response = await this.mcp.callTool<{ items?: Repo[] } | Repo[]>("workspace_list");
+  async list(): Promise<Workspace[]> {
+    const response = await this.mcp.callTool<{ items?: Workspace[] } | Workspace[]>("workspace_list");
     return Array.isArray(response) ? response : response.items ?? [];
   }
 
-  async get(repo: string | RepoRef): Promise<Repo> {
-    return this.mcp.callTool<Repo>("workspace_get", {
-      workspace: typeof repo === "string" ? repo : repo.name,
+  async get(workspace: string | WorkspaceRef): Promise<Workspace> {
+    return this.mcp.callTool<Workspace>("workspace_get", {
+      workspace: typeof workspace === "string" ? workspace : workspace.name,
     });
   }
 
-  async fork(input: ForkRepoInput): Promise<{ source: string; workspace: string; created: boolean }> {
+  async fork(input: ForkWorkspaceInput): Promise<{ source: string; workspace: string; created: boolean }> {
     return this.mcp.callTool("workspace_fork", {
       source: input.source,
       name: input.name,
     });
   }
 
-  async delete(repo: string | RepoRef): Promise<{ workspace: string; deleted: boolean }> {
+  async delete(workspace: string | WorkspaceRef): Promise<{ workspace: string; deleted: boolean }> {
     return this.mcp.callTool("workspace_delete", {
-      workspace: typeof repo === "string" ? repo : repo.name,
+      workspace: typeof workspace === "string" ? workspace : workspace.name,
     });
   }
 }
 
+export { WorkspaceClient as RepoClient };
+
 export class CheckpointClient {
   constructor(private readonly mcp: MCPHttpClient) {}
 
-  async list(repo: string | RepoRef): Promise<Checkpoint[]> {
+  async list(workspace: string | WorkspaceRef): Promise<Checkpoint[]> {
     const response = await this.mcp.callTool<{ checkpoints?: Checkpoint[] }>("checkpoint_list", {
-      workspace: typeof repo === "string" ? repo : repo.name,
+      workspace: typeof workspace === "string" ? workspace : workspace.name,
     });
     return response.checkpoints ?? [];
   }
 
   async create(input: CheckpointInput): Promise<{ workspace: string; checkpoint: string; created: boolean }> {
+    const workspace = input.workspace ?? input.repo;
+    if (!workspace) {
+      throw new AFSError("checkpoint.create requires a workspace");
+    }
     return this.mcp.callTool("checkpoint_create", {
-      workspace: input.repo,
+      workspace,
       checkpoint: input.checkpoint,
     });
   }
 
   async restore(input: RestoreCheckpointInput): Promise<{ workspace: string; checkpoint: string; restored: boolean }> {
+    const workspace = input.workspace ?? input.repo;
+    if (!workspace) {
+      throw new AFSError("checkpoint.restore requires a workspace");
+    }
     return this.mcp.callTool("checkpoint_restore", {
-      workspace: input.repo,
+      workspace,
       checkpoint: input.checkpoint,
     });
   }
@@ -233,22 +258,23 @@ export class FSClient {
   constructor(private readonly controlPlane: MCPHttpClient) {}
 
   async mount(input: MountInput): Promise<MountedFS> {
-    if (!input.repos.length) {
-      throw new AFSError("fs.mount requires at least one repo");
+    const workspaces = input.workspaces ?? input.repos ?? [];
+    if (!workspaces.length) {
+      throw new AFSError("fs.mount requires at least one workspace");
     }
     const profile = profileForMode(input.mode ?? "rw");
-    const mounted: MountedRepo[] = [];
-    for (const repo of input.repos) {
+    const mounted: MountedWorkspace[] = [];
+    for (const workspace of workspaces) {
       const issued = await this.controlPlane.callTool<MCPTokenIssueResponse>("mcp_token_issue", {
-        workspace: repo.name,
-        name: input.tokenName ?? `redis-afs-sdk ${repo.name}`,
+        workspace: workspace.name,
+        name: input.tokenName ?? `redis-afs ${workspace.name}`,
         profile,
       });
       if (!issued.token) {
-        throw new AFSError(`mcp_token_issue did not return a token for ${repo.name}`, { payload: issued });
+        throw new AFSError(`mcp_token_issue did not return a token for ${workspace.name}`, { payload: issued });
       }
       mounted.push({
-        name: repo.name,
+        name: workspace.name,
         token: issued.token,
         client: new MCPHttpClient({
           apiKey: issued.token,
@@ -262,35 +288,39 @@ export class FSClient {
   }
 }
 
-type MountedRepo = {
+type MountedWorkspace = {
   name: string;
   token: string;
   client: MCPHttpClient;
 };
 
 type ResolvedMountPath = {
-  repo: MountedRepo;
+  workspace: MountedWorkspace;
   remotePath: string;
 };
 
 export class MountedFS {
-  private readonly reposByName = new Map<string, MountedRepo>();
+  private readonly workspacesByName = new Map<string, MountedWorkspace>();
   private localRootPath?: string;
 
   constructor(
-    private readonly repos: MountedRepo[],
+    private readonly workspaces: MountedWorkspace[],
     readonly options: { mode: MountMode },
   ) {
-    for (const repo of repos) {
-      if (this.reposByName.has(repo.name)) {
-        throw new AFSError(`repo ${repo.name} is mounted more than once`);
+    for (const workspace of workspaces) {
+      if (this.workspacesByName.has(workspace.name)) {
+        throw new AFSError(`workspace ${workspace.name} is mounted more than once`);
       }
-      this.reposByName.set(repo.name, repo);
+      this.workspacesByName.set(workspace.name, workspace);
     }
   }
 
   get repoNames(): string[] {
-    return this.repos.map((repo) => repo.name);
+    return this.workspaceNames;
+  }
+
+  get workspaceNames(): string[] {
+    return this.workspaces.map((workspace) => workspace.name);
   }
 
   get localRoot(): string | undefined {
@@ -299,7 +329,7 @@ export class MountedFS {
 
   async readFile(path: string): Promise<string> {
     const resolved = this.resolvePath(path);
-    const response = await resolved.repo.client.callTool<FileReadResponse>("file_read", {
+    const response = await resolved.workspace.client.callTool<FileReadResponse>("file_read", {
       path: resolved.remotePath,
     });
     if (response.binary) {
@@ -314,12 +344,12 @@ export class MountedFS {
   async writeFile(path: string, content: string | Uint8Array): Promise<void> {
     const resolved = this.resolvePath(path);
     const text = typeof content === "string" ? content : Buffer.from(content).toString("utf8");
-    await resolved.repo.client.callTool("file_write", {
+    await resolved.workspace.client.callTool("file_write", {
       path: resolved.remotePath,
       content: text,
     });
     if (this.localRootPath) {
-      const localPath = this.localPathFor(resolved.repo.name, resolved.remotePath);
+      const localPath = this.localPathFor(resolved.workspace.name, resolved.remotePath);
       await mkdir(nodePath.dirname(localPath), { recursive: true });
       await nodeWriteFile(localPath, text, "utf8");
     }
@@ -327,7 +357,7 @@ export class MountedFS {
 
   async listFiles(path = "/", depth = 1): Promise<FileListItem[]> {
     const resolved = this.resolvePath(path);
-    const response = await resolved.repo.client.callTool<{ entries?: FileListItem[] }>("file_list", {
+    const response = await resolved.workspace.client.callTool<{ entries?: FileListItem[] }>("file_list", {
       path: resolved.remotePath,
       depth,
     });
@@ -336,7 +366,7 @@ export class MountedFS {
 
   async glob(pattern: string, options: { path?: string; kind?: "file" | "dir" | "symlink" | "any"; limit?: number } = {}) {
     const resolved = this.resolvePath(options.path ?? "/");
-    return resolved.repo.client.callTool("file_glob", {
+    return resolved.workspace.client.callTool("file_glob", {
       path: resolved.remotePath,
       pattern,
       kind: options.kind,
@@ -346,7 +376,7 @@ export class MountedFS {
 
   async grep(pattern: string, options: Record<string, unknown> = {}) {
     const resolved = this.resolvePath(String(options.path ?? "/"));
-    return resolved.repo.client.callTool("file_grep", {
+    return resolved.workspace.client.callTool("file_grep", {
       ...options,
       path: resolved.remotePath,
       pattern,
@@ -355,11 +385,14 @@ export class MountedFS {
 
   async checkpoint(name?: string): Promise<{ workspace: string; checkpoint: string; created: boolean }[]> {
     const out = [];
-    for (const repo of this.repos) {
+    for (const workspace of this.workspaces) {
       out.push(
-        await repo.client.callTool<{ workspace: string; checkpoint: string; created: boolean }>("checkpoint_create", {
-          checkpoint: name,
-        }),
+        await workspace.client.callTool<{ workspace: string; checkpoint: string; created: boolean }>(
+          "checkpoint_create",
+          {
+            checkpoint: name,
+          },
+        ),
       );
     }
     return out;
@@ -371,11 +404,11 @@ export class MountedFS {
 
   async syncFromRemote(): Promise<string> {
     const root = await this.ensureLocalRoot();
-    for (const repo of this.repos) {
-      const repoRoot = nodePath.join(root, repo.name);
-      await rm(repoRoot, { recursive: true, force: true });
-      await mkdir(repoRoot, { recursive: true });
-      await this.copyRemoteDirectory(repo, "/", repoRoot);
+    for (const workspace of this.workspaces) {
+      const workspaceRoot = nodePath.join(root, workspace.name);
+      await rm(workspaceRoot, { recursive: true, force: true });
+      await mkdir(workspaceRoot, { recursive: true });
+      await this.copyRemoteDirectory(workspace, "/", workspaceRoot);
     }
     return root;
   }
@@ -384,12 +417,12 @@ export class MountedFS {
     if (!this.localRootPath) {
       return;
     }
-    for (const repo of this.repos) {
-      const repoRoot = nodePath.join(this.localRootPath, repo.name);
-      if (!(await exists(repoRoot))) {
+    for (const workspace of this.workspaces) {
+      const workspaceRoot = nodePath.join(this.localRootPath, workspace.name);
+      if (!(await exists(workspaceRoot))) {
         continue;
       }
-      await this.copyLocalDirectory(repo, repoRoot, "/");
+      await this.copyLocalDirectory(workspace, workspaceRoot, "/");
     }
   }
 
@@ -401,12 +434,12 @@ export class MountedFS {
     this.localRootPath = undefined;
   }
 
-  mapAbsoluteRepoPaths(command: string): string {
+  mapAbsoluteWorkspacePaths(command: string): string {
     if (!this.localRootPath) {
       return command;
     }
     let out = command;
-    const names = this.repoNames.sort((a, b) => b.length - a.length);
+    const names = this.workspaceNames.sort((a, b) => b.length - a.length);
     for (const name of names) {
       const remotePrefix = `/${name}`;
       const localPrefix = nodePath.join(this.localRootPath, name).replaceAll("\\", "/");
@@ -415,23 +448,27 @@ export class MountedFS {
     return out;
   }
 
+  mapAbsoluteRepoPaths(command: string): string {
+    return this.mapAbsoluteWorkspacePaths(command);
+  }
+
   private resolvePath(rawPath: string): ResolvedMountPath {
     const normalized = normalizeRemotePath(rawPath);
-    const names = this.repoNames.sort((a, b) => b.length - a.length);
+    const names = this.workspaceNames.sort((a, b) => b.length - a.length);
     for (const name of names) {
       const prefix = `/${name}`;
       if (normalized === prefix) {
-        return { repo: this.reposByName.get(name)!, remotePath: "/" };
+        return { workspace: this.workspacesByName.get(name)!, remotePath: "/" };
       }
       if (normalized.startsWith(`${prefix}/`)) {
         return {
-          repo: this.reposByName.get(name)!,
+          workspace: this.workspacesByName.get(name)!,
           remotePath: normalized.slice(prefix.length) || "/",
         };
       }
     }
-    if (this.repos.length === 1) {
-      return { repo: this.repos[0]!, remotePath: normalized };
+    if (this.workspaces.length === 1) {
+      return { workspace: this.workspaces[0]!, remotePath: normalized };
     }
     throw new AFSError(`path ${rawPath} must start with one of: ${names.map((name) => `/${name}`).join(", ")}`);
   }
@@ -443,16 +480,16 @@ export class MountedFS {
     return this.localRootPath;
   }
 
-  private localPathFor(repoName: string, remotePath: string): string {
+  private localPathFor(workspaceName: string, remotePath: string): string {
     if (!this.localRootPath) {
       throw new AFSError("mount has not been materialized locally yet");
     }
     const relative = normalizeRemotePath(remotePath).replace(/^\/+/, "");
-    return nodePath.join(this.localRootPath, repoName, relative);
+    return nodePath.join(this.localRootPath, workspaceName, relative);
   }
 
-  private async copyRemoteDirectory(repo: MountedRepo, remotePath: string, localPath: string): Promise<void> {
-    const response = await repo.client.callTool<{ entries?: FileListItem[] }>("file_list", {
+  private async copyRemoteDirectory(workspace: MountedWorkspace, remotePath: string, localPath: string): Promise<void> {
+    const response = await workspace.client.callTool<{ entries?: FileListItem[] }>("file_list", {
       path: remotePath,
       depth: 1,
     });
@@ -460,11 +497,11 @@ export class MountedFS {
       const target = nodePath.join(localPath, entry.name);
       if (entry.kind === "dir") {
         await mkdir(target, { recursive: true });
-        await this.copyRemoteDirectory(repo, entry.path, target);
+        await this.copyRemoteDirectory(workspace, entry.path, target);
       } else if (entry.kind === "symlink" && entry.target) {
         await symlink(entry.target, target).catch(async () => undefined);
       } else if (entry.kind === "file") {
-        const file = await repo.client.callTool<FileReadResponse>("file_read", { path: entry.path });
+        const file = await workspace.client.callTool<FileReadResponse>("file_read", { path: entry.path });
         if (!file.binary) {
           await mkdir(nodePath.dirname(target), { recursive: true });
           await nodeWriteFile(target, file.content ?? "", "utf8");
@@ -473,16 +510,20 @@ export class MountedFS {
     }
   }
 
-  private async copyLocalDirectory(repo: MountedRepo, localDirectory: string, remoteDirectory: string): Promise<void> {
+  private async copyLocalDirectory(
+    workspace: MountedWorkspace,
+    localDirectory: string,
+    remoteDirectory: string,
+  ): Promise<void> {
     const entries = await readdir(localDirectory, { withFileTypes: true });
     for (const entry of entries) {
       const localPath = nodePath.join(localDirectory, entry.name);
       const remotePath = posixPath.join(remoteDirectory, entry.name);
       if (entry.isDirectory()) {
-        await this.copyLocalDirectory(repo, localPath, remotePath);
+        await this.copyLocalDirectory(workspace, localPath, remotePath);
       } else if (entry.isFile()) {
         const content = await nodeReadFile(localPath, "utf8");
-        await repo.client.callTool("file_write", {
+        await workspace.client.callTool("file_write", {
           path: normalizeRemotePath(remotePath),
           content,
         });
@@ -496,7 +537,7 @@ export class BashRunner {
 
   async exec(command: string, options: BashExecOptions = {}): Promise<BashResult> {
     const root = await this.fs.syncFromRemote();
-    const mappedCommand = this.fs.mapAbsoluteRepoPaths(command);
+    const mappedCommand = this.fs.mapAbsoluteWorkspacePaths(command);
     const result = await runShell(mappedCommand, {
       cwd: options.cwd ? nodePath.resolve(root, options.cwd) : root,
       env: options.env,

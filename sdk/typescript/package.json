@@ -1,7 +1,27 @@
 {
-  "name": "@redis/afs-sdk",
+  "name": "redis-afs",
   "version": "0.1.0",
   "description": "TypeScript SDK for the AFS control plane and agent filesystem mounts.",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/redis/agent-filesystem/tree/main/sdk/typescript",
+  "bugs": {
+    "url": "https://github.com/redis/agent-filesystem/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/redis/agent-filesystem.git",
+    "directory": "sdk/typescript"
+  },
+  "keywords": [
+    "afs",
+    "agent-filesystem",
+    "redis",
+    "sdk",
+    "typescript",
+    "mcp",
+    "workspace",
+    "checkpoint"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,15 +33,17 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "api-docs.md"
   ],
   "publishConfig": {
-    "access": "public"
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
+    "pack:dry-run": "npm pack --dry-run --json",
     "prepack": "npm run build"
   },
   "engines": {

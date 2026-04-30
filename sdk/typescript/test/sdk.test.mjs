@@ -7,7 +7,7 @@ test("normalizes MCP endpoints", () => {
   assert.equal(_testing.normalizeMCPEndpoint("https://afs.cloud/mcp"), "https://afs.cloud/mcp");
 });
 
-test("repo.create calls the control-plane MCP tool", async () => {
+test("workspace.create calls the control-plane MCP tool", async () => {
   const calls = [];
   const afs = new AFS({
     apiKey: "test",
@@ -28,13 +28,13 @@ test("repo.create calls the control-plane MCP tool", async () => {
     },
   });
 
-  const repo = await afs.repo.create({ name: "foobar" });
+  const workspace = await afs.workspace.create({ name: "foobar" });
 
-  assert.equal(repo.name, "foobar");
+  assert.equal(workspace.name, "foobar");
   assert.equal(calls[0].params.name, "workspace_create");
 });
 
-test("single-repo mounts allow repo-relative paths", async () => {
+test("single-workspace mounts allow workspace-relative paths", async () => {
   const files = new Map();
   const fakeClient = {
     async callTool(name, args = {}) {
@@ -54,4 +54,5 @@ test("single-repo mounts allow repo-relative paths", async () => {
 
   assert.equal(files.get("/src/README.md"), "hello");
   assert.equal(await fs.readFile("/foobar/src/README.md"), "hello");
+  assert.deepEqual(fs.workspaceNames, ["foobar"]);
 });
