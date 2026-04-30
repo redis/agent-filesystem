@@ -146,7 +146,7 @@ touch "$stage_dir/internal/uistatic/dist/.keep"
 # (so `afs --version` reports the real tag on shipped binaries) and into
 # the staged control-plane source tree (so the Vercel build — which runs
 # its own `go build` without our Makefile's ldflags — still picks them up).
-afs_version="$(cd "$repo_root" && git describe --tags --dirty --always 2>/dev/null || echo dev)"
+afs_version="$(cd "$repo_root" && AFS_VERSION_BASE="${AFS_VERSION_BASE:-v0.1.0}" scripts/resolve-afs-version.sh 2>/dev/null || echo dev)"
 afs_commit="$(cd "$repo_root" && git rev-parse --short=7 HEAD 2>/dev/null || true)"
 afs_build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 afs_version_pkg="github.com/redis/agent-filesystem/internal/version"
