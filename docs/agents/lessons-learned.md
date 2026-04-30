@@ -8,6 +8,10 @@ future agents should not have to rediscover.
 - If UI assets matter, do not rely on plain `go build ./cmd/afs-control-plane`.
   Use a path that rebuilds embedded UI assets such as `make afs-control-plane`,
   `make web-build`, or `make embed-ui`.
+- Tenant-scoped client routes must run through the same auth middleware as
+  admin routes before they resolve workspace names. Otherwise bearer tokens do
+  not attach an auth subject and duplicate workspace-name errors can expose
+  cross-tenant workspace/database identifiers.
 - `cmd/afs/auth_commands.go` treats cloud-vs-self-managed login as a hostname
   allowlist problem. When the public cloud domain changes, update that list
   alongside the default cloud URL or `afs login --url <new-cloud-host>` will

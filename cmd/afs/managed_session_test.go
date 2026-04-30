@@ -47,3 +47,21 @@ func TestManagedWorkspaceSessionRequestUsesManagedMetadata(t *testing.T) {
 		t.Fatal("expected OperatingSystem to be populated")
 	}
 }
+
+func TestManagedWorkspaceSessionRefPrefersOpaqueWorkspaceID(t *testing.T) {
+	t.Helper()
+
+	got := managedWorkspaceSessionRef(config{CurrentWorkspaceID: " ws_123 "}, " getting-started ")
+	if got != "ws_123" {
+		t.Fatalf("managedWorkspaceSessionRef = %q, want %q", got, "ws_123")
+	}
+}
+
+func TestManagedWorkspaceSessionRefFallsBackToWorkspaceName(t *testing.T) {
+	t.Helper()
+
+	got := managedWorkspaceSessionRef(config{}, " getting-started ")
+	if got != "getting-started" {
+		t.Fatalf("managedWorkspaceSessionRef = %q, want %q", got, "getting-started")
+	}
+}

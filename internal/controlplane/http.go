@@ -64,7 +64,6 @@ func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
 
 func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.Handler {
 	root := http.NewServeMux()
-	root.Handle("/v1/client/", http.StripPrefix("/v1/client", newClientMux(manager)))
 
 	if opts.Auth != nil && manager != nil {
 		opts.Auth.AttachCLITokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
@@ -106,6 +105,12 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 			}, nil
 		})
 	}
+
+	client := http.Handler(newClientMux(manager))
+	if opts.Auth != nil {
+		client = opts.Auth.Middleware(client)
+	}
+	root.Handle("/v1/client/", http.StripPrefix("/v1/client", client))
 
 	admin := authWrappedAdminMux(manager, opts.Auth)
 	if manager != nil {
@@ -1892,5 +1897,18 @@ func writeError(w http.ResponseWriter, err error) {
 	case strings.Contains(strings.ToLower(err.Error()), "not allowed"):
 		status = http.StatusMethodNotAllowed
 	}
-	writeJSON(w, status, map[string]string{"error": err.Error()})
+	writeJSON(w, status, map[string]string{"error": publicErrorMessage(err)})
+}
+
+func publicErrorMessage(err error) string {
+	switch {
+	case err == nil:
+		return "internal server error"
+	case errors.Is(err, ErrAmbiguousDatabase):
+		return ErrAmbiguousDatabase.Error() + "; select a database or set a default database first"
+	case errors.Is(err, ErrAmbiguousWorkspace):
+		return ErrAmbiguousWorkspace.Error() + "; use a workspace id or database-scoped route"
+	default:
+		return err.Error()
+	}
 }

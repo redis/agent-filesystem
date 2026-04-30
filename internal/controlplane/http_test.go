@@ -1855,8 +1855,12 @@ func TestHTTPWorkspaceFirstRouteRejectsAmbiguousWorkspaceNames(t *testing.T) {
 		t.Fatalf("GET /v1/workspaces/repo status = %d, want %d, body=%s", resp.StatusCode, http.StatusBadRequest, body)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "multiple databases") {
-		t.Fatalf("GET /v1/workspaces/repo body = %q, want ambiguity guidance", string(body))
+	bodyText := string(body)
+	if !strings.Contains(bodyText, "control plane workspace is ambiguous") {
+		t.Fatalf("GET /v1/workspaces/repo body = %q, want ambiguity guidance", bodyText)
+	}
+	if strings.Contains(bodyText, created.ID) || strings.Contains(bodyText, secondary.ID) || strings.Contains(bodyText, secondary.Name) {
+		t.Fatalf("GET /v1/workspaces/repo body = %q, leaked workspace or database identifiers", bodyText)
 	}
 }
 

@@ -92,6 +92,32 @@ func TestTrustedHeaderAuthProtectsAdminRoutes(t *testing.T) {
 	}
 }
 
+func TestTrustedHeaderAuthLeavesClientHealthPublic(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/client/healthz")
+	if err != nil {
+		t.Fatalf("GET /v1/client/healthz returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/client/healthz status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+}
+
 func TestCLIExchangeTokenAuthenticatesProtectedRoutes(t *testing.T) {
 	manager, _ := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{
@@ -166,6 +192,118 @@ func TestCLIExchangeTokenAuthenticatesProtectedRoutes(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("authorized GET /v1/workspaces status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	clientSessionURL := server.URL + "/v1/client/workspaces/" + exchange.WorkspaceID + "/sessions"
+	resp, err = http.Post(clientSessionURL, "application/json", nil)
+	if err != nil {
+		t.Fatalf("unauthorized POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unauthorized POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusUnauthorized, body)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, clientSessionURL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest(client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+exchange.AccessToken)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("authorized POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("authorized POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+}
+
+func TestClientWorkspaceSessionRoutesUseBearerTenantForDuplicateNames(t *testing.T) {
+	manager, databaseID := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+		TrustedNameHeader: "X-Forwarded-Name",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	baseProfile := manager.profiles[databaseID]
+	aliceCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "alice@example.com",
+		Name:    "Alice",
+		Email:   "alice@example.com",
+	})
+	bobCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "bob@example.com",
+		Name:    "Bob",
+		Email:   "bob@example.com",
+	})
+
+	aliceDatabase, err := manager.UpsertDatabase(aliceCtx, "", upsertDatabaseRequest{
+		Name:      "Alice Sessions DB",
+		RedisAddr: baseProfile.RedisAddr,
+		RedisDB:   1,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDatabase(alice) returned error: %v", err)
+	}
+	bobDatabase, err := manager.UpsertDatabase(bobCtx, "", upsertDatabaseRequest{
+		Name:      "Bob Sessions DB",
+		RedisAddr: baseProfile.RedisAddr,
+		RedisDB:   2,
+	})
+	if err != nil {
+		t.Fatalf("UpsertDatabase(bob) returned error: %v", err)
+	}
+	aliceWorkspace, err := manager.CreateWorkspace(aliceCtx, aliceDatabase.ID, createWorkspaceRequest{
+		Name:   "shared-repo",
+		Source: sourceRef{Kind: SourceBlank},
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace(alice) returned error: %v", err)
+	}
+	if _, err := manager.CreateWorkspace(bobCtx, bobDatabase.ID, createWorkspaceRequest{
+		Name:   "shared-repo",
+		Source: sourceRef{Kind: SourceBlank},
+	}); err != nil {
+		t.Fatalf("CreateWorkspace(bob) returned error: %v", err)
+	}
+	accessToken, err := manager.createCLIAccessTokenRecord(context.Background(), "alice@example.com", "Alice", aliceDatabase.ID, aliceWorkspace.ID, aliceWorkspace.Name)
+	if err != nil {
+		t.Fatalf("createCLIAccessTokenRecord returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/shared-repo/sessions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(client session) returned error: %v", err)
+	}
+	if session.DatabaseID != aliceDatabase.ID {
+		t.Fatalf("session database_id = %q, want %q", session.DatabaseID, aliceDatabase.ID)
 	}
 }
 

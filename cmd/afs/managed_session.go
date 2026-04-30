@@ -35,8 +35,8 @@ func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSess
 
 func startManagedWorkspaceSessionLifecycle(cfg config, workspace, sessionID string, heartbeatEvery time.Duration) (func(), error) {
 	sessionID = strings.TrimSpace(sessionID)
-	workspace = strings.TrimSpace(workspace)
-	if sessionID == "" || workspace == "" || heartbeatEvery <= 0 {
+	workspaceRef := managedWorkspaceSessionRef(cfg, workspace)
+	if sessionID == "" || workspaceRef == "" || heartbeatEvery <= 0 {
 		return func() {}, nil
 	}
 
@@ -57,7 +57,7 @@ func startManagedWorkspaceSessionLifecycle(cfg config, workspace, sessionID stri
 				return
 			case <-ticker.C:
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_, err := service.HeartbeatWorkspaceSession(ctx, workspace, sessionID)
+				_, err := service.HeartbeatWorkspaceSession(ctx, workspaceRef, sessionID)
 				cancel()
 				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					fmt.Fprintf(os.Stderr, "afs sync: session heartbeat failed: %v\n", err)
@@ -69,14 +69,14 @@ func startManagedWorkspaceSessionLifecycle(cfg config, workspace, sessionID stri
 	return func() {
 		close(stopCh)
 		<-doneCh
-		closeManagedWorkspaceSessionWithService(service, closeFn, workspace, sessionID)
+		closeManagedWorkspaceSessionWithService(service, closeFn, workspaceRef, sessionID)
 	}, nil
 }
 
 func closeManagedWorkspaceSession(cfg config, workspace, sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
-	workspace = strings.TrimSpace(workspace)
-	if sessionID == "" || workspace == "" {
+	workspaceRef := managedWorkspaceSessionRef(cfg, workspace)
+	if sessionID == "" || workspaceRef == "" {
 		return
 	}
 
@@ -85,7 +85,7 @@ func closeManagedWorkspaceSession(cfg config, workspace, sessionID string) {
 		fmt.Fprintf(os.Stderr, "afs sync: session cleanup failed to connect to control plane: %v\n", err)
 		return
 	}
-	closeManagedWorkspaceSessionWithService(service, closeFn, workspace, sessionID)
+	closeManagedWorkspaceSessionWithService(service, closeFn, workspaceRef, sessionID)
 }
 
 func closeManagedWorkspaceSessionWithService(service afsControlPlane, closeFn func(), workspace, sessionID string) {
@@ -95,6 +95,13 @@ func closeManagedWorkspaceSessionWithService(service afsControlPlane, closeFn fu
 	if err := service.CloseWorkspaceSession(ctx, workspace, sessionID); err != nil && !errors.Is(err, os.ErrNotExist) {
 		fmt.Fprintf(os.Stderr, "afs sync: session cleanup failed: %v\n", err)
 	}
+}
+
+func managedWorkspaceSessionRef(cfg config, workspace string) string {
+	if id := strings.TrimSpace(cfg.CurrentWorkspaceID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(workspace)
 }
 
 func configFromState(st state) config {

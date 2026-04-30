@@ -161,13 +161,13 @@ func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, wor
 
 func (c *httpControlPlaneClient) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error) {
 	var out controlplane.WorkspaceSessionInfo
-	path := c.clientWorkspacePath(workspace, "sessions", sessionID, "heartbeat")
+	path := c.clientWorkspaceSessionPath(workspace, "sessions", sessionID, "heartbeat")
 	err := c.doJSON(ctx, http.MethodPost, path, nil, &out, http.StatusOK)
 	return out, err
 }
 
 func (c *httpControlPlaneClient) CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
-	return c.doJSON(ctx, http.MethodDelete, c.clientWorkspacePath(workspace, "sessions", sessionID), nil, nil, http.StatusNoContent)
+	return c.doJSON(ctx, http.MethodDelete, c.clientWorkspaceSessionPath(workspace, "sessions", sessionID), nil, nil, http.StatusNoContent)
 }
 
 func (c *httpControlPlaneClient) ListChangelog(ctx context.Context, workspace string, req controlplane.ChangelogListRequest) (controlplane.ChangelogListResponse, error) {
@@ -341,6 +341,13 @@ func (c *httpControlPlaneClient) workspacePath(workspace string, more ...string)
 
 func (c *httpControlPlaneClient) clientWorkspacePath(workspace string, more ...string) string {
 	return c.unscopedPath("/v1/client/workspaces", append([]string{workspace}, more...)...)
+}
+
+func (c *httpControlPlaneClient) clientWorkspaceSessionPath(workspace string, more ...string) string {
+	if c.hasScopedDatabase() {
+		return c.clientScopedPath(append([]string{"workspaces", workspace}, more...)...)
+	}
+	return c.clientWorkspacePath(workspace, more...)
 }
 
 func (c *httpControlPlaneClient) unscopedPath(prefix string, parts ...string) string {
