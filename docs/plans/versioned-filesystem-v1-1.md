@@ -44,6 +44,17 @@ Implemented in the current branch:
   level.
 - `afs checkpoint diff [workspace] <base> <target>` and
   `afs checkpoint diff [workspace] <checkpoint> --active` are implemented.
+- `afs checkpoint show [workspace] <checkpoint>` is implemented with
+  human-readable default output and `--json` for structured agent use.
+- `checkpoint diff --json` is implemented for agents, while default CLI diff
+  remains human-readable and includes bounded text hunks when available.
+- `GET /v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}` and its
+  database-scoped equivalent expose complete checkpoint detail metadata.
+- Diff responses include text diffs for UTF-8 file content under 256 KiB and
+  4000 combined lines; binary/oversized content returns a skip reason.
+- Checkpoint audit rows and file changelog rows now dual-write to
+  `workspace:events`, exposed through workspace, database, and global event
+  API routes.
 - The UI Checkpoints tab has compare-with-active and restore-preview flows
   backed by the diff API.
 - Restore creates a safety checkpoint when active state has uncheckpointed
@@ -58,23 +69,14 @@ Implemented in the current branch:
 
 Partially implemented:
 
-- Checkpoint metadata is richer for create/restore, but the full checkpoint
-  detail DTO is not complete.
-- Diff is manifest/file-level only. It reports create, update, delete, rename,
-  metadata, size, byte delta, and hashes where available.
 - The UI diff renders a reviewable changed-file list and summary stats, but not
   inline text diffs.
-- Restore is safe and scriptable in the CLI, but the final UX polish around
-  explanatory copy and edge cases should be reviewed after a fresh end-to-end
-  run.
+- Restore is safe and scriptable in the CLI. A local control-plane smoke with
+  an isolated Redis server and temp sync folder verifies checkpoint create,
+  show, diff JSON, restore, event API rows, and sync-folder rematerialization.
 
 Not implemented yet:
 
-- `afs checkpoint show`.
-- `GET /v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}` detail route.
-- JSON output for checkpoint diff/show, if we want it in v1.1.
-- Text diff generation with size and binary guards.
-- Unified history/event model for checkpoints, sessions, and file events.
 - Session-boundary auto-checkpoints.
 - Fork review and accept/reject flow.
 - Path-history UI.
@@ -544,20 +546,20 @@ storage rewrite.
 - [ ] Final pass on CLI/UI confirmation wording after end-to-end restore smoke
   testing.
 
-### Phase 1: Backend Checkpoint DTOs And Diff - partially complete
+### Phase 1: Backend Checkpoint DTOs And Diff - complete
 
-- [ ] Add complete richer checkpoint DTOs backed by existing savepoints.
+- [x] Add complete richer checkpoint DTOs backed by existing savepoints.
 - [x] Add manifest diff service method.
 - [x] Add API route for diff.
 - [x] Add tests for checkpoint-to-checkpoint and checkpoint-to-active diff.
-- [ ] Add text diff generation with binary and size guards.
+- [x] Add text diff generation with binary and size guards.
 
-### Phase 2: CLI Diff And Show - partially complete
+### Phase 2: CLI Diff And Show - complete
 
-- [ ] Add `checkpoint show`.
+- [x] Add `checkpoint show`.
 - [x] Add `checkpoint diff`.
 - [x] Keep output concise and scriptable.
-- [ ] Add JSON output if current command conventions support it.
+- [x] Add JSON output for `checkpoint diff` and `checkpoint show`.
 
 ### Phase 3: Safe Restore - mostly complete
 
@@ -568,8 +570,8 @@ storage rewrite.
 - [x] Coordinate CLI sync restore by stopping/restarting the managed sync
   daemon and rematerializing the local folder.
 - [x] Update CLI and API tests.
-- [ ] Run a final manual restore smoke test against the local control plane and
-  UI with a real `~/afs` sync folder.
+- [x] Run a final manual restore smoke test against a local control plane and
+  isolated temp sync folder.
 
 ### Phase 4: UI Checkpoints And Diff - partially complete
 
@@ -579,9 +581,9 @@ storage rewrite.
 - [ ] Add text diff view if content diffs ship in v1.1.
 - [ ] Final visual/browser QA against the Redis UI shell.
 
-### Phase 5: History Integration - not started
+### Phase 5: History Integration - partially complete
 
-- [ ] Wire checkpoint rows into unified history.
+- [x] Wire checkpoint and file rows into unified event storage/API.
 - [ ] Add expandable checkpoint rows.
 - [ ] Add path-history follow-up if event indexing is ready.
 
@@ -666,16 +668,17 @@ Resolved during implementation:
 - Public naming is checkpoint-only for CLI, API, MCP, UI, and docs.
 - Safety checkpoints before restore are default-on.
 - Automatic session checkpoints remain opt-in.
+- Text diff limits are 256 KiB and 4000 combined lines for v1.1.
+- `checkpoint diff` and `checkpoint show` default to human-readable output and
+  support `--json` for agents.
 
 Still open:
 
 1. Should session-close auto-checkpoints ship in v1.1, or wait until after
    manual checkpoint history and diff are live?
-2. What is the first text-diff size limit?
-3. Should `checkpoint diff` and `checkpoint show` include JSON output in v1.1?
-4. Should fork acceptance replace parent active state in v1.1, or should fork
+2. Should fork acceptance replace parent active state in v1.1, or should fork
    review stop at compare/delete/manual copy?
-5. Should path history be part of v1.1, or a follow-up after unified events?
+3. Should path history be part of v1.1, or a follow-up after unified events?
 
 ## Recommended V1.1 Cut
 
@@ -687,16 +690,17 @@ Already covered in the current branch:
 4. UI Checkpoints tab redesign and file-level diff/restore preview.
 5. Safety checkpoint before restore.
 6. Root-replace invalidation and local sync rematerialization after restore.
+7. Checkpoint detail API and CLI `checkpoint show`.
+8. Human-readable default plus `--json` for checkpoint diff/show.
+9. Bounded text diff hunks for API/CLI.
+10. Unified event stream API for checkpoint and file rows.
 
 Remaining before calling v1.1 complete:
 
-1. Complete checkpoint detail metadata and expose checkpoint detail through API
-   and CLI `checkpoint show`.
-2. Decide whether v1.1 needs JSON output for checkpoint diff/show.
-3. Either add text diff generation with binary/size guards or explicitly defer
-   content diffs from the first v1.1 cut.
-4. Wire checkpoint lifecycle rows into the unified history/event surface.
-5. Run final local control-plane, CLI, sync-folder, and UI restore smoke tests.
+1. Render inline text diffs in the UI if we want visible content hunks in the
+   Checkpoints tab for v1.1.
+2. Run browser-level visual QA for the Checkpoints tab once inline text-diff UI
+   is added or explicitly deferred.
 
 Defer:
 

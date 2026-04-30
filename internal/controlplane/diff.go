@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"strconv"
@@ -13,6 +14,12 @@ const (
 	DiffOpDelete   = "delete"
 	DiffOpRename   = "rename"
 	DiffOpMetadata = "metadata"
+)
+
+const (
+	diffTextMaxBytes = 256 * 1024
+	diffTextMaxLines = 4000
+	diffTextContext  = 3
 )
 
 type DiffState struct {
@@ -36,18 +43,42 @@ type DiffSummary struct {
 }
 
 type DiffEntry struct {
-	Op                string `json:"op"`
-	Path              string `json:"path"`
-	PreviousPath      string `json:"previous_path,omitempty"`
-	Kind              string `json:"kind,omitempty"`
-	PreviousKind      string `json:"previous_kind,omitempty"`
-	SizeBytes         int64  `json:"size_bytes,omitempty"`
-	PreviousSizeBytes int64  `json:"previous_size_bytes,omitempty"`
-	DeltaBytes        int64  `json:"delta_bytes,omitempty"`
-	ContentHash       string `json:"content_hash,omitempty"`
-	PreviousHash      string `json:"previous_hash,omitempty"`
-	Mode              uint32 `json:"mode,omitempty"`
-	PreviousMode      uint32 `json:"previous_mode,omitempty"`
+	Op                string    `json:"op"`
+	Path              string    `json:"path"`
+	PreviousPath      string    `json:"previous_path,omitempty"`
+	Kind              string    `json:"kind,omitempty"`
+	PreviousKind      string    `json:"previous_kind,omitempty"`
+	SizeBytes         int64     `json:"size_bytes,omitempty"`
+	PreviousSizeBytes int64     `json:"previous_size_bytes,omitempty"`
+	DeltaBytes        int64     `json:"delta_bytes,omitempty"`
+	ContentHash       string    `json:"content_hash,omitempty"`
+	PreviousHash      string    `json:"previous_hash,omitempty"`
+	Mode              uint32    `json:"mode,omitempty"`
+	PreviousMode      uint32    `json:"previous_mode,omitempty"`
+	TextDiff          *TextDiff `json:"text_diff,omitempty"`
+}
+
+type TextDiff struct {
+	Available     bool           `json:"available"`
+	SkippedReason string         `json:"skipped_reason,omitempty"`
+	Language      string         `json:"language,omitempty"`
+	MaxBytes      int            `json:"max_bytes,omitempty"`
+	Hunks         []TextDiffHunk `json:"hunks,omitempty"`
+}
+
+type TextDiffHunk struct {
+	OldStart int            `json:"old_start"`
+	OldLines int            `json:"old_lines"`
+	NewStart int            `json:"new_start"`
+	NewLines int            `json:"new_lines"`
+	Lines    []TextDiffLine `json:"lines"`
+}
+
+type TextDiffLine struct {
+	Kind    string `json:"kind"`
+	OldLine int    `json:"old_line,omitempty"`
+	NewLine int    `json:"new_line,omitempty"`
+	Text    string `json:"text"`
 }
 
 type WorkspaceDiffResponse struct {
@@ -59,75 +90,92 @@ type WorkspaceDiffResponse struct {
 	Entries       []DiffEntry `json:"entries"`
 }
 
+type diffManifestSnapshot struct {
+	Meta     WorkspaceMeta
+	State    DiffState
+	Manifest Manifest
+	Blobs    map[string][]byte
+}
+
 func (s *Service) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (WorkspaceDiffResponse, error) {
 	baseView = defaultString(strings.TrimSpace(baseView), "head")
 	headView = defaultString(strings.TrimSpace(headView), "working-copy")
 
-	meta, baseState, baseManifest, err := s.resolveDiffManifestForView(ctx, workspace, baseView)
+	baseSnapshot, err := s.resolveDiffManifestSnapshot(ctx, workspace, baseView)
 	if err != nil {
 		return WorkspaceDiffResponse{}, err
 	}
-	_, headState, headManifest, err := s.resolveDiffManifestForView(ctx, workspace, headView)
+	headSnapshot, err := s.resolveDiffManifestSnapshot(ctx, workspace, headView)
 	if err != nil {
 		return WorkspaceDiffResponse{}, err
 	}
-	entries := diffManifests(baseManifest, headManifest)
+	entries := diffManifests(baseSnapshot.Manifest, headSnapshot.Manifest)
+	entries = s.enrichDiffEntriesWithText(ctx, workspaceStorageID(baseSnapshot.Meta), baseSnapshot, headSnapshot, entries)
 	return WorkspaceDiffResponse{
-		WorkspaceID:   workspaceStorageID(meta),
-		WorkspaceName: meta.Name,
-		Base:          baseState,
-		Head:          headState,
+		WorkspaceID:   workspaceStorageID(baseSnapshot.Meta),
+		WorkspaceName: baseSnapshot.Meta.Name,
+		Base:          baseSnapshot.State,
+		Head:          headSnapshot.State,
 		Summary:       summarizeDiffEntries(entries),
 		Entries:       entries,
 	}, nil
 }
 
-func (s *Service) resolveDiffManifestForView(ctx context.Context, workspace, rawView string) (WorkspaceMeta, DiffState, Manifest, error) {
+func (s *Service) resolveDiffManifestSnapshot(ctx context.Context, workspace, rawView string) (diffManifestSnapshot, error) {
 	view, err := parseViewRef(rawView)
 	if err != nil {
-		return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+		return diffManifestSnapshot{}, err
 	}
 	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
 	if err != nil {
-		return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+		return diffManifestSnapshot{}, err
 	}
 	meta = applyWorkspaceMetaDefaults(s.cfg, meta)
 	storageID := workspaceStorageID(meta)
 
 	if view.Kind == "working-copy" {
 		if _, _, _, err := EnsureWorkspaceRoot(ctx, s.store, storageID); err != nil {
-			return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+			return diffManifestSnapshot{}, err
 		}
-		manifestValue, _, _, _, _, err := BuildManifestFromWorkspaceRoot(ctx, s.store.rdb, storageID, "working-copy")
+		manifestValue, blobs, _, _, _, err := BuildManifestFromWorkspaceRoot(ctx, s.store.rdb, storageID, "working-copy")
 		if err != nil {
-			return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+			return diffManifestSnapshot{}, err
 		}
 		manifestHash, err := HashManifest(manifestValue)
 		if err != nil {
-			return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+			return diffManifestSnapshot{}, err
 		}
 		stats := manifestStats(manifestValue)
-		return meta, DiffState{
-			View:         viewName(view, ""),
-			ManifestHash: manifestHash,
-			FileCount:    stats.FileCount,
-			FolderCount:  stats.DirCount,
-			TotalBytes:   stats.TotalBytes,
-		}, manifestValue, nil
+		return diffManifestSnapshot{
+			Meta: meta,
+			State: DiffState{
+				View:         viewName(view, ""),
+				ManifestHash: manifestHash,
+				FileCount:    stats.FileCount,
+				FolderCount:  stats.DirCount,
+				TotalBytes:   stats.TotalBytes,
+			},
+			Manifest: manifestValue,
+			Blobs:    blobs,
+		}, nil
 	}
 
 	_, checkpoint, manifestValue, err := s.resolveManifestForView(ctx, storageID, view)
 	if err != nil {
-		return WorkspaceMeta{}, DiffState{}, Manifest{}, err
+		return diffManifestSnapshot{}, err
 	}
-	return meta, DiffState{
-		View:         viewName(view, checkpoint.ID),
-		CheckpointID: checkpoint.ID,
-		ManifestHash: checkpoint.ManifestHash,
-		FileCount:    checkpoint.FileCount,
-		FolderCount:  checkpoint.DirCount,
-		TotalBytes:   checkpoint.TotalBytes,
-	}, manifestValue, nil
+	return diffManifestSnapshot{
+		Meta: meta,
+		State: DiffState{
+			View:         viewName(view, checkpoint.ID),
+			CheckpointID: checkpoint.ID,
+			ManifestHash: checkpoint.ManifestHash,
+			FileCount:    checkpoint.FileCount,
+			FolderCount:  checkpoint.DirCount,
+			TotalBytes:   checkpoint.TotalBytes,
+		},
+		Manifest: manifestValue,
+	}, nil
 }
 
 func diffManifests(base, head Manifest) []DiffEntry {
@@ -329,4 +377,180 @@ func summarizeDiffEntries(entries []DiffEntry) DiffSummary {
 		}
 	}
 	return summary
+}
+
+func (s *Service) enrichDiffEntriesWithText(ctx context.Context, storageID string, base, head diffManifestSnapshot, entries []DiffEntry) []DiffEntry {
+	for i := range entries {
+		entry := &entries[i]
+		switch entry.Op {
+		case DiffOpCreate, DiffOpUpdate, DiffOpDelete:
+		default:
+			continue
+		}
+		var (
+			oldEntry ManifestEntry
+			newEntry ManifestEntry
+			hadOld   bool
+			hasNew   bool
+		)
+		if entry.Op != DiffOpCreate {
+			oldEntry, hadOld = base.Manifest.Entries[entry.Path]
+		}
+		if entry.Op != DiffOpDelete {
+			newEntry, hasNew = head.Manifest.Entries[entry.Path]
+		}
+		entry.TextDiff = s.textDiffForEntries(ctx, storageID, entry.Path, oldEntry, hadOld, base.Blobs, newEntry, hasNew, head.Blobs)
+	}
+	return entries
+}
+
+func (s *Service) textDiffForEntries(ctx context.Context, storageID, p string, oldEntry ManifestEntry, hadOld bool, oldBlobs map[string][]byte, newEntry ManifestEntry, hasNew bool, newBlobs map[string][]byte) *TextDiff {
+	if hadOld && oldEntry.Type != "file" && oldEntry.Type != "symlink" {
+		return nil
+	}
+	if hasNew && newEntry.Type != "file" && newEntry.Type != "symlink" {
+		return nil
+	}
+	if hadOld && oldEntry.Type == "file" && oldEntry.Size > diffTextMaxBytes {
+		return skippedTextDiff("too_large")
+	}
+	if hasNew && newEntry.Type == "file" && newEntry.Size > diffTextMaxBytes {
+		return skippedTextDiff("too_large")
+	}
+
+	oldData, oldOK, oldReason := s.diffEntryData(ctx, storageID, oldEntry, hadOld, oldBlobs)
+	if !oldOK {
+		return skippedTextDiff(oldReason)
+	}
+	newData, newOK, newReason := s.diffEntryData(ctx, storageID, newEntry, hasNew, newBlobs)
+	if !newOK {
+		return skippedTextDiff(newReason)
+	}
+	if len(oldData)+len(newData) > diffTextMaxBytes {
+		return skippedTextDiff("too_large")
+	}
+	if isBinary(oldData) || isBinary(newData) {
+		return skippedTextDiff("binary")
+	}
+	oldLines := splitDiffLines(string(oldData))
+	newLines := splitDiffLines(string(newData))
+	if len(oldLines)+len(newLines) > diffTextMaxLines {
+		return skippedTextDiff("too_many_lines")
+	}
+	hunks := buildTextDiffHunks(oldLines, newLines)
+	if len(hunks) == 0 {
+		return nil
+	}
+	return &TextDiff{
+		Available: true,
+		Language:  language(p),
+		MaxBytes:  diffTextMaxBytes,
+		Hunks:     hunks,
+	}
+}
+
+func (s *Service) diffEntryData(ctx context.Context, storageID string, entry ManifestEntry, ok bool, blobs map[string][]byte) ([]byte, bool, string) {
+	if !ok {
+		return nil, true, ""
+	}
+	if entry.Type == "symlink" {
+		return []byte(entry.Target), true, ""
+	}
+	if entry.Type != "file" {
+		return nil, false, "unsupported_kind"
+	}
+	data, err := ManifestEntryData(entry, func(blobID string) ([]byte, error) {
+		if data, ok := blobs[blobID]; ok {
+			return data, nil
+		}
+		return s.store.GetBlob(ctx, storageID, blobID)
+	})
+	if err != nil {
+		return nil, false, "content_unavailable"
+	}
+	return data, true, ""
+}
+
+func skippedTextDiff(reason string) *TextDiff {
+	return &TextDiff{
+		Available:     false,
+		SkippedReason: reason,
+		MaxBytes:      diffTextMaxBytes,
+	}
+}
+
+func splitDiffLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	raw := strings.SplitAfter(text, "\n")
+	if len(raw) > 0 && raw[len(raw)-1] == "" {
+		raw = raw[:len(raw)-1]
+	}
+	for i := range raw {
+		raw[i] = strings.TrimSuffix(raw[i], "\n")
+		raw[i] = strings.TrimSuffix(raw[i], "\r")
+	}
+	return raw
+}
+
+func buildTextDiffHunks(oldLines, newLines []string) []TextDiffHunk {
+	if bytes.Equal([]byte(strings.Join(oldLines, "\n")), []byte(strings.Join(newLines, "\n"))) {
+		return nil
+	}
+	prefix := 0
+	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldLines)-prefix && suffix < len(newLines)-prefix &&
+		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
+		suffix++
+	}
+
+	contextStart := maxInt(0, prefix-diffTextContext)
+	oldChangeEnd := len(oldLines) - suffix
+	newChangeEnd := len(newLines) - suffix
+	oldContextEnd := minInt(len(oldLines), oldChangeEnd+diffTextContext)
+	newContextEnd := minInt(len(newLines), newChangeEnd+diffTextContext)
+
+	lines := make([]TextDiffLine, 0, (oldContextEnd-contextStart)+(newContextEnd-prefix))
+	for i := contextStart; i < prefix; i++ {
+		lines = append(lines, TextDiffLine{Kind: "context", OldLine: i + 1, NewLine: i + 1, Text: oldLines[i]})
+	}
+	for i := prefix; i < oldChangeEnd; i++ {
+		lines = append(lines, TextDiffLine{Kind: "delete", OldLine: i + 1, Text: oldLines[i]})
+	}
+	for i := prefix; i < newChangeEnd; i++ {
+		lines = append(lines, TextDiffLine{Kind: "insert", NewLine: i + 1, Text: newLines[i]})
+	}
+	for offset := 0; offset < oldContextEnd-oldChangeEnd && offset < newContextEnd-newChangeEnd; offset++ {
+		oldIndex := oldChangeEnd + offset
+		newIndex := newChangeEnd + offset
+		lines = append(lines, TextDiffLine{Kind: "context", OldLine: oldIndex + 1, NewLine: newIndex + 1, Text: oldLines[oldIndex]})
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	return []TextDiffHunk{{
+		OldStart: contextStart + 1,
+		OldLines: oldContextEnd - contextStart,
+		NewStart: contextStart + 1,
+		NewLines: newContextEnd - contextStart,
+		Lines:    lines,
+	}}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

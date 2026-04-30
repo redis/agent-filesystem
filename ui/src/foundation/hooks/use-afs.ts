@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { afsApi } from "../api/afs";
-import type { ListActivityInput, ListChangelogInput } from "../api/afs";
+import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../api/afs";
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
@@ -49,6 +49,20 @@ export const afsKeys = {
       "activity",
       input.databaseId ?? "all",
       input.limit ?? 50,
+      input.until ?? "",
+    ] as const,
+  events: (input: ListEventsInput) =>
+    [
+      ...afsKeys.all,
+      "events",
+      input.databaseId ?? "all",
+      input.workspaceId ?? "all",
+      input.kind ?? "all",
+      input.sessionId ?? "all",
+      input.path ?? "all",
+      input.limit ?? 100,
+      input.direction ?? "desc",
+      input.since ?? "",
       input.until ?? "",
     ] as const,
   changelog: (input: ListChangelogInput) =>
@@ -175,6 +189,15 @@ export function activityItemsQueryOptions(databaseId: string | null, limit: numb
   return queryOptions({
     queryKey: [...afsKeys.activity({ databaseId: databaseId ?? undefined, limit }), "items"] as const,
     queryFn: () => afsApi.listActivity(databaseId ?? "", limit),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function eventsQueryOptions(input: ListEventsInput) {
+  return queryOptions({
+    queryKey: afsKeys.events(input),
+    queryFn: () => afsApi.listEvents(input),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
   });
@@ -335,6 +358,15 @@ export function useActivityPage(input: ListActivityInput, enabled = true) {
   return useQuery(
     {
       ...activityQueryOptions(input),
+      enabled,
+    },
+  );
+}
+
+export function useEvents(input: ListEventsInput, enabled = true) {
+  return useQuery(
+    {
+      ...eventsQueryOptions(input),
       enabled,
     },
   );

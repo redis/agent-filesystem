@@ -396,6 +396,24 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		req, err := eventListRequestFromQuery(r, 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListAllEvents(r.Context(), req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	})
+
 	mux.HandleFunc("/v1/changes", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -611,6 +629,22 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 				Limit: limit,
 				Until: strings.TrimSpace(r.URL.Query().Get("until")),
 			})
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case rest == "events":
+			if r.Method != http.MethodGet {
+				writeError(w, fmt.Errorf("%s not allowed", r.Method))
+				return
+			}
+			req, err := eventListRequestFromQuery(r, 100)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			response, err := manager.ListGlobalEvents(r.Context(), databaseID, req)
 			if err != nil {
 				writeError(w, err)
 				return
@@ -951,6 +985,22 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	case strings.Contains(workspacePath, "/checkpoints/"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "checkpoints" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.GetCheckpoint(r.Context(), databaseID, parts[0], parts[2])
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	case strings.HasSuffix(workspacePath, "/checkpoints"):
 		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
 		switch r.Method {
@@ -1070,6 +1120,23 @@ func handleWorkspaceRoute(
 			Limit: limit,
 			Until: strings.TrimSpace(r.URL.Query().Get("until")),
 		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/events"):
+		workspace := strings.TrimSuffix(workspacePath, "/events")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		req, err := eventListRequestFromQuery(r, 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListWorkspaceEvents(r.Context(), databaseID, workspace, req)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1294,6 +1361,22 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, result)
+	case strings.Contains(workspacePath, "/checkpoints/"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 3 || parts[1] != "checkpoints" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.GetResolvedCheckpoint(r.Context(), parts[0], parts[2])
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	case strings.HasSuffix(workspacePath, "/checkpoints"):
 		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
 		switch r.Method {
@@ -1410,6 +1493,23 @@ func handleResolvedWorkspaceRoute(
 			Limit: limit,
 			Until: strings.TrimSpace(r.URL.Query().Get("until")),
 		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/events"):
+		workspace := strings.TrimSuffix(workspacePath, "/events")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		req, err := eventListRequestFromQuery(r, 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.ListResolvedWorkspaceEvents(r.Context(), workspace, req)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1676,6 +1776,22 @@ func queryInt(r *http.Request, key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("invalid %s value %q", key, raw)
 	}
 	return value, nil
+}
+
+func eventListRequestFromQuery(r *http.Request, fallbackLimit int) (eventListRequest, error) {
+	limit, err := queryInt(r, "limit", fallbackLimit)
+	if err != nil {
+		return eventListRequest{}, err
+	}
+	return eventListRequest{
+		Kind:      strings.TrimSpace(r.URL.Query().Get("kind")),
+		SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+		Path:      strings.TrimSpace(r.URL.Query().Get("path")),
+		Since:     strings.TrimSpace(r.URL.Query().Get("since")),
+		Until:     strings.TrimSpace(r.URL.Query().Get("until")),
+		Limit:     limit,
+		Reverse:   strings.EqualFold(r.URL.Query().Get("direction"), "desc"),
+	}, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

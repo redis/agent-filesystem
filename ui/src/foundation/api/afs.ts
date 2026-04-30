@@ -15,11 +15,14 @@ import type {
   GetWorkspaceTreeInput,
   AFSActivityEvent,
   AFSActivityListResponse,
+  AFSEventEntry,
+  AFSEventListResponse,
   AFSClientMode,
   AFSFile,
   AFSFileContent,
   AFSDiffEntry,
   AFSDiffOp,
+  AFSTextDiff,
   AFSSavepoint,
   AFSState,
   AFSTreeItem,
@@ -69,6 +72,7 @@ type AFSClient = {
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
   listActivityPage: (input: ListActivityInput) => Promise<AFSActivityListResponse>;
+  listEvents: (input: ListEventsInput) => Promise<AFSEventListResponse>;
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
@@ -105,6 +109,18 @@ export type ListActivityInput = {
   databaseId?: string;
   limit?: number;
   until?: string;
+};
+
+export type ListEventsInput = {
+  databaseId?: string;
+  workspaceId?: string;
+  kind?: string;
+  sessionId?: string;
+  path?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  direction?: "asc" | "desc";
 };
 
 type HTTPChangelogEntry = {
@@ -202,6 +218,7 @@ type HTTPCheckpoint = {
   id: string;
   name: string;
   author?: string;
+  description?: string;
   note?: string;
   kind?: string;
   source?: string;
@@ -273,6 +290,38 @@ type HTTPWorkspaceDetail = {
 
 type HTTPActivityList = {
   items: HTTPActivity[];
+  next_cursor?: string;
+};
+
+type HTTPEventEntry = {
+  id: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  database_id?: string;
+  database_name?: string;
+  created_at?: string;
+  kind: string;
+  op: string;
+  source?: string;
+  actor?: string;
+  session_id?: string;
+  user?: string;
+  label?: string;
+  agent_version?: string;
+  hostname?: string;
+  path?: string;
+  prev_path?: string;
+  size_bytes?: number;
+  delta_bytes?: number;
+  content_hash?: string;
+  prev_hash?: string;
+  mode?: number;
+  checkpoint_id?: string;
+  extras?: Record<string, string>;
+};
+
+type HTTPEventList = {
+  items: HTTPEventEntry[];
   next_cursor?: string;
 };
 
@@ -353,6 +402,29 @@ type HTTPDiffSummary = {
   bytes_removed: number;
 };
 
+type HTTPTextDiffLine = {
+  kind: "context" | "delete" | "insert";
+  old_line?: number;
+  new_line?: number;
+  text: string;
+};
+
+type HTTPTextDiffHunk = {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  lines: HTTPTextDiffLine[];
+};
+
+type HTTPTextDiff = {
+  available: boolean;
+  skipped_reason?: string;
+  language?: string;
+  max_bytes?: number;
+  hunks?: HTTPTextDiffHunk[];
+};
+
 type HTTPDiffEntry = {
   op: AFSDiffOp;
   path: string;
@@ -366,6 +438,7 @@ type HTTPDiffEntry = {
   previous_hash?: string;
   mode?: number;
   previous_mode?: number;
+  text_diff?: HTTPTextDiff;
 };
 
 type HTTPWorkspaceDiffResponse = {
@@ -817,6 +890,62 @@ function fileSizeBytes(file: AFSFile) {
   return new TextEncoder().encode(file.content).length;
 }
 
+function demoTextDiff(previous: AFSFile | undefined, next: AFSFile | undefined): AFSTextDiff {
+  const previousText = previous?.content ?? "";
+  const nextText = next?.content ?? "";
+  if (new TextEncoder().encode(previousText + nextText).length > 128 * 1024) {
+    return {
+      available: false,
+      skippedReason: "file is larger than the demo text diff limit",
+      maxBytes: 128 * 1024,
+    };
+  }
+  const previousLines = previousText === "" ? [] : previousText.split(/\r?\n/);
+  const nextLines = nextText === "" ? [] : nextText.split(/\r?\n/);
+  let prefix = 0;
+  while (
+    prefix < previousLines.length &&
+    prefix < nextLines.length &&
+    previousLines[prefix] === nextLines[prefix]
+  ) {
+    prefix += 1;
+  }
+  let suffix = 0;
+  while (
+    suffix < previousLines.length - prefix &&
+    suffix < nextLines.length - prefix &&
+    previousLines[previousLines.length - 1 - suffix] === nextLines[nextLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  const removed = previousLines.slice(prefix, previousLines.length - suffix);
+  const inserted = nextLines.slice(prefix, nextLines.length - suffix);
+  return {
+    available: true,
+    language: next?.language ?? previous?.language ?? "text",
+    hunks: [
+      {
+        oldStart: prefix + 1,
+        oldLines: removed.length,
+        newStart: prefix + 1,
+        newLines: inserted.length,
+        lines: [
+          ...removed.map((text, index) => ({
+            kind: "delete" as const,
+            oldLine: prefix + index + 1,
+            text,
+          })),
+          ...inserted.map((text, index) => ({
+            kind: "insert" as const,
+            newLine: prefix + index + 1,
+            text,
+          })),
+        ],
+      },
+    ],
+  };
+}
+
 function demoDiffState(workspace: AFSWorkspace, view: AFSWorkspaceView, files: AFSFile[]) {
   const checkpointId =
     view === "head"
@@ -948,6 +1077,7 @@ function compareDemoFiles(
       kind: "file",
       sizeBytes,
       deltaBytes: sizeBytes,
+      textDiff: demoTextDiff(undefined, file),
     });
   }
 
@@ -960,6 +1090,7 @@ function compareDemoFiles(
       previousKind: "file",
       previousSizeBytes,
       deltaBytes: previousSizeBytes * -1,
+      textDiff: demoTextDiff(file, undefined),
     });
   }
 
@@ -977,6 +1108,7 @@ function compareDemoFiles(
         sizeBytes,
         previousSizeBytes,
         deltaBytes: sizeBytes - previousSizeBytes,
+        textDiff: demoTextDiff(previous, next),
       });
       continue;
     }
@@ -1106,6 +1238,28 @@ function allActivityForState(state: AFSState) {
 
 function activityForState(state: AFSState, limit: number) {
   return allActivityForState(state).slice(0, limit);
+}
+
+function allEventsForState(state: AFSState): AFSEventEntry[] {
+  return allActivityForState(state).map((event) => {
+    const [kind, op] = event.kind.split(".", 2);
+    return {
+      id: event.id,
+      workspaceId: event.workspaceId,
+      workspaceName: event.workspaceName,
+      databaseId: event.databaseId,
+      databaseName: event.databaseName,
+      createdAt: event.createdAt,
+      kind: event.scope || kind || "workspace",
+      op: op || event.kind,
+      source: "demo",
+      actor: event.actor,
+      extras: {
+        title: event.title,
+        detail: event.detail,
+      },
+    };
+  });
 }
 
 const demoAFSClient: AFSClient = {
@@ -1441,6 +1595,24 @@ This workspace was created from the AFS Web UI.
     };
   },
 
+  async listEvents(input: ListEventsInput) {
+    await wait();
+    const state = loadState();
+    const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
+    const events = allEventsForState(state)
+      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
+      .filter((event) => input.workspaceId == null || input.workspaceId === "" || event.workspaceId === input.workspaceId)
+      .filter((event) => input.kind == null || input.kind === "" || event.kind === input.kind)
+      .filter((event) => input.sessionId == null || input.sessionId === "" || event.sessionId === input.sessionId)
+      .filter((event) => input.path == null || input.path === "" || event.path === input.path)
+      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
+    const page = events.slice(0, limit);
+    return {
+      items: page,
+      nextCursor: page.length > 0 ? page[page.length - 1].id : undefined,
+    };
+  },
+
   async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
     await wait();
     return { entries: [] };
@@ -1740,13 +1912,65 @@ function mapActivityList(
   };
 }
 
+function mapEventEntry(
+  input: HTTPEventEntry,
+  scope?: {
+    workspaceId?: string;
+    workspaceName?: string;
+    databaseId?: string;
+    databaseName?: string;
+  },
+): AFSEventEntry {
+  return {
+    id: input.id,
+    workspaceId: input.workspace_id ?? scope?.workspaceId,
+    workspaceName: input.workspace_name ?? scope?.workspaceName,
+    databaseId: input.database_id ?? scope?.databaseId,
+    databaseName: input.database_name ?? scope?.databaseName,
+    createdAt: input.created_at,
+    kind: input.kind,
+    op: input.op,
+    source: input.source,
+    actor: input.actor,
+    sessionId: input.session_id,
+    user: input.user,
+    label: input.label,
+    agentVersion: input.agent_version,
+    hostname: input.hostname,
+    path: input.path,
+    prevPath: input.prev_path,
+    sizeBytes: input.size_bytes,
+    deltaBytes: input.delta_bytes,
+    contentHash: input.content_hash,
+    prevHash: input.prev_hash,
+    mode: input.mode,
+    checkpointId: input.checkpoint_id,
+    extras: input.extras,
+  };
+}
+
+function mapEventList(
+  response: HTTPEventList,
+  scope?: {
+    workspaceId?: string;
+    workspaceName?: string;
+    databaseId?: string;
+    databaseName?: string;
+  },
+): AFSEventListResponse {
+  return {
+    items: response.items.map((item) => mapEventEntry(item, scope)),
+    nextCursor: response.next_cursor,
+  };
+}
+
 function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   return {
     id: input.id,
     name: input.name,
     author: input.author ?? "afs",
     createdAt: input.created_at,
-    note: input.note ?? "",
+    note: input.description ?? input.note ?? "",
     kind: input.kind,
     source: input.source,
     createdBy: input.created_by,
@@ -1805,6 +2029,32 @@ function changelogSearchParams(input: ListChangelogInput): URLSearchParams {
   }
   if (input.sessionId) {
     params.set("session_id", input.sessionId);
+  }
+  if (input.since) {
+    params.set("since", input.since);
+  }
+  if (input.until) {
+    params.set("until", input.until);
+  }
+  if (input.direction) {
+    params.set("direction", input.direction);
+  }
+  return params;
+}
+
+function eventSearchParams(input: ListEventsInput): URLSearchParams {
+  const params = new URLSearchParams();
+  if (input.limit != null && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+  if (input.kind) {
+    params.set("kind", input.kind);
+  }
+  if (input.sessionId) {
+    params.set("session_id", input.sessionId);
+  }
+  if (input.path) {
+    params.set("path", input.path);
   }
   if (input.since) {
     params.set("since", input.since);
@@ -1987,6 +2237,26 @@ function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffRes
       previousHash: entry.previous_hash,
       mode: entry.mode,
       previousMode: entry.previous_mode,
+      textDiff: entry.text_diff
+        ? {
+            available: entry.text_diff.available,
+            skippedReason: entry.text_diff.skipped_reason,
+            language: entry.text_diff.language,
+            maxBytes: entry.text_diff.max_bytes,
+            hunks: entry.text_diff.hunks?.map((hunk) => ({
+              oldStart: hunk.old_start,
+              oldLines: hunk.old_lines,
+              newStart: hunk.new_start,
+              newLines: hunk.new_lines,
+              lines: hunk.lines.map((line) => ({
+                kind: line.kind,
+                oldLine: line.old_line,
+                newLine: line.new_line,
+                text: line.text,
+              })),
+            })),
+          }
+        : undefined,
     })),
   };
 }
@@ -2189,6 +2459,34 @@ const httpAFSClient: AFSClient = {
 
     const response = await requestJSON<HTTPActivityList>(query ? `/activity?${query}` : "/activity");
     return mapActivityList(response);
+  },
+
+  async listEvents(input: ListEventsInput): Promise<AFSEventListResponse> {
+    const params = eventSearchParams(input);
+    const query = params.toString();
+    const workspaceId = input.workspaceId?.trim() ?? "";
+    if (workspaceId !== "") {
+      const base = `${workspaceBasePath(input.databaseId, workspaceId)}/events`;
+      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      return mapEventList(response, {
+        workspaceId,
+        databaseId: input.databaseId,
+      });
+    }
+
+    const databaseId = input.databaseId?.trim() ?? "";
+    if (databaseId !== "") {
+      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
+      const base = `/databases/${databaseId}/events`;
+      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      return mapEventList(response, {
+        databaseId,
+        databaseName: database?.name,
+      });
+    }
+
+    const response = await requestJSON<HTTPEventList>(query ? `/events?${query}` : "/events");
+    return mapEventList(response);
   },
 
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {

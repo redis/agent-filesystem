@@ -284,13 +284,129 @@ func TestHTTPCheckpointDiff(t *testing.T) {
 		t.Fatalf("diff summary = %+v, want 3 created", diff.Summary)
 	}
 	paths := make(map[string]string, len(diff.Entries))
+	entriesByPath := make(map[string]DiffEntry, len(diff.Entries))
 	for _, entry := range diff.Entries {
 		paths[entry.Path] = entry.Op
+		entriesByPath[entry.Path] = entry
 	}
 	for _, path := range []string{"/README.md", "/src", "/src/main.go"} {
 		if paths[path] != DiffOpCreate {
 			t.Fatalf("diff entry %s op = %q, want create; entries=%#v", path, paths[path], diff.Entries)
 		}
+	}
+	readmeDiff := entriesByPath["/README.md"].TextDiff
+	if readmeDiff == nil || !readmeDiff.Available || len(readmeDiff.Hunks) == 0 {
+		t.Fatalf("README text diff = %#v, want available hunks", readmeDiff)
+	}
+	foundInsert := false
+	for _, line := range readmeDiff.Hunks[0].Lines {
+		if line.Kind == "insert" && line.Text == "# demo" {
+			foundInsert = true
+			break
+		}
+	}
+	if !foundInsert {
+		t.Fatalf("README text diff lines = %#v, want inserted # demo line", readmeDiff.Hunks[0].Lines)
+	}
+}
+
+func TestHTTPCheckpointDetailAndEvents(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/checkpoints/snapshot")
+	if err != nil {
+		t.Fatalf("GET checkpoint detail returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET checkpoint detail status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var detail checkpointDetail
+	if err := json.NewDecoder(resp.Body).Decode(&detail); err != nil {
+		t.Fatalf("Decode(checkpoint detail) returned error: %v", err)
+	}
+	if detail.ID != "snapshot" || detail.Description != "Snapshot workspace state." {
+		t.Fatalf("checkpoint detail = %+v, want snapshot with description", detail)
+	}
+	if detail.ParentCheckpointID != initialCheckpointName || detail.Parent == nil || detail.Parent.ID != initialCheckpointName {
+		t.Fatalf("checkpoint parent = id %q parent %#v, want initial", detail.ParentCheckpointID, detail.Parent)
+	}
+	if detail.ChangeSummary.Total != 3 || detail.ChangeSummary.Created != 3 {
+		t.Fatalf("checkpoint change summary = %+v, want 3 created", detail.ChangeSummary)
+	}
+
+	ctx := context.Background()
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	manifestValue, err := service.store.GetManifest(ctx, "repo", "snapshot")
+	if err != nil {
+		t.Fatalf("GetManifest(snapshot) returned error: %v", err)
+	}
+	updatedReadme := []byte("# demo\nupdated\n")
+	manifestValue.Savepoint = "event-snapshot"
+	manifestValue.Entries["/README.md"] = ManifestEntry{
+		Type:    "file",
+		Mode:    0o644,
+		Size:    int64(len(updatedReadme)),
+		Inline:  base64.StdEncoding.EncodeToString(updatedReadme),
+		MtimeMs: time.Now().UTC().UnixMilli(),
+	}
+	saved, err := manager.SaveCheckpoint(ctx, databaseID, "repo", SaveCheckpointRequest{
+		Workspace:    "repo",
+		ExpectedHead: "snapshot",
+		CheckpointID: "event-snapshot",
+		Description:  "Event test checkpoint.",
+		Manifest:     manifestValue,
+		FileCount:    2,
+		DirCount:     1,
+		TotalBytes:   int64(len(updatedReadme) + len("package main\n")),
+	})
+	if err != nil {
+		t.Fatalf("SaveCheckpoint(event-snapshot) returned error: %v", err)
+	}
+	if !saved {
+		t.Fatalf("SaveCheckpoint(event-snapshot) saved = false, want true")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/events?kind=checkpoint&direction=desc")
+	if err != nil {
+		t.Fatalf("GET checkpoint events returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET checkpoint events status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var checkpointEvents EventListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&checkpointEvents); err != nil {
+		t.Fatalf("Decode(checkpoint events) returned error: %v", err)
+	}
+	if len(checkpointEvents.Items) == 0 || checkpointEvents.Items[0].CheckpointID != "event-snapshot" || checkpointEvents.Items[0].Op != "save" {
+		t.Fatalf("checkpoint events = %#v, want save event for event-snapshot", checkpointEvents.Items)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/events?kind=file&path=/README.md")
+	if err != nil {
+		t.Fatalf("GET file events returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET file events status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var fileEvents EventListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&fileEvents); err != nil {
+		t.Fatalf("Decode(file events) returned error: %v", err)
+	}
+	if len(fileEvents.Items) == 0 || fileEvents.Items[0].CheckpointID != "event-snapshot" || fileEvents.Items[0].Path != "/README.md" {
+		t.Fatalf("file events = %#v, want README event for event-snapshot", fileEvents.Items)
 	}
 }
 

@@ -126,6 +126,7 @@ type afsControlPlane interface {
 	HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error)
 	CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error)
+	GetCheckpoint(ctx context.Context, workspace, checkpointID string) (controlplane.CheckpointDetail, error)
 	DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)

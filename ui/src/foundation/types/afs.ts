@@ -128,6 +128,38 @@ export type AFSActivityListResponse = {
   nextCursor?: string;
 };
 
+export type AFSEventEntry = {
+  id: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  databaseId?: string;
+  databaseName?: string;
+  createdAt?: string;
+  kind: string;
+  op: string;
+  source?: string;
+  actor?: string;
+  sessionId?: string;
+  user?: string;
+  label?: string;
+  agentVersion?: string;
+  hostname?: string;
+  path?: string;
+  prevPath?: string;
+  sizeBytes?: number;
+  deltaBytes?: number;
+  contentHash?: string;
+  prevHash?: string;
+  mode?: number;
+  checkpointId?: string;
+  extras?: Record<string, string>;
+};
+
+export type AFSEventListResponse = {
+  items: AFSEventEntry[];
+  nextCursor?: string;
+};
+
 export type AFSAgentSession = {
   sessionId: string;
   workspaceId: string;
@@ -202,6 +234,29 @@ export type AFSDiffSummary = {
   bytesRemoved: number;
 };
 
+export type AFSTextDiffLine = {
+  kind: "context" | "delete" | "insert";
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+};
+
+export type AFSTextDiffHunk = {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: AFSTextDiffLine[];
+};
+
+export type AFSTextDiff = {
+  available: boolean;
+  skippedReason?: string;
+  language?: string;
+  maxBytes?: number;
+  hunks?: AFSTextDiffHunk[];
+};
+
 export type AFSDiffEntry = {
   op: AFSDiffOp;
   path: string;
@@ -215,6 +270,7 @@ export type AFSDiffEntry = {
   previousHash?: string;
   mode?: number;
   previousMode?: number;
+  textDiff?: AFSTextDiff;
 };
 
 export type AFSWorkspaceDiffResponse = {

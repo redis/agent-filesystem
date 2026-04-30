@@ -19,6 +19,7 @@ import (
 )
 
 const syncDaemonBootstrapEnv = "AFS_SYNC_BOOTSTRAP"
+const syncDaemonReadyTimeout = 10 * time.Second
 
 type syncBootstrap struct {
 	cfg             config
@@ -36,6 +37,12 @@ type syncDaemonBootstrap struct {
 	RedisKey                 string `json:"redis_key"`
 	SessionID                string `json:"session_id,omitempty"`
 	HeartbeatIntervalSeconds int    `json:"heartbeat_interval_seconds,omitempty"`
+	ReadyPath                string `json:"ready_path,omitempty"`
+}
+
+type syncDaemonReady struct {
+	Ready bool   `json:"ready"`
+	Error string `json:"error,omitempty"`
 }
 
 func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(), error) {
@@ -317,9 +324,21 @@ func startSyncDaemonProcess(cfg config, bootstrap *syncDaemonBootstrap) (int, er
 	cmd := exec.Command(exe, args...)
 	cmd.Env = os.Environ()
 	bootstrapPath := ""
+	readyPath := ""
 	if bootstrap != nil {
+		readyPath = strings.TrimSpace(bootstrap.ReadyPath)
+		if readyPath == "" {
+			readyPath, err = reserveSyncDaemonReadyPath()
+			if err != nil {
+				return 0, err
+			}
+			bootstrap.ReadyPath = readyPath
+		}
 		bootstrapPath, err = writeSyncDaemonBootstrap(*bootstrap)
 		if err != nil {
+			if readyPath != "" {
+				_ = os.Remove(readyPath)
+			}
 			return 0, err
 		}
 		cmd.Env = append(cmd.Env, syncDaemonBootstrapEnv+"="+bootstrapPath)
@@ -336,9 +355,19 @@ func startSyncDaemonProcess(cfg config, bootstrap *syncDaemonBootstrap) (int, er
 		if bootstrapPath != "" {
 			_ = os.Remove(bootstrapPath)
 		}
+		if readyPath != "" {
+			_ = os.Remove(readyPath)
+		}
 		return 0, fmt.Errorf("start sync daemon: %w", err)
 	}
 	pid := cmd.Process.Pid
+	if readyPath != "" {
+		if err := waitForSyncDaemonReady(cmd.Process, readyPath, syncDaemonReadyTimeout); err != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+			return 0, err
+		}
+	}
 	_ = cmd.Process.Release()
 	return pid, nil
 }
@@ -346,14 +375,14 @@ func startSyncDaemonProcess(cfg config, bootstrap *syncDaemonBootstrap) (int, er
 // runSyncDaemon is the entry point for the `_sync-daemon` child process.
 // It connects to Redis, starts the sync daemon, and blocks until SIGTERM.
 func runSyncDaemon() error {
-	cfg, workspace, mountKey, sessionID, heartbeatEvery, err := loadSyncDaemonRuntime()
+	cfg, workspace, mountKey, sessionID, heartbeatEvery, readyPath, err := loadSyncDaemonRuntime()
 	if err != nil {
 		return err
 	}
 
 	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {
-		return err
+		return failSyncDaemonReady(readyPath, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -365,7 +394,7 @@ func runSyncDaemon() error {
 	pingCtx, pingCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer pingCancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		return fmt.Errorf("cannot connect to Redis at %s: %w", cfg.RedisAddr, err)
+		return failSyncDaemonReady(readyPath, fmt.Errorf("cannot connect to Redis at %s: %w", cfg.RedisAddr, err))
 	}
 
 	store := newAFSStore(rdb)
@@ -386,18 +415,23 @@ func runSyncDaemon() error {
 		AgentVersion: version.String(),
 	})
 	if err != nil {
-		return err
+		return failSyncDaemonReady(readyPath, err)
 	}
 	// Skip the initial reconcile — the parent process already did it moments
 	// ago. Go straight to the steady-state goroutines so the subscription
 	// pump starts receiving events immediately.
 	if err := daemon.StartSteadyStateOnly(ctx); err != nil {
-		return err
+		return failSyncDaemonReady(readyPath, err)
 	}
 	stopSessionLifecycle, err := startManagedWorkspaceSessionLifecycle(cfg, workspace, sessionID, heartbeatEvery)
 	if err != nil {
 		daemon.Stop()
-		return err
+		return failSyncDaemonReady(readyPath, err)
+	}
+	if err := writeSyncDaemonReady(readyPath, nil); err != nil {
+		stopSessionLifecycle()
+		daemon.Stop()
+		return fmt.Errorf("signal sync daemon readiness: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "afs sync daemon: running for workspace %s at %s (pid %d)\n", workspace, localRoot, os.Getpid())
@@ -414,41 +448,120 @@ func runSyncDaemon() error {
 	return nil
 }
 
-func loadSyncDaemonRuntime() (config, string, string, string, time.Duration, error) {
+func loadSyncDaemonRuntime() (config, string, string, string, time.Duration, string, error) {
 	bootstrap, ok, err := loadSyncDaemonBootstrap()
 	if err != nil {
-		return config{}, "", "", "", 0, err
+		return config{}, "", "", "", 0, "", err
 	}
 	if ok {
 		cfg := bootstrap.Config
 		if err := resolveConfigPaths(&cfg); err != nil {
-			return config{}, "", "", "", 0, fmt.Errorf("resolve bootstrap config: %w", err)
+			return config{}, "", "", "", 0, bootstrap.ReadyPath, fmt.Errorf("resolve bootstrap config: %w", err)
 		}
 		if strings.TrimSpace(bootstrap.Workspace) == "" {
-			return config{}, "", "", "", 0, errors.New("sync bootstrap is missing workspace")
+			return config{}, "", "", "", 0, bootstrap.ReadyPath, errors.New("sync bootstrap is missing workspace")
 		}
 		if strings.TrimSpace(bootstrap.RedisKey) == "" {
-			return config{}, "", "", "", 0, errors.New("sync bootstrap is missing redis key")
+			return config{}, "", "", "", 0, bootstrap.ReadyPath, errors.New("sync bootstrap is missing redis key")
 		}
-		return cfg, strings.TrimSpace(bootstrap.Workspace), strings.TrimSpace(bootstrap.RedisKey), strings.TrimSpace(bootstrap.SessionID), time.Duration(bootstrap.HeartbeatIntervalSeconds) * time.Second, nil
+		return cfg, strings.TrimSpace(bootstrap.Workspace), strings.TrimSpace(bootstrap.RedisKey), strings.TrimSpace(bootstrap.SessionID), time.Duration(bootstrap.HeartbeatIntervalSeconds) * time.Second, strings.TrimSpace(bootstrap.ReadyPath), nil
 	}
 
 	cfg, err := loadConfig()
 	if err != nil {
-		return config{}, "", "", "", 0, fmt.Errorf("load config: %w", err)
+		return config{}, "", "", "", 0, "", fmt.Errorf("load config: %w", err)
 	}
 	if err := resolveConfigPaths(&cfg); err != nil {
-		return config{}, "", "", "", 0, fmt.Errorf("resolve config: %w", err)
+		return config{}, "", "", "", 0, "", fmt.Errorf("resolve config: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	bootstrapState, closeFn, err := prepareSyncBootstrap(ctx, cfg)
 	if err != nil {
-		return config{}, "", "", "", 0, err
+		return config{}, "", "", "", 0, "", err
 	}
 	defer closeFn()
-	return bootstrapState.cfg, bootstrapState.workspace, bootstrapState.redisKey, bootstrapState.sessionID, bootstrapState.heartbeatEvery, nil
+	return bootstrapState.cfg, bootstrapState.workspace, bootstrapState.redisKey, bootstrapState.sessionID, bootstrapState.heartbeatEvery, "", nil
+}
+
+func reserveSyncDaemonReadyPath() (string, error) {
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(stateDir(), ".sync-ready-*.json")
+	if err != nil {
+		return "", err
+	}
+	name := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(name)
+		return "", err
+	}
+	_ = os.Remove(name)
+	return name, nil
+}
+
+func writeSyncDaemonReady(path string, daemonErr error) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	payload := syncDaemonReady{Ready: daemonErr == nil}
+	if daemonErr != nil {
+		payload.Error = daemonErr.Error()
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, raw, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func failSyncDaemonReady(path string, err error) error {
+	_ = writeSyncDaemonReady(path, err)
+	return err
+}
+
+func waitForSyncDaemonReady(process *os.Process, path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil {
+			_ = os.Remove(path)
+			var ready syncDaemonReady
+			if err := json.Unmarshal(raw, &ready); err != nil {
+				return fmt.Errorf("parse sync daemon ready marker: %w", err)
+			}
+			if ready.Ready {
+				return nil
+			}
+			if strings.TrimSpace(ready.Error) != "" {
+				return fmt.Errorf("sync daemon failed before ready: %s", ready.Error)
+			}
+			return errors.New("sync daemon failed before ready")
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("read sync daemon ready marker: %w", err)
+		}
+		if time.Now().After(deadline) {
+			_ = os.Remove(path)
+			return fmt.Errorf("sync daemon did not become ready within %s", timeout)
+		}
+		if process != nil && !processAlive(process.Pid) {
+			_ = os.Remove(path)
+			return errors.New("sync daemon exited before it became ready")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
 }
 
 func writeSyncDaemonBootstrap(bootstrap syncDaemonBootstrap) (string, error) {

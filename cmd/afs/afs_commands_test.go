@@ -55,6 +55,10 @@ func (s stubAFSControlPlane) ListCheckpoints(context.Context, string, int) ([]co
 	return nil, fmt.Errorf("unexpected ListCheckpoints call")
 }
 
+func (s stubAFSControlPlane) GetCheckpoint(context.Context, string, string) (controlplane.CheckpointDetail, error) {
+	return controlplane.CheckpointDetail{}, fmt.Errorf("unexpected GetCheckpoint call")
+}
+
 func (s stubAFSControlPlane) DiffWorkspace(context.Context, string, string, string) (controlplane.WorkspaceDiffResponse, error) {
 	return controlplane.WorkspaceDiffResponse{}, fmt.Errorf("unexpected DiffWorkspace call")
 }

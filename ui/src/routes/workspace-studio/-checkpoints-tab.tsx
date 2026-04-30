@@ -699,14 +699,17 @@ function DiffReview({ diff }: { diff: AFSWorkspaceDiffResponse }) {
       ) : (
         <DiffList>
           {entries.map((entry) => (
-            <DiffRow key={`${entry.op}:${entry.previousPath ?? ""}:${entry.path}`}>
-              <DiffOpBadge $op={entry.op}>{formatDiffOp(entry.op)}</DiffOpBadge>
-              <DiffPathStack>
-                <DiffPath title={diffEntryPathTitle(entry)}>{diffEntryPath(entry)}</DiffPath>
-                <DiffMeta>{diffEntryMeta(entry)}</DiffMeta>
-              </DiffPathStack>
-              <DiffDelta>{formatDiffDelta(entry.deltaBytes)}</DiffDelta>
-            </DiffRow>
+            <DiffRowShell key={`${entry.op}:${entry.previousPath ?? ""}:${entry.path}`}>
+              <DiffRow>
+                <DiffOpBadge $op={entry.op}>{formatDiffOp(entry.op)}</DiffOpBadge>
+                <DiffPathStack>
+                  <DiffPath title={diffEntryPathTitle(entry)}>{diffEntryPath(entry)}</DiffPath>
+                  <DiffMeta>{diffEntryMeta(entry)}</DiffMeta>
+                </DiffPathStack>
+                <DiffDelta>{formatDiffDelta(entry.deltaBytes)}</DiffDelta>
+              </DiffRow>
+              <InlineTextDiff entry={entry} />
+            </DiffRowShell>
           ))}
           {hiddenCount > 0 ? (
             <DiffMessage>{hiddenCount.toLocaleString()} more changes not shown.</DiffMessage>
@@ -714,6 +717,54 @@ function DiffReview({ diff }: { diff: AFSWorkspaceDiffResponse }) {
         </DiffList>
       )}
     </DiffStack>
+  );
+}
+
+function InlineTextDiff({ entry }: { entry: AFSDiffEntry }) {
+  const textDiff = entry.textDiff;
+  if (textDiff == null) {
+    return null;
+  }
+  if (!textDiff.available) {
+    return textDiff.skippedReason ? (
+      <DiffInlineBlock>
+        <DiffInlineNotice>Text diff not shown: {textDiff.skippedReason}</DiffInlineNotice>
+      </DiffInlineBlock>
+    ) : null;
+  }
+
+  const hunks = textDiff.hunks ?? [];
+  if (hunks.length === 0) {
+    return null;
+  }
+
+  return (
+    <DiffInlineBlock>
+      {hunks.slice(0, 8).map((hunk, hunkIndex) => (
+        <DiffHunk key={`${entry.path}:${hunk.oldStart}:${hunk.newStart}:${hunkIndex}`}>
+          <DiffHunkHeader>
+            @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
+          </DiffHunkHeader>
+          {hunk.lines.slice(0, 80).map((line, lineIndex) => (
+            <DiffCodeLine
+              key={`${line.oldLine ?? ""}:${line.newLine ?? ""}:${lineIndex}`}
+              $kind={line.kind}
+            >
+              <DiffLineNo>{line.oldLine ?? ""}</DiffLineNo>
+              <DiffLineNo>{line.newLine ?? ""}</DiffLineNo>
+              <DiffLineSign>{diffLineSign(line.kind)}</DiffLineSign>
+              <DiffLineText>{line.text === "" ? " " : line.text}</DiffLineText>
+            </DiffCodeLine>
+          ))}
+          {hunk.lines.length > 80 ? (
+            <DiffInlineNotice>{hunk.lines.length - 80} more lines not shown.</DiffInlineNotice>
+          ) : null}
+        </DiffHunk>
+      ))}
+      {hunks.length > 8 ? (
+        <DiffInlineNotice>{hunks.length - 8} more hunks not shown.</DiffInlineNotice>
+      ) : null}
+    </DiffInlineBlock>
   );
 }
 
@@ -738,6 +789,17 @@ function formatDiffOp(op: AFSDiffEntry["op"]) {
       return "Metadata";
     default:
       return op;
+  }
+}
+
+function diffLineSign(kind: "context" | "delete" | "insert") {
+  switch (kind) {
+    case "delete":
+      return "-";
+    case "insert":
+      return "+";
+    default:
+      return " ";
   }
 }
 
@@ -884,6 +946,15 @@ const DiffList = styled.div`
   background: var(--afs-panel-strong);
 `;
 
+const DiffRowShell = styled.div`
+  display: grid;
+  border-bottom: 1px solid var(--afs-line);
+
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
 const DiffRow = styled.div`
   display: grid;
   grid-template-columns: 90px minmax(0, 1fr) 96px;
@@ -891,11 +962,6 @@ const DiffRow = styled.div`
   align-items: center;
   min-height: 48px;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--afs-line);
-
-  &:last-child {
-    border-bottom: none;
-  }
 
   @media (max-width: 640px) {
     grid-template-columns: 76px minmax(0, 1fr);
@@ -956,6 +1022,73 @@ const DiffDelta = styled.span`
   @media (max-width: 640px) {
     display: none;
   }
+`;
+
+const DiffInlineBlock = styled.div`
+  display: grid;
+  gap: 8px;
+  margin: 0 12px 12px 114px;
+  overflow: hidden;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  background: #fff;
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+
+  @media (max-width: 640px) {
+    margin-left: 12px;
+  }
+`;
+
+const DiffHunk = styled.div`
+  display: grid;
+`;
+
+const DiffHunkHeader = styled.div`
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--afs-line);
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+`;
+
+const DiffCodeLine = styled.div<{ $kind: "context" | "delete" | "insert" }>`
+  display: grid;
+  grid-template-columns: 44px 44px 18px minmax(0, 1fr);
+  min-width: 0;
+  background: ${({ $kind }) =>
+    $kind === "insert" ? "#f0fdf4" : $kind === "delete" ? "#fef2f2" : "#fff"};
+  color: ${({ $kind }) =>
+    $kind === "insert" ? "#166534" : $kind === "delete" ? "#991b1b" : "#334155"};
+  font-size: 12px;
+  line-height: 1.45;
+`;
+
+const DiffLineNo = styled.span`
+  user-select: none;
+  border-right: 1px solid rgba(148, 163, 184, 0.28);
+  padding: 2px 8px;
+  color: #94a3b8;
+  text-align: right;
+`;
+
+const DiffLineSign = styled.span`
+  user-select: none;
+  padding: 2px 0;
+  text-align: center;
+`;
+
+const DiffLineText = styled.span`
+  min-width: 0;
+  padding: 2px 10px 2px 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+`;
+
+const DiffInlineNotice = styled.div`
+  padding: 8px 10px;
+  color: var(--afs-muted);
+  font-size: 12px;
 `;
 
 const DiffMessage = styled.div`

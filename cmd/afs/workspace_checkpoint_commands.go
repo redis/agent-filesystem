@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -70,6 +71,8 @@ func cmdCheckpoint(args []string) error {
 		return cmdCheckpointCreate(args)
 	case "list":
 		return cmdCheckpointList(args)
+	case "show":
+		return cmdCheckpointShow(args)
 	case "diff":
 		return cmdCheckpointDiff(args)
 	case "restore":
@@ -986,11 +989,157 @@ func checkpointListSize(item controlplane.CheckpointSummary) string {
 	return formatBytes(item.TotalBytes)
 }
 
+type checkpointShowArgs struct {
+	workspace    string
+	checkpointID string
+	json         bool
+}
+
+func cmdCheckpointShow(args []string) error {
+	for _, arg := range args[2:] {
+		if isHelpArg(arg) {
+			fmt.Fprint(os.Stderr, checkpointShowUsageText(filepath.Base(os.Args[0])))
+			return nil
+		}
+	}
+	parsed, err := parseCheckpointShowArgs(args[2:])
+	if err != nil {
+		return fmt.Errorf("%s\n\n%s", err, checkpointShowUsageText(filepath.Base(os.Args[0])))
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, parsed.workspace)
+	if err != nil {
+		return err
+	}
+	detail, err := service.GetCheckpoint(context.Background(), selection.ID, parsed.checkpointID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("checkpoint %q does not exist", parsed.checkpointID)
+		}
+		return err
+	}
+	if parsed.json {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(detail)
+	}
+
+	activeCheckpointID := ""
+	workspaceDetail, err := service.GetWorkspace(context.Background(), selection.ID)
+	if err == nil && workspaceDetail.DraftState != "dirty" {
+		activeCheckpointID = workspaceDetail.HeadCheckpointID
+	}
+	printCheckpointShow(selection.Name, detail, activeCheckpointID)
+	return nil
+}
+
+func parseCheckpointShowArgs(args []string) (checkpointShowArgs, error) {
+	var parsed checkpointShowArgs
+	positionals := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			parsed.json = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return parsed, fmt.Errorf("unknown flag %q", arg)
+			}
+			positionals = append(positionals, arg)
+		}
+	}
+	switch len(positionals) {
+	case 1:
+		parsed.checkpointID = positionals[0]
+	case 2:
+		parsed.workspace = positionals[0]
+		parsed.checkpointID = positionals[1]
+	default:
+		return parsed, fmt.Errorf("expected [workspace] <checkpoint>")
+	}
+	if err := validateAFSName("checkpoint", parsed.checkpointID); err != nil {
+		return parsed, err
+	}
+	return parsed, nil
+}
+
+func printCheckpointShow(workspace string, detail controlplane.CheckpointDetail, activeCheckpointID string) {
+	rows := []boxRow{
+		{Label: "workspace", Value: workspace},
+		{Label: "checkpoint", Value: detail.ID},
+		{Label: "active", Value: yesNo(detail.ID != "" && detail.ID == activeCheckpointID)},
+		{Label: "created", Value: formatDisplayTimestamp(detail.CreatedAt)},
+		{Label: "author", Value: checkpointDisplayDefault(detail.Author, "afs")},
+	}
+	if strings.TrimSpace(detail.Description) != "" {
+		rows = append(rows, boxRow{Label: "description", Value: detail.Description})
+	}
+	if strings.TrimSpace(detail.Kind) != "" {
+		rows = append(rows, boxRow{Label: "kind", Value: detail.Kind})
+	}
+	if strings.TrimSpace(detail.Source) != "" {
+		rows = append(rows, boxRow{Label: "source", Value: detail.Source})
+	}
+	if actor := checkpointDetailActor(detail); actor != "" {
+		rows = append(rows, boxRow{Label: "actor", Value: actor})
+	}
+	if strings.TrimSpace(detail.SessionID) != "" {
+		rows = append(rows, boxRow{Label: "session", Value: detail.SessionID})
+	}
+	if strings.TrimSpace(detail.ParentCheckpointID) != "" {
+		rows = append(rows, boxRow{Label: "parent", Value: detail.ParentCheckpointID})
+	}
+	rows = append(rows,
+		boxRow{Label: "files", Value: strconv.Itoa(detail.FileCount)},
+		boxRow{Label: "folders", Value: strconv.Itoa(detail.FolderCount)},
+		boxRow{Label: "size", Value: formatBytes(detail.TotalBytes)},
+		boxRow{Label: "changes", Value: checkpointDiffSummary(detail.ChangeSummary)},
+	)
+	if strings.TrimSpace(detail.ManifestHash) != "" {
+		rows = append(rows, boxRow{Label: "manifest", Value: detail.ManifestHash})
+	}
+	printBox(clr(ansiBold, "checkpoint"), rows)
+}
+
+func checkpointDetailActor(detail controlplane.CheckpointDetail) string {
+	switch {
+	case strings.TrimSpace(detail.AgentName) != "":
+		return strings.TrimSpace(detail.AgentName)
+	case strings.TrimSpace(detail.AgentID) != "":
+		return strings.TrimSpace(detail.AgentID)
+	case strings.TrimSpace(detail.CreatedBy) != "":
+		return strings.TrimSpace(detail.CreatedBy)
+	default:
+		return ""
+	}
+}
+
+func checkpointDisplayDefault(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
 type checkpointDiffArgs struct {
 	workspace     string
 	base          string
 	head          string
 	compareActive bool
+	json          bool
 }
 
 func cmdCheckpointDiff(args []string) error {
@@ -1030,6 +1179,11 @@ func cmdCheckpointDiff(args []string) error {
 		}
 		return err
 	}
+	if parsed.json {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(diff)
+	}
 	printCheckpointDiff(selection.Name, diff)
 	return nil
 }
@@ -1041,6 +1195,8 @@ func parseCheckpointDiffArgs(args []string) (checkpointDiffArgs, error) {
 		switch arg {
 		case "--active":
 			parsed.compareActive = true
+		case "--json":
+			parsed.json = true
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return parsed, fmt.Errorf("unknown flag %q", arg)
@@ -1127,6 +1283,7 @@ func printCheckpointDiff(workspace string, diff controlplane.WorkspaceDiffRespon
 		rows = append(rows, boxRow{Value: fmt.Sprintf("%d more changes not shown", extra)})
 	}
 	printBox(clr(ansiBold, "checkpoint diff"), rows)
+	printCheckpointDiffText(diff)
 }
 
 func checkpointDiffDisplayView(state controlplane.DiffState) string {
@@ -1200,6 +1357,83 @@ func checkpointDiffEntryValue(entry controlplane.DiffEntry) string {
 			value += " -" + formatBytes(-entry.DeltaBytes)
 		}
 		return value
+	}
+}
+
+func printCheckpointDiffText(diff controlplane.WorkspaceDiffResponse) {
+	const (
+		maxTextFiles = 12
+		maxTextLines = 600
+	)
+	filesShown := 0
+	linesShown := 0
+	for _, entry := range diff.Entries {
+		if entry.TextDiff == nil {
+			continue
+		}
+		if filesShown >= maxTextFiles || linesShown >= maxTextLines {
+			fmt.Fprintln(os.Stdout)
+			fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diffs not shown. Use --json for complete structured diff data."))
+			return
+		}
+		filesShown++
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout, clr(ansiBold, entry.Path))
+		if !entry.TextDiff.Available {
+			reason := checkpointTextDiffSkippedReason(entry.TextDiff.SkippedReason)
+			fmt.Fprintln(os.Stdout, clr(ansiDim, "text diff skipped: "+reason))
+			continue
+		}
+		for _, hunk := range entry.TextDiff.Hunks {
+			if linesShown >= maxTextLines {
+				fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diff lines not shown. Use --json for complete structured diff data."))
+				return
+			}
+			fmt.Fprintln(os.Stdout, clr(ansiDim, checkpointTextDiffHunkHeader(hunk)))
+			linesShown++
+			for _, line := range hunk.Lines {
+				if linesShown >= maxTextLines {
+					fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diff lines not shown. Use --json for complete structured diff data."))
+					return
+				}
+				fmt.Fprintln(os.Stdout, checkpointTextDiffLine(line))
+				linesShown++
+			}
+		}
+	}
+}
+
+func checkpointTextDiffSkippedReason(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case "binary":
+		return "binary file"
+	case "too_large":
+		return "file exceeds text diff size limit"
+	case "too_many_lines":
+		return "file exceeds text diff line limit"
+	case "content_unavailable":
+		return "content is unavailable"
+	case "unsupported_kind":
+		return "unsupported file kind"
+	case "":
+		return "unavailable"
+	default:
+		return reason
+	}
+}
+
+func checkpointTextDiffHunkHeader(hunk controlplane.TextDiffHunk) string {
+	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", hunk.OldStart, hunk.OldLines, hunk.NewStart, hunk.NewLines)
+}
+
+func checkpointTextDiffLine(line controlplane.TextDiffLine) string {
+	switch line.Kind {
+	case "delete":
+		return clr(ansiRed, "-"+line.Text)
+	case "insert":
+		return clr(ansiGreen, "+"+line.Text)
+	default:
+		return " " + line.Text
 	}
 }
 
@@ -1664,17 +1898,19 @@ func checkpointUsageText(bin string) string {
 	Subcommands:
 	  list [workspace]                     List checkpoints for a workspace
 	  create [workspace] [checkpoint]     Create a checkpoint from the current workspace state
+	  show [workspace] <checkpoint>       Show checkpoint metadata
 	  diff [workspace] <base> <target>    Compare two checkpoints
 	  restore [workspace] <checkpoint>    Restore a workspace to a checkpoint
 
 	Examples:
 	  %s checkpoint list demo
 	  %s checkpoint create demo before-refactor
+	  %s checkpoint show demo before-refactor
 	  %s checkpoint diff demo initial before-refactor
 	  %s checkpoint restore demo initial
 
 	Run '%s checkpoint <subcommand> --help' for details.
-	`, bin, bin, bin, bin, bin, bin)
+	`, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func checkpointListUsageText(bin string) string {
@@ -1697,13 +1933,27 @@ Options:
 `, bin)
 }
 
+func checkpointShowUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s checkpoint show [workspace] <checkpoint> [--json]
+
+Show checkpoint metadata and the change summary from its parent checkpoint.
+
+Options:
+  --json  Emit structured JSON
+`, bin)
+}
+
 func checkpointDiffUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint diff [workspace] <base-checkpoint> <target-checkpoint>
-  %s checkpoint diff [workspace] <checkpoint> --active
+  %s checkpoint diff [workspace] <base-checkpoint> <target-checkpoint> [--json]
+  %s checkpoint diff [workspace] <checkpoint> --active [--json]
 
 Compare saved filesystem states. Use --active to compare a checkpoint to the
 active workspace state.
+
+Options:
+  --json  Emit structured JSON, including text diff hunks when available
 `, bin, bin)
 }
 

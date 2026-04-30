@@ -643,18 +643,23 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 	if err != nil {
 		return err
 	}
+	ts := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
 	fields := map[string]any{
-		"ts_ms":     strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
+		"ts_ms":     ts,
 		"workspace": meta.Name,
 		"op":        op,
 	}
 	for key, value := range extra {
 		fields[key] = fmt.Sprint(value)
 	}
-	return s.rdb.XAdd(ctx, &redis.XAddArgs{
+	pipe := s.rdb.TxPipeline()
+	pipe.XAdd(ctx, &redis.XAddArgs{
 		Stream: workspaceAuditKey(storageID),
 		Values: fields,
-	}).Err()
+	})
+	enqueueEventFields(ctx, pipe, storageID, auditEventFields(fields))
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (s *Store) ListAudit(ctx context.Context, workspace string, limit int64) ([]auditRecord, error) {

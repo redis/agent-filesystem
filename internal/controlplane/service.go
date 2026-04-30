@@ -89,6 +89,7 @@ type checkpointSummary struct {
 	ID                 string `json:"id"`
 	Name               string `json:"name"`
 	Author             string `json:"author,omitempty"`
+	Description        string `json:"description,omitempty"`
 	Note               string `json:"note,omitempty"`
 	Kind               string `json:"kind,omitempty"`
 	Source             string `json:"source,omitempty"`
@@ -103,6 +104,31 @@ type checkpointSummary struct {
 	FolderCount        int    `json:"folder_count"`
 	TotalBytes         int64  `json:"total_bytes"`
 	IsHead             bool   `json:"is_head"`
+}
+
+type checkpointDetail struct {
+	WorkspaceID        string             `json:"workspace_id"`
+	WorkspaceName      string             `json:"workspace_name,omitempty"`
+	ID                 string             `json:"id"`
+	Name               string             `json:"name"`
+	Author             string             `json:"author,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	Note               string             `json:"note,omitempty"`
+	Kind               string             `json:"kind,omitempty"`
+	Source             string             `json:"source,omitempty"`
+	CreatedBy          string             `json:"created_by,omitempty"`
+	SessionID          string             `json:"session_id,omitempty"`
+	AgentID            string             `json:"agent_id,omitempty"`
+	AgentName          string             `json:"agent_name,omitempty"`
+	ParentCheckpointID string             `json:"parent_checkpoint_id,omitempty"`
+	Parent             *checkpointSummary `json:"parent,omitempty"`
+	ManifestHash       string             `json:"manifest_hash,omitempty"`
+	CreatedAt          string             `json:"created_at"`
+	FileCount          int                `json:"file_count"`
+	FolderCount        int                `json:"folder_count"`
+	TotalBytes         int64              `json:"total_bytes"`
+	IsHead             bool               `json:"is_head"`
+	ChangeSummary      DiffSummary        `json:"change_summary"`
 }
 
 type activityEvent struct {
@@ -294,6 +320,7 @@ type Capabilities = capabilities
 type WorkspaceSummary = workspaceSummary
 type WorkspaceListResponse = workspaceListResponse
 type CheckpointSummary = checkpointSummary
+type CheckpointDetail = checkpointDetail
 type ActivityEvent = activityEvent
 type ActivityListRequest = activityListRequest
 type ActivityListResponse = activityListResponse
@@ -376,6 +403,10 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspace string) error {
 
 func (s *Service) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]CheckpointSummary, error) {
 	return s.listCheckpoints(ctx, workspace, limit)
+}
+
+func (s *Service) GetCheckpoint(ctx context.Context, workspace, checkpointID string) (CheckpointDetail, error) {
+	return s.getCheckpoint(ctx, workspace, checkpointID)
 }
 
 func (s *Service) RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
@@ -717,6 +748,14 @@ func (s *Service) ListGlobalActivity(ctx context.Context, limit int) (ActivityLi
 
 func (s *Service) ListGlobalActivityPage(ctx context.Context, req ActivityListRequest) (ActivityListResponse, error) {
 	return s.listGlobalActivity(ctx, req)
+}
+
+func (s *Service) ListWorkspaceEvents(ctx context.Context, workspace string, req EventListRequest) (EventListResponse, error) {
+	return s.listWorkspaceEvents(ctx, workspace, req)
+}
+
+func (s *Service) ListGlobalEvents(ctx context.Context, req EventListRequest) (EventListResponse, error) {
+	return s.listGlobalEvents(ctx, req)
 }
 
 func ApplyWorkspaceMetaDefaults(cfg Config, meta WorkspaceMeta) WorkspaceMeta {
@@ -1112,6 +1151,7 @@ func checkpointSummaryFromMeta(checkpoint SavepointMeta, headSavepoint string) c
 		ID:                 checkpoint.ID,
 		Name:               checkpoint.Name,
 		Author:             defaultString(checkpoint.Author, "afs"),
+		Description:        checkpoint.Description,
 		Note:               checkpoint.Description,
 		Kind:               checkpointKind(checkpoint.Kind),
 		Source:             checkpointSource(checkpoint.Source),
@@ -1126,6 +1166,74 @@ func checkpointSummaryFromMeta(checkpoint SavepointMeta, headSavepoint string) c
 		FolderCount:        checkpoint.DirCount,
 		TotalBytes:         checkpoint.TotalBytes,
 		IsHead:             checkpoint.ID == headSavepoint,
+	}
+}
+
+func (s *Service) getCheckpoint(ctx context.Context, workspace, checkpointID string) (checkpointDetail, error) {
+	if err := ValidateName("workspace", workspace); err != nil {
+		return checkpointDetail{}, err
+	}
+	if err := ValidateName("checkpoint", checkpointID); err != nil {
+		return checkpointDetail{}, err
+	}
+	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return checkpointDetail{}, err
+	}
+	meta = applyWorkspaceMetaDefaults(s.cfg, meta)
+	storageID := workspaceStorageID(meta)
+	checkpoint, err := s.store.GetSavepointMeta(ctx, storageID, checkpointID)
+	if err != nil {
+		return checkpointDetail{}, err
+	}
+	manifestValue, err := s.store.GetManifest(ctx, storageID, checkpointID)
+	if err != nil {
+		return checkpointDetail{}, err
+	}
+
+	var parent *checkpointSummary
+	parentManifest := Manifest{}
+	if checkpoint.ParentSavepoint != "" {
+		if parentMeta, err := s.store.GetSavepointMeta(ctx, storageID, checkpoint.ParentSavepoint); err == nil {
+			parentSummary := checkpointSummaryFromMeta(parentMeta, meta.HeadSavepoint)
+			parent = &parentSummary
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return checkpointDetail{}, err
+		}
+		if m, err := s.store.GetManifest(ctx, storageID, checkpoint.ParentSavepoint); err == nil {
+			parentManifest = m
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return checkpointDetail{}, err
+		}
+	}
+	changes := diffManifests(parentManifest, manifestValue)
+	return checkpointDetailFromMeta(meta, checkpoint, parent, summarizeDiffEntries(changes)), nil
+}
+
+func checkpointDetailFromMeta(meta WorkspaceMeta, checkpoint SavepointMeta, parent *checkpointSummary, summary DiffSummary) checkpointDetail {
+	return checkpointDetail{
+		WorkspaceID:        workspaceStorageID(meta),
+		WorkspaceName:      meta.Name,
+		ID:                 checkpoint.ID,
+		Name:               checkpoint.Name,
+		Author:             defaultString(checkpoint.Author, "afs"),
+		Description:        checkpoint.Description,
+		Note:               checkpoint.Description,
+		Kind:               checkpointKind(checkpoint.Kind),
+		Source:             checkpointSource(checkpoint.Source),
+		CreatedBy:          checkpoint.CreatedBy,
+		SessionID:          checkpoint.SessionID,
+		AgentID:            checkpoint.AgentID,
+		AgentName:          checkpoint.AgentName,
+		ParentCheckpointID: checkpoint.ParentSavepoint,
+		Parent:             parent,
+		ManifestHash:       checkpoint.ManifestHash,
+		CreatedAt:          checkpoint.CreatedAt.UTC().Format(time.RFC3339),
+		FileCount:          checkpoint.FileCount,
+		FolderCount:        checkpoint.DirCount,
+		TotalBytes:         checkpoint.TotalBytes,
+		IsHead:             checkpoint.ID == meta.HeadSavepoint,
+		ChangeSummary:      summary,
 	}
 }
 

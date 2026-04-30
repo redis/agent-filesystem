@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -314,6 +315,44 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	}
 	if !strings.Contains(diffOutput, "checkpoint diff") || !strings.Contains(diffOutput, "Update") || !strings.Contains(diffOutput, "/main.go") {
 		t.Fatalf("cmdCheckpoint(diff) output = %q, want update for /main.go", diffOutput)
+	}
+	if !strings.Contains(diffOutput, "-package main") || !strings.Contains(diffOutput, "+package updated") {
+		t.Fatalf("cmdCheckpoint(diff) output = %q, want text diff for /main.go", diffOutput)
+	}
+	diffJSONOutput, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "diff", "repo", "initial", "after-edit", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(diff --json) returned error: %v", err)
+	}
+	var diffJSON controlplane.WorkspaceDiffResponse
+	if err := json.Unmarshal([]byte(diffJSONOutput), &diffJSON); err != nil {
+		t.Fatalf("Unmarshal(diff json) returned error: %v\n%s", err, diffJSONOutput)
+	}
+	if diffJSON.Summary.Updated != 1 || len(diffJSON.Entries) != 1 || diffJSON.Entries[0].TextDiff == nil {
+		t.Fatalf("diff json = %+v, want one updated entry with text diff", diffJSON)
+	}
+	showOutput, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "show", "repo", "after-edit"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(show) returned error: %v", err)
+	}
+	if !strings.Contains(showOutput, "checkpoint") || !strings.Contains(showOutput, "after-edit") || !strings.Contains(showOutput, "Before restoring a known-good file.") {
+		t.Fatalf("cmdCheckpoint(show) output = %q, want checkpoint detail", showOutput)
+	}
+	showJSONOutput, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "show", "repo", "after-edit", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(show --json) returned error: %v", err)
+	}
+	var showJSON controlplane.CheckpointDetail
+	if err := json.Unmarshal([]byte(showJSONOutput), &showJSON); err != nil {
+		t.Fatalf("Unmarshal(show json) returned error: %v\n%s", err, showJSONOutput)
+	}
+	if showJSON.ID != "after-edit" || showJSON.Description != "Before restoring a known-good file." || showJSON.ChangeSummary.Updated != 1 {
+		t.Fatalf("checkpoint show json = %+v, want after-edit detail with update summary", showJSON)
 	}
 
 	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/main.go", []byte("package broken\n")); err != nil {

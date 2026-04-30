@@ -162,7 +162,7 @@ func printUsage() {
 	// Data
 	fmt.Fprintf(w, "  %sworkspace%s            %sWorkspace ops — create, list, use, clone, fork, delete, import%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sdatabase%s             %sDatabase ops — list, use%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %scheckpoint%s           %sCheckpoint ops — create, list, restore%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %scheckpoint%s           %sCheckpoint ops — create, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %ssession%s              %sSession ops — log, summary%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sgrep%s <pattern>       %sSearch a workspace in Redis%s\n", bold, reset, dim, reset)
 	// Integrations

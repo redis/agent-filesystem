@@ -212,6 +212,12 @@ func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace 
 	return out, err
 }
 
+func (c *httpControlPlaneClient) GetCheckpoint(ctx context.Context, workspace, checkpointID string) (controlplane.CheckpointDetail, error) {
+	var out controlplane.CheckpointDetail
+	err := c.doJSON(ctx, http.MethodGet, c.workspacePath(workspace, "checkpoints", checkpointID), nil, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error) {
 	params := url.Values{}
 	if strings.TrimSpace(baseView) != "" {

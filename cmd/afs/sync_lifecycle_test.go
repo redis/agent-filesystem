@@ -1,9 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadSyncDaemonBootstrapFromEnv(t *testing.T) {
@@ -53,5 +56,47 @@ func TestLoadSyncDaemonBootstrapFromEnv(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected bootstrap file to be removed after load, stat err = %v", err)
+	}
+}
+
+func TestWaitForSyncDaemonReady(t *testing.T) {
+	t.Helper()
+	withTempHome(t)
+
+	path, err := reserveSyncDaemonReadyPath()
+	if err != nil {
+		t.Fatalf("reserveSyncDaemonReadyPath() returned error: %v", err)
+	}
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		_ = writeSyncDaemonReady(path, nil)
+	}()
+
+	if err := waitForSyncDaemonReady(nil, path, time.Second); err != nil {
+		t.Fatalf("waitForSyncDaemonReady() returned error: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected ready file to be removed after wait, stat err = %v", err)
+	}
+}
+
+func TestWaitForSyncDaemonReadyReportsChildError(t *testing.T) {
+	t.Helper()
+	withTempHome(t)
+
+	path, err := reserveSyncDaemonReadyPath()
+	if err != nil {
+		t.Fatalf("reserveSyncDaemonReadyPath() returned error: %v", err)
+	}
+	if err := writeSyncDaemonReady(path, errors.New("watcher failed")); err != nil {
+		t.Fatalf("writeSyncDaemonReady() returned error: %v", err)
+	}
+
+	err = waitForSyncDaemonReady(nil, path, time.Second)
+	if err == nil {
+		t.Fatal("waitForSyncDaemonReady() returned nil error, want child error")
+	}
+	if !strings.Contains(err.Error(), "watcher failed") {
+		t.Fatalf("waitForSyncDaemonReady() error = %q, want child error detail", err)
 	}
 }

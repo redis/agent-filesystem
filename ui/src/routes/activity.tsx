@@ -17,10 +17,10 @@ import {
 } from "../components/afs-kit";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { computeChangelogTotals, formatChangelogBytes } from "../foundation/changelog-utils";
-import { useActivityPage, useChangelog } from "../foundation/hooks/use-afs";
-import { ActivityTable } from "../foundation/tables/activity-table";
+import { useChangelog, useEvents } from "../foundation/hooks/use-afs";
 import { ChangesTable } from "../foundation/tables/changes-table";
-import type { AFSActivityEvent, AFSChangelogEntry } from "../foundation/types/afs";
+import { EventsTable } from "../foundation/tables/events-table";
+import type { AFSChangelogEntry, AFSEventEntry } from "../foundation/types/afs";
 
 const ACTIVITY_PAGE_SIZE = 25;
 
@@ -39,14 +39,15 @@ function ActivityPage() {
   const { unavailableDatabases } = useDatabaseScope();
   const view = search.view ?? "changes";
   const [changelogCursors, setChangelogCursors] = useState<string[]>([]);
-  const [activityCursors, setActivityCursors] = useState<string[]>([]);
+  const [eventCursors, setEventCursors] = useState<string[]>([]);
   const changelogCursor = changelogCursors[changelogCursors.length - 1];
-  const activityCursor = activityCursors[activityCursors.length - 1];
+  const eventCursor = eventCursors[eventCursors.length - 1];
 
-  const activityQuery = useActivityPage(
+  const eventsQuery = useEvents(
     {
       limit: ACTIVITY_PAGE_SIZE,
-      until: activityCursor,
+      direction: "desc",
+      until: eventCursor,
     },
     view === "events",
   );
@@ -60,14 +61,14 @@ function ActivityPage() {
   );
 
   const changelogEntries = changelogQuery.data?.entries ?? [];
-  const activityRows = activityQuery.data?.items ?? [];
+  const eventRows = eventsQuery.data?.items ?? [];
   const changelogTotals = useMemo(
     () => computeChangelogTotals(changelogEntries),
     [changelogEntries],
   );
   const hasChangelogEntries = changelogEntries.length > 0;
   const canPageChangelogNext = Boolean(changelogQuery.data?.nextCursor) && changelogEntries.length === ACTIVITY_PAGE_SIZE;
-  const canPageActivityNext = Boolean(activityQuery.data?.nextCursor) && activityRows.length === ACTIVITY_PAGE_SIZE;
+  const canPageEventsNext = Boolean(eventsQuery.data?.nextCursor) && eventRows.length === ACTIVITY_PAGE_SIZE;
 
   function setView(nextView: "changes" | "events") {
     void navigate({
@@ -77,7 +78,7 @@ function ActivityPage() {
     });
   }
 
-  function openActivity(event: AFSActivityEvent) {
+  function openEvent(event: AFSEventEntry) {
     if (event.workspaceId == null) {
       return;
     }
@@ -87,11 +88,11 @@ function ActivityPage() {
       params: { workspaceId: event.workspaceId },
       search: {
         ...(event.databaseId ? { databaseId: event.databaseId } : {}),
-        ...(event.scope === "savepoint"
+        ...(event.kind === "checkpoint"
           ? { tab: "checkpoints" }
-          : event.scope === "file"
+          : event.kind === "file"
             ? { tab: "browse" }
-            : event.scope === "workspace"
+            : event.kind === "workspace"
               ? {}
               : { tab: "activity" }),
       },
@@ -204,28 +205,28 @@ function ActivityPage() {
 
       {view === "events" ? (
         <>
-          <ActivityTable
-            rows={activityRows}
-            loading={activityQuery.isLoading}
-            error={activityQuery.isError}
-            errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
-            onOpenActivity={openActivity}
+          <EventsTable
+            rows={eventRows}
+            loading={eventsQuery.isLoading}
+            error={eventsQuery.isError}
+            errorMessage={eventsQuery.error instanceof Error ? eventsQuery.error.message : undefined}
+            onOpenEvent={openEvent}
           />
-          {!activityQuery.isLoading &&
-          !activityQuery.isError &&
-          activityRows.length > 0 &&
-          (activityCursors.length > 0 || canPageActivityNext) ? (
+          {!eventsQuery.isLoading &&
+          !eventsQuery.isError &&
+          eventRows.length > 0 &&
+          (eventCursors.length > 0 || canPageEventsNext) ? (
             <PaginationControls
-              onPrevious={() => setActivityCursors((cursors) => cursors.slice(0, -1))}
+              onPrevious={() => setEventCursors((cursors) => cursors.slice(0, -1))}
               onNext={() => {
-                const nextCursor = activityQuery.data?.nextCursor;
+                const nextCursor = eventsQuery.data?.nextCursor;
                 if (nextCursor) {
-                  setActivityCursors((cursors) => [...cursors, nextCursor]);
+                  setEventCursors((cursors) => [...cursors, nextCursor]);
                 }
               }}
-              previousDisabled={activityCursors.length === 0}
-              nextDisabled={!canPageActivityNext}
-              loading={activityQuery.isFetching}
+              previousDisabled={eventCursors.length === 0}
+              nextDisabled={!canPageEventsNext}
+              loading={eventsQuery.isFetching}
             />
           ) : null}
         </>

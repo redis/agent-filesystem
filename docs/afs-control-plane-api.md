@@ -1,7 +1,7 @@
 # AFS Control Plane API
 
 Date: 2026-04-05
-Last reviewed: 2026-04-24
+Last reviewed: 2026-04-30
 
 ## Goal
 
@@ -103,6 +103,7 @@ Unless noted otherwise, paths below are rooted at `/v1`.
 - `DELETE /databases/{database_id}`
 - `POST /databases/{database_id}/default`
 - `GET /databases/{database_id}/activity`
+- `GET /databases/{database_id}/events`
 - `GET /databases/{database_id}/agents`
 
 ### Workspaces
@@ -135,10 +136,29 @@ Database-scoped equivalents remain available:
 ### Checkpoints
 
 - `GET /workspaces/{workspace_id}/checkpoints`
+- `GET /workspaces/{workspace_id}/checkpoints/{checkpoint_id}`
 - `POST /workspaces/{workspace_id}/checkpoints`
+- `GET /workspaces/{workspace_id}/diff`
 - `POST /workspaces/{workspace_id}:restore`
 - `POST /workspaces/{workspace_id}:save-from-live`
 - `POST /workspaces/{workspace_id}:fork`
+
+`GET /workspaces/{workspace_id}/checkpoints/{checkpoint_id}` returns richer
+checkpoint detail:
+
+- workspace id/name
+- checkpoint id/name
+- description/note
+- kind/source/author/actor/session metadata
+- parent checkpoint summary
+- manifest hash, file count, folder count, byte total
+- change summary from parent to this checkpoint
+
+`GET /workspaces/{workspace_id}/diff` accepts `base` and `head` view refs. View
+refs may be `checkpoint:{checkpoint_id}`, `head`, or `working-copy`. The
+response includes file-level entries and, for UTF-8 text files under the server
+limit, bounded `text_diff` hunks. Binary and oversized files report a skipped
+reason instead of blocking the request.
 
 `POST /workspaces/{workspace_id}:restore` accepts:
 
@@ -166,8 +186,10 @@ rather than a standalone `PUT /files/content` route.
 ### Activity, Changes, And Agents
 
 - `GET /activity`
+- `GET /events`
 - `GET /agents`
 - `GET /workspaces/{workspace_id}/activity`
+- `GET /workspaces/{workspace_id}/events`
 - `GET /workspaces/{workspace_id}/changes`
 - `GET /workspaces/{workspace_id}/sessions`
 - `GET /workspaces/{workspace_id}/sessions/{session_id}/summary`

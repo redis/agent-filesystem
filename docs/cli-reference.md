@@ -266,8 +266,9 @@ Subcommands:
 | --- | --- |
 | `afs checkpoint list [workspace]` | List checkpoints newest first. |
 | `afs checkpoint create [workspace] [checkpoint] [--description <text>]` | Save the active workspace state. |
-| `afs checkpoint diff [workspace] <base> <target>` | Compare two checkpoints or workspace states. |
-| `afs checkpoint diff [workspace] <checkpoint> --active` | Compare a checkpoint to the active workspace. |
+| `afs checkpoint show [workspace] <checkpoint> [--json]` | Show checkpoint metadata and parent-change summary. |
+| `afs checkpoint diff [workspace] <base> <target> [--json]` | Compare two checkpoints or workspace states. |
+| `afs checkpoint diff [workspace] <checkpoint> --active [--json]` | Compare a checkpoint to the active workspace. |
 | `afs checkpoint restore [workspace] <checkpoint>` | Restore active state to a checkpoint. |
 
 Examples:
@@ -275,7 +276,9 @@ Examples:
 ```bash
 afs checkpoint list demo
 afs checkpoint create demo before-refactor --description "Before the agent rewrite"
+afs checkpoint show demo before-refactor
 afs checkpoint diff demo before-refactor --active
+afs checkpoint diff demo initial before-refactor --json
 afs checkpoint restore demo initial
 ```
 

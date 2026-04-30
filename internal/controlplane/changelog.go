@@ -117,12 +117,14 @@ func enqueueChangeEntries(ctx context.Context, pipe redis.Pipeliner, storageID s
 	}
 	streamKey := changelogStreamKey(storageID)
 	for _, entry := range entries {
+		fields := entry.fields()
 		pipe.XAdd(ctx, &redis.XAddArgs{
 			Stream: streamKey,
 			MaxLen: changelogStreamMaxLen,
 			Approx: true,
-			Values: entry.fields(),
+			Values: fields,
 		})
+		enqueueEventFields(ctx, pipe, storageID, changeEventFields(fields))
 		if entry.SessionID != "" {
 			summaryKey := sessionSummaryKey(storageID, entry.SessionID)
 			pipe.HIncrBy(ctx, summaryKey, "op_"+entry.Op, 1)

@@ -860,6 +860,45 @@ func (m *DatabaseManager) ListResolvedWorkspaceActivity(ctx context.Context, wor
 	return response, nil
 }
 
+func (m *DatabaseManager) ListGlobalEvents(ctx context.Context, databaseID string, req EventListRequest) (EventListResponse, error) {
+	service, _, err := m.serviceFor(ctx, databaseID)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	response, err := service.ListGlobalEvents(ctx, req)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	m.attachDatabaseToEvents(&response, databaseID)
+	return response, nil
+}
+
+func (m *DatabaseManager) ListWorkspaceEvents(ctx context.Context, databaseID, workspace string, req EventListRequest) (EventListResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	response, err := service.ListWorkspaceEvents(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	m.attachDatabaseToEvents(&response, route.DatabaseID)
+	return response, nil
+}
+
+func (m *DatabaseManager) ListResolvedWorkspaceEvents(ctx context.Context, workspace string, req EventListRequest) (EventListResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	response, err := service.ListWorkspaceEvents(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return EventListResponse{}, err
+	}
+	m.attachDatabaseToEvents(&response, route.DatabaseID)
+	return response, nil
+}
+
 func (m *DatabaseManager) ListGlobalChangelog(ctx context.Context, databaseID string, req ChangelogListRequest) (ChangelogListResponse, error) {
 	service, _, err := m.serviceFor(ctx, databaseID)
 	if err != nil {
@@ -927,6 +966,22 @@ func (m *DatabaseManager) ListResolvedCheckpoints(ctx context.Context, workspace
 		return nil, err
 	}
 	return service.ListCheckpoints(ctx, route.WorkspaceID, limit)
+}
+
+func (m *DatabaseManager) GetCheckpoint(ctx context.Context, databaseID, workspace, checkpointID string) (checkpointDetail, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return checkpointDetail{}, err
+	}
+	return service.GetCheckpoint(ctx, route.WorkspaceID, checkpointID)
+}
+
+func (m *DatabaseManager) GetResolvedCheckpoint(ctx context.Context, workspace, checkpointID string) (checkpointDetail, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return checkpointDetail{}, err
+	}
+	return service.GetCheckpoint(ctx, route.WorkspaceID, checkpointID)
 }
 
 func (m *DatabaseManager) DiffWorkspace(ctx context.Context, databaseID, workspace, baseView, headView string) (WorkspaceDiffResponse, error) {
@@ -1333,6 +1388,56 @@ func (m *DatabaseManager) ListAllActivity(ctx context.Context, req activityListR
 	return response, nil
 }
 
+func (m *DatabaseManager) ListAllEvents(ctx context.Context, req EventListRequest) (EventListResponse, error) {
+	m.mu.Lock()
+	order := append([]string(nil), m.order...)
+	profiles := make(map[string]databaseProfile, len(m.profiles))
+	for id, profile := range m.profiles {
+		profiles[id] = profile
+	}
+	m.mu.Unlock()
+	subject := authSubjectFromContext(ctx)
+
+	req = normalizeEventListRequest(req)
+	items := make([]eventEntry, 0, req.Limit)
+	for _, databaseID := range order {
+		profile, ok := profiles[databaseID]
+		if ok && !databaseProfileVisibleToSubject(profile, subject) {
+			continue
+		}
+		service, _, err := m.serviceFor(ctx, databaseID)
+		if err != nil {
+			continue
+		}
+		response, err := service.ListGlobalEvents(ctx, req)
+		if err != nil {
+			continue
+		}
+		for _, item := range response.Items {
+			item.DatabaseID = databaseID
+			item.DatabaseName = profile.Name
+			items = append(items, item)
+		}
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		comparison := compareRedisStreamIDs(items[i].ID, items[j].ID)
+		if req.Reverse {
+			return comparison > 0
+		}
+		return comparison < 0
+	})
+	if len(items) > req.Limit {
+		items = items[:req.Limit]
+	}
+
+	response := EventListResponse{Items: items}
+	if len(items) > 0 {
+		response.NextCursor = items[len(items)-1].ID
+	}
+	return response, nil
+}
+
 func (m *DatabaseManager) ListAllChangelog(ctx context.Context, req ChangelogListRequest) (ChangelogListResponse, error) {
 	m.mu.Lock()
 	order := append([]string(nil), m.order...)
@@ -1413,6 +1518,19 @@ func (m *DatabaseManager) attachDatabaseToChangelog(response *ChangelogListRespo
 	for i := range response.Entries {
 		response.Entries[i].DatabaseID = databaseID
 		response.Entries[i].DatabaseName = profile.Name
+	}
+}
+
+func (m *DatabaseManager) attachDatabaseToEvents(response *EventListResponse, databaseID string) {
+	m.mu.Lock()
+	profile, ok := m.profiles[databaseID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+	for i := range response.Items {
+		response.Items[i].DatabaseID = databaseID
+		response.Items[i].DatabaseName = profile.Name
 	}
 }
 
