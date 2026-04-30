@@ -12,6 +12,8 @@ type Props = {
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
+  emptyStateText?: string;
+  hideWorkspaceColumn?: boolean;
   onOpenEvent: (event: AFSEventEntry) => void;
 };
 
@@ -33,6 +35,8 @@ export function EventsTable({
   loading = false,
   error = false,
   errorMessage = "Unable to load events. Please retry.",
+  emptyStateText = "No events match the current filter.",
+  hideWorkspaceColumn = false,
   onOpenEvent,
 }: Props) {
   const [search, setSearch] = useState("");
@@ -75,63 +79,70 @@ export function EventsTable({
   );
 
   const columns = useMemo<ColumnDef<AFSEventEntry>[]>(
-    () => [
-      {
-        accessorKey: "createdAt",
-        header: "When",
-        size: 64,
-        enableSorting: true,
-        cell: ({ row }) => formatEventTime(row.original.createdAt),
-      },
-      {
-        accessorKey: "kind",
-        header: "Event",
-        size: 150,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.Stack>
-            <Typography.Body component="strong">{eventTitle(row.original)}</Typography.Body>
-            <Typography.Body color="secondary" component="span">
-              {eventDetail(row.original)}
-            </Typography.Body>
-          </S.Stack>
-        ),
-      },
-      {
-        accessorKey: "workspaceName",
-        header: "Workspace",
-        size: 90,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
-            {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
-          </S.SingleLineText>
-        ),
-      },
-      {
-        accessorKey: "actor",
-        header: "Actor",
-        size: 70,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.SingleLineText title={eventActor(row.original)}>
-            {eventActor(row.original)}
-          </S.SingleLineText>
-        ),
-      },
-      {
-        accessorKey: "path",
-        header: "Path",
-        size: 120,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.SingleLineText title={eventPath(row.original)}>
-            {eventPath(row.original)}
-          </S.SingleLineText>
-        ),
-      },
-    ],
-    [],
+    () => {
+      const cols: ColumnDef<AFSEventEntry>[] = [
+        {
+          accessorKey: "createdAt",
+          header: "When",
+          size: 64,
+          enableSorting: true,
+          cell: ({ row }) => formatEventTime(row.original.createdAt),
+        },
+        {
+          accessorKey: "kind",
+          header: "Event",
+          size: 150,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.Stack>
+              <Typography.Body component="strong">{eventTitle(row.original)}</Typography.Body>
+              <Typography.Body color="secondary" component="span">
+                {eventDetail(row.original)}
+              </Typography.Body>
+            </S.Stack>
+          ),
+        },
+        {
+          accessorKey: "actor",
+          header: "Actor",
+          size: 70,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.SingleLineText title={eventActor(row.original)}>
+              {eventActor(row.original)}
+            </S.SingleLineText>
+          ),
+        },
+        {
+          accessorKey: "path",
+          header: "Path",
+          size: 120,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.SingleLineText title={eventPath(row.original)}>
+              {eventPath(row.original)}
+            </S.SingleLineText>
+          ),
+        },
+      ];
+
+      if (!hideWorkspaceColumn) {
+        cols.splice(2, 0, {
+          accessorKey: "workspaceName",
+          header: "Workspace",
+          size: 90,
+          enableSorting: true,
+          cell: ({ row }) => (
+            <S.SingleLineText title={row.original.workspaceName ?? row.original.workspaceId ?? "Global"}>
+              {row.original.workspaceName ?? row.original.workspaceId ?? "Global"}
+            </S.SingleLineText>
+          ),
+        });
+      }
+
+      return cols;
+    },
+    [hideWorkspaceColumn],
   );
 
   return (
@@ -147,7 +158,7 @@ export function EventsTable({
       {loading ? <S.EmptyState>Loading events...</S.EmptyState> : null}
       {error ? <S.EmptyState role="alert">{errorMessage}</S.EmptyState> : null}
       {!loading && !error && filteredRows.length === 0 ? (
-        <S.EmptyState>No events match the current filter.</S.EmptyState>
+        <S.EmptyState>{emptyStateText}</S.EmptyState>
       ) : null}
 
       {!loading && !error && filteredRows.length > 0 ? (

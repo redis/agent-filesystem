@@ -694,6 +694,7 @@ function createActivity(
   scope: string,
   workspaceId: string,
   workspaceName: string,
+  activityPath?: string,
 ): AFSActivityEvent {
   return {
     id: makeId("evt"),
@@ -701,6 +702,7 @@ function createActivity(
     createdAt: nowISO(),
     detail,
     kind,
+    path: activityPath,
     scope,
     title,
     workspaceId,
@@ -1287,6 +1289,7 @@ function allEventsForState(state: AFSState): AFSEventEntry[] {
       op: op || event.kind,
       source: "demo",
       actor: event.actor,
+      path: event.path,
       extras: {
         title: event.title,
         detail: event.detail,
@@ -1536,6 +1539,7 @@ This workspace was created from the AFS Web UI.
           "file",
           workspace.id,
           workspace.name,
+          normalizeFilePath(normalizedPath),
         ),
       );
     });

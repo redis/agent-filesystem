@@ -8,7 +8,7 @@ import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
 import { BgFx } from "../layout/situation-room-chrome";
-import { bottomNavigationItems, navigationItems } from "../layout/navigation-items";
+import { adminNavigationItem, bottomNavigationItems, navigationItems } from "../layout/navigation-items";
 import {
   FlexRow,
   FlexColItem,
@@ -28,7 +28,7 @@ function RouteWarmup() {
   const auth = useAuthSession();
 
   useEffect(() => {
-    const targets = [...navigationItems, ...bottomNavigationItems]
+    const targets = [...navigationItems, adminNavigationItem, ...bottomNavigationItems]
       .filter((item) => !item.adminOnly || isCloudAdminConfig(auth.config))
       .map((item) => item.path)
       .filter((path, index, values) => path !== location.pathname && values.indexOf(path) === index);

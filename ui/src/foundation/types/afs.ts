@@ -91,6 +91,7 @@ export type AFSActivityEvent = {
   createdAt: string;
   detail: string;
   kind: string;
+  path?: string;
   scope: string;
   title: string;
 };

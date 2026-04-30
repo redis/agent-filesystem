@@ -56,7 +56,12 @@ Implemented in the current branch:
   `workspace:events`, exposed through workspace, database, and global event
   API routes.
 - The UI Checkpoints tab has compare-with-active and restore-preview flows
-  backed by the diff API.
+  backed by the diff API, including inline text hunks for supported files.
+- Checkpoint rows in the UI expand to show details and changed paths.
+- The workspace History tab reads from the unified event stream instead of the
+  older summary activity array.
+- The Browse drawer has a first path-history surface that filters recent events
+  for the selected path and links checkpoint-backed rows back to Checkpoints.
 - Restore creates a safety checkpoint when active state has uncheckpointed
   changes, returns the safety checkpoint in the restore result, writes restore
   changelog/audit data, and publishes a root-replace invalidation.
@@ -69,17 +74,18 @@ Implemented in the current branch:
 
 Partially implemented:
 
-- The UI diff renders a reviewable changed-file list and summary stats, but not
-  inline text diffs.
 - Restore is safe and scriptable in the CLI. A local control-plane smoke with
   an isolated Redis server and temp sync folder verifies checkpoint create,
   show, diff JSON, restore, event API rows, and sync-folder rematerialization.
+- Path history is available in the UI through the existing event API's exact
+  `path` filter. A dedicated indexed path-history endpoint can wait until query
+  volume proves it is needed.
 
 Not implemented yet:
 
 - Session-boundary auto-checkpoints.
 - Fork review and accept/reject flow.
-- Path-history UI.
+- CLI `afs history` and `afs path history` commands.
 
 ## Product Thesis
 
@@ -407,11 +413,16 @@ POST /v1/workspaces/{workspace_id}/checkpoints
 GET  /v1/workspaces/{workspace_id}/diff?base=<id|active>&target=<id|active>
 POST /v1/workspaces/{workspace_id}:restore
 GET  /v1/workspaces/{workspace_id}/events
-GET  /v1/workspaces/{workspace_id}/paths/history?path=/notes/foo.md
+GET  /v1/workspaces/{workspace_id}/events?path=/notes/foo.md
 ```
 
 No `/versions` alias is planned for the first release. It adds another noun
 without improving the agent-facing model.
+
+A dedicated `/paths/history` endpoint is not required for the first UI slice.
+The existing event endpoint already accepts `path`, `session_id`, `kind`, and
+time bounds. Add a path-history-specific endpoint only if we need a different
+indexing strategy or response shape.
 
 ## CLI Shape
 
@@ -437,6 +448,8 @@ Recommendation for v1.1:
 - Keep `checkpoint` in the CLI.
 - Do not add `afs version` aliases.
 - Explain checkpoint as a saved filesystem state in help text.
+- Keep history/path-history CLI commands behind a real agent workflow need; the
+  API/UI event stream now covers the first review loop.
 
 ## UI Shape
 
@@ -476,6 +489,16 @@ Shows:
 The existing event-history merge should feed the checkpoint timeline where
 possible. Checkpoint rows should expand into file changes, and session rows
 should expand into the file events they produced.
+
+For the current v1.1 UI slice:
+
+- Workspace detail uses a visible **History** tab backed by `workspace:events`.
+- The route/search value can remain `activity` for compatibility; the visible
+  noun should be History.
+- Browse file drawers expose a compact Path history panel for the selected
+  path, backed by `events?path=...`.
+- The global Activity page keeps Changelog first and exposes Events as the
+  broader operational feed.
 
 ## MCP Behavior
 
@@ -573,19 +596,24 @@ storage rewrite.
 - [x] Run a final manual restore smoke test against a local control plane and
   isolated temp sync folder.
 
-### Phase 4: UI Checkpoints And Diff - partially complete
+### Phase 4: UI Checkpoints And Diff - complete
 
 - [x] Redesign the existing Checkpoints tab around checkpoint history.
 - [x] Add file-level diff view.
 - [x] Add restore preview flow.
-- [ ] Add text diff view if content diffs ship in v1.1.
-- [ ] Final visual/browser QA against the Redis UI shell.
+- [x] Add text diff view for supported content diffs.
+- [x] Run browser QA against the Redis UI shell for checkpoint expand/collapse
+  and diff flows.
 
-### Phase 5: History Integration - partially complete
+### Phase 5: History Integration - mostly complete
 
 - [x] Wire checkpoint and file rows into unified event storage/API.
-- [ ] Add expandable checkpoint rows.
-- [ ] Add path-history follow-up if event indexing is ready.
+- [x] Add expandable checkpoint rows.
+- [x] Move workspace detail History to the unified event API.
+- [x] Add first path-history UI using the existing event `path` filter.
+- [ ] Add CLI history/path-history only if the UI/API loop exposes a concrete
+  agent workflow need.
+- [ ] Revisit path indexing if exact path filtering becomes too expensive.
 
 ### Phase 6: Fork Review - not started
 
@@ -678,7 +706,8 @@ Still open:
    manual checkpoint history and diff are live?
 2. Should fork acceptance replace parent active state in v1.1, or should fork
    review stop at compare/delete/manual copy?
-3. Should path history be part of v1.1, or a follow-up after unified events?
+3. Should history/path-history CLI commands ship in v1.1, or wait until a real
+   agent/operator workflow needs them?
 
 ## Recommended V1.1 Cut
 
@@ -697,10 +726,10 @@ Already covered in the current branch:
 
 Remaining before calling v1.1 complete:
 
-1. Render inline text diffs in the UI if we want visible content hunks in the
-   Checkpoints tab for v1.1.
-2. Run browser-level visual QA for the Checkpoints tab once inline text-diff UI
-   is added or explicitly deferred.
+1. Run browser-level visual QA for the new History tab and file drawer Path
+   history panel.
+2. Decide whether the CLI needs `afs history` / `afs path history` in v1.1 or
+   whether the event API plus UI covers the first release.
 
 Defer:
 

@@ -14,7 +14,12 @@ import {
 } from "@redis-ui/icons/multicolor";
 import { Moon, Sun } from "lucide-react";
 import * as S from "./sidebar.styles";
-import { bottomNavigationItems, isNavigationItemActive, navigationItems } from "./navigation-items";
+import {
+  adminNavigationItem,
+  bottomNavigationItems,
+  isNavigationItemActive,
+  navigationItems,
+} from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
 import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
 import { useColorMode } from "../foundation/theme-context";
@@ -77,9 +82,7 @@ export function AppSidebar() {
   const serverVersion = useQuery(serverVersionQueryOptions());
 
   const isEmpty = !isLoading && databases.length === 0;
-  const visibleNavigationItems = navigationItems.filter(
-    (item) => item.kind !== "route" || !item.adminOnly || isCloudAdminConfig(auth.config),
-  );
+  const showAdminNavigation = isCloudAdminConfig(auth.config);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_LOCALSTORAGE_KEY, JSON.stringify(isExpanded));
@@ -171,7 +174,14 @@ export function AppSidebar() {
         </S.CenterSidebarHeader>
 
         <SideBar.ScrollContainer>
-          <SideBar.ItemsContainer>{visibleNavigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
+          <SideBar.ItemsContainer>{navigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
+
+          {showAdminNavigation ? (
+            <>
+              <SideBar.Divider fullWidth />
+              <SideBar.ItemsContainer>{renderRouteItem(adminNavigationItem)}</SideBar.ItemsContainer>
+            </>
+          ) : null}
 
           <S.Spacer />
           <SideBar.Divider fullWidth />

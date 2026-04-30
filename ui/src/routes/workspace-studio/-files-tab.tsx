@@ -1,5 +1,5 @@
 import { Button } from "@redis-ui/components";
-import { Check, ChevronDown, GitFork, Search, X } from "lucide-react";
+import { Check, ChevronDown, GitFork, History, Search, X } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import styled, { keyframes } from "styled-components";
 import {
@@ -10,10 +10,12 @@ import {
 } from "../../components/afs-kit";
 import { formatBytes } from "../../foundation/api/afs";
 import {
+  useEvents,
   useUpdateWorkspaceFileMutation,
   useWorkspaceFileContent,
   useWorkspaceTree,
 } from "../../foundation/hooks/use-afs";
+import { PathHistoryPanel } from "../../foundation/tables/path-history-panel";
 import {
   getActiveWorkspaceView,
   getWorkspaceBrowserViewOptions,
@@ -61,6 +63,7 @@ export function FilesTab({
   const [currentPath, setCurrentPath] = useState("/");
   const [selectedPath, setSelectedPath] = useState("");
   const [draftContent, setDraftContent] = useState("");
+  const [pathHistoryOpen, setPathHistoryOpen] = useState(false);
   const [checkpointMenuOpen, setCheckpointMenuOpen] = useState(false);
   const [checkpointSearch, setCheckpointSearch] = useState("");
   const checkpointMenuRef = useRef<HTMLDivElement | null>(null);
@@ -68,13 +71,13 @@ export function FilesTab({
 
   useEffect(() => {
     setCurrentPath("/");
-    setSelectedPath("");
+    closeSelectedFile();
   }, [browserView]);
 
   useEffect(() => {
     if (selectedPath === "") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedPath("");
+      if (e.key === "Escape") closeSelectedFile();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -97,6 +100,17 @@ export function FilesTab({
       path: selectedPath,
     },
     selectedPath !== "",
+  );
+
+  const pathHistoryQuery = useEvents(
+    {
+      databaseId: workspace.databaseId,
+      workspaceId: workspace.id,
+      path: selectedPath,
+      limit: 25,
+      direction: "desc",
+    },
+    selectedPath !== "" && pathHistoryOpen,
   );
 
   useEffect(() => {
@@ -194,7 +208,7 @@ export function FilesTab({
   function switchCheckpoint(nextView: AFSWorkspaceView) {
     onBrowserViewChange(nextView);
     setCurrentPath("/");
-    setSelectedPath("");
+    closeSelectedFile();
     setCheckpointMenuOpen(false);
     setCheckpointSearch("");
   }
@@ -203,6 +217,51 @@ export function FilesTab({
     setCheckpointMenuOpen(false);
     setCheckpointSearch("");
     onViewAllCheckpoints();
+  }
+
+  function closeSelectedFile() {
+    setSelectedPath("");
+    setPathHistoryOpen(false);
+  }
+
+  function openPathHistoryEvent(event: { kind: string; checkpointId?: string }) {
+    if (event.kind === "checkpoint" || event.checkpointId) {
+      closeSelectedFile();
+      onViewAllCheckpoints();
+    }
+  }
+
+  function renderPathHistoryToggle() {
+    return (
+      <PathHistoryToggleButton
+        type="button"
+        aria-pressed={pathHistoryOpen}
+        $active={pathHistoryOpen}
+        onClick={() => setPathHistoryOpen((open) => !open)}
+      >
+        <History size={14} strokeWidth={1.8} aria-hidden="true" />
+        <span>History</span>
+      </PathHistoryToggleButton>
+    );
+  }
+
+  function renderPathHistoryPanel() {
+    if (!pathHistoryOpen || selectedPath === "") {
+      return null;
+    }
+
+    return (
+      <PathHistoryPanel
+        path={selectedPath}
+        rows={pathHistoryQuery.data?.items ?? []}
+        loading={pathHistoryQuery.isLoading}
+        error={pathHistoryQuery.isError}
+        errorMessage={
+          pathHistoryQuery.error instanceof Error ? pathHistoryQuery.error.message : undefined
+        }
+        onOpenEvent={openPathHistoryEvent}
+      />
+    );
   }
 
   return (
@@ -280,7 +339,7 @@ export function FilesTab({
             <BreadcrumbLink
               onClick={() => {
                 setCurrentPath("/");
-                setSelectedPath("");
+                closeSelectedFile();
               }}
               $isRoot
             >
@@ -297,7 +356,7 @@ export function FilesTab({
                   ) : (
                     <BreadcrumbLink onClick={() => {
                       setCurrentPath(fullPath);
-                      setSelectedPath("");
+                      closeSelectedFile();
                     }}>
                       {segment}
                     </BreadcrumbLink>
@@ -344,7 +403,7 @@ export function FilesTab({
                   <FileRow
                     onClick={() => {
                       setCurrentPath(parentPath(currentPath));
-                      setSelectedPath("");
+                      closeSelectedFile();
                     }}
                   >
                     <FileCell $name>
@@ -364,7 +423,7 @@ export function FilesTab({
                     onClick={() => {
                       if (item.kind === "dir") {
                         setCurrentPath(item.path);
-                        setSelectedPath("");
+                        closeSelectedFile();
                       } else {
                         setSelectedPath(item.path);
                       }
@@ -394,7 +453,7 @@ export function FilesTab({
 
       {/* ─── File content viewer (slide-over drawer) ─── */}
       {selectedPath !== "" && (
-        <DrawerOverlay onClick={() => setSelectedPath("")}>
+        <DrawerOverlay onClick={closeSelectedFile}>
           <DrawerPanel onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             {selectedFileQuery.isLoading ? (
               <>
@@ -402,9 +461,13 @@ export function FilesTab({
                   <DrawerTitleWrap>
                     <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
                   </DrawerTitleWrap>
-                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  <DrawerHeaderActions>
+                    {renderPathHistoryToggle()}
+                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
+                  </DrawerHeaderActions>
                 </DrawerHeader>
                 <ViewerMessage>Loading file content...</ViewerMessage>
+                {renderPathHistoryPanel()}
               </>
             ) : selectedFile == null ? (
               <>
@@ -412,9 +475,13 @@ export function FilesTab({
                   <DrawerTitleWrap>
                     <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
                   </DrawerTitleWrap>
-                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  <DrawerHeaderActions>
+                    {renderPathHistoryToggle()}
+                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
+                  </DrawerHeaderActions>
                 </DrawerHeader>
                 <ViewerMessage>Could not load file.</ViewerMessage>
+                {renderPathHistoryPanel()}
               </>
             ) : selectedFile.binary ? (
               <>
@@ -427,9 +494,13 @@ export function FilesTab({
                       <Tag>binary</Tag>
                     </MetaRow>
                   </DrawerTitleWrap>
-                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  <DrawerHeaderActions>
+                    {renderPathHistoryToggle()}
+                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
+                  </DrawerHeaderActions>
                 </DrawerHeader>
-                <ViewerMessage>Binary file — content not shown.</ViewerMessage>
+                <ViewerMessage>Binary file - content not shown.</ViewerMessage>
+                {renderPathHistoryPanel()}
               </>
             ) : editable ? (
               <DrawerForm
@@ -450,16 +521,18 @@ export function FilesTab({
                     </ViewerMeta>
                   </DrawerTitleWrap>
                   <InlineActions>
+                    {renderPathHistoryToggle()}
                     <Button size="medium" type="submit" disabled={updateFile.isPending}>
                       Save
                     </Button>
-                    <DrawerCloseButton type="button" onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                    <DrawerCloseButton type="button" onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
                   </InlineActions>
                 </DrawerHeader>
                 <DrawerCodeArea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
                 />
+                {renderPathHistoryPanel()}
               </DrawerForm>
             ) : (
               <>
@@ -470,12 +543,16 @@ export function FilesTab({
                       {selectedFile.language} · {formatItemSize(selectedFile.size)}
                     </ViewerMeta>
                   </DrawerTitleWrap>
-                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  <DrawerHeaderActions>
+                    {renderPathHistoryToggle()}
+                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
+                  </DrawerHeaderActions>
                 </DrawerHeader>
                 <DrawerCodeArea
                   readOnly
                   value={selectedFile.content ?? selectedFile.target ?? ""}
                 />
+                {renderPathHistoryPanel()}
               </>
             )}
           </DrawerPanel>
@@ -1033,6 +1110,41 @@ const DrawerTitleWrap = styled.div`
   gap: 10px;
   min-width: 0;
   flex: 1;
+`;
+
+const DrawerHeaderActions = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+`;
+
+const PathHistoryToggleButton = styled.button<{ $active?: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line)")};
+  border-radius: 7px;
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)")};
+  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-soft)")};
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink);
+  }
+
+  &:focus-visible {
+    outline: none;
+    border-color: var(--afs-focus);
+    box-shadow: 0 0 0 3px var(--afs-focus-soft);
+  }
 `;
 
 const DrawerCloseButton = styled.button`

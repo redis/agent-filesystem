@@ -45,7 +45,6 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Agents", path: "/agents", icon: BotIcon },
   { kind: "route", label: "MCP", path: "/mcp", icon: PlugIcon },
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
-  { kind: "route", label: "Admin", path: "/admin", icon: ShieldIcon, adminOnly: true },
   {
     kind: "route",
     label: "Events",
@@ -53,6 +52,14 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
     icon: BellIcon,
   },
 ];
+
+export const adminNavigationItem: NavigationRouteItem = {
+  kind: "route",
+  label: "Admin",
+  path: "/admin",
+  icon: ShieldIcon,
+  adminOnly: true,
+};
 
 export const bottomNavigationItems: ReadonlyArray<NavigationRouteItem> = [
   { kind: "route", label: "Docs", path: "/docs", icon: BookOpenIcon, title: "Documentation" },

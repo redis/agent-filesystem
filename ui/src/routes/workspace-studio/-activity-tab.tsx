@@ -1,40 +1,56 @@
 import styled from "styled-components";
 import { SectionCard, SectionGrid, SectionHeader, SectionTitle } from "../../components/afs-kit";
-import { ActivityTable } from "../../foundation/tables/activity-table";
-import type { AFSActivityEvent } from "../../foundation/types/afs";
+import { useEvents } from "../../foundation/hooks/use-afs";
+import { EventsTable } from "../../foundation/tables/events-table";
+import type { AFSEventEntry } from "../../foundation/types/afs";
+import type { StudioTab } from "../../foundation/workspace-tabs";
 
-type StudioTab = "browse" | "checkpoints" | "activity" | "settings";
+const WORKSPACE_HISTORY_LIMIT = 100;
 
 type Props = {
-  activity: AFSActivityEvent[];
+  databaseId?: string;
+  workspaceId: string;
   updatedAt: string;
   onTabChange: (tab: StudioTab) => void;
 };
 
-function activityDestinationTab(event: AFSActivityEvent): StudioTab {
-  if (event.scope === "savepoint") {
+function eventDestinationTab(event: AFSEventEntry): StudioTab {
+  if (event.kind === "checkpoint" || event.checkpointId) {
     return "checkpoints";
   }
-  if (event.scope === "file") {
+  if (event.kind === "file" || event.path) {
     return "browse";
   }
-  if (event.scope === "workspace") {
+  if (event.kind === "workspace") {
     return "browse";
   }
   return "activity";
 }
 
-export function ActivityTab({ activity, updatedAt, onTabChange }: Props) {
+export function ActivityTab({ databaseId, workspaceId, updatedAt, onTabChange }: Props) {
+  const eventsQuery = useEvents({
+    databaseId,
+    workspaceId,
+    limit: WORKSPACE_HISTORY_LIMIT,
+    direction: "desc",
+  });
+  const events = eventsQuery.data?.items ?? [];
+
   return (
     <SectionGrid>
       <SectionCard $span={12}>
         <SectionHeader>
-          <SectionTitle title="Workspace events" />
+          <SectionTitle title="Workspace history" />
           <LastUpdated>Last updated {new Date(updatedAt).toLocaleString()}</LastUpdated>
         </SectionHeader>
-        <ActivityTable
-          rows={activity}
-          onOpenActivity={(event) => onTabChange(activityDestinationTab(event))}
+        <EventsTable
+          rows={events}
+          loading={eventsQuery.isLoading}
+          error={eventsQuery.isError}
+          errorMessage={eventsQuery.error instanceof Error ? eventsQuery.error.message : undefined}
+          emptyStateText="No workspace events have been recorded yet."
+          hideWorkspaceColumn
+          onOpenEvent={(event) => onTabChange(eventDestinationTab(event))}
         />
       </SectionCard>
     </SectionGrid>

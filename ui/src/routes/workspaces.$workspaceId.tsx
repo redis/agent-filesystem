@@ -334,7 +334,7 @@ function WorkspaceStudioPage() {
           Checkpoints
         </TabButton>
         <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
-          Events
+          History
         </TabButton>
         <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
           Settings
@@ -360,7 +360,8 @@ function WorkspaceStudioPage() {
 
       {tab === "activity" ? (
         <ActivityTab
-          activity={workspace.activity}
+          databaseId={workspace.databaseId}
+          workspaceId={workspaceId}
           updatedAt={workspace.updatedAt}
           onTabChange={setStudioTab}
         />
