@@ -1,15 +1,41 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "redis-afs-sdk"
+name = "redis-afs"
 version = "0.1.0"
 description = "Python SDK for the AFS control plane and agent filesystem mounts."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "AGPL-3.0-only"
 authors = [{ name = "Redis" }]
+keywords = [
+  "afs",
+  "agent-filesystem",
+  "redis",
+  "sdk",
+  "mcp",
+  "workspace",
+  "checkpoint",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/redis/agent-filesystem/tree/main/sdk/python"
+Repository = "https://github.com/redis/agent-filesystem"
+Issues = "https://github.com/redis/agent-filesystem/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

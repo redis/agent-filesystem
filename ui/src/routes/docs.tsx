@@ -18,7 +18,7 @@ import {
   CrossLinkDesc,
   CrossLinkArrow,
 } from "../components/doc-kit";
-import { DocsTopicLinks } from "../features/docs/docs-topics";
+import { DocsTopicLinks, docsTopicById } from "../features/docs/docs-topics";
 import { pythonSdkSample, typescriptSdkSample } from "../features/docs/afs-samples";
 import { searchBenchmark } from "../foundation/performance-data";
 
@@ -37,6 +37,8 @@ function DocsPage() {
           SDKs and the CLI as the fastest ways to start.
         </DocHeroSub>
       </DocHero>
+
+      <DocsContents />
 
       <PrimerPanel>
         <DocProse>
@@ -62,14 +64,14 @@ function DocsPage() {
           asking the user to manage a local mount first.
         </DocProse>
         <DocProse>
-          Install with <InlineCode>npm install @redis/afs-sdk</InlineCode> for
-          TypeScript or <InlineCode>pip install redis-afs-sdk</InlineCode> for
+          Install with <InlineCode>npm install redis-afs</InlineCode> for
+          TypeScript or <InlineCode>pip install redis-afs</InlineCode> for
           Python.
         </DocProse>
         <ExampleList>
           <SdkExample
             title="TypeScript"
-            description="Create a repo-backed workspace, write a file, and run a command through the SDK mount."
+            description="Create an AFS workspace, write a file, and run a command through the SDK mount."
             code={typescriptSdkSample}
           />
           <SdkExample
@@ -180,7 +182,7 @@ function DocsPage() {
             <DocProse>
               Today, the clean path is to bring that data into a local
               directory first, then import or sync it with AFS. For Git
-              upstreams, clone or check out the repo the way you already do,
+              upstreams, clone or check out the Git project the way you already do,
               then run <InlineCode>afs workspace import</InlineCode> or{" "}
               <InlineCode>afs up --mode sync</InlineCode>. For non-Git systems
               like S3 or Google Drive, use their API or CLI in a small script
@@ -416,6 +418,62 @@ afs mcp --workspace myworkspace`}
   );
 }
 
+function DocsContents() {
+  const groups = [
+    {
+      title: "Start here",
+      topics: [
+        docsTopicById["how-it-works"],
+        docsTopicById.cli,
+        docsTopicById.workspaces,
+      ],
+    },
+    {
+      title: "Build with AFS",
+      topics: [
+        docsTopicById["mcp-agents"],
+        docsTopicById["typescript-sdk"],
+        docsTopicById["python-sdk"],
+      ],
+    },
+    {
+      title: "Operate it",
+      topics: [
+        docsTopicById["local-files"],
+        docsTopicById["self-managed"],
+        docsTopicById.performance,
+      ],
+    },
+  ];
+
+  return (
+    <TocPanel aria-labelledby="docs-contents-heading">
+      <DocHeading id="docs-contents-heading">Documentation Contents</DocHeading>
+      <DocProse>
+        Jump straight to the part of AFS you need: the CLI, MCP agent access,
+        SDKs, local files, deployment modes, and performance notes.
+      </DocProse>
+      <TocGrid>
+        {groups.map((group) => (
+          <TocGroup key={group.title}>
+            <TocGroupTitle>{group.title}</TocGroupTitle>
+            <TocList>
+              {group.topics.map((topic) => (
+                <li key={topic.id}>
+                  <TocLink as={Link} to={topic.path}>
+                    <TocLinkTitle>{topic.title}</TocLinkTitle>
+                    <TocLinkSummary>{topic.summary}</TocLinkSummary>
+                  </TocLink>
+                </li>
+              ))}
+            </TocList>
+          </TocGroup>
+        ))}
+      </TocGrid>
+    </TocPanel>
+  );
+}
+
 function CliExample(props: {
   title: string;
   description: string;
@@ -506,6 +564,75 @@ const PrimerPanel = styled.div`
   @media (max-width: 720px) {
     padding: 20px;
   }
+`;
+
+const TocPanel = styled.nav`
+  padding: 24px 28px;
+  border: 1px solid var(--afs-line, #e6e6e6);
+  border-radius: 8px;
+  background: var(--afs-panel-strong, #ffffff);
+
+  @media (max-width: 720px) {
+    padding: 20px;
+  }
+`;
+
+const TocGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+  margin-top: 18px;
+
+  @media (max-width: 860px) {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+`;
+
+const TocGroup = styled.div`
+  min-width: 0;
+`;
+
+const TocGroupTitle = styled.div`
+  margin-bottom: 8px;
+  color: var(--afs-accent, #064ea2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+`;
+
+const TocList = styled.ul`
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+`;
+
+const TocLinkTitle = styled.span`
+  color: var(--afs-ink, #282828);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.35;
+`;
+
+const TocLink = styled.a`
+  display: grid;
+  gap: 3px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--afs-line, #e6e6e6);
+  text-decoration: none;
+
+  &:hover ${/* sc-selector */ TocLinkTitle} {
+    color: var(--afs-accent, #064ea2);
+  }
+`;
+
+const TocLinkSummary = styled.span`
+  color: var(--afs-muted, #6d6e71);
+  font-size: 12px;
+  line-height: 1.45;
 `;
 
 const TerminalFrame = styled.div`

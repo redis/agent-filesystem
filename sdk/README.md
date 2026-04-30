@@ -2,8 +2,8 @@
 
 This directory contains first-pass agent SDKs for the AFS control plane:
 
-- `typescript/` publishes the `@redis/afs-sdk` package.
-- `python/` publishes the `redis-afs-sdk` package with the `redis_afs` import.
+- `typescript/` publishes the `redis-afs` package.
+- `python/` publishes the `redis-afs` package with the `redis_afs` import.
 
 Both SDKs use the hosted MCP endpoint as the stable agent-facing transport:
 
@@ -20,18 +20,20 @@ Self-managed control plane; otherwise the SDKs use `https://afs.cloud`.
 
 ## TypeScript
 
+Full API reference: [`typescript/api-docs.md`](typescript/api-docs.md).
+
 ```bash
-npm install @redis/afs-sdk
+npm install redis-afs
 ```
 
 ```ts
-import { AFS } from "@redis/afs-sdk";
+import { AFS } from "redis-afs";
 
 const afs = new AFS({ apiKey: process.env.AFS_API_KEY });
-const repo = await afs.repo.create({ name: "foobar" });
+const workspace = await afs.workspace.create({ name: "foobar" });
 
 const fs = await afs.fs.mount({
-  repos: [{ name: repo.name }],
+  workspaces: [{ name: workspace.name }],
   mode: "rw",
 });
 
@@ -43,8 +45,10 @@ await fs.close();
 
 ## Python
 
+Full API reference: [`python/api-docs.md`](python/api-docs.md).
+
 ```bash
-pip install redis-afs-sdk
+pip install redis-afs
 ```
 
 ```python
@@ -52,10 +56,10 @@ import os
 from redis_afs import AFS
 
 afs = AFS(api_key=os.environ["AFS_API_KEY"])
-repo = afs.repo.create(name="foobar")
+workspace = afs.workspace.create(name="foobar")
 
 fs = afs.fs.mount(
-    repos=[{"name": repo["name"]}],
+    workspaces=[{"name": workspace["name"]}],
     mode="rw",
 )
 
@@ -68,14 +72,14 @@ fs.close()
 ## Mount Semantics
 
 `fs.mount()` creates an isolated SDK mount, not a kernel FUSE/NFS mount. For
-one mounted repo, `/path/to/file` is treated as repo-relative. For multiple
-repos, use `/<repo-name>/path/to/file`.
+one mounted workspace, `/path/to/file` is treated as workspace-relative. For
+multiple workspaces, use `/<workspace-name>/path/to/file`.
 
-`bash().exec()` materializes each repo into a temporary local directory, rewrites
-absolute repo paths such as `/foobar/src/README.md` to that isolated directory,
-runs the shell command, then writes created and modified files back through MCP.
-The current alpha sync path supports file create/update; remote file deletion is
-waiting on a dedicated hosted file-delete API.
+`bash().exec()` materializes each workspace into a temporary local directory,
+rewrites absolute workspace paths such as `/foobar/src/README.md` to that
+isolated directory, runs the shell command, then writes created and modified
+files back through MCP. The current alpha sync path supports file create/update;
+remote file deletion is waiting on a dedicated hosted file-delete API.
 
 ## Test Locally
 

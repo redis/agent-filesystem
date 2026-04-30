@@ -1,0 +1,99 @@
+name: Python SDK
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/python-sdk.yml"
+      - "sdk/python/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/python-sdk.yml"
+      - "sdk/python/**"
+    tags:
+      - "redis-afs-python-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.12"
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: PYTHONPATH=src python -m unittest discover -s tests
+
+  build:
+    name: Build package
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/python
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-sdk-dist
+          path: sdk/python/dist/*
+
+  publish:
+    name: Publish package
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/redis-afs-python-v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify tag matches package version
+        working-directory: sdk/python
+        run: |
+          package_version="$(python - <<'PY'
+          import pathlib
+          import tomllib
+
+          pyproject = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+          print(pyproject["project"]["version"])
+          PY
+          )"
+          tag_version="${GITHUB_REF_NAME#redis-afs-python-v}"
+          if [ "$package_version" != "$tag_version" ]; then
+            echo "Tag redis-afs-python-v${tag_version} does not match pyproject.toml version ${package_version}."
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          name: python-sdk-dist
+          path: sdk/python/dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk/python/dist

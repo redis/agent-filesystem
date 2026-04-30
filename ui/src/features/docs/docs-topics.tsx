@@ -29,6 +29,8 @@ export type DocsTopicId =
   | "workspaces"
   | "local-files"
   | "mcp-agents"
+  | "typescript-sdk"
+  | "python-sdk"
   | "self-managed"
   | "performance";
 
@@ -40,6 +42,8 @@ export type DocsTopic = {
     | "/docs/workspaces"
     | "/docs/local-files"
     | "/docs/mcp-agents"
+    | "/docs/typescript-sdk"
+    | "/docs/python-sdk"
     | "/docs/self-managed"
     | "/docs/performance";
   eyebrow: string;
@@ -548,8 +552,8 @@ const mcpAgentsTopic: DocsTopic = {
             against an isolated in-process mount.
           </DocProse>
           <DocProse>
-            Install with <InlineCode>npm install @redis/afs-sdk</InlineCode> or{" "}
-            <InlineCode>pip install redis-afs-sdk</InlineCode>.
+            Install with <InlineCode>npm install redis-afs</InlineCode> or{" "}
+            <InlineCode>pip install redis-afs</InlineCode>.
           </DocProse>
           <DocSubheading>TypeScript</DocSubheading>
           <CodeBlock>
@@ -622,7 +626,272 @@ afs mcp --workspace demo --profile workspace-rw-checkpoint`}</code>
       ),
     },
   ],
-  related: ["workspaces", "cli", "self-managed"],
+  related: ["typescript-sdk", "python-sdk", "workspaces"],
+};
+
+const typescriptSdkTopic: DocsTopic = {
+  id: "typescript-sdk",
+  path: "/docs/typescript-sdk",
+  eyebrow: "SDK",
+  title: "TypeScript SDK",
+  summary:
+    "Create workspaces, mount them in-process, edit files, search, checkpoint, and run shell commands from Node.js.",
+  sections: [
+    {
+      heading: "Install And Connect",
+      body: (
+        <>
+          <DocProse>
+            Use the TypeScript SDK when an agent app should work with AFS
+            directly instead of asking a user to create a local mount first.
+            The client uses the hosted MCP endpoint by default and can point at
+            a Self-managed control plane with one environment variable.
+          </DocProse>
+          <CodeBlock>
+            <code>{`npm install redis-afs
+export AFS_API_KEY="afs_..."
+
+# Optional for Self-managed control planes
+export AFS_API_BASE_URL="http://127.0.0.1:8091"`}</code>
+          </CodeBlock>
+          <CmdTable>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><InlineCode>import</InlineCode></td>
+                <td><InlineCode>{`import { AFS } from "redis-afs"`}</InlineCode></td>
+              </tr>
+              <tr>
+                <td><InlineCode>runtime</InlineCode></td>
+                <td>Node.js 18 or newer.</td>
+              </tr>
+              <tr>
+                <td><InlineCode>default endpoint</InlineCode></td>
+                <td><InlineCode>https://afs.cloud/mcp</InlineCode></td>
+              </tr>
+            </tbody>
+          </CmdTable>
+        </>
+      ),
+    },
+    {
+      heading: "Create And Mount",
+      body: (
+        <>
+          <DocProse>
+            The mount is isolated inside the SDK process. It issues
+            workspace-scoped MCP tokens, then gives your app file, search,
+            checkpoint, and shell helpers.
+          </DocProse>
+          <CodeBlock>
+            <code>{typescriptSdkSample}</code>
+          </CodeBlock>
+        </>
+      ),
+    },
+    {
+      heading: "Daily SDK Methods",
+      body: (
+        <CmdTable>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Use it for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><InlineCode>afs.workspace.create()</InlineCode></td>
+              <td>Create a Redis-backed workspace.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.workspace.fork()</InlineCode></td>
+              <td>Branch an existing workspace into a separate line of work.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.checkpoint.create()</InlineCode></td>
+              <td>Save a deliberate restore point.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.fs.mount()</InlineCode></td>
+              <td>Open an isolated in-process mount.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.readFile()</InlineCode> / <InlineCode>fs.writeFile()</InlineCode></td>
+              <td>Read and write text files through workspace-scoped MCP tools.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.glob()</InlineCode> / <InlineCode>fs.grep()</InlineCode></td>
+              <td>Find paths and search file contents without a local mount.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.bash().exec()</InlineCode></td>
+              <td>Run shell commands after materializing the workspace locally.</td>
+            </tr>
+          </tbody>
+        </CmdTable>
+      ),
+    },
+    {
+      heading: "Path And Command Semantics",
+      body: (
+        <>
+          <DocProse>
+            With one mounted workspace, paths like{" "}
+            <InlineCode>/src/index.ts</InlineCode> are workspace-relative. With
+            multiple mounted workspaces, prefix paths with the workspace name,
+            such as <InlineCode>/api/src/index.ts</InlineCode>.
+          </DocProse>
+          <DocProse>
+            <InlineCode>bash().exec()</InlineCode> downloads mounted workspaces
+            into a temporary local directory, rewrites absolute workspace paths
+            to that directory, runs <InlineCode>/bin/bash</InlineCode>, then
+            syncs created and modified text files back to AFS.
+          </DocProse>
+        </>
+      ),
+    },
+  ],
+  related: ["python-sdk", "mcp-agents", "workspaces"],
+};
+
+const pythonSdkTopic: DocsTopic = {
+  id: "python-sdk",
+  path: "/docs/python-sdk",
+  eyebrow: "SDK",
+  title: "Python SDK",
+  summary:
+    "Use Python to create AFS workspaces, mount them in-process, edit files, checkpoint, search, and run commands.",
+  sections: [
+    {
+      heading: "Install And Connect",
+      body: (
+        <>
+          <DocProse>
+            The Python SDK mirrors the TypeScript shape with Python naming and a
+            context-manager-friendly mount. Use it for agents, workers, and
+            automation that should talk to AFS directly.
+          </DocProse>
+          <CodeBlock>
+            <code>{`pip install redis-afs
+export AFS_API_KEY="afs_..."
+
+# Optional for Self-managed control planes
+export AFS_API_BASE_URL="http://127.0.0.1:8091"`}</code>
+          </CodeBlock>
+          <CmdTable>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><InlineCode>import</InlineCode></td>
+                <td><InlineCode>from redis_afs import AFS</InlineCode></td>
+              </tr>
+              <tr>
+                <td><InlineCode>runtime</InlineCode></td>
+                <td>Python 3.10 or newer.</td>
+              </tr>
+              <tr>
+                <td><InlineCode>default endpoint</InlineCode></td>
+                <td><InlineCode>https://afs.cloud/mcp</InlineCode></td>
+              </tr>
+            </tbody>
+          </CmdTable>
+        </>
+      ),
+    },
+    {
+      heading: "Create And Mount",
+      body: (
+        <>
+          <DocProse>
+            The mount is isolated inside the SDK process. It can be closed
+            manually or used as a context manager so temporary local state is
+            cleaned up when your agent finishes.
+          </DocProse>
+          <CodeBlock>
+            <code>{pythonSdkSample}</code>
+          </CodeBlock>
+          <CodeBlock>
+            <code>{`with afs.fs.mount(workspaces=[{"name": "foobar"}], mode="rw") as fs:
+    fs.write_file("/README.md", "hello")`}</code>
+          </CodeBlock>
+        </>
+      ),
+    },
+    {
+      heading: "Daily SDK Methods",
+      body: (
+        <CmdTable>
+          <thead>
+            <tr>
+              <th>Method</th>
+              <th>Use it for</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><InlineCode>afs.workspace.create()</InlineCode></td>
+              <td>Create a Redis-backed workspace.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.workspace.fork()</InlineCode></td>
+              <td>Branch an existing workspace into a separate line of work.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.checkpoint.create()</InlineCode></td>
+              <td>Save a deliberate restore point.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>afs.fs.mount()</InlineCode></td>
+              <td>Open an isolated in-process mount.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.read_file()</InlineCode> / <InlineCode>fs.write_file()</InlineCode></td>
+              <td>Read and write text files through workspace-scoped MCP tools.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.glob()</InlineCode> / <InlineCode>fs.grep()</InlineCode></td>
+              <td>Find paths and search file contents without a local mount.</td>
+            </tr>
+            <tr>
+              <td><InlineCode>fs.bash().exec()</InlineCode></td>
+              <td>Run shell commands after materializing the workspace locally.</td>
+            </tr>
+          </tbody>
+        </CmdTable>
+      ),
+    },
+    {
+      heading: "Path And Command Semantics",
+      body: (
+        <>
+          <DocProse>
+            With one mounted workspace, paths like{" "}
+            <InlineCode>/src/app.py</InlineCode> are workspace-relative. With
+            multiple mounted workspaces, prefix paths with the workspace name,
+            such as <InlineCode>/api/app.py</InlineCode>.
+          </DocProse>
+          <DocProse>
+            <InlineCode>bash().exec()</InlineCode> downloads mounted workspaces
+            into a temporary local directory, rewrites absolute workspace paths
+            to that directory, runs <InlineCode>/bin/bash</InlineCode>, then
+            syncs created and modified text files back to AFS.
+          </DocProse>
+        </>
+      ),
+    },
+  ],
+  related: ["typescript-sdk", "mcp-agents", "workspaces"],
 };
 
 const selfManagedTopic: DocsTopic = {
@@ -657,7 +926,7 @@ const selfManagedTopic: DocsTopic = {
       body: (
         <>
           <DocProse>
-            The repo has a single local web-dev path that starts the control
+            The checkout has a single local web-dev path that starts the control
             plane and Vite UI together. Use it when you want to work on the
             product surface rather than only the CLI.
           </DocProse>
@@ -763,6 +1032,8 @@ export const docsTopics = [
   workspacesTopic,
   localFilesTopic,
   mcpAgentsTopic,
+  typescriptSdkTopic,
+  pythonSdkTopic,
   selfManagedTopic,
   performanceTopic,
 ] as const satisfies ReadonlyArray<DocsTopic>;
@@ -773,6 +1044,8 @@ export const docsTopicById = {
   workspaces: workspacesTopic,
   "local-files": localFilesTopic,
   "mcp-agents": mcpAgentsTopic,
+  "typescript-sdk": typescriptSdkTopic,
+  "python-sdk": pythonSdkTopic,
   "self-managed": selfManagedTopic,
   performance: performanceTopic,
 } satisfies Record<DocsTopicId, DocsTopic>;

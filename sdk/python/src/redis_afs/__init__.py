@@ -5,6 +5,7 @@ from .client import (
     AFS,
     AFSError,
     MountedFS,
+    WorkspaceClient,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "AFS",
     "AFSError",
     "MountedFS",
+    "WorkspaceClient",
 ]

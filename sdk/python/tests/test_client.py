@@ -1,6 +1,6 @@
 import unittest
 
-from redis_afs.client import MCPHttpClient, AFSError, MountedFS, _MountedRepo, _normalize_mcp_endpoint
+from redis_afs.client import MCPHttpClient, AFSError, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
 
 
 class FakeMCP:
@@ -30,39 +30,40 @@ class FakeMCP:
                         entries.append({"path": file_path, "name": remainder, "kind": "file"})
             return {"entries": entries}
         if name == "checkpoint_create":
-            return {"workspace": "repo", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+            return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
         raise AssertionError(f"unexpected tool {name}")
 
 
 class MountedFSTest(unittest.TestCase):
-    def test_single_repo_paths_are_repo_relative(self):
+    def test_single_workspace_paths_are_workspace_relative(self):
         fake = FakeMCP()
-        fs = MountedFS([_MountedRepo(name="foobar", token="token", client=fake)])
+        fs = MountedFS([_MountedWorkspace(name="foobar", token="token", client=fake)])
 
         fs.write_file("/src/README.md", "hello")
 
         self.assertEqual(fake.files["/src/README.md"], "hello")
         self.assertEqual(fs.read_file("/foobar/src/README.md"), "hello")
+        self.assertEqual(fs.workspace_names, ["foobar"])
 
-    def test_multi_repo_requires_repo_prefix(self):
+    def test_multi_workspace_requires_workspace_prefix(self):
         fs = MountedFS(
             [
-                _MountedRepo(name="api", token="token", client=FakeMCP()),
-                _MountedRepo(name="web", token="token", client=FakeMCP()),
+                _MountedWorkspace(name="api", token="token", client=FakeMCP()),
+                _MountedWorkspace(name="web", token="token", client=FakeMCP()),
             ]
         )
 
         with self.assertRaises(AFSError):
             fs.write_file("/README.md", "hello")
 
-    def test_maps_absolute_repo_paths_after_materialization(self):
+    def test_maps_absolute_workspace_paths_after_materialization(self):
         fake = FakeMCP()
         fake.files["/README.md"] = "hello"
-        fs = MountedFS([_MountedRepo(name="foobar", token="token", client=fake)])
+        fs = MountedFS([_MountedWorkspace(name="foobar", token="token", client=fake)])
         self.addCleanup(fs.close)
         root = fs.sync_from_remote()
 
-        mapped = fs.map_absolute_repo_paths("cat /foobar/README.md")
+        mapped = fs.map_absolute_workspace_paths("cat /foobar/README.md")
 
         self.assertIn(root, mapped)
         self.assertNotEqual(mapped, "cat /foobar/README.md")

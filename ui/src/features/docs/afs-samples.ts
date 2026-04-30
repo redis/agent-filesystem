@@ -1,9 +1,9 @@
-export const typescriptSdkSample = `import { AFS } from "@redis/afs-sdk";
+export const typescriptSdkSample = `import { AFS } from "redis-afs";
 
 const afs = new AFS({ apiKey: process.env.AFS_API_KEY });
-const repo = await afs.repo.create({ name: "foobar" });
+const workspace = await afs.workspace.create({ name: "foobar" });
 const fs = await afs.fs.mount({
-  repos: [{ name: repo.name }],
+  workspaces: [{ name: workspace.name }],
   mode: "rw",
 });
 
@@ -16,9 +16,9 @@ export const pythonSdkSample = `import os
 from redis_afs import AFS
 
 afs = AFS(api_key=os.environ["AFS_API_KEY"])
-repo = afs.repo.create(name="foobar")
+workspace = afs.workspace.create(name="foobar")
 fs = afs.fs.mount(
-    repos=[{"name": repo["name"]}],
+    workspaces=[{"name": workspace["name"]}],
     mode="rw",
 )
 

@@ -29,7 +29,9 @@ import { Route as SignupClerkPathRouteImport } from './routes/signup.$clerkPath'
 import { Route as McpConnectRouteImport } from './routes/mcp_.connect'
 import { Route as LoginClerkPathRouteImport } from './routes/login.$clerkPath'
 import { Route as DocsWorkspacesRouteImport } from './routes/docs_.workspaces'
+import { Route as DocsTypescriptSdkRouteImport } from './routes/docs_.typescript-sdk'
 import { Route as DocsSelfManagedRouteImport } from './routes/docs_.self-managed'
+import { Route as DocsPythonSdkRouteImport } from './routes/docs_.python-sdk'
 import { Route as DocsPerformanceRouteImport } from './routes/docs_.performance'
 import { Route as DocsMcpAgentsRouteImport } from './routes/docs_.mcp-agents'
 import { Route as DocsLocalFilesRouteImport } from './routes/docs_.local-files'
@@ -138,9 +140,19 @@ const DocsWorkspacesRoute = DocsWorkspacesRouteImport.update({
   path: '/docs/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsTypescriptSdkRoute = DocsTypescriptSdkRouteImport.update({
+  id: '/docs_/typescript-sdk',
+  path: '/docs/typescript-sdk',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsSelfManagedRoute = DocsSelfManagedRouteImport.update({
   id: '/docs_/self-managed',
   path: '/docs/self-managed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DocsPythonSdkRoute = DocsPythonSdkRouteImport.update({
+  id: '/docs_/python-sdk',
+  path: '/docs/python-sdk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsPerformanceRoute = DocsPerformanceRouteImport.update({
@@ -202,7 +214,9 @@ export interface FileRoutesByFullPath {
   '/docs/local-files': typeof DocsLocalFilesRoute
   '/docs/mcp-agents': typeof DocsMcpAgentsRoute
   '/docs/performance': typeof DocsPerformanceRoute
+  '/docs/python-sdk': typeof DocsPythonSdkRoute
   '/docs/self-managed': typeof DocsSelfManagedRoute
+  '/docs/typescript-sdk': typeof DocsTypescriptSdkRoute
   '/docs/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
@@ -232,7 +246,9 @@ export interface FileRoutesByTo {
   '/docs/local-files': typeof DocsLocalFilesRoute
   '/docs/mcp-agents': typeof DocsMcpAgentsRoute
   '/docs/performance': typeof DocsPerformanceRoute
+  '/docs/python-sdk': typeof DocsPythonSdkRoute
   '/docs/self-managed': typeof DocsSelfManagedRoute
+  '/docs/typescript-sdk': typeof DocsTypescriptSdkRoute
   '/docs/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp/connect': typeof McpConnectRoute
@@ -263,7 +279,9 @@ export interface FileRoutesById {
   '/docs_/local-files': typeof DocsLocalFilesRoute
   '/docs_/mcp-agents': typeof DocsMcpAgentsRoute
   '/docs_/performance': typeof DocsPerformanceRoute
+  '/docs_/python-sdk': typeof DocsPythonSdkRoute
   '/docs_/self-managed': typeof DocsSelfManagedRoute
+  '/docs_/typescript-sdk': typeof DocsTypescriptSdkRoute
   '/docs_/workspaces': typeof DocsWorkspacesRoute
   '/login/$clerkPath': typeof LoginClerkPathRoute
   '/mcp_/connect': typeof McpConnectRoute
@@ -295,7 +313,9 @@ export interface FileRouteTypes {
     | '/docs/local-files'
     | '/docs/mcp-agents'
     | '/docs/performance'
+    | '/docs/python-sdk'
     | '/docs/self-managed'
+    | '/docs/typescript-sdk'
     | '/docs/workspaces'
     | '/login/$clerkPath'
     | '/mcp/connect'
@@ -325,7 +345,9 @@ export interface FileRouteTypes {
     | '/docs/local-files'
     | '/docs/mcp-agents'
     | '/docs/performance'
+    | '/docs/python-sdk'
     | '/docs/self-managed'
+    | '/docs/typescript-sdk'
     | '/docs/workspaces'
     | '/login/$clerkPath'
     | '/mcp/connect'
@@ -355,7 +377,9 @@ export interface FileRouteTypes {
     | '/docs_/local-files'
     | '/docs_/mcp-agents'
     | '/docs_/performance'
+    | '/docs_/python-sdk'
     | '/docs_/self-managed'
+    | '/docs_/typescript-sdk'
     | '/docs_/workspaces'
     | '/login/$clerkPath'
     | '/mcp_/connect'
@@ -386,7 +410,9 @@ export interface RootRouteChildren {
   DocsLocalFilesRoute: typeof DocsLocalFilesRoute
   DocsMcpAgentsRoute: typeof DocsMcpAgentsRoute
   DocsPerformanceRoute: typeof DocsPerformanceRoute
+  DocsPythonSdkRoute: typeof DocsPythonSdkRoute
   DocsSelfManagedRoute: typeof DocsSelfManagedRoute
+  DocsTypescriptSdkRoute: typeof DocsTypescriptSdkRoute
   DocsWorkspacesRoute: typeof DocsWorkspacesRoute
   McpConnectRoute: typeof McpConnectRoute
 }
@@ -533,11 +559,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsWorkspacesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs_/typescript-sdk': {
+      id: '/docs_/typescript-sdk'
+      path: '/docs/typescript-sdk'
+      fullPath: '/docs/typescript-sdk'
+      preLoaderRoute: typeof DocsTypescriptSdkRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs_/self-managed': {
       id: '/docs_/self-managed'
       path: '/docs/self-managed'
       fullPath: '/docs/self-managed'
       preLoaderRoute: typeof DocsSelfManagedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/docs_/python-sdk': {
+      id: '/docs_/python-sdk'
+      path: '/docs/python-sdk'
+      fullPath: '/docs/python-sdk'
+      preLoaderRoute: typeof DocsPythonSdkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs_/performance': {
@@ -659,7 +699,9 @@ const rootRouteChildren: RootRouteChildren = {
   DocsLocalFilesRoute: DocsLocalFilesRoute,
   DocsMcpAgentsRoute: DocsMcpAgentsRoute,
   DocsPerformanceRoute: DocsPerformanceRoute,
+  DocsPythonSdkRoute: DocsPythonSdkRoute,
   DocsSelfManagedRoute: DocsSelfManagedRoute,
+  DocsTypescriptSdkRoute: DocsTypescriptSdkRoute,
   DocsWorkspacesRoute: DocsWorkspacesRoute,
   McpConnectRoute: McpConnectRoute,
 }
