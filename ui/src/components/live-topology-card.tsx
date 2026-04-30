@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useLayoutEffect, useState, useCallback } from "react";
+import { useMemo, useRef, useLayoutEffect, useState, useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
 import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
+import { AgentDetailDialog } from "../foundation/tables/agents-table";
+import { displayWorkspaceName } from "../foundation/workspace-display";
 
 /* ------------------------------------------------------------------ */
 /*  Live topology: agents <-> Redis hub <-> workspaces                 */
@@ -85,28 +88,30 @@ const ColumnLabel = styled.div`
 `;
 
 /* ---- Agent nodes ---- */
-const AgentNode = styled.button<{ $i: number; $canCopy: boolean; $copied: boolean }>`
+const AgentNode = styled.button<{ $i: number }>`
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid ${({ $copied }) => ($copied ? "#22c55e" : "var(--afs-line, #e4e4e7)")};
+  border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
   color: inherit;
-  cursor: ${({ $canCopy }) => ($canCopy ? "copy" : "default")};
+  cursor: pointer;
   font: inherit;
   text-align: left;
   transition:
     border-color 0.16s ease,
-    box-shadow 0.16s ease;
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
   animation: ${fadeIn} 0.24s ease forwards;
   animation-delay: ${({ $i }) => $i * 0.06}s;
   opacity: 0;
 
   &:hover {
-    border-color: ${({ $canCopy, $copied }) =>
-      $copied ? "#22c55e" : $canCopy ? "var(--afs-accent, #dc2626)" : "var(--afs-line, #e4e4e7)"};
+    border-color: var(--afs-accent, #dc2626);
+    box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
+    transform: translateY(-1px);
   }
 
   &:focus-visible {
@@ -201,7 +206,7 @@ const HubLabel = styled.span`
 `;
 
 /* ---- Workspace nodes ---- */
-const WorkspaceNode = styled.div<{ $i: number }>`
+const WorkspaceNode = styled.button<{ $i: number }>`
   display: flex;
   align-items: center;
   gap: 8px;
@@ -209,9 +214,28 @@ const WorkspaceNode = styled.div<{ $i: number }>`
   border: 1px solid var(--afs-line, #e4e4e7);
   border-radius: 10px;
   background: var(--afs-panel-strong);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.16s ease;
   animation: ${fadeIn} 0.24s ease forwards;
   animation-delay: ${({ $i }) => 0.18 + $i * 0.06}s;
   opacity: 0;
+
+  &:hover {
+    border-color: var(--afs-accent, #dc2626);
+    box-shadow: 0 4px 12px rgba(8, 6, 13, 0.08);
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent, #dc2626);
+    outline-offset: 2px;
+  }
 `;
 
 const FolderIcon = styled.div`
@@ -347,13 +371,13 @@ type Props = {
 };
 
 export function LiveTopologyCard({ agents, workspaces }: Props) {
+  const navigate = useNavigate();
   const topologyRef = useRef<HTMLDivElement>(null);
   const agentRefs = useRef<(HTMLButtonElement | null)[]>([]);
-  const wsRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const wsRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const hubRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const copyResetTimeoutRef = useRef<number | null>(null);
-  const [copiedAgentId, setCopiedAgentId] = useState<string | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AFSAgentSession | null>(null);
   const [lines, setLines] = useState<
     {
       x1: number;
@@ -388,26 +412,6 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     });
     return pairs;
   }, [agents, wsIndexMap]);
-
-  const copyAgentId = useCallback(async (agentId: string) => {
-    if (!agentId) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(agentId);
-      setCopiedAgentId(agentId);
-      if (copyResetTimeoutRef.current != null) {
-        window.clearTimeout(copyResetTimeoutRef.current);
-      }
-      copyResetTimeoutRef.current = window.setTimeout(() => {
-        setCopiedAgentId(null);
-        copyResetTimeoutRef.current = null;
-      }, 1400);
-    } catch {
-      // Clipboard permissions are browser-controlled; ignore denied writes.
-    }
-  }, []);
 
   const computeLines = useCallback(() => {
     const container = topologyRef.current;
@@ -496,17 +500,10 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     };
   }, [agents.length, workspaces.length, scheduleLineCompute]);
 
-  useEffect(() => {
-    return () => {
-      if (copyResetTimeoutRef.current != null) {
-        window.clearTimeout(copyResetTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const activeAgents = agents.filter((a) => a.state === "active").length;
 
   return (
+    <>
     <CardWrap>
       <CardTitle>Live Topology</CardTitle>
       <CardSubtitle>
@@ -572,18 +569,15 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
               const localPath = displayLocalPath(agent.localPath);
               const agentName = displayAgentName(agent);
               const methodLabel = agent.clientKind.trim() || "agent";
-              const agentId = agent.agentId?.trim() ?? "";
-              const copied = agentId !== "" && copiedAgentId === agentId;
               return (
                 <AgentNode
                   key={agent.sessionId}
                   $i={i}
-                  $canCopy={agentId !== ""}
-                  $copied={copied}
-                  aria-label={agentId ? `Copy agent ID ${agentId}` : "Agent ID not reported"}
-                  title={agentId ? (copied ? "Copied agent ID" : "Copy agent ID") : "Agent ID not reported"}
+                  type="button"
+                  aria-label={`Open details for ${agentName}`}
+                  title={`Open details for ${agentName}`}
                   onClick={() => {
-                    void copyAgentId(agentId);
+                    setSelectedAgent(agent);
                   }}
                   ref={(el) => {
                     agentRefs.current[i] = el;
@@ -625,26 +619,54 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
           {workspaces.length === 0 ? (
             <EmptyColumn>No workspaces yet</EmptyColumn>
           ) : (
-            workspaces.map((ws, i) => (
-              <WorkspaceNode
-                key={ws.id}
-                $i={i}
-                ref={(el) => {
-                  wsRefs.current[i] = el;
-                }}
-              >
-                <FolderIcon>&#128193;</FolderIcon>
-                <WorkspaceMeta>
-                  <WorkspaceName>{ws.name}</WorkspaceName>
-                  <WorkspaceFiles>
-                    {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"}
-                  </WorkspaceFiles>
-                </WorkspaceMeta>
-              </WorkspaceNode>
-            ))
+            workspaces.map((ws, i) => {
+              const workspaceLabel = displayWorkspaceName(ws.name);
+              return (
+                <WorkspaceNode
+                  key={ws.id}
+                  $i={i}
+                  type="button"
+                  aria-label={`Open workspace ${workspaceLabel}`}
+                  title={`Open workspace ${workspaceLabel}`}
+                  onClick={() => {
+                    void navigate({
+                      to: "/workspaces/$workspaceId",
+                      params: { workspaceId: ws.id },
+                      search: { databaseId: ws.databaseId },
+                    });
+                  }}
+                  ref={(el) => {
+                    wsRefs.current[i] = el;
+                  }}
+                >
+                  <FolderIcon>&#128193;</FolderIcon>
+                  <WorkspaceMeta>
+                    <WorkspaceName>{workspaceLabel}</WorkspaceName>
+                    <WorkspaceFiles>
+                      {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"}
+                    </WorkspaceFiles>
+                  </WorkspaceMeta>
+                </WorkspaceNode>
+              );
+            })
           )}
         </Column>
       </Topology>
     </CardWrap>
+      {selectedAgent != null ? (
+        <AgentDetailDialog
+          agent={selectedAgent}
+          onClose={() => setSelectedAgent(null)}
+          onOpenWorkspace={(agent) => {
+            setSelectedAgent(null);
+            void navigate({
+              to: "/workspaces/$workspaceId",
+              params: { workspaceId: agent.workspaceId },
+              search: agent.databaseId ? { databaseId: agent.databaseId } : {},
+            });
+          }}
+        />
+      ) : null}
+    </>
   );
 }

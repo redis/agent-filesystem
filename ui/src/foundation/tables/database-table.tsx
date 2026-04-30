@@ -4,11 +4,12 @@ import { Table } from "@redis-ui/table";
 import { DatabaseIcon } from "../../components/lucide-icons";
 import type { ColumnDef } from "@redis-ui/table";
 import { useMemo, useState } from "react";
-import styled, { css, keyframes } from "styled-components";
+import styled from "styled-components";
 import type { AFSDatabaseScopeRecord } from "../database-scope";
 import { formatBytes } from "../api/afs";
 import * as S from "./workspace-table.styles";
 import { DenseTableViewport } from "./workspace-table.styles";
+import { StatusNameCell, StatusNameLine } from "./status-name-cell";
 
 type Props = {
   rows: AFSDatabaseScopeRecord[];
@@ -161,11 +162,11 @@ export function DatabaseTable({
     if (query === "") return rows;
     return rows.filter((row) =>
       [
-        row.displayName ?? "",
-        row.databaseName ?? "",
-        row.description ?? "",
-        row.endpointLabel ?? "",
-        row.id ?? "",
+        row.displayName,
+        row.databaseName,
+        row.description,
+        row.endpointLabel,
+        row.id,
       ].some((value) => value.toLowerCase().includes(query)),
     );
   }, [rows, search]);
@@ -198,21 +199,18 @@ export function DatabaseTable({
             const canEdit = row.original.canEdit;
             const canSetDefault = row.original.canCreateWorkspaces;
             return (
-              <NameCell>
-                <NameIconBox>
-                  <DatabaseIcon customSize={18} />
-                </NameIconBox>
-                <NameStack>
-                <NameLine>
-                  <LiveDot
-                    $active={row.original.isHealthy}
-                    title={
-                      row.original.isHealthy
-                        ? "Connected"
-                        : row.original.connectionError || "Unavailable"
-                    }
-                    aria-label={row.original.isHealthy ? "Connected" : "Unavailable"}
-                  />
+              <StatusNameCell
+                active={row.original.isHealthy}
+                icon={<DatabaseIcon customSize={18} />}
+                inactiveTone="danger"
+                statusLabel={row.original.isHealthy ? "Connected" : "Unavailable"}
+                statusTitle={
+                  row.original.isHealthy
+                    ? "Connected"
+                    : row.original.connectionError || "Unavailable"
+                }
+              >
+                <StatusNameLine>
                   <NameButton
                     disabled={!canEdit}
                     onClick={(event) => {
@@ -237,8 +235,8 @@ export function DatabaseTable({
                       !canSetDefault
                         ? `${nameLabel} is reserved for onboarding`
                         : isDefault
-                        ? "Default database for new workspaces"
-                        : "Set as default database for new workspaces"
+                          ? "Default database for new workspaces"
+                          : "Set as default database for new workspaces"
                     }
                     disabled={isDefault || !canSetDefault}
                     onClick={(event) => {
@@ -248,7 +246,7 @@ export function DatabaseTable({
                   >
                     <StarIcon filled={isDefault} />
                   </DefaultStarButton>
-                </NameLine>
+                </StatusNameLine>
 
                 <IdRow>
                   <IdText title={id}>{id}</IdText>
@@ -273,8 +271,7 @@ export function DatabaseTable({
                         : "Managed by AFS Cloud"}
                   </ManagedHint>
                 ) : null}
-                </NameStack>
-              </NameCell>
+              </StatusNameCell>
             );
           },
         },
@@ -476,37 +473,6 @@ const DEFAULT_AMBER = "#f59e0b";
 
 /* ---- Name cell ---- */
 
-const NameStack = styled.div`
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-`;
-
-const NameCell = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-`;
-
-const NameIconBox = styled.span`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--afs-muted, #71717a);
-`;
-
-const NameLine = styled.div`
-  display: inline-flex;
-  align-items: center;
-  width: 100%;
-  gap: 8px;
-  min-width: 0;
-`;
-
 const NameButton = styled.button`
   border: none;
   background: transparent;
@@ -539,30 +505,6 @@ const ManagedHint = styled.div`
   font-size: 12px;
   line-height: 1.3;
   color: var(--afs-muted-ink, #7c6f63);
-`;
-
-/* Glowing status dot, inline before the name */
-const pulse = keyframes`
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
-`;
-
-const LiveDot = styled.span<{ $active: boolean }>`
-  flex-shrink: 0;
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: ${({ $active }) => ($active ? "#22c55e" : "#dc2626")};
-  ${({ $active }) =>
-    $active
-      ? css`
-          box-shadow: 0 0 6px rgba(34, 197, 94, 0.55);
-          animation: ${pulse} 2s ease-in-out infinite;
-        `
-      : css`
-          box-shadow: 0 0 6px rgba(220, 38, 38, 0.55);
-        `}
 `;
 
 /* ---- Default star ---- */
@@ -625,7 +567,6 @@ const IdRow = styled.div`
   width: 100%;
   gap: 4px;
   min-width: 0;
-  padding-left: 16px; /* align under the name, past the status dot */
 `;
 
 const IdText = styled.span`

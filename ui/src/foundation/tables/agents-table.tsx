@@ -10,6 +10,7 @@ import styled, { keyframes, css } from "styled-components";
 import { BotIcon } from "../../components/lucide-icons";
 import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
 import type { AgentSortField } from "./agents-table-utils";
+import { StatusNameCell, StatusNameLine } from "./status-name-cell";
 import {
   DialogOverlay,
   DialogCard,
@@ -87,37 +88,6 @@ const ActiveDot = styled.span<{ $active: boolean }>`
     `}
 `;
 
-const NameCell = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-`;
-
-const NameIconBox = styled.span`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: var(--afs-muted, #71717a);
-`;
-
-const NameStack = styled.div`
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-`;
-
-const NameLine = styled.div`
-  display: inline-flex;
-  align-items: center;
-  width: 100%;
-  gap: 8px;
-  min-width: 0;
-`;
-
 const SystemNameText = styled.span`
   flex: 1 1 auto;
   min-width: 0;
@@ -128,11 +98,6 @@ const SystemNameText = styled.span`
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-`;
-
-const AgentNameRow = styled.div`
-  min-width: 0;
-  padding-left: 16px;
 `;
 
 const AgentNameText = styled.span`
@@ -356,7 +321,7 @@ type Props = {
 /* ------------------------------------------------------------------ */
 /*  Detail dialog component                                            */
 /* ------------------------------------------------------------------ */
-function AgentDetailDialog({
+export function AgentDetailDialog({
   agent,
   onClose,
   onOpenWorkspace,
@@ -501,20 +466,17 @@ export function AgentsTable({
               row.original.agentId?.trim() ||
               "Agent name not set";
             return (
-              <NameCell>
-                <NameIconBox>
-                  <BotIcon customSize={18} />
-                </NameIconBox>
-                <NameStack>
-                  <NameLine>
-                    <ActiveDot $active={active} />
-                    <SystemNameText title={systemName}>{systemName}</SystemNameText>
-                  </NameLine>
-                  <AgentNameRow>
-                    <AgentNameText title={agentName}>{agentName}</AgentNameText>
-                  </AgentNameRow>
-                </NameStack>
-              </NameCell>
+              <StatusNameCell
+                active={active}
+                icon={<BotIcon customSize={18} />}
+                statusLabel={active ? "Active" : "Inactive"}
+                statusTitle={active ? "Active" : "Inactive"}
+              >
+                <StatusNameLine>
+                  <SystemNameText title={systemName}>{systemName}</SystemNameText>
+                </StatusNameLine>
+                <AgentNameText title={agentName}>{agentName}</AgentNameText>
+              </StatusNameCell>
             );
           },
         },

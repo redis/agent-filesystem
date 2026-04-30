@@ -191,21 +191,17 @@ function AgentsPage() {
       ) : null}
 
       {tab === "active" ? (
-        <SectionGrid>
-          <SectionCard $span={12}>
-            <AgentsTable
-              rows={currentConnections}
-              loading={agentsQuery.isLoading}
-              error={agentsQuery.isError}
-              toolbarAction={(
-                <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
-                  Add agent
-                </Button>
-              )}
-              onOpenWorkspace={openWorkspace}
-            />
-          </SectionCard>
-        </SectionGrid>
+        <AgentsTable
+          rows={currentConnections}
+          loading={agentsQuery.isLoading}
+          error={agentsQuery.isError}
+          toolbarAction={(
+            <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
+              Add agent
+            </Button>
+          )}
+          onOpenWorkspace={openWorkspace}
+        />
       ) : null}
 
       {tab === "history" ? (

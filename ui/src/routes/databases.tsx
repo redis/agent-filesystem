@@ -12,6 +12,7 @@ import {
   PageStack,
 } from "../components/afs-kit";
 import { AddDatabaseDialog } from "../components/add-database-dialog";
+import { RefreshCwIcon } from "../components/lucide-icons";
 import { databasesQueryOptions } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
 import { DatabaseTable, DatabaseSummaryStrip } from "../foundation/tables/database-table";
@@ -126,8 +127,15 @@ function DatabasesPage() {
         onRemoveDatabase={deleteDatabase}
         toolbarAction={
           <div style={{ display: "flex", gap: 8 }}>
-            <RefreshButton size="medium" onClick={repairCatalog} disabled={isReconciling}>
-              {isReconciling ? "Refreshing..." : "Refresh"}
+            <RefreshButton
+              size="medium"
+              onClick={repairCatalog}
+              disabled={isReconciling}
+              aria-label={isReconciling ? "Refreshing databases" : "Refresh databases"}
+              aria-busy={isReconciling}
+              title={isReconciling ? "Refreshing..." : "Refresh databases"}
+            >
+              <RefreshCwIcon customSize={16} />
             </RefreshButton>
             <Button size="medium" onClick={openCreateDialog}>
               Add database
@@ -195,7 +203,12 @@ const ConfirmCard = styled(DialogCard)`
 
 const RefreshButton = styled(Button)`
   && {
-    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    min-width: 38px;
+    padding-inline: 0;
     background: transparent;
     border-color: var(--afs-line-strong);
     color: var(--afs-ink-soft);

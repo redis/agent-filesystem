@@ -226,7 +226,7 @@ export const SearchOnlyHeadingWrap = styled(HeadingWrap)`
 export const TableBlock = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
   min-width: 0;
 `;
 
