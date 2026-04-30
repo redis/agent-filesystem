@@ -1,7 +1,5 @@
 import { Button, Typography } from "@redis-ui/components";
-import { Table } from "@redis-ui/table";
-import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import styled from "styled-components";
 import {
   DialogBody,
@@ -63,6 +61,7 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
   const [sortBy, setSortBy] = useState<CheckpointSortField>("createdAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedSavepoint, setSelectedSavepoint] = useState<AFSSavepoint | null>(null);
+  const [expandedSavepointId, setExpandedSavepointId] = useState<string | null>(null);
   const [diffDialog, setDiffDialog] = useState<DiffDialogState | null>(null);
 
   const openSavepoint = useCallback(
@@ -104,124 +103,18 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
     );
   }, [workspace.savepoints, search, sortBy, sortDirection]);
 
-  const sorting = useMemo<SortingState>(
-    () => [{ id: sortBy, desc: sortDirection === "desc" }],
-    [sortBy, sortDirection],
-  );
-
-  const columns = useMemo<ColumnDef<AFSSavepoint>[]>(
-    () => [
-      {
-        accessorKey: "createdAt",
-        header: "Created",
-        size: 110,
-        enableSorting: true,
-        cell: ({ row }) => shortDateTime(row.original.createdAt),
-      },
-      {
-        accessorKey: "name",
-        header: "Checkpoint",
-        size: 260,
-        enableSorting: true,
-        cell: ({ row }) => {
-          const savepoint = row.original;
-          const isActive = isActiveCheckpoint(workspace, savepoint);
-          return (
-            <CheckpointNameCell>
-              <CheckpointNameStack>
-                <CheckpointTitleRow>
-                  <CheckpointTitle title={savepoint.name}>{savepoint.name}</CheckpointTitle>
-                  {isActive ? <ActiveCheckpointBadge>Active</ActiveCheckpointBadge> : null}
-                </CheckpointTitleRow>
-                <S.SingleLineText title={savepoint.note || "No description provided."}>
-                  {savepoint.note || "No description provided."}
-                </S.SingleLineText>
-              </CheckpointNameStack>
-            </CheckpointNameCell>
-          );
-        },
-      },
-      {
-        id: "actor",
-        header: "Actor",
-        size: 140,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.SingleLineText title={checkpointActor(row.original) || "Unknown"}>
-            {checkpointActor(row.original) || "Unknown"}
-          </S.SingleLineText>
-        ),
-      },
-      {
-        accessorKey: "totalBytes",
-        header: "Contents",
-        size: 150,
-        enableSorting: true,
-        cell: ({ row }) => (
-          <S.Stack>
-            <Typography.Body component="span">{row.original.sizeLabel}</Typography.Body>
-            <Typography.Body color="secondary" component="span">
-              {row.original.fileCount} files · {row.original.folderCount} folders
-            </Typography.Body>
-          </S.Stack>
-        ),
-      },
-      {
-        id: "actions",
-        header: "",
-        size: 210,
-        enableSorting: false,
-        cell: ({ row }) => {
-          const savepoint = row.original;
-          const isActive = isActiveCheckpoint(workspace, savepoint);
-          return (
-            <CheckpointActions>
-              <S.TextActionButton
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openSavepoint(savepoint);
-                }}
-              >
-                Browse
-              </S.TextActionButton>
-              <S.TextActionButton
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setDiffDialog({ savepoint, mode: "compare" });
-                }}
-              >
-                Compare
-              </S.TextActionButton>
-              <S.TextActionButton
-                type="button"
-                disabled={
-                  !workspace.capabilities.restoreCheckpoint ||
-                  restoreCheckpointPending ||
-                  isActive
-                }
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setDiffDialog({ savepoint, mode: "restore" });
-                }}
-              >
-                Restore
-              </S.TextActionButton>
-            </CheckpointActions>
-          );
-        },
-      },
-    ],
-    [
-      openSavepoint,
-      restoreCheckpointPending,
-      workspace.capabilities.restoreCheckpoint,
-      workspace,
-    ],
-  );
-
   const isFiltering = search.trim() !== "";
+
+  const setCheckpointSort = useCallback((field: CheckpointSortField) => {
+    setSortBy((currentField) => {
+      if (currentField === field) {
+        setSortDirection((direction) => (direction === "asc" ? "desc" : "asc"));
+        return currentField;
+      }
+      setSortDirection(field === "createdAt" ? "desc" : "asc");
+      return field;
+    });
+  }, []);
 
   return (
     <>
@@ -299,29 +192,143 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
               </S.EmptyState>
             ) : (
               <S.TableCard>
-                <S.DenseTableViewport>
-                  <Table
-                    columns={columns}
-                    data={filteredSavepoints}
-                    getRowId={(row) => row.id}
-                    sorting={sorting}
-                    manualSorting
-                    onSortingChange={(nextState) => {
-                      if (nextState.length === 0) {
-                        setSortBy("createdAt");
-                        setSortDirection("desc");
-                        return;
-                      }
-
-                      const next = nextState[0];
-                      setSortBy(next.id as CheckpointSortField);
-                      setSortDirection(next.desc ? "desc" : "asc");
-                    }}
-                    enableSorting
-                    stripedRows
-                    onRowClick={(rowData) => setSelectedSavepoint(rowData)}
-                  />
-                </S.DenseTableViewport>
+                <CheckpointHistoryViewport>
+                  <CheckpointHistoryTable
+                    aria-label="Checkpoint history"
+                  >
+                    <thead>
+                      <tr>
+                        <SortableCheckpointHeader
+                          field="createdAt"
+                          activeField={sortBy}
+                          direction={sortDirection}
+                          onSort={setCheckpointSort}
+                        >
+                          Created
+                        </SortableCheckpointHeader>
+                        <SortableCheckpointHeader
+                          field="name"
+                          activeField={sortBy}
+                          direction={sortDirection}
+                          onSort={setCheckpointSort}
+                        >
+                          Checkpoint
+                        </SortableCheckpointHeader>
+                        <SortableCheckpointHeader
+                          field="actor"
+                          activeField={sortBy}
+                          direction={sortDirection}
+                          onSort={setCheckpointSort}
+                        >
+                          Actor
+                        </SortableCheckpointHeader>
+                        <SortableCheckpointHeader
+                          field="totalBytes"
+                          activeField={sortBy}
+                          direction={sortDirection}
+                          onSort={setCheckpointSort}
+                        >
+                          Contents
+                        </SortableCheckpointHeader>
+                        <CheckpointHeaderCell>Actions</CheckpointHeaderCell>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSavepoints.map((savepoint) => {
+                        const isActive = isActiveCheckpoint(workspace, savepoint);
+                        const isExpanded = expandedSavepointId === savepoint.id;
+                        return (
+                          <Fragment key={savepoint.id}>
+                            <CheckpointSummaryRow
+                              $expanded={isExpanded}
+                              onClick={() =>
+                                setExpandedSavepointId((current) =>
+                                  current === savepoint.id ? null : savepoint.id,
+                                )
+                              }
+                            >
+                              <CheckpointCell>{shortDateTime(savepoint.createdAt)}</CheckpointCell>
+                              <CheckpointCell>
+                                <CheckpointNameCell>
+                                  <ExpandGlyph aria-hidden="true" $expanded={isExpanded}>
+                                    &gt;
+                                  </ExpandGlyph>
+                                  <CheckpointNameStack>
+                                    <CheckpointTitleRow>
+                                      <CheckpointTitle title={savepoint.name}>
+                                        {savepoint.name}
+                                      </CheckpointTitle>
+                                      {isActive ? <ActiveCheckpointBadge>Active</ActiveCheckpointBadge> : null}
+                                    </CheckpointTitleRow>
+                                    <S.SingleLineText title={savepoint.note || "No description provided."}>
+                                      {savepoint.note || "No description provided."}
+                                    </S.SingleLineText>
+                                  </CheckpointNameStack>
+                                </CheckpointNameCell>
+                              </CheckpointCell>
+                              <CheckpointCell>
+                                <S.SingleLineText title={checkpointActor(savepoint) || "Unknown"}>
+                                  {checkpointActor(savepoint) || "Unknown"}
+                                </S.SingleLineText>
+                              </CheckpointCell>
+                              <CheckpointCell>
+                                <S.Stack>
+                                  <Typography.Body component="span">{savepoint.sizeLabel}</Typography.Body>
+                                  <Typography.Body color="secondary" component="span">
+                                    {savepoint.fileCount} files · {savepoint.folderCount} folders
+                                  </Typography.Body>
+                                </S.Stack>
+                              </CheckpointCell>
+                              <CheckpointCell onClick={(event) => event.stopPropagation()}>
+                                <CheckpointActions>
+                                  <S.TextActionButton
+                                    type="button"
+                                    onClick={() => setSelectedSavepoint(savepoint)}
+                                  >
+                                    Details
+                                  </S.TextActionButton>
+                                  <S.TextActionButton
+                                    type="button"
+                                    onClick={() => openSavepoint(savepoint)}
+                                  >
+                                    Browse
+                                  </S.TextActionButton>
+                                  <S.TextActionButton
+                                    type="button"
+                                    onClick={() => setDiffDialog({ savepoint, mode: "compare" })}
+                                  >
+                                    Compare
+                                  </S.TextActionButton>
+                                  <S.TextActionButton
+                                    type="button"
+                                    disabled={
+                                      !workspace.capabilities.restoreCheckpoint ||
+                                      restoreCheckpointPending ||
+                                      isActive
+                                    }
+                                    onClick={() => setDiffDialog({ savepoint, mode: "restore" })}
+                                  >
+                                    Restore
+                                  </S.TextActionButton>
+                                </CheckpointActions>
+                              </CheckpointCell>
+                            </CheckpointSummaryRow>
+                            {isExpanded ? (
+                              <CheckpointExpandedRow>
+                                <CheckpointExpandedCell colSpan={5}>
+                                  <CheckpointExpandedPanel
+                                    savepoint={savepoint}
+                                    isActive={isActive}
+                                  />
+                                </CheckpointExpandedCell>
+                              </CheckpointExpandedRow>
+                            ) : null}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </CheckpointHistoryTable>
+                </CheckpointHistoryViewport>
               </S.TableCard>
             )}
           </S.TableBlock>
@@ -417,6 +424,94 @@ function checkpointActor(savepoint: AFSSavepoint) {
 
 function isActiveCheckpoint(workspace: AFSWorkspaceDetail, savepoint: AFSSavepoint) {
   return getActiveWorkspaceView(workspace) === "head" && savepoint.id === workspace.headSavepointId;
+}
+
+function SortableCheckpointHeader({
+  field,
+  activeField,
+  direction,
+  onSort,
+  children,
+}: {
+  field: CheckpointSortField;
+  activeField: CheckpointSortField;
+  direction: "asc" | "desc";
+  onSort: (field: CheckpointSortField) => void;
+  children: string;
+}) {
+  const isActive = activeField === field;
+  return (
+    <CheckpointHeaderCell
+      as="th"
+      aria-sort={isActive ? (direction === "asc" ? "ascending" : "descending") : "none"}
+    >
+      <CheckpointSortButton type="button" onClick={() => onSort(field)}>
+        {children}
+        <SortIndicator>{isActive ? (direction === "asc" ? "^" : "v") : ""}</SortIndicator>
+      </CheckpointSortButton>
+    </CheckpointHeaderCell>
+  );
+}
+
+function CheckpointExpandedPanel({
+  savepoint,
+  isActive,
+}: {
+  savepoint: AFSSavepoint;
+  isActive: boolean;
+}) {
+  const actor = checkpointActor(savepoint) || "Unknown";
+  const typeLabel = savepoint.kind ? formatCheckpointKind(savepoint.kind) : "Checkpoint";
+  const sourceLabel = savepoint.source ? formatCheckpointSource(savepoint.source) : "Unknown";
+
+  return (
+    <ExpandedPanelStack>
+      <ExpandedPanelHeader>
+        <ExpandedPanelTitle>{savepoint.name}</ExpandedPanelTitle>
+        <CheckpointBadgeRow>
+          {isActive ? <ActiveCheckpointBadge>Active</ActiveCheckpointBadge> : null}
+          <S.MetaBadge>{typeLabel}</S.MetaBadge>
+          <S.MetaBadge>{sourceLabel}</S.MetaBadge>
+          <S.MetaBadge>{actor}</S.MetaBadge>
+        </CheckpointBadgeRow>
+      </ExpandedPanelHeader>
+      <ExpandedDescription>{savepoint.note || "No description provided."}</ExpandedDescription>
+      <ExpandedDetailGrid>
+        <DetailField>
+          <DetailLabel>Checkpoint ID</DetailLabel>
+          <DetailValue $mono title={savepoint.id}>{savepoint.id}</DetailValue>
+        </DetailField>
+        <DetailField>
+          <DetailLabel>Created</DetailLabel>
+          <DetailValue>{new Date(savepoint.createdAt).toLocaleString()}</DetailValue>
+        </DetailField>
+        <DetailField>
+          <DetailLabel>Session ID</DetailLabel>
+          <DetailValue $mono title={savepoint.sessionId || "Not set"}>
+            {savepoint.sessionId || "Not set"}
+          </DetailValue>
+        </DetailField>
+        <DetailField>
+          <DetailLabel>Parent Checkpoint</DetailLabel>
+          <DetailValue $mono title={savepoint.parentCheckpointId || "None"}>
+            {savepoint.parentCheckpointId || "None"}
+          </DetailValue>
+        </DetailField>
+        <DetailField>
+          <DetailLabel>Manifest Hash</DetailLabel>
+          <DetailValue $mono title={savepoint.manifestHash || "Not recorded"}>
+            {savepoint.manifestHash || "Not recorded"}
+          </DetailValue>
+        </DetailField>
+        <DetailField>
+          <DetailLabel>Contents</DetailLabel>
+          <DetailValue>
+            {savepoint.fileCount.toLocaleString()} files · {savepoint.folderCount.toLocaleString()} folders · {savepoint.sizeLabel}
+          </DetailValue>
+        </DetailField>
+      </ExpandedDetailGrid>
+    </ExpandedPanelStack>
+  );
 }
 
 function formatCheckpointKind(kind: string) {
@@ -851,6 +946,123 @@ const CheckpointNameCell = styled.div`
   min-width: 0;
 `;
 
+const CheckpointHistoryViewport = styled.div`
+  max-height: 720px;
+  overflow: auto;
+`;
+
+const CheckpointHistoryTable = styled.table`
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  table-layout: fixed;
+`;
+
+const CheckpointHeaderCell = styled.th`
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--afs-line);
+  background: var(--afs-panel-strong);
+  color: var(--afs-muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+
+  &:first-child {
+    width: 120px;
+  }
+
+  &:nth-child(2) {
+    width: 34%;
+  }
+
+  &:nth-child(3) {
+    width: 140px;
+  }
+
+  &:nth-child(4) {
+    width: 170px;
+  }
+
+  &:last-child {
+    width: 250px;
+    text-align: right;
+  }
+`;
+
+const CheckpointSortButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 0;
+  text-transform: inherit;
+`;
+
+const SortIndicator = styled.span`
+  display: inline-block;
+  width: 10px;
+  color: var(--afs-ink-soft);
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+`;
+
+const CheckpointSummaryRow = styled.tr<{ $expanded: boolean }>`
+  cursor: pointer;
+  background: ${({ $expanded }) => ($expanded ? "var(--afs-panel)" : "transparent")};
+  transition: background 160ms ease;
+
+  &:hover {
+    background: var(--afs-panel);
+  }
+`;
+
+const CheckpointCell = styled.td`
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--afs-line);
+  color: var(--afs-ink);
+  font-size: 13px;
+  vertical-align: middle;
+
+  &:last-child {
+    text-align: right;
+  }
+`;
+
+const CheckpointExpandedRow = styled.tr`
+  background: var(--afs-panel);
+`;
+
+const CheckpointExpandedCell = styled.td`
+  padding: 0 12px 14px 132px;
+  border-bottom: 1px solid var(--afs-line);
+
+  @media (max-width: 760px) {
+    padding-left: 12px;
+  }
+`;
+
+const ExpandGlyph = styled.span<{ $expanded: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--afs-muted);
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 12px;
+  transform: rotate(${({ $expanded }) => ($expanded ? "90deg" : "0deg")});
+  transition: transform 160ms ease;
+`;
+
 const CheckpointNameStack = styled(S.Stack)`
   flex: 1 1 auto;
   min-width: 0;
@@ -876,7 +1088,7 @@ const CheckpointTitle = styled.span`
 const CheckpointActions = styled.div`
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 10px;
   white-space: nowrap;
 `;
 
@@ -897,6 +1109,56 @@ const CheckpointBadgeRow = styled.div`
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 18px;
+`;
+
+const ExpandedPanelStack = styled.div`
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  background: var(--afs-panel-strong);
+`;
+
+const ExpandedPanelHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+
+  ${CheckpointBadgeRow} {
+    margin-bottom: 0;
+    justify-content: flex-end;
+  }
+`;
+
+const ExpandedPanelTitle = styled.span`
+  min-width: 0;
+  overflow: hidden;
+  color: var(--afs-ink);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const ExpandedDescription = styled.div`
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.45;
+`;
+
+const ExpandedDetailGrid = styled.div`
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  @media (max-width: 900px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const DiffStack = styled.div`
