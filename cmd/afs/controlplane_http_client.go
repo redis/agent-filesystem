@@ -40,11 +40,19 @@ type httpForkWorkspaceRequest struct {
 
 type httpSaveFromLiveRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
+	Description  string `json:"description,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Author       string `json:"author,omitempty"`
 }
 
 type httpSaveCheckpointRequest struct {
 	ExpectedHead          string                `json:"expected_head"`
 	CheckpointID          string                `json:"checkpoint_id"`
+	Description           string                `json:"description,omitempty"`
+	Kind                  string                `json:"kind,omitempty"`
+	Source                string                `json:"source,omitempty"`
+	Author                string                `json:"author,omitempty"`
 	Manifest              controlplane.Manifest `json:"manifest"`
 	Blobs                 map[string][]byte     `json:"blobs"`
 	FileCount             int                   `json:"file_count"`
@@ -204,10 +212,34 @@ func (c *httpControlPlaneClient) ListCheckpoints(ctx context.Context, workspace 
 	return out, err
 }
 
+func (c *httpControlPlaneClient) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error) {
+	params := url.Values{}
+	if strings.TrimSpace(baseView) != "" {
+		params.Set("base", strings.TrimSpace(baseView))
+	}
+	if strings.TrimSpace(headView) != "" {
+		params.Set("head", strings.TrimSpace(headView))
+	}
+	rel := c.workspacePath(workspace, "diff")
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.WorkspaceDiffResponse
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
-	return c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":restore", httpRestoreCheckpointRequest{
+	_, err := c.RestoreCheckpointWithResult(ctx, workspace, checkpointID)
+	return err
+}
+
+func (c *httpControlPlaneClient) RestoreCheckpointWithResult(ctx context.Context, workspace, checkpointID string) (controlplane.RestoreCheckpointResult, error) {
+	var out controlplane.RestoreCheckpointResult
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":restore", httpRestoreCheckpointRequest{
 		CheckpointID: checkpointID,
-	}, nil, http.StatusNoContent)
+	}, &out, http.StatusOK)
+	return out, err
 }
 
 func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error) {
@@ -215,6 +247,10 @@ func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input contr
 	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(input.Workspace, "checkpoints"), httpSaveCheckpointRequest{
 		ExpectedHead:          input.ExpectedHead,
 		CheckpointID:          input.CheckpointID,
+		Description:           input.Description,
+		Kind:                  input.Kind,
+		Source:                input.Source,
+		Author:                input.Author,
 		Manifest:              input.Manifest,
 		Blobs:                 input.Blobs,
 		FileCount:             input.FileCount,
@@ -226,9 +262,23 @@ func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input contr
 }
 
 func (c *httpControlPlaneClient) SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	return c.SaveCheckpointFromLiveWithOptions(ctx, workspace, checkpointID, controlplane.SaveCheckpointFromLiveOptions{})
+}
+
+func (c *httpControlPlaneClient) SaveCheckpointFromLiveWithOptions(ctx context.Context, workspace, checkpointID string, options controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
+	if strings.TrimSpace(options.Kind) == "" {
+		options.Kind = controlplane.CheckpointKindManual
+	}
+	if strings.TrimSpace(options.Source) == "" {
+		options.Source = controlplane.CheckpointSourceCLI
+	}
 	var out httpSaveCheckpointResponse
 	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":save-from-live", httpSaveFromLiveRequest{
 		CheckpointID: checkpointID,
+		Description:  options.Description,
+		Kind:         options.Kind,
+		Source:       options.Source,
+		Author:       options.Author,
 	}, &out, http.StatusCreated)
 	return out.Saved, err
 }

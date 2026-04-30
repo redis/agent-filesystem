@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
 func liveWorkspaceManifest(ctx context.Context, store *afsStore, workspace, savepointID string) (manifest, map[string][]byte, error) {
@@ -109,11 +111,11 @@ func workspaceManifestIsDirty(ctx context.Context, store *afsStore, workspace, h
 	return !manifestEquivalent(headManifest, current), nil
 }
 
-func saveAFSWorkspaceOrLiveRoot(ctx context.Context, cfg config, store *afsStore, workspace, savepointID string, printResult bool) (bool, error) {
-	return saveLiveWorkspaceCheckpoint(ctx, store, workspace, savepointID, printResult)
+func saveAFSWorkspaceOrLiveRoot(ctx context.Context, cfg config, store *afsStore, workspace, savepointID string, printResult bool, options ...controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
+	return saveLiveWorkspaceCheckpoint(ctx, store, workspace, savepointID, printResult, options...)
 }
 
-func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace, savepointID string, printResult bool) (bool, error) {
+func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace, savepointID string, printResult bool, options ...controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
 	workspaceInfo, err := store.getWorkspaceMeta(ctx, workspace)
 	if err != nil {
 		return false, err
@@ -129,7 +131,7 @@ func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace
 	if _, _, _, err := store.ensureWorkspaceRoot(ctx, workspace); err != nil {
 		return false, err
 	}
-	saved, err := saveWorkspaceRootCheckpoint(ctx, store, workspace, workspaceInfo.HeadSavepoint, savepointID)
+	saved, err := saveWorkspaceRootCheckpoint(ctx, store, workspace, workspaceInfo.HeadSavepoint, savepointID, options...)
 	if err != nil {
 		if errors.Is(err, errAFSWorkspaceConflict) {
 			return false, fmt.Errorf("checkpoint conflict: workspace %q moved while saving; reopen it before retrying", workspace)

@@ -41,39 +41,39 @@ type syncControlResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func cmdSync(args []string) error {
+func cmdFile(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, syncUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, fileUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
 
 	switch args[1] {
 	case "create-exclusive":
-		return cmdSyncCreateExclusive(args[2:])
+		return cmdFileCreateExclusive(args[2:])
 	default:
-		return fmt.Errorf("unknown sync subcommand %q\n\n%s", args[1], syncUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("unknown file subcommand %q\n\n%s", args[1], fileUsageText(filepath.Base(os.Args[0])))
 	}
 }
 
-func cmdSyncCreateExclusive(args []string) error {
+func cmdFileCreateExclusive(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, syncCreateExclusiveUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, fileCreateExclusiveUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
 
-	fs := flag.NewFlagSet("sync create-exclusive", flag.ContinueOnError)
+	fs := flag.NewFlagSet("file create-exclusive", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var content optionalString
 	var contentFile string
 	var timeout time.Duration
 	fs.Var(&content, "content", "file content")
 	fs.StringVar(&contentFile, "content-file", "", "read content from file")
-	fs.DurationVar(&timeout, "timeout", defaultSyncControlTimeout, "how long to wait for the daemon result")
+	fs.DurationVar(&timeout, "timeout", defaultSyncControlTimeout, "how long to wait for the file operation result")
 	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%s", syncCreateExclusiveUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("%s", fileCreateExclusiveUsageText(filepath.Base(os.Args[0])))
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("%s", syncCreateExclusiveUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("%s", fileCreateExclusiveUsageText(filepath.Base(os.Args[0])))
 	}
 	if content.set && strings.TrimSpace(contentFile) != "" {
 		return errors.New("--content and --content-file are mutually exclusive")
@@ -85,13 +85,13 @@ func cmdSyncCreateExclusive(args []string) error {
 	}
 	st, err := loadState()
 	if err != nil {
-		return fmt.Errorf("sync state unavailable: %w\nRun '%s up --mode sync' first", err, filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode: %w\nRun '%s up --mode sync' first", err, filepath.Base(os.Args[0]))
 	}
 	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
-		return fmt.Errorf("sync mode is not running\nRun '%s up --mode sync' first", filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode\nRun '%s up --mode sync' first", filepath.Base(os.Args[0]))
 	}
 	if !runtimeStateMatchesConfig(cfg, st) {
-		return fmt.Errorf("sync daemon does not match the current config\nRun '%s up --mode sync' again", filepath.Base(os.Args[0]))
+		return fmt.Errorf("running AFS sync process does not match the current config\nRun '%s up --mode sync' again", filepath.Base(os.Args[0]))
 	}
 
 	localRoot := strings.TrimSpace(st.LocalPath)
@@ -99,7 +99,7 @@ func cmdSyncCreateExclusive(args []string) error {
 		localRoot = strings.TrimSpace(cfg.LocalPath)
 	}
 	if localRoot == "" {
-		return errors.New("sync local path is not configured")
+		return errors.New("AFS local sync path is not configured")
 	}
 
 	contentValue := content.value
@@ -139,15 +139,15 @@ func cmdSyncCreateExclusive(args []string) error {
 			_ = os.Remove(resultPath)
 			var result syncControlResult
 			if err := json.Unmarshal(data, &result); err != nil {
-				return fmt.Errorf("parse sync result: %w", err)
+				return fmt.Errorf("parse file operation result: %w", err)
 			}
 			if !result.Success {
 				if strings.TrimSpace(result.Error) == "" {
-					return errors.New("sync create-exclusive failed")
+					return errors.New("file create-exclusive failed")
 				}
 				return errors.New(result.Error)
 			}
-			printBox(markerSuccess+" "+clr(ansiBold, "sync create-exclusive"), []boxRow{
+			printBox(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []boxRow{
 				{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
 				{Label: "path", Value: result.Path},
 				{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
@@ -158,32 +158,33 @@ func cmdSyncCreateExclusive(args []string) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for sync daemon result for %s", normalizedPath)
+			return fmt.Errorf("timed out waiting for file create-exclusive result for %s", normalizedPath)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func syncUsageText(bin string) string {
+func fileUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s sync <subcommand>
+  %s file <subcommand>
 
-Explicit operations for a running sync daemon.
+Workspace file operations.
 
 Subcommands:
-  create-exclusive   Atomically create a file in the synced workspace exactly once
+  create-exclusive   Create a workspace file only if it does not already exist
 `, bin)
 }
 
-func syncCreateExclusiveUsageText(bin string) string {
+func fileCreateExclusiveUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s sync create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
+  %s file create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
 
-Ask the running sync daemon to atomically create <path> exactly once across
-all clients. The path must be absolute inside the workspace, for example:
+Create <path> only if it does not already exist in the workspace. The create is
+atomic across connected AFS clients. Requires AFS to be running in sync mode on
+this machine. The path must be absolute inside the workspace, for example:
 
-  %s sync create-exclusive /tasks/001.claim
-  %s sync create-exclusive --content "agent-a\n" /tasks/001.claim
+  %s file create-exclusive /tasks/001.claim
+  %s file create-exclusive --content "agent-a\n" /tasks/001.claim
 `, bin, bin, bin)
 }
 

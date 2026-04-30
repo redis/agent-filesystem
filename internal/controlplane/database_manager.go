@@ -874,25 +874,43 @@ func (m *DatabaseManager) ListGlobalChangelog(ctx context.Context, databaseID st
 }
 
 func (m *DatabaseManager) RestoreCheckpoint(ctx context.Context, databaseID, workspace, checkpointID string) error {
+	_, err := m.RestoreCheckpointWithResult(ctx, databaseID, workspace, checkpointID)
+	return err
+}
+
+func (m *DatabaseManager) RestoreCheckpointWithResult(ctx context.Context, databaseID, workspace, checkpointID string) (RestoreCheckpointResult, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
-	if err := service.RestoreCheckpoint(ctx, route.WorkspaceID, checkpointID); err != nil {
-		return err
+	result, err := service.RestoreCheckpointWithResult(ctx, route.WorkspaceID, checkpointID)
+	if err != nil {
+		return RestoreCheckpointResult{}, err
 	}
-	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID)
+	if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
+		return RestoreCheckpointResult{}, err
+	}
+	return result, nil
 }
 
 func (m *DatabaseManager) RestoreResolvedCheckpoint(ctx context.Context, workspace, checkpointID string) error {
+	_, err := m.RestoreResolvedCheckpointWithResult(ctx, workspace, checkpointID)
+	return err
+}
+
+func (m *DatabaseManager) RestoreResolvedCheckpointWithResult(ctx context.Context, workspace, checkpointID string) (RestoreCheckpointResult, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
-	if err := service.RestoreCheckpoint(ctx, route.WorkspaceID, checkpointID); err != nil {
-		return err
+	result, err := service.RestoreCheckpointWithResult(ctx, route.WorkspaceID, checkpointID)
+	if err != nil {
+		return RestoreCheckpointResult{}, err
 	}
-	return m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID)
+	if err := m.refreshWorkspaceCatalogEntry(ctx, route.DatabaseID, route.WorkspaceID); err != nil {
+		return RestoreCheckpointResult{}, err
+	}
+	return result, nil
 }
 
 func (m *DatabaseManager) ListCheckpoints(ctx context.Context, databaseID, workspace string, limit int) ([]checkpointSummary, error) {
@@ -909,6 +927,22 @@ func (m *DatabaseManager) ListResolvedCheckpoints(ctx context.Context, workspace
 		return nil, err
 	}
 	return service.ListCheckpoints(ctx, route.WorkspaceID, limit)
+}
+
+func (m *DatabaseManager) DiffWorkspace(ctx context.Context, databaseID, workspace, baseView, headView string) (WorkspaceDiffResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceDiffResponse{}, err
+	}
+	return service.DiffWorkspace(ctx, route.WorkspaceID, baseView, headView)
+}
+
+func (m *DatabaseManager) DiffResolvedWorkspace(ctx context.Context, workspace, baseView, headView string) (WorkspaceDiffResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceDiffResponse{}, err
+	}
+	return service.DiffWorkspace(ctx, route.WorkspaceID, baseView, headView)
 }
 
 func (m *DatabaseManager) SaveCheckpoint(ctx context.Context, databaseID, workspace string, input SaveCheckpointRequest) (bool, error) {
@@ -948,11 +982,15 @@ func (m *DatabaseManager) SaveResolvedCheckpoint(ctx context.Context, workspace 
 }
 
 func (m *DatabaseManager) SaveResolvedCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	return m.SaveResolvedCheckpointFromLiveWithOptions(ctx, workspace, checkpointID, SaveCheckpointFromLiveOptions{})
+}
+
+func (m *DatabaseManager) SaveResolvedCheckpointFromLiveWithOptions(ctx context.Context, workspace, checkpointID string, options SaveCheckpointFromLiveOptions) (bool, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return false, fmt.Errorf("resolve workspace %q: %w", workspace, err)
 	}
-	saved, err := service.SaveCheckpointFromLive(ctx, route.WorkspaceID, checkpointID)
+	saved, err := service.SaveCheckpointFromLiveWithOptions(ctx, route.WorkspaceID, checkpointID, options)
 	if err != nil {
 		return false, err
 	}
@@ -965,11 +1003,15 @@ func (m *DatabaseManager) SaveResolvedCheckpointFromLive(ctx context.Context, wo
 }
 
 func (m *DatabaseManager) SaveCheckpointFromLive(ctx context.Context, databaseID, workspace, checkpointID string) (bool, error) {
+	return m.SaveCheckpointFromLiveWithOptions(ctx, databaseID, workspace, checkpointID, SaveCheckpointFromLiveOptions{})
+}
+
+func (m *DatabaseManager) SaveCheckpointFromLiveWithOptions(ctx context.Context, databaseID, workspace, checkpointID string, options SaveCheckpointFromLiveOptions) (bool, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
 		return false, fmt.Errorf("resolve workspace %q in database %q: %w", workspace, databaseID, err)
 	}
-	saved, err := service.SaveCheckpointFromLive(ctx, route.WorkspaceID, checkpointID)
+	saved, err := service.SaveCheckpointFromLiveWithOptions(ctx, route.WorkspaceID, checkpointID, options)
 	if err != nil {
 		return false, err
 	}

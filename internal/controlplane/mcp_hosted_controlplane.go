@@ -252,7 +252,10 @@ func (p *hostedMCPProvider) dispatchControlPlaneTool(ctx context.Context, name s
 		if err != nil {
 			return nil, err
 		}
-		saved, err := p.manager.SaveCheckpointFromLive(ctx, route.DatabaseID, route.Name, checkpointID)
+		saved, err := p.manager.SaveCheckpointFromLiveWithOptions(ctx, route.DatabaseID, route.Name, checkpointID, SaveCheckpointFromLiveOptions{
+			Kind:   CheckpointKindManual,
+			Source: CheckpointSourceMCP,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -275,14 +278,20 @@ func (p *hostedMCPProvider) dispatchControlPlaneTool(ctx context.Context, name s
 		if err != nil {
 			return nil, err
 		}
-		if err := p.manager.RestoreCheckpoint(ctx, route.DatabaseID, route.Name, checkpointID); err != nil {
+		result, err := p.manager.RestoreCheckpointWithResult(ctx, route.DatabaseID, route.Name, checkpointID)
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{
+		payload := map[string]any{
 			"workspace":  workspace,
 			"checkpoint": checkpointID,
 			"restored":   true,
-		}, nil
+		}
+		if result.SafetyCheckpointCreated {
+			payload["safety_checkpoint"] = result.SafetyCheckpointID
+			payload["safety_checkpoint_created"] = true
+		}
+		return payload, nil
 
 	case "mcp_token_issue":
 		workspace, err := mcpRequiredString(args, "workspace")

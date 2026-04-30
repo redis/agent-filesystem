@@ -39,6 +39,26 @@ function formatSignedBytes(n?: number): string {
   return `${sign}${(abs / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function changeOperationLabel(row: Pick<AFSChangelogEntry, "op" | "prevHash" | "prevPath">): string {
+  const hasPrevious = Boolean(row.prevHash?.trim() || row.prevPath?.trim());
+  switch (row.op) {
+    case "put":
+      return hasPrevious ? "Update" : "Create";
+    case "delete":
+      return "Delete";
+    case "mkdir":
+      return "Create folder";
+    case "rmdir":
+      return "Delete folder";
+    case "symlink":
+      return hasPrevious ? "Update link" : "Create link";
+    case "chmod":
+      return "Change mode";
+    default:
+      return row.op || "Unknown";
+  }
+}
+
 export function ChangesTable({
   rows,
   loading = false,
@@ -52,10 +72,10 @@ export function ChangesTable({
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [opFilter, setOpFilter] = useState<string>("all");
 
-  const ops = useMemo(() => {
+  const operations = useMemo(() => {
     const set = new Set<string>();
     for (const row of rows) {
-      if (row.op) set.add(row.op);
+      set.add(changeOperationLabel(row));
     }
     return Array.from(set).sort();
   }, [rows]);
@@ -63,7 +83,8 @@ export function ChangesTable({
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
     const baseRows = rows.filter((row) => {
-      if (opFilter !== "all" && row.op !== opFilter) return false;
+      const operation = changeOperationLabel(row);
+      if (opFilter !== "all" && operation !== opFilter) return false;
       if (query === "") return true;
       return [
         row.path,
@@ -74,7 +95,7 @@ export function ChangesTable({
         row.sessionId ?? "",
         row.label ?? "",
         row.user ?? "",
-        row.op ?? "",
+        operation,
         row.source ?? "",
       ].some((value) => value.toLowerCase().includes(query));
     });
@@ -83,11 +104,15 @@ export function ChangesTable({
       const leftValue =
         sortBy === "sessionId"
           ? (left.label ?? left.agentId ?? left.sessionId ?? "")
-          : ((left[sortBy] ?? "") as string | number);
+          : sortBy === "op"
+            ? changeOperationLabel(left)
+          : (left[sortBy] ?? "");
       const rightValue =
         sortBy === "sessionId"
           ? (right.label ?? right.agentId ?? right.sessionId ?? "")
-          : ((right[sortBy] ?? "") as string | number);
+          : sortBy === "op"
+            ? changeOperationLabel(right)
+          : (right[sortBy] ?? "");
       return compareValues(leftValue, rightValue, sortDirection);
     });
   }, [rows, search, opFilter, sortBy, sortDirection]);
@@ -117,11 +142,11 @@ export function ChangesTable({
         },
         {
           accessorKey: "op",
-          header: "Op",
-          size: 60,
+          header: "Change",
+          size: 120,
           enableSorting: true,
           cell: ({ row }) => (
-            <Typography.Body component="strong">{row.original.op}</Typography.Body>
+            <Typography.Body component="strong">{changeOperationLabel(row.original)}</Typography.Body>
           ),
         },
         {
@@ -208,10 +233,10 @@ export function ChangesTable({
           onChange={setSearch}
           placeholder="Search by path, agent, user..."
         />
-        {ops.length > 1 ? (
+        {operations.length > 1 ? (
           <OpFilter
             value={opFilter}
-            ops={ops}
+            ops={operations}
             onChange={setOpFilter}
           />
         ) : null}
@@ -266,7 +291,7 @@ function OpFilter({
 }) {
   const options = useMemo(
     () => [
-      { value: "all", label: "All ops" },
+      { value: "all", label: "All changes" },
       ...ops.map((op) => ({ value: op, label: op })),
     ],
     [ops],
@@ -277,8 +302,8 @@ function OpFilter({
       <Select
         options={options}
         value={value}
-        onChange={(next) => onChange(next as string)}
-        placeholder="All ops"
+        onChange={(next) => onChange(next)}
+        placeholder="All changes"
       />
     </div>
   );

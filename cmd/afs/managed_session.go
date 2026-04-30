@@ -13,11 +13,6 @@ import (
 )
 
 func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSessionRequest {
-	productMode, err := effectiveProductMode(cfg)
-	if err != nil || productMode == productModeLocal {
-		return controlplane.CreateWorkspaceSessionRequest{}
-	}
-
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = ""

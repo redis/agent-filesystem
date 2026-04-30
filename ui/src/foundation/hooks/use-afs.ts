@@ -12,6 +12,7 @@ import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
+  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
   RestoreSavepointInput,
   SaveDatabaseInput,
@@ -98,6 +99,17 @@ export const afsKeys = {
       "files",
       input.view,
       input.path,
+    ] as const,
+  workspaceDiff: (input: GetWorkspaceDiffInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "diff",
+      input.base,
+      input.head,
     ] as const,
   mcpTokens: (databaseId: string | null, workspaceId: string) =>
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
@@ -207,6 +219,15 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
   return queryOptions({
     queryKey: afsKeys.workspaceFile(input),
     queryFn: () => afsApi.getWorkspaceFileContent(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function workspaceDiffQueryOptions(input: GetWorkspaceDiffInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceDiff(input),
+    queryFn: () => afsApi.getWorkspaceDiff(input),
     staleTime: FILESYSTEM_QUERY_STALE_MS,
     gcTime: FILESYSTEM_QUERY_GC_MS,
   });
@@ -348,6 +369,15 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
   return useQuery(
     {
       ...workspaceFileContentQueryOptions(input),
+      enabled: enabled && input.workspaceId !== "",
+    },
+  );
+}
+
+export function useWorkspaceDiff(input: GetWorkspaceDiffInput, enabled = true) {
+  return useQuery(
+    {
+      ...workspaceDiffQueryOptions(input),
       enabled: enabled && input.workspaceId !== "",
     },
   );

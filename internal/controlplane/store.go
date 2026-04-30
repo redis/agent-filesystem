@@ -30,6 +30,22 @@ const (
 	InitialCheckpointName = initialCheckpointName
 )
 
+const (
+	CheckpointKindManual = "manual"
+	CheckpointKindImport = "import"
+	CheckpointKindFork   = "fork"
+	CheckpointKindSafety = "safety"
+	CheckpointKindSystem = "system"
+)
+
+const (
+	CheckpointSourceCLI        = "cli"
+	CheckpointSourceImport     = "import"
+	CheckpointSourceMCP        = "mcp"
+	CheckpointSourceServer     = "server"
+	CheckpointSourceQuickstart = "quickstart"
+)
+
 var namePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 type WorkspaceMeta struct {
@@ -57,7 +73,13 @@ type SavepointMeta struct {
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
 	Description     string    `json:"description,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	Source          string    `json:"source,omitempty"`
 	Author          string    `json:"author,omitempty"`
+	CreatedBy       string    `json:"created_by,omitempty"`
+	SessionID       string    `json:"session_id,omitempty"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentName       string    `json:"agent_name,omitempty"`
 	Workspace       string    `json:"workspace"`
 	ParentSavepoint string    `json:"parent_savepoint,omitempty"`
 	ManifestHash    string    `json:"manifest_hash"`

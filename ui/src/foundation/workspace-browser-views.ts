@@ -9,20 +9,22 @@ export function hasDistinctWorkingCopy(workspace: AFSWorkspaceDetail) {
   return workspace.capabilities.browseWorkingCopy && workspace.draftState === "dirty";
 }
 
+export function getActiveWorkspaceView(workspace: AFSWorkspaceDetail): AFSWorkspaceView {
+  return hasDistinctWorkingCopy(workspace) ? "working-copy" : "head";
+}
+
 export function getWorkspaceBrowserViewOptions(workspace: AFSWorkspaceDetail): WorkspaceBrowserViewOption[] {
   const options: WorkspaceBrowserViewOption[] = [];
+  const hasDirtyActiveState = hasDistinctWorkingCopy(workspace);
+  const activeView = getActiveWorkspaceView(workspace);
 
-  if (hasDistinctWorkingCopy(workspace)) {
-    options.push({ value: "working-copy", label: "working-copy" });
-  }
-
-  if (workspace.capabilities.browseHead || options.length === 0) {
-    options.push({ value: "head", label: "head" });
+  if (activeView === "working-copy" || workspace.capabilities.browseHead || options.length === 0) {
+    options.push({ value: activeView, label: "Active workspace" });
   }
 
   if (workspace.capabilities.browseCheckpoints) {
     for (const savepoint of workspace.savepoints) {
-      if (savepoint.id === workspace.headSavepointId) {
+      if (!hasDirtyActiveState && savepoint.id === workspace.headSavepointId) {
         continue;
       }
       options.push({
@@ -36,5 +38,5 @@ export function getWorkspaceBrowserViewOptions(workspace: AFSWorkspaceDetail): W
 }
 
 export function getDefaultWorkspaceBrowserView(workspace: AFSWorkspaceDetail): AFSWorkspaceView {
-  return getWorkspaceBrowserViewOptions(workspace)[0]?.value ?? "head";
+  return getWorkspaceBrowserViewOptions(workspace)[0]?.value ?? getActiveWorkspaceView(workspace);
 }

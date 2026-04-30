@@ -51,6 +51,20 @@ describe("afsApi", () => {
     expect(savedWorkspace?.savepoints[0]?.name).toBe("after-update");
   });
 
+  test("compares a checkpoint with the live workspace", async () => {
+    const diff = await afsApi.getWorkspaceDiff({
+      databaseId: paymentsDatabaseId,
+      workspaceId: "payments-portal",
+      base: "checkpoint:sp-payments-before-refactor",
+      head: "working-copy",
+    });
+
+    expect(diff.summary.total).toBeGreaterThan(0);
+    expect(diff.summary.updated).toBeGreaterThan(0);
+    expect(diff.entries.some((entry) => entry.path === "/README.md")).toBe(true);
+    expect(diff.entries.some((entry) => entry.path === "/src/routes/editor.tsx")).toBe(true);
+  });
+
   test("updates workspace metadata", async () => {
     const workspace = await afsApi.updateWorkspace({
       databaseId: paymentsDatabaseId,

@@ -307,6 +307,8 @@ func createQuickstartWorkspace(ctx context.Context, service *Service, profile da
 		ID:           quickstartCheckpoint,
 		Name:         quickstartCheckpoint,
 		Description:  "Initial quickstart snapshot with sample files.",
+		Kind:         CheckpointKindSystem,
+		Source:       CheckpointSourceQuickstart,
 		Author:       "afs",
 		Workspace:    workspaceID,
 		ManifestHash: manifestHash,

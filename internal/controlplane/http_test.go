@@ -159,9 +159,19 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 		t.Fatalf("POST scoped restore returned error: %v", err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("POST restore status = %d, want %d, body=%s", resp.StatusCode, http.StatusNoContent, body)
+		t.Fatalf("POST restore status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var restoreResult RestoreCheckpointResult
+	if err := json.NewDecoder(resp.Body).Decode(&restoreResult); err != nil {
+		t.Fatalf("Decode(restore result) returned error: %v", err)
+	}
+	if !restoreResult.Restored || restoreResult.CheckpointID != "initial" {
+		t.Fatalf("restore result = %#v, want restored initial", restoreResult)
+	}
+	if restoreResult.SafetyCheckpointCreated || restoreResult.SafetyCheckpointID != "" {
+		t.Fatalf("restore result safety checkpoint = %#v, want none for clean head restore", restoreResult)
 	}
 
 	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo")
@@ -175,6 +185,112 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	}
 	if detail.HeadCheckpointID != "initial" {
 		t.Fatalf("restored head_checkpoint_id = %q, want %q", detail.HeadCheckpointID, "initial")
+	}
+}
+
+func TestHTTPRestoreCreatesSafetyCheckpointForDirtyWorkingCopy(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	ctx := context.Background()
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("manager.serviceFor() returned error: %v", err)
+	}
+	redisKey, _, _, err := EnsureWorkspaceRoot(ctx, service.store, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	if err := mountclient.New(service.store.rdb, redisKey).Echo(ctx, "/drafts/notes.txt", []byte("working copy\n")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	if err := MarkWorkspaceRootDirty(ctx, service.store, "repo"); err != nil {
+		t.Fatalf("MarkWorkspaceRootDirty() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(
+		server.URL+"/v1/databases/"+databaseID+"/workspaces/repo:restore",
+		"application/json",
+		strings.NewReader(`{"checkpoint_id":"initial"}`),
+	)
+	if err != nil {
+		t.Fatalf("POST scoped restore returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST restore status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var result RestoreCheckpointResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("Decode(restore result) returned error: %v", err)
+	}
+	if !result.SafetyCheckpointCreated || !strings.HasPrefix(result.SafetyCheckpointID, "restore-safety-") {
+		t.Fatalf("restore result safety checkpoint = %#v, want restore-safety checkpoint", result)
+	}
+
+	meta, err := service.store.GetSavepointMeta(ctx, "repo", result.SafetyCheckpointID)
+	if err != nil {
+		t.Fatalf("GetSavepointMeta(%s) returned error: %v", result.SafetyCheckpointID, err)
+	}
+	if meta.Kind != CheckpointKindSafety {
+		t.Fatalf("safety checkpoint kind = %q, want %q", meta.Kind, CheckpointKindSafety)
+	}
+	if meta.Source != CheckpointSourceServer {
+		t.Fatalf("safety checkpoint source = %q, want %q", meta.Source, CheckpointSourceServer)
+	}
+	if !strings.Contains(meta.Description, "before restoring initial") {
+		t.Fatalf("safety checkpoint description = %q, want restore target", meta.Description)
+	}
+
+	manifestValue, err := service.store.GetManifest(ctx, "repo", result.SafetyCheckpointID)
+	if err != nil {
+		t.Fatalf("GetManifest(%s) returned error: %v", result.SafetyCheckpointID, err)
+	}
+	if _, ok := manifestValue.Entries["/drafts/notes.txt"]; !ok {
+		t.Fatalf("safety checkpoint manifest missing draft file: %#v", manifestValue.Entries)
+	}
+}
+
+func TestHTTPCheckpointDiff(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/diff?base=checkpoint:initial&head=checkpoint:snapshot")
+	if err != nil {
+		t.Fatalf("GET checkpoint diff returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET checkpoint diff status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var diff WorkspaceDiffResponse
+	if err := json.NewDecoder(resp.Body).Decode(&diff); err != nil {
+		t.Fatalf("Decode(diff) returned error: %v", err)
+	}
+	if diff.Base.CheckpointID != "initial" || diff.Head.CheckpointID != "snapshot" {
+		t.Fatalf("diff refs = base %q head %q, want initial -> snapshot", diff.Base.CheckpointID, diff.Head.CheckpointID)
+	}
+	if diff.Summary.Total != 3 || diff.Summary.Created != 3 {
+		t.Fatalf("diff summary = %+v, want 3 created", diff.Summary)
+	}
+	paths := make(map[string]string, len(diff.Entries))
+	for _, entry := range diff.Entries {
+		paths[entry.Path] = entry.Op
+	}
+	for _, path := range []string{"/README.md", "/src", "/src/main.go"} {
+		if paths[path] != DiffOpCreate {
+			t.Fatalf("diff entry %s op = %q, want create; entries=%#v", path, paths[path], diff.Entries)
+		}
 	}
 }
 
@@ -725,6 +841,12 @@ func TestHTTPBrowseWorkingCopyView(t *testing.T) {
 	if summaries.Items[0].TotalBytes != expectedBytes {
 		t.Fatalf("summary total_bytes = %d, want %d", summaries.Items[0].TotalBytes, expectedBytes)
 	}
+	if summaries.Items[0].DraftState != "dirty" {
+		t.Fatalf("summary draft_state = %q, want dirty", summaries.Items[0].DraftState)
+	}
+	if summaries.Items[0].Status != "attention" {
+		t.Fatalf("summary status = %q, want attention", summaries.Items[0].Status)
+	}
 
 	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo")
 	if err != nil {
@@ -748,6 +870,12 @@ func TestHTTPBrowseWorkingCopyView(t *testing.T) {
 	}
 	if detail.TotalBytes != expectedBytes {
 		t.Fatalf("detail total_bytes = %d, want %d", detail.TotalBytes, expectedBytes)
+	}
+	if detail.DraftState != "dirty" {
+		t.Fatalf("detail draft_state = %q, want dirty", detail.DraftState)
+	}
+	if detail.Status != "attention" {
+		t.Fatalf("detail status = %q, want attention", detail.Status)
 	}
 
 	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=working-copy&path=/&depth=2")
@@ -830,6 +958,10 @@ func TestHTTPCheckpointListSaveAndFork(t *testing.T) {
 	saveRequest := fmtJSON(t, saveCheckpointRequest{
 		ExpectedHead: "snapshot",
 		CheckpointID: "snapshot-2",
+		Description:  "Second snapshot.",
+		Kind:         CheckpointKindManual,
+		Source:       CheckpointSourceMCP,
+		Author:       "codex",
 		Manifest: Manifest{
 			Version:   formatVersion,
 			Workspace: "repo",
@@ -867,6 +999,43 @@ func TestHTTPCheckpointListSaveAndFork(t *testing.T) {
 	}
 	if !saveResponse.Saved {
 		t.Fatal("expected checkpoint save response to report saved=true")
+	}
+	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/checkpoints?limit=10")
+	if err != nil {
+		t.Fatalf("GET checkpoints after save returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	var checkpointsAfterSave []checkpointSummary
+	if err := json.NewDecoder(resp.Body).Decode(&checkpointsAfterSave); err != nil {
+		t.Fatalf("Decode(checkpoints after save) returned error: %v", err)
+	}
+	var latestCheckpoint checkpointSummary
+	for _, checkpoint := range checkpointsAfterSave {
+		if checkpoint.ID == "snapshot-2" {
+			latestCheckpoint = checkpoint
+			break
+		}
+	}
+	if latestCheckpoint.ID == "" {
+		t.Fatalf("checkpoint snapshot-2 not found: %#v", checkpointsAfterSave)
+	}
+	if latestCheckpoint.Note != "Second snapshot." {
+		t.Errorf("checkpoint note = %q, want Second snapshot.", latestCheckpoint.Note)
+	}
+	if latestCheckpoint.Kind != CheckpointKindManual {
+		t.Errorf("checkpoint kind = %q, want %q", latestCheckpoint.Kind, CheckpointKindManual)
+	}
+	if latestCheckpoint.Source != CheckpointSourceMCP {
+		t.Errorf("checkpoint source = %q, want %q", latestCheckpoint.Source, CheckpointSourceMCP)
+	}
+	if latestCheckpoint.Author != "codex" {
+		t.Errorf("checkpoint author = %q, want codex", latestCheckpoint.Author)
+	}
+	if latestCheckpoint.ParentCheckpointID != "snapshot" {
+		t.Errorf("checkpoint parent = %q, want snapshot", latestCheckpoint.ParentCheckpointID)
+	}
+	if latestCheckpoint.ManifestHash == "" {
+		t.Error("checkpoint manifest hash is empty")
 	}
 
 	resp, err = http.Post(

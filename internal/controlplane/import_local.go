@@ -115,6 +115,8 @@ func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, in
 		ID:           initialCheckpointName,
 		Name:         initialCheckpointName,
 		Description:  "Initial import snapshot.",
+		Kind:         CheckpointKindImport,
+		Source:       CheckpointSourceImport,
 		Author:       "afs",
 		Workspace:    workspaceID,
 		ManifestHash: manifestHash,

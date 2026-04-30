@@ -70,6 +70,8 @@ func cmdCheckpoint(args []string) error {
 		return cmdCheckpointCreate(args)
 	case "list":
 		return cmdCheckpointList(args)
+	case "diff":
+		return cmdCheckpointDiff(args)
 	case "restore":
 		return cmdCheckpointRestore(args)
 	default:
@@ -880,31 +882,337 @@ func cmdCheckpointList(args []string) error {
 	if err != nil {
 		return err
 	}
-	rows := make([]boxRow, 0, len(checkpoints))
-	for _, meta := range checkpoints {
-		value := fmt.Sprintf("%s · %s", formatDisplayTimestamp(meta.CreatedAt), formatBytes(meta.TotalBytes))
-		if meta.IsHead {
-			value = "head · " + value
-		}
-		rows = append(rows, boxRow{
-			Label: meta.Name,
-			Value: value,
-		})
+	detail, err := service.GetWorkspace(context.Background(), selection.ID)
+	if err != nil {
+		return err
 	}
-	if len(rows) == 0 {
+	activeCheckpointID := ""
+	if detail.DraftState != "dirty" {
+		activeCheckpointID = detail.HeadCheckpointID
+	}
+	rows := make([]boxRow, 0, len(checkpoints))
+	if len(checkpoints) == 0 {
 		rows = append(rows, boxRow{Value: clr(ansiDim, "No checkpoints found")})
+	} else {
+		layout := newCheckpointListLayout(checkpoints, activeCheckpointID)
+		rows = append(rows, boxRow{Value: layout.header()})
+		for _, meta := range checkpoints {
+			rows = append(rows, boxRow{Value: layout.row(meta, activeCheckpointID)})
+		}
 	}
 	printBox(clr(ansiBold, "checkpoints in workspace: "+selection.Name), rows)
 	return nil
 }
 
-func cmdCheckpointCreate(args []string) error {
-	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, checkpointCreateUsageText(filepath.Base(os.Args[0])))
-		return nil
+const checkpointListColumnSep = "  "
+
+type checkpointListLayout struct {
+	nameWidth    int
+	activeWidth  int
+	createdWidth int
+	sizeWidth    int
+}
+
+func newCheckpointListLayout(items []controlplane.CheckpointSummary, activeCheckpointID string) checkpointListLayout {
+	nameHeader := "Checkpoint"
+	activeHeader := "Active"
+	createdHeader := "Created"
+	sizeHeader := "Size"
+
+	layout := checkpointListLayout{
+		nameWidth:    runeWidth(nameHeader),
+		activeWidth:  runeWidth(activeHeader),
+		createdWidth: runeWidth(createdHeader),
+		sizeWidth:    runeWidth(sizeHeader),
 	}
-	if len(args) != 2 && len(args) != 3 && len(args) != 4 {
-		return fmt.Errorf("%s", checkpointCreateUsageText(filepath.Base(os.Args[0])))
+	for _, item := range items {
+		layout.nameWidth = maxInt(layout.nameWidth, runeWidth(checkpointListName(item)))
+		layout.activeWidth = maxInt(layout.activeWidth, runeWidth(checkpointListActive(item, activeCheckpointID)))
+		layout.createdWidth = maxInt(layout.createdWidth, runeWidth(checkpointListCreated(item)))
+		layout.sizeWidth = maxInt(layout.sizeWidth, runeWidth(checkpointListSize(item)))
+	}
+
+	maxContentWidth := maxBoxText - 3*runeWidth(checkpointListColumnSep)
+	for layout.nameWidth+layout.activeWidth+layout.createdWidth+layout.sizeWidth > maxContentWidth {
+		switch {
+		case layout.nameWidth > runeWidth(nameHeader):
+			layout.nameWidth--
+		case layout.createdWidth > runeWidth(createdHeader):
+			layout.createdWidth--
+		default:
+			return layout
+		}
+	}
+	return layout
+}
+
+func (l checkpointListLayout) header() string {
+	return strings.Join([]string{
+		clr(ansiDim, padVisibleText("Checkpoint", l.nameWidth)),
+		clr(ansiDim, padVisibleText("Active", l.activeWidth)),
+		clr(ansiDim, padVisibleText("Created", l.createdWidth)),
+		clr(ansiDim, padVisibleText("Size", l.sizeWidth)),
+	}, checkpointListColumnSep)
+}
+
+func (l checkpointListLayout) row(item controlplane.CheckpointSummary, activeCheckpointID string) string {
+	return strings.Join([]string{
+		padVisibleText(fitDisplayText(checkpointListName(item), l.nameWidth), l.nameWidth),
+		padVisibleText(checkpointListActive(item, activeCheckpointID), l.activeWidth),
+		padVisibleText(fitDisplayText(checkpointListCreated(item), l.createdWidth), l.createdWidth),
+		padVisibleText(checkpointListSize(item), l.sizeWidth),
+	}, checkpointListColumnSep)
+}
+
+func checkpointListName(item controlplane.CheckpointSummary) string {
+	return clr(ansiBold+ansiWhite, item.Name)
+}
+
+func checkpointListActive(item controlplane.CheckpointSummary, activeCheckpointID string) string {
+	if activeCheckpointID != "" && item.ID == activeCheckpointID {
+		return "active"
+	}
+	return ""
+}
+
+func checkpointListCreated(item controlplane.CheckpointSummary) string {
+	if created := strings.TrimSpace(formatDisplayTimestamp(item.CreatedAt)); created != "" {
+		return created
+	}
+	return "unknown"
+}
+
+func checkpointListSize(item controlplane.CheckpointSummary) string {
+	return formatBytes(item.TotalBytes)
+}
+
+type checkpointDiffArgs struct {
+	workspace     string
+	base          string
+	head          string
+	compareActive bool
+}
+
+func cmdCheckpointDiff(args []string) error {
+	for _, arg := range args[2:] {
+		if isHelpArg(arg) {
+			fmt.Fprint(os.Stderr, checkpointDiffUsageText(filepath.Base(os.Args[0])))
+			return nil
+		}
+	}
+	parsed, err := parseCheckpointDiffArgs(args[2:])
+	if err != nil {
+		return fmt.Errorf("%s\n\n%s", err, checkpointDiffUsageText(filepath.Base(os.Args[0])))
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, parsed.workspace)
+	if err != nil {
+		return err
+	}
+	baseView, err := checkpointDiffView(parsed.base)
+	if err != nil {
+		return err
+	}
+	headView, err := checkpointDiffView(parsed.head)
+	if err != nil {
+		return err
+	}
+	diff, err := service.DiffWorkspace(context.Background(), selection.ID, baseView, headView)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("checkpoint does not exist")
+		}
+		return err
+	}
+	printCheckpointDiff(selection.Name, diff)
+	return nil
+}
+
+func parseCheckpointDiffArgs(args []string) (checkpointDiffArgs, error) {
+	var parsed checkpointDiffArgs
+	positionals := make([]string, 0, len(args))
+	for _, arg := range args {
+		switch arg {
+		case "--active":
+			parsed.compareActive = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return parsed, fmt.Errorf("unknown flag %q", arg)
+			}
+			positionals = append(positionals, arg)
+		}
+	}
+	if parsed.compareActive {
+		switch len(positionals) {
+		case 1:
+			parsed.base = positionals[0]
+		case 2:
+			parsed.workspace = positionals[0]
+			parsed.base = positionals[1]
+		default:
+			return parsed, fmt.Errorf("expected [workspace] <checkpoint> --active")
+		}
+		parsed.head = "working-copy"
+		return parsed, nil
+	}
+	switch len(positionals) {
+	case 2:
+		parsed.base = positionals[0]
+		parsed.head = positionals[1]
+	case 3:
+		parsed.workspace = positionals[0]
+		parsed.base = positionals[1]
+		parsed.head = positionals[2]
+	default:
+		return parsed, fmt.Errorf("expected [workspace] <base-checkpoint> <target-checkpoint>")
+	}
+	return parsed, nil
+}
+
+func checkpointDiffView(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	switch {
+	case raw == "":
+		return "", fmt.Errorf("checkpoint is required")
+	case raw == "active", raw == "working-copy":
+		return "working-copy", nil
+	case raw == "head":
+		return raw, nil
+	case strings.HasPrefix(raw, "checkpoint:"):
+		checkpointID := strings.TrimPrefix(raw, "checkpoint:")
+		if err := validateAFSName("checkpoint", checkpointID); err != nil {
+			return "", err
+		}
+		return raw, nil
+	default:
+		if err := validateAFSName("checkpoint", raw); err != nil {
+			return "", err
+		}
+		return "checkpoint:" + raw, nil
+	}
+}
+
+func printCheckpointDiff(workspace string, diff controlplane.WorkspaceDiffResponse) {
+	summary := diff.Summary
+	rows := []boxRow{
+		{Label: "workspace", Value: workspace},
+		{Label: "base", Value: checkpointDiffDisplayView(diff.Base)},
+		{Label: "target", Value: checkpointDiffDisplayView(diff.Head)},
+		{Label: "changes", Value: checkpointDiffSummary(summary)},
+	}
+	if len(diff.Entries) == 0 {
+		rows = append(rows, boxRow{})
+		rows = append(rows, boxRow{Value: clr(ansiDim, "No changes")})
+		printBox(clr(ansiBold, "checkpoint diff"), rows)
+		return
+	}
+	rows = append(rows, boxRow{})
+	limit := len(diff.Entries)
+	if limit > 100 {
+		limit = 100
+	}
+	for _, entry := range diff.Entries[:limit] {
+		rows = append(rows, boxRow{
+			Label: checkpointDiffOpLabel(entry.Op),
+			Value: checkpointDiffEntryValue(entry),
+		})
+	}
+	if extra := len(diff.Entries) - limit; extra > 0 {
+		rows = append(rows, boxRow{Value: fmt.Sprintf("%d more changes not shown", extra)})
+	}
+	printBox(clr(ansiBold, "checkpoint diff"), rows)
+}
+
+func checkpointDiffDisplayView(state controlplane.DiffState) string {
+	if state.CheckpointID != "" {
+		return state.CheckpointID
+	}
+	if state.View == "working-copy" || state.View == "head" {
+		return "active workspace"
+	}
+	return state.View
+}
+
+func checkpointDiffSummary(summary controlplane.DiffSummary) string {
+	parts := []string{fmt.Sprintf("%d total", summary.Total)}
+	if summary.Created > 0 {
+		parts = append(parts, fmt.Sprintf("%d created", summary.Created))
+	}
+	if summary.Updated > 0 {
+		parts = append(parts, fmt.Sprintf("%d updated", summary.Updated))
+	}
+	if summary.Deleted > 0 {
+		parts = append(parts, fmt.Sprintf("%d deleted", summary.Deleted))
+	}
+	if summary.Renamed > 0 {
+		parts = append(parts, fmt.Sprintf("%d renamed", summary.Renamed))
+	}
+	if summary.MetadataChanged > 0 {
+		parts = append(parts, fmt.Sprintf("%d metadata", summary.MetadataChanged))
+	}
+	if summary.BytesAdded > 0 || summary.BytesRemoved > 0 {
+		parts = append(parts, fmt.Sprintf("+%s / -%s", formatBytes(summary.BytesAdded), formatBytes(summary.BytesRemoved)))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func checkpointDiffOpLabel(op string) string {
+	switch op {
+	case controlplane.DiffOpCreate:
+		return "Create"
+	case controlplane.DiffOpUpdate:
+		return "Update"
+	case controlplane.DiffOpDelete:
+		return "Delete"
+	case controlplane.DiffOpRename:
+		return "Rename"
+	case controlplane.DiffOpMetadata:
+		return "Metadata"
+	default:
+		return op
+	}
+}
+
+func checkpointDiffEntryValue(entry controlplane.DiffEntry) string {
+	switch entry.Op {
+	case controlplane.DiffOpRename:
+		return fmt.Sprintf("%s -> %s", entry.PreviousPath, entry.Path)
+	case controlplane.DiffOpDelete:
+		kind := strings.TrimSpace(entry.PreviousKind)
+		if kind == "" {
+			kind = "path"
+		}
+		return fmt.Sprintf("%s (%s)", entry.Path, kind)
+	default:
+		value := entry.Path
+		if entry.Kind != "" {
+			value += " (" + entry.Kind + ")"
+		}
+		if entry.DeltaBytes > 0 {
+			value += " +" + formatBytes(entry.DeltaBytes)
+		} else if entry.DeltaBytes < 0 {
+			value += " -" + formatBytes(-entry.DeltaBytes)
+		}
+		return value
+	}
+}
+
+func cmdCheckpointCreate(args []string) error {
+	for _, arg := range args[2:] {
+		if isHelpArg(arg) {
+			fmt.Fprint(os.Stderr, checkpointCreateUsageText(filepath.Base(os.Args[0])))
+			return nil
+		}
+	}
+	parsed, err := parseCheckpointCreateArgs(args[2:])
+	if err != nil {
+		return fmt.Errorf("%s\n\n%s", err, checkpointCreateUsageText(filepath.Base(os.Args[0])))
 	}
 
 	cfg, service, closeFn, err := openAFSControlPlane(context.Background())
@@ -915,15 +1223,15 @@ func cmdCheckpointCreate(args []string) error {
 
 	workspace := ""
 	checkpointID := generatedSavepointName()
-	switch len(args) {
-	case 4:
-		workspace = args[2]
-		checkpointID = args[3]
-	case 3:
+	switch len(parsed.positionals) {
+	case 2:
+		workspace = parsed.positionals[0]
+		checkpointID = parsed.positionals[1]
+	case 1:
 		if hasCurrentWorkspaceSelection(cfg) {
-			checkpointID = args[2]
+			checkpointID = parsed.positionals[0]
 		} else {
-			workspace = args[2]
+			workspace = parsed.positionals[0]
 		}
 	}
 	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
@@ -935,7 +1243,9 @@ func cmdCheckpointCreate(args []string) error {
 	}
 
 	step := startStep("Saving checkpoint")
-	saved, err := service.SaveCheckpointFromLive(context.Background(), selection.Name, checkpointID)
+	saved, err := saveCheckpointFromLiveWithOptions(context.Background(), service, selection.Name, checkpointID, controlplane.SaveCheckpointFromLiveOptions{
+		Description: parsed.description,
+	})
 	if err != nil {
 		step.fail(err.Error())
 		return err
@@ -951,12 +1261,66 @@ func cmdCheckpointCreate(args []string) error {
 	}
 	step.succeed(checkpointID)
 
-	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint created"), []boxRow{
+	rows := []boxRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "checkpoint", Value: checkpointID},
-		{Label: "database", Value: configRemoteLabel(cfg)},
-	})
+	}
+	if parsed.description != "" {
+		rows = append(rows, boxRow{Label: "description", Value: parsed.description})
+	}
+	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
+	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint created"), rows)
 	return nil
+}
+
+type checkpointCreateArgs struct {
+	positionals []string
+	description string
+}
+
+func parseCheckpointCreateArgs(args []string) (checkpointCreateArgs, error) {
+	var parsed checkpointCreateArgs
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--description":
+			if i+1 >= len(args) {
+				return parsed, fmt.Errorf("--description requires a value")
+			}
+			i++
+			parsed.description = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--description="):
+			parsed.description = strings.TrimSpace(strings.TrimPrefix(arg, "--description="))
+		case strings.HasPrefix(arg, "-"):
+			return parsed, fmt.Errorf("unknown flag %q", arg)
+		default:
+			parsed.positionals = append(parsed.positionals, arg)
+		}
+	}
+	if len(parsed.positionals) > 2 {
+		return parsed, fmt.Errorf("expected at most workspace and checkpoint, got %d positional arguments", len(parsed.positionals))
+	}
+	return parsed, nil
+}
+
+type checkpointLiveSaverWithOptions interface {
+	SaveCheckpointFromLiveWithOptions(ctx context.Context, workspace, checkpointID string, options controlplane.SaveCheckpointFromLiveOptions) (bool, error)
+}
+
+var (
+	checkpointRestoreStartSyncServices = startSyncServices
+	checkpointRestoreTerminatePID      = terminatePID
+)
+
+func saveCheckpointFromLiveWithOptions(ctx context.Context, service afsControlPlane, workspace, checkpointID string, options controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
+	options.Description = strings.TrimSpace(options.Description)
+	if saver, ok := service.(checkpointLiveSaverWithOptions); ok {
+		return saver.SaveCheckpointFromLiveWithOptions(ctx, workspace, checkpointID, options)
+	}
+	if options.Description != "" {
+		return false, fmt.Errorf("checkpoint descriptions are not supported by this control plane")
+	}
+	return service.SaveCheckpointFromLive(ctx, workspace, checkpointID)
 }
 
 func cmdCheckpointRestore(args []string) error {
@@ -999,8 +1363,19 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 	}
 	defer closeStore()
 
-	_, err = resetAFSWorkspaceHead(ctx, service, workspace, checkpointID)
+	if err := guardCheckpointRestoreLocalHandles(cfg, workspace); err != nil {
+		return err
+	}
+	syncRuntime, err := prepareCheckpointRestoreSyncRuntime(ctx, cfg, workspace)
 	if err != nil {
+		return err
+	}
+
+	result, err := resetAFSWorkspaceHead(ctx, service, workspace, checkpointID)
+	if err != nil {
+		if syncRuntime != nil {
+			_ = syncRuntime.restart(ctx)
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("checkpoint %q does not exist", checkpointID)
 		}
@@ -1009,14 +1384,157 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 		}
 		return err
 	}
+	if syncRuntime != nil {
+		if err := syncRuntime.replaceLocalAndRestart(ctx); err != nil {
+			return err
+		}
+	}
 
 	rows := []boxRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
-		{Label: "database", Value: configRemoteLabel(cfg)},
 	}
+	if result.SafetyCheckpointCreated {
+		rows = append(rows, boxRow{Label: "safety checkpoint", Value: result.SafetyCheckpointID})
+	}
+	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
 	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint restored"), rows)
 	return nil
+}
+
+func guardCheckpointRestoreLocalHandles(cfg config, workspace string) error {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	if strings.TrimSpace(st.Mode) != modeSync || !stateMatchesRestoreWorkspace(cfg, st, workspace) || !stateClientAlive(st) {
+		return nil
+	}
+	return ensureNoOpenHandlesUnderPath(st.LocalPath, st.SyncPID)
+}
+
+type checkpointRestoreSyncRuntime struct {
+	st         state
+	restartCfg config
+	workspace  string
+}
+
+func prepareCheckpointRestoreSyncRuntime(ctx context.Context, cfg config, workspace string) (*checkpointRestoreSyncRuntime, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(st.Mode) != modeSync || !stateMatchesRestoreWorkspace(cfg, st, workspace) || !stateClientAlive(st) {
+		return nil, nil
+	}
+	runtime := &checkpointRestoreSyncRuntime{
+		st:         st,
+		restartCfg: checkpointRestoreSyncConfig(cfg, st, workspace),
+		workspace:  workspace,
+	}
+	if st.SyncPID > 0 && processAlive(st.SyncPID) {
+		step := startStep("Stopping sync daemon")
+		if err := checkpointRestoreTerminatePID(st.SyncPID, 5*time.Second); err != nil {
+			step.fail(err.Error())
+			return nil, err
+		}
+		step.succeed(fmt.Sprintf("pid %d", st.SyncPID))
+	}
+	closeManagedWorkspaceSession(configFromState(st), strings.TrimSpace(st.CurrentWorkspace), strings.TrimSpace(st.SessionID))
+	return runtime, nil
+}
+
+func checkpointRestoreSyncConfig(cfg config, st state, workspace string) config {
+	restart := cfg
+	restart.Mode = modeSync
+	restart.MountBackend = mountBackendNone
+	restart.CurrentWorkspace = strings.TrimSpace(workspace)
+	if restart.CurrentWorkspace == "" {
+		restart.CurrentWorkspace = strings.TrimSpace(st.CurrentWorkspace)
+	}
+	restart.CurrentWorkspaceID = strings.TrimSpace(st.CurrentWorkspaceID)
+	if strings.TrimSpace(st.ProductMode) != "" {
+		restart.ProductMode = strings.TrimSpace(st.ProductMode)
+	}
+	if strings.TrimSpace(st.ControlPlaneURL) != "" {
+		restart.URL = strings.TrimSpace(st.ControlPlaneURL)
+	}
+	if strings.TrimSpace(st.ControlPlaneDatabase) != "" {
+		restart.DatabaseID = strings.TrimSpace(st.ControlPlaneDatabase)
+	}
+	if strings.TrimSpace(st.RedisAddr) != "" {
+		restart.RedisAddr = strings.TrimSpace(st.RedisAddr)
+	}
+	if st.RedisDB >= 0 {
+		restart.RedisDB = st.RedisDB
+	}
+	if strings.TrimSpace(st.LocalPath) != "" {
+		restart.LocalPath = strings.TrimSpace(st.LocalPath)
+	}
+	if strings.TrimSpace(st.SyncLog) != "" {
+		restart.SyncLog = strings.TrimSpace(st.SyncLog)
+	}
+	restart.ReadOnly = st.ReadOnly
+	return restart
+}
+
+func (r *checkpointRestoreSyncRuntime) restart(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	return checkpointRestoreStartSyncServices(r.restartCfg, false)
+}
+
+func (r *checkpointRestoreSyncRuntime) replaceLocalAndRestart(ctx context.Context) error {
+	if r == nil {
+		return nil
+	}
+	localPath := strings.TrimSpace(r.st.LocalPath)
+	if localPath != "" {
+		step := startStep("Replacing local sync folder")
+		if err := os.RemoveAll(localPath); err != nil {
+			step.fail(err.Error())
+			return err
+		}
+		step.succeed(localPath)
+	}
+	if workspace := strings.TrimSpace(r.st.CurrentWorkspace); workspace != "" {
+		_ = removeSyncState(workspace)
+	}
+	if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return r.restart(ctx)
+}
+
+func stateMatchesRestoreWorkspace(cfg config, st state, workspace string) bool {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return false
+	}
+	if strings.TrimSpace(st.CurrentWorkspace) != workspace && strings.TrimSpace(st.CurrentWorkspaceID) != workspace {
+		return false
+	}
+	if mode := strings.TrimSpace(st.ProductMode); mode != "" && strings.TrimSpace(cfg.ProductMode) != "" && mode != strings.TrimSpace(cfg.ProductMode) {
+		return false
+	}
+	if url := strings.TrimSpace(st.ControlPlaneURL); url != "" && strings.TrimSpace(cfg.URL) != "" && url != strings.TrimSpace(cfg.URL) {
+		return false
+	}
+	if databaseID := strings.TrimSpace(st.ControlPlaneDatabase); databaseID != "" && strings.TrimSpace(cfg.DatabaseID) != "" && databaseID != strings.TrimSpace(cfg.DatabaseID) {
+		return false
+	}
+	return true
+}
+
+func stateClientAlive(st state) bool {
+	return (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID))
 }
 
 func checkpointCountLabel(count int) string {
@@ -1048,7 +1566,7 @@ Subcommands:
   current                                      Show the current workspace
   use <workspace>                              Set the current workspace
   clone [workspace] <directory>                Clone a workspace into a local directory
-  fork [source-workspace] <new-workspace>      Fork a workspace at its current head
+  fork [source-workspace] <new-workspace>      Fork a workspace from its current checkpoint
   delete <workspace>...                       Delete workspaces and local materialized state
   import [--force] [--mount-at-source] <workspace> <directory>
                                                Import a local directory into a workspace
@@ -1100,7 +1618,7 @@ func workspaceCloneUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace clone [workspace] <directory>
 
-Clone a workspace into a local directory at its current saved head.
+Clone a workspace into a local directory at its current checkpoint.
 The destination must not already contain files.
 
 If [workspace] is omitted, AFS uses the current workspace.
@@ -1111,7 +1629,7 @@ func workspaceForkUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s workspace fork [source-workspace] <new-workspace>
 
-Create a new workspace from the source workspace's current saved head.
+Create a new workspace from the source workspace's current checkpoint.
 
 If [source-workspace] is omitted, AFS uses the current workspace.
 `, bin)
@@ -1143,18 +1661,20 @@ func checkpointUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint <subcommand>
 
-Subcommands:
-  list [workspace]                     List checkpoints for a workspace
-  create [workspace] [checkpoint]     Create a checkpoint from the current workspace state
-  restore [workspace] <checkpoint>    Restore a workspace to a checkpoint
+	Subcommands:
+	  list [workspace]                     List checkpoints for a workspace
+	  create [workspace] [checkpoint]     Create a checkpoint from the current workspace state
+	  diff [workspace] <base> <target>    Compare two checkpoints
+	  restore [workspace] <checkpoint>    Restore a workspace to a checkpoint
 
-Examples:
-  %s checkpoint list demo
-  %s checkpoint create demo before-refactor
-  %s checkpoint restore demo initial
+	Examples:
+	  %s checkpoint list demo
+	  %s checkpoint create demo before-refactor
+	  %s checkpoint diff demo initial before-refactor
+	  %s checkpoint restore demo initial
 
-Run '%s checkpoint <subcommand> --help' for details.
-`, bin, bin, bin, bin, bin)
+	Run '%s checkpoint <subcommand> --help' for details.
+	`, bin, bin, bin, bin, bin, bin)
 }
 
 func checkpointListUsageText(bin string) string {
@@ -1167,17 +1687,30 @@ List checkpoints for a workspace, newest first.
 
 func checkpointCreateUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint create [workspace] [checkpoint]
+  %s checkpoint create [workspace] [checkpoint] [--description <text>]
 
-Create a checkpoint from the workspace's current live state.
+Create a checkpoint from the workspace's active state.
 If [checkpoint] is omitted, AFS generates a timestamped name.
+
+Options:
+  --description <text>  Human-readable checkpoint description
 `, bin)
+}
+
+func checkpointDiffUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s checkpoint diff [workspace] <base-checkpoint> <target-checkpoint>
+  %s checkpoint diff [workspace] <checkpoint> --active
+
+Compare saved filesystem states. Use --active to compare a checkpoint to the
+active workspace state.
+`, bin, bin)
 }
 
 func checkpointRestoreUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s checkpoint restore [workspace] <checkpoint>
 
-Restore the workspace live state to the selected checkpoint.
+Restore the active workspace state to the selected checkpoint.
 `, bin)
 }

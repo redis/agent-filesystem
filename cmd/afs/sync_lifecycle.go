@@ -246,15 +246,12 @@ func startSyncServices(cfg config, foreground bool) error {
 	daemon.Stop()
 
 	daemonStep := startStep("Starting background daemon")
-	var daemonBootstrap *syncDaemonBootstrap
-	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
-		daemonBootstrap = &syncDaemonBootstrap{
-			Config:                   runtimeCfg,
-			Workspace:                bootstrap.workspace,
-			RedisKey:                 bootstrap.redisKey,
-			SessionID:                bootstrap.sessionID,
-			HeartbeatIntervalSeconds: int(bootstrap.heartbeatEvery / time.Second),
-		}
+	daemonBootstrap := &syncDaemonBootstrap{
+		Config:                   runtimeCfg,
+		Workspace:                bootstrap.workspace,
+		RedisKey:                 bootstrap.redisKey,
+		SessionID:                bootstrap.sessionID,
+		HeartbeatIntervalSeconds: int(bootstrap.heartbeatEvery / time.Second),
 	}
 	daemonPID, err := startSyncDaemonProcess(runtimeCfg, daemonBootstrap)
 	if err != nil {

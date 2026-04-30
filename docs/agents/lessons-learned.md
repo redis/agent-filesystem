@@ -21,6 +21,17 @@ future agents should not have to rediscover.
 - Benchmark helpers that open the Redis filesystem client directly must resolve
   the workspace storage ID after import. New imports use opaque workspace IDs,
   so `client.New(rdb, workspaceName)` can silently point at an empty namespace.
+- Build versions must use the AFS product tag namespace. Use `vX.Y.Z` or
+  `afs-vX.Y.Z` tags for CLI/control-plane releases and keep SDK tags such as
+  `redis-afs-python-vX.Y.Z` out of `git describe` paths.
+- Sync-mode file writes only reach the user-facing changelog when the daemon
+  has a tracked workspace session id. If the web UI shows no active agents and
+  file changes only appear in the low-level `:changes` stream, inspect session
+  creation before debugging the uploader.
+- Browser/UI `draft_state` must come from the live workspace root dirty marker
+  when it exists, not only `WorkspaceMeta.DirtyHint`. A stale clean
+  `DirtyHint` can hide `working-copy` even though the Redis root contains
+  unsaved files.
 
 ## Git & Shell
 
@@ -33,9 +44,15 @@ future agents should not have to rediscover.
 
 ## UI Semantics
 
-- In the workspace browser, treat `head` as the single canonical label for the
-  current saved checkpoint. Do not also surface that same checkpoint by name,
-  and only show `working-copy` when the live draft actually differs from head.
+- In the workspace browser, use "Active workspace" for the server-side live
+  filesystem state. Keep `head` and `working-copy` as internal/API view names:
+  when active state is dirty, active resolves to `working-copy` and checkpoints
+  should remain visible as saved states below a divider.
+- Checkpoint restore is an explicit active-workspace replacement, not a reason
+  to block normal clients. For sync clients, preflight the local tree for open
+  handles, create the safety checkpoint server-side when dirty, publish a
+  root-replace invalidation, and rematerialize the local folder from Redis as
+  authoritative.
 - TanStack route files should only export their `Route`. If login/signup or
   other sibling routes need shared UI, move the shared component and search
   validators into `ui/src/features/` instead of importing from another route

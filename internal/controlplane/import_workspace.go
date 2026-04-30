@@ -85,6 +85,8 @@ func (s *Service) importWorkspace(ctx context.Context, input ImportWorkspaceRequ
 		ID:           initialCheckpointName,
 		Name:         initialCheckpointName,
 		Description:  "Initial import snapshot.",
+		Kind:         CheckpointKindImport,
+		Source:       CheckpointSourceImport,
 		Author:       "afs",
 		Workspace:    workspaceID,
 		ManifestHash: manifestHash,

@@ -76,8 +76,8 @@ func main() {
 		if err := cmdStatus(); err != nil {
 			fatal(err)
 		}
-	case "sync":
-		if err := cmdSync(args); err != nil {
+	case "file":
+		if err := cmdFile(args); err != nil {
 			fatal(err)
 		}
 	case "grep":
@@ -158,7 +158,7 @@ func printUsage() {
 	fmt.Fprintf(w, "  %sup%s [flags]           %sStart sync/mount for the current workspace%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sdown%s                 %sStop and unmount%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sstatus%s               %sShow connection, workspace, and sync status%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %ssync%s                 %sExplicit operations for a running sync daemon%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sfile%s                 %sWorkspace file operations%s\n", bold, reset, dim, reset)
 	// Data
 	fmt.Fprintf(w, "  %sworkspace%s            %sWorkspace ops — create, list, use, clone, fork, delete, import%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sdatabase%s             %sDatabase ops — list, use%s\n", bold, reset, dim, reset)

@@ -182,6 +182,16 @@ func TestAFSMCPCheckpointCreatePersistsPendingWrite(t *testing.T) {
 	if workspaceMeta.DirtyHint {
 		t.Fatal("expected explicit checkpoint to leave the live workspace clean")
 	}
+	checkpointMeta, err := server.store.getSavepointMeta(context.Background(), "repo", "after-edit")
+	if err != nil {
+		t.Fatalf("getSavepointMeta(after-edit) returned error: %v", err)
+	}
+	if checkpointMeta.Kind != controlplane.CheckpointKindManual {
+		t.Fatalf("checkpoint kind = %q, want %q", checkpointMeta.Kind, controlplane.CheckpointKindManual)
+	}
+	if checkpointMeta.Source != controlplane.CheckpointSourceMCP {
+		t.Fatalf("checkpoint source = %q, want %q", checkpointMeta.Source, controlplane.CheckpointSourceMCP)
+	}
 	rootDirty, err := server.store.rdb.Get(context.Background(), controlplane.WorkspaceRootDirtyKey(workspaceMeta.ID)).Result()
 	if err != nil {
 		t.Fatalf("Get(root_dirty) returned error: %v", err)

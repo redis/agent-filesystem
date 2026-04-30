@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useState } from "react";
-import styled from "styled-components";
+import styled, { css, keyframes } from "styled-components";
 import { z } from "zod";
 import {
   DialogActions,
@@ -62,7 +62,7 @@ function WorkspaceStudioPage() {
   const navigate = useNavigate();
   const auth = useAuthSession();
   const { workspaceId } = Route.useParams();
-  const search = Route.useSearch() ?? {};
+  const search = Route.useSearch();
   const databaseId = search.databaseId ?? null;
   const { unavailableDatabases } = useDatabaseScope();
   const workspaceQuery = useWorkspace(databaseId, workspaceId);
@@ -80,7 +80,8 @@ function WorkspaceStudioPage() {
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
-  const hasAgents = (workspace?.agents.length ?? 0) > 0;
+  const agentCount = workspace?.agents.length ?? 0;
+  const hasAgents = agentCount > 0;
   const showBanner = workspace != null && !bannerDismissed && userRequestedBanner;
   const showWelcomeInterstitial =
     workspace != null && search.welcome === true && !userRequestedBanner;
@@ -189,7 +190,7 @@ function WorkspaceStudioPage() {
   }
 
   if (workspace == null) {
-    if (deleteWorkspace.isPending || deleteWorkspace.isSuccess || isRedirectingAfterDelete) {
+    if (deleteWorkspace.isPending) {
       return <Loader data-testid="loader--spinner" />;
     }
     throw new Error("Workspace not found.");
@@ -305,30 +306,20 @@ function WorkspaceStudioPage() {
           <BreadcrumbCurrent>{workspaceLabel}</BreadcrumbCurrent>
         </BreadcrumbGroup>
         <StudioActions>
-          {hasAgents ? (
-            <ViewAgentsButton
-              kind="ghost"
-              size="large"
-              onClick={() => {
-                void navigate({
-                  to: "/agents",
-                  search: {
-                    workspaceId,
-                  },
-                });
-              }}
-            >
-              View agents
-            </ViewAgentsButton>
-          ) : (
-            <ConnectAgentButton
-              kind="ghost"
-              size="large"
-              onClick={() => setBannerDismissed(false)}
-            >
-              Connect agent
-            </ConnectAgentButton>
-          )}
+          <AgentConnectionPill title={`${agentCount} connected agent${agentCount === 1 ? "" : "s"}`}>
+            <AgentLiveDot $active={hasAgents} />
+            {agentCount.toLocaleString()} connected agent{agentCount === 1 ? "" : "s"}
+          </AgentConnectionPill>
+          <ConnectAgentButton
+            kind="ghost"
+            size="large"
+            onClick={() => {
+              setUserRequestedBanner(true);
+              setBannerDismissed(false);
+            }}
+          >
+            Connect agent
+          </ConnectAgentButton>
         </StudioActions>
       </StudioNavRow>
 
@@ -355,6 +346,7 @@ function WorkspaceStudioPage() {
           workspace={workspace}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
+          onViewAllCheckpoints={() => setStudioTab("checkpoints")}
         />
       ) : null}
 
@@ -471,6 +463,11 @@ const StudioNavRow = styled.div`
   justify-content: space-between;
   gap: 16px;
   min-height: 24px;
+
+  @media (max-width: 720px) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 `;
 
 const StudioActions = styled.div`
@@ -480,7 +477,7 @@ const StudioActions = styled.div`
 
   @media (max-width: 720px) {
     width: 100%;
-    justify-content: flex-end;
+    justify-content: flex-start;
     flex-wrap: wrap;
   }
 `;
@@ -526,18 +523,46 @@ const BreadcrumbCurrent = styled.span`
   font-weight: 700;
 `;
 
-const ViewAgentsButton = styled(Button)`
+const ConnectAgentButton = styled(Button)`
   && {
+    margin-left: auto;
     white-space: nowrap;
     box-shadow: none;
   }
 `;
 
-const ConnectAgentButton = styled(Button)`
-  && {
-    white-space: nowrap;
-    box-shadow: none;
-  }
+const agentPulse = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+`;
+
+const AgentConnectionPill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--afs-ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+`;
+
+const AgentLiveDot = styled.span<{ $active: boolean }>`
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: ${({ $active }) => ($active ? "#22c55e" : "#d1d5db")};
+  ${({ $active }) =>
+    $active &&
+    css`
+      box-shadow: 0 0 7px rgba(34, 197, 94, 0.65);
+      animation: ${agentPulse} 2s ease-in-out infinite;
+    `}
 `;
 
 const WelcomeInterstitial = styled.section`

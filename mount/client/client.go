@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"time"
 
 	internal "github.com/redis/agent-filesystem/mount/internal/client"
@@ -21,10 +22,11 @@ type ChangeStreamEntry = internal.ChangeStreamEntry
 var ErrStreamTrimmed = internal.ErrStreamTrimmed
 
 const (
-	InvalidateOpInode   = internal.InvalidateOpInode
-	InvalidateOpDir     = internal.InvalidateOpDir
-	InvalidateOpPrefix  = internal.InvalidateOpPrefix
-	InvalidateOpContent = internal.InvalidateOpContent
+	InvalidateOpInode       = internal.InvalidateOpInode
+	InvalidateOpDir         = internal.InvalidateOpDir
+	InvalidateOpPrefix      = internal.InvalidateOpPrefix
+	InvalidateOpContent     = internal.InvalidateOpContent
+	InvalidateOpRootReplace = internal.InvalidateOpRootReplace
 )
 
 func New(rdb *redis.Client, key string) Client {
@@ -33,4 +35,8 @@ func New(rdb *redis.Client, key string) Client {
 
 func NewWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
 	return internal.NewWithCache(rdb, key, ttl)
+}
+
+func PublishInvalidation(ctx context.Context, rdb *redis.Client, key string, ev InvalidateEvent) error {
+	return internal.PublishInvalidation(ctx, rdb, key, ev)
 }

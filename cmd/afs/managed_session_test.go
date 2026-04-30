@@ -2,15 +2,21 @@ package main
 
 import "testing"
 
-func TestManagedWorkspaceSessionRequestSkipsLocalMode(t *testing.T) {
+func TestManagedWorkspaceSessionRequestTracksLocalMode(t *testing.T) {
 	t.Helper()
 
 	req := managedWorkspaceSessionRequest(config{
 		ProductMode: productModeLocal,
 		LocalPath:   "/tmp/repo",
 	})
-	if req.ClientKind != "" || req.LocalPath != "" || req.Hostname != "" {
-		t.Fatalf("managedWorkspaceSessionRequest(local) = %#v, want empty request", req)
+	if req.ClientKind != "sync" {
+		t.Fatalf("ClientKind = %q, want sync", req.ClientKind)
+	}
+	if req.LocalPath != "/tmp/repo" {
+		t.Fatalf("LocalPath = %q, want /tmp/repo", req.LocalPath)
+	}
+	if req.Hostname == "" {
+		t.Fatal("expected Hostname to be populated")
 	}
 }
 

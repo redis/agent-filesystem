@@ -11,12 +11,15 @@ import type {
   CreateControlPlaneTokenInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
+  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
   AFSActivityEvent,
   AFSActivityListResponse,
   AFSClientMode,
   AFSFile,
   AFSFileContent,
+  AFSDiffEntry,
+  AFSDiffOp,
   AFSSavepoint,
   AFSState,
   AFSTreeItem,
@@ -27,6 +30,7 @@ import type {
   AFSWorkspaceSource,
   AFSWorkspaceSummary,
   AFSWorkspaceView,
+  AFSWorkspaceDiffResponse,
   RestoreSavepointInput,
   SaveDatabaseInput,
   UpdateWorkspaceInput,
@@ -68,6 +72,7 @@ type AFSClient = {
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
+  getWorkspaceDiff: (input: GetWorkspaceDiffInput) => Promise<AFSWorkspaceDiffResponse>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   listAllMCPAccessTokens: () => Promise<AFSMCPToken[]>;
@@ -198,6 +203,14 @@ type HTTPCheckpoint = {
   name: string;
   author?: string;
   note?: string;
+  kind?: string;
+  source?: string;
+  created_by?: string;
+  session_id?: string;
+  agent_id?: string;
+  agent_name?: string;
+  parent_checkpoint_id?: string;
+  manifest_hash?: string;
   created_at: string;
   file_count: number;
   folder_count: number;
@@ -318,6 +331,50 @@ type HTTPFileContent = {
   binary: boolean;
   content?: string;
   target?: string;
+};
+
+type HTTPDiffState = {
+  view: AFSWorkspaceView;
+  checkpoint_id?: string;
+  manifest_hash?: string;
+  file_count: number;
+  folder_count: number;
+  total_bytes: number;
+};
+
+type HTTPDiffSummary = {
+  total: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  renamed: number;
+  metadata_changed: number;
+  bytes_added: number;
+  bytes_removed: number;
+};
+
+type HTTPDiffEntry = {
+  op: AFSDiffOp;
+  path: string;
+  previous_path?: string;
+  kind?: AFSDiffEntry["kind"];
+  previous_kind?: AFSDiffEntry["previousKind"];
+  size_bytes?: number;
+  previous_size_bytes?: number;
+  delta_bytes?: number;
+  content_hash?: string;
+  previous_hash?: string;
+  mode?: number;
+  previous_mode?: number;
+};
+
+type HTTPWorkspaceDiffResponse = {
+  workspace_id: string;
+  workspace_name?: string;
+  base: HTTPDiffState;
+  head: HTTPDiffState;
+  summary: HTTPDiffSummary;
+  entries: HTTPDiffEntry[];
 };
 
 type HTTPOnboardingTokenResponse = {
@@ -506,14 +563,14 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
     totalBytes: savepoint.totalBytes,
     sizeLabel: savepoint.sizeLabel || bytesLabel(savepoint.filesSnapshot),
   }));
-  normalized.activity = (workspace.activity ?? []).map((event) => ({
+  normalized.activity = workspace.activity.map((event) => ({
     ...event,
     workspaceId: event.workspaceId ?? workspace.id,
     workspaceName: event.workspaceName ?? workspace.name,
     databaseId: event.databaseId ?? workspace.databaseId,
     databaseName: event.databaseName ?? workspace.databaseName,
   }));
-  normalized.agents = (workspace.agents ?? []).map((agent) => ({
+  normalized.agents = workspace.agents.map((agent) => ({
     ...agent,
     workspaceId: agent.workspaceId || workspace.id,
     workspaceName: agent.workspaceName || workspace.name,
@@ -550,6 +607,7 @@ function createSavepointRecord(
   note: string,
   author: string,
   files: AFSFile[],
+  metadata: Partial<Pick<AFSSavepoint, "kind" | "source" | "createdBy" | "agentName">> = {},
 ): AFSSavepoint {
   return {
     id: makeId("sp"),
@@ -557,6 +615,7 @@ function createSavepointRecord(
     author,
     createdAt: nowISO(),
     note,
+    ...metadata,
     fileCount: files.length,
     folderCount: folderCount(files),
     totalBytes: bytesCount(files),
@@ -705,8 +764,8 @@ function deriveDemoDatabases(state: AFSState) {
     const existing = grouped.get(database.id);
     grouped.set(database.id, {
       ...database,
-      workspaceCount: existing?.workspaceCount ?? database.workspaceCount ?? 0,
-      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount ?? 0,
+      workspaceCount: existing?.workspaceCount ?? database.workspaceCount,
+      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount,
     });
   }
 
@@ -752,6 +811,202 @@ function demoFilesForView(workspace: AFSWorkspace, view: AFSWorkspaceView): AFSF
     ...file,
     path: normalizeFilePath(file.path),
   }));
+}
+
+function fileSizeBytes(file: AFSFile) {
+  return new TextEncoder().encode(file.content).length;
+}
+
+function demoDiffState(workspace: AFSWorkspace, view: AFSWorkspaceView, files: AFSFile[]) {
+  const checkpointId =
+    view === "head"
+      ? workspace.headSavepointId
+      : view.startsWith("checkpoint:")
+        ? view.replace(/^checkpoint:/, "")
+        : undefined;
+  return {
+    view,
+    checkpointId,
+    fileCount: files.length,
+    folderCount: folderCount(files),
+    totalBytes: bytesCount(files),
+  };
+}
+
+function demoDiffEntryKey(file: AFSFile) {
+  return `${file.language}\0${file.content}`;
+}
+
+function summarizeDiffEntries(entries: AFSDiffEntry[]) {
+  return entries.reduce(
+    (summary, entry) => {
+      summary.total += 1;
+      switch (entry.op) {
+        case "create":
+          summary.created += 1;
+          break;
+        case "update":
+          summary.updated += 1;
+          break;
+        case "delete":
+          summary.deleted += 1;
+          break;
+        case "rename":
+          summary.renamed += 1;
+          break;
+        case "metadata":
+          summary.metadataChanged += 1;
+          break;
+        default:
+          break;
+      }
+      const deltaBytes = entry.deltaBytes ?? 0;
+      if (deltaBytes > 0) {
+        summary.bytesAdded += deltaBytes;
+      } else if (deltaBytes < 0) {
+        summary.bytesRemoved += Math.abs(deltaBytes);
+      }
+      return summary;
+    },
+    {
+      total: 0,
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      renamed: 0,
+      metadataChanged: 0,
+      bytesAdded: 0,
+      bytesRemoved: 0,
+    },
+  );
+}
+
+function compareDemoFiles(
+  workspace: AFSWorkspace,
+  baseView: AFSWorkspaceView,
+  headView: AFSWorkspaceView,
+): AFSWorkspaceDiffResponse {
+  const baseFiles = demoFilesForView(workspace, baseView);
+  const headFiles = demoFilesForView(workspace, headView);
+  const baseByPath = new Map(baseFiles.map((file) => [normalizeFilePath(file.path), file]));
+  const headByPath = new Map(headFiles.map((file) => [normalizeFilePath(file.path), file]));
+  const deleted = new Map<string, AFSFile>();
+  const created = new Map<string, AFSFile>();
+  const entries: AFSDiffEntry[] = [];
+
+  for (const [path, file] of baseByPath) {
+    if (!headByPath.has(path)) {
+      deleted.set(path, file);
+    }
+  }
+  for (const [path, file] of headByPath) {
+    if (!baseByPath.has(path)) {
+      created.set(path, file);
+    }
+  }
+
+  const deletedByKey = new Map<string, string[]>();
+  const createdByKey = new Map<string, string[]>();
+  for (const [path, file] of deleted) {
+    const key = demoDiffEntryKey(file);
+    deletedByKey.set(key, [...(deletedByKey.get(key) ?? []), path]);
+  }
+  for (const [path, file] of created) {
+    const key = demoDiffEntryKey(file);
+    createdByKey.set(key, [...(createdByKey.get(key) ?? []), path]);
+  }
+  const renameKeys = [...deletedByKey.keys()].filter((key) => createdByKey.has(key)).sort();
+  for (const key of renameKeys) {
+    const oldPaths = [...(deletedByKey.get(key) ?? [])].sort();
+    const newPaths = [...(createdByKey.get(key) ?? [])].sort();
+    const limit = Math.min(oldPaths.length, newPaths.length);
+    for (let index = 0; index < limit; index += 1) {
+      const previousPath = oldPaths[index];
+      const path = newPaths[index];
+      const previous = deleted.get(previousPath);
+      const next = created.get(path);
+      if (previous == null || next == null) continue;
+      entries.push({
+        op: "rename",
+        path,
+        previousPath,
+        kind: "file",
+        previousKind: "file",
+        sizeBytes: fileSizeBytes(next),
+        previousSizeBytes: fileSizeBytes(previous),
+      });
+      deleted.delete(previousPath);
+      created.delete(path);
+    }
+  }
+
+  for (const [path, file] of created) {
+    const sizeBytes = fileSizeBytes(file);
+    entries.push({
+      op: "create",
+      path,
+      kind: "file",
+      sizeBytes,
+      deltaBytes: sizeBytes,
+    });
+  }
+
+  for (const [path, file] of deleted) {
+    const previousSizeBytes = fileSizeBytes(file);
+    entries.push({
+      op: "delete",
+      path,
+      previousPath: path,
+      previousKind: "file",
+      previousSizeBytes,
+      deltaBytes: previousSizeBytes * -1,
+    });
+  }
+
+  for (const [path, previous] of baseByPath) {
+    const next = headByPath.get(path);
+    if (next == null) continue;
+    const previousSizeBytes = fileSizeBytes(previous);
+    const sizeBytes = fileSizeBytes(next);
+    if (previous.content !== next.content) {
+      entries.push({
+        op: "update",
+        path,
+        kind: "file",
+        previousKind: "file",
+        sizeBytes,
+        previousSizeBytes,
+        deltaBytes: sizeBytes - previousSizeBytes,
+      });
+      continue;
+    }
+    if (previous.language !== next.language) {
+      entries.push({
+        op: "metadata",
+        path,
+        kind: "file",
+        previousKind: "file",
+        sizeBytes,
+        previousSizeBytes,
+      });
+    }
+  }
+
+  entries.sort((left, right) => {
+    if (left.path === right.path) {
+      return (left.previousPath ?? "").localeCompare(right.previousPath ?? "");
+    }
+    return left.path.localeCompare(right.path);
+  });
+
+  return {
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    base: demoDiffState(workspace, baseView, baseFiles),
+    head: demoDiffState(workspace, headView, headFiles),
+    summary: summarizeDiffEntries(entries),
+    entries,
+  };
 }
 
 function parentPath(value: string) {
@@ -970,6 +1225,7 @@ This workspace was created from the AFS Web UI.
         "Workspace created from the Web UI.",
         "webui",
         baseFiles,
+        { kind: "system", source: "browser" },
       );
 
       const workspace = normalizeWorkspace({
@@ -1112,6 +1368,7 @@ This workspace was created from the AFS Web UI.
         input.note.trim(),
         "webui",
         workspace.files,
+        { kind: "manual", source: "browser" },
       );
       workspace.savepoints.unshift(savepoint);
       workspace.draftState = "clean";
@@ -1234,6 +1491,16 @@ This workspace was created from the AFS Web UI.
       binary: false,
       content: file.content,
     };
+  },
+
+  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
+    await wait();
+    const state = loadState();
+    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    if (!matchesOptionalDatabase(input.databaseId, workspace)) {
+      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+    }
+    return compareDemoFiles(workspace, input.base, input.head);
   },
 
   async quickstart() {
@@ -1480,6 +1747,14 @@ function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
     author: input.author ?? "afs",
     createdAt: input.created_at,
     note: input.note ?? "",
+    kind: input.kind,
+    source: input.source,
+    createdBy: input.created_by,
+    sessionId: input.session_id,
+    agentId: input.agent_id,
+    agentName: input.agent_name,
+    parentCheckpointId: input.parent_checkpoint_id,
+    manifestHash: input.manifest_hash,
     fileCount: input.file_count,
     folderCount: input.folder_count,
     totalBytes: input.total_bytes,
@@ -1666,6 +1941,53 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
     binary: input.binary,
     content: input.content,
     target: input.target,
+  };
+}
+
+function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffResponse {
+  return {
+    workspaceId: input.workspace_id,
+    workspaceName: input.workspace_name,
+    base: {
+      view: input.base.view,
+      checkpointId: input.base.checkpoint_id,
+      manifestHash: input.base.manifest_hash,
+      fileCount: input.base.file_count,
+      folderCount: input.base.folder_count,
+      totalBytes: input.base.total_bytes,
+    },
+    head: {
+      view: input.head.view,
+      checkpointId: input.head.checkpoint_id,
+      manifestHash: input.head.manifest_hash,
+      fileCount: input.head.file_count,
+      folderCount: input.head.folder_count,
+      totalBytes: input.head.total_bytes,
+    },
+    summary: {
+      total: input.summary.total,
+      created: input.summary.created,
+      updated: input.summary.updated,
+      deleted: input.summary.deleted,
+      renamed: input.summary.renamed,
+      metadataChanged: input.summary.metadata_changed,
+      bytesAdded: input.summary.bytes_added,
+      bytesRemoved: input.summary.bytes_removed,
+    },
+    entries: input.entries.map((entry) => ({
+      op: entry.op,
+      path: entry.path,
+      previousPath: entry.previous_path,
+      kind: entry.kind,
+      previousKind: entry.previous_kind,
+      sizeBytes: entry.size_bytes,
+      previousSizeBytes: entry.previous_size_bytes,
+      deltaBytes: entry.delta_bytes,
+      contentHash: entry.content_hash,
+      previousHash: entry.previous_hash,
+      mode: entry.mode,
+      previousMode: entry.previous_mode,
+    })),
   };
 }
 
@@ -1921,6 +2243,18 @@ const httpAFSClient: AFSClient = {
       }
       throw error;
     }
+  },
+
+  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
+    const params = new URLSearchParams({
+      base: input.base,
+      head: input.head,
+    });
+    return mapWorkspaceDiff(
+      await requestJSON<HTTPWorkspaceDiffResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/diff?${params.toString()}`,
+      ),
+    );
   },
 
   async quickstart(input: QuickstartInput) {

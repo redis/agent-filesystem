@@ -435,7 +435,10 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 				}
 				if err = validateHostedMCPName("checkpoint", checkpointID); err == nil {
 					var saved bool
-					saved, err = p.manager.SaveCheckpointFromLive(ctx, p.databaseID, p.workspace, checkpointID)
+					saved, err = p.manager.SaveCheckpointFromLiveWithOptions(ctx, p.databaseID, p.workspace, checkpointID, SaveCheckpointFromLiveOptions{
+						Kind:   CheckpointKindManual,
+						Source: CheckpointSourceMCP,
+					})
 					value = map[string]any{
 						"workspace":   p.workspace,
 						"checkpoint":  checkpointID,
@@ -451,12 +454,18 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 			var checkpointID string
 			checkpointID, err = mcpRequiredString(args, "checkpoint")
 			if err == nil {
-				err = p.manager.RestoreCheckpoint(ctx, p.databaseID, p.workspace, checkpointID)
-				value = map[string]any{
+				result, restoreErr := p.manager.RestoreCheckpointWithResult(ctx, p.databaseID, p.workspace, checkpointID)
+				err = restoreErr
+				payload := map[string]any{
 					"workspace":  p.workspace,
 					"checkpoint": checkpointID,
 					"mode":       "live-workspace",
 				}
+				if restoreErr == nil && result.SafetyCheckpointCreated {
+					payload["safety_checkpoint"] = result.SafetyCheckpointID
+					payload["safety_checkpoint_created"] = true
+				}
+				value = payload
 			}
 		}
 	case "file_read":

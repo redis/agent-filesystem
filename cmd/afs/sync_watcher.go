@@ -103,6 +103,17 @@ func (s *syncWatcher) Close() error {
 	return nil
 }
 
+func (s *syncWatcher) resetRecursive(root string) error {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil
+	}
+	s.dirs = make(map[string]struct{})
+	s.mu.Unlock()
+	return s.addRecursive(root)
+}
+
 // run pumps fsnotify events until the underlying channels close or ctx is
 // cancelled. Errors are logged to stderr; recoverable failures (e.g. a
 // directory disappearing) are ignored.

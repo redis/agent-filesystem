@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { SignOutButton } from "@clerk/react";
 import { Button, SideBar } from "@redis-ui/components";
 import {
@@ -46,6 +46,15 @@ function profileInitials(displayName: string) {
 /** Routes that remain active even when no databases are configured. */
 const ALWAYS_ENABLED_PATHS = new Set(["/", "/docs", "/agent-guide", "/downloads"]);
 
+const serverVersionQueryOptions = () =>
+  queryOptions({
+    queryKey: ["afs", "server", "version"],
+    queryFn: () => afsApi.getServerVersion(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 0,
+  });
+
 export function AppSidebar() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -58,19 +67,14 @@ export function AppSidebar() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const isDark = colorMode === "dark";
+  const themeToggleTitle = isDark ? "Switch to light mode" : "Switch to dark mode";
   const profileLabel = auth.supportsAccountAuth ? auth.displayName : "Logged in";
   const avatarLabel = auth.supportsAccountAuth ? auth.displayName : "AFS";
 
   // Surface the control-plane version in the footer so operators can tell at
   // a glance which build is serving the UI. One fetch per session is plenty;
   // version doesn't change without a server restart.
-  const serverVersion = useQuery({
-    queryKey: ["afs", "server", "version"],
-    queryFn: () => afsApi.getServerVersion(),
-    staleTime: Infinity,
-    gcTime: Infinity,
-    retry: 0,
-  });
+  const serverVersion = useQuery(serverVersionQueryOptions());
 
   const isEmpty = !isLoading && databases.length === 0;
 
@@ -179,24 +183,41 @@ export function AppSidebar() {
           <>
             <SideBar.Divider fullWidth />
             <S.DarkModeRow $isExpanded={isExpanded}>
-              <S.DarkModeToggle
-                type="button"
-                role="switch"
-                aria-checked={isDark}
-                aria-label="Toggle dark mode"
-                title="Toggle dark mode"
-                onClick={toggleColorMode}
-              >
-                <S.ToggleTrack $on={isDark}>
-                  <S.ToggleIcon $active={!isDark}>
-                    <Sun size={14} strokeWidth={2} aria-hidden="true" />
-                  </S.ToggleIcon>
-                  <S.ToggleIcon $active={isDark}>
-                    <Moon size={14} strokeWidth={2} aria-hidden="true" />
-                  </S.ToggleIcon>
-                  <S.ToggleThumb $on={isDark} />
-                </S.ToggleTrack>
-              </S.DarkModeToggle>
+              {isExpanded ? (
+                <S.DarkModeToggle
+                  type="button"
+                  role="switch"
+                  aria-checked={isDark}
+                  aria-label="Dark mode"
+                  title={themeToggleTitle}
+                  onClick={toggleColorMode}
+                >
+                  <S.ToggleTrack $on={isDark}>
+                    <S.ToggleIcon $active={!isDark}>
+                      <Sun size={12} strokeWidth={2.1} aria-hidden="true" />
+                    </S.ToggleIcon>
+                    <S.ToggleIcon $active={isDark}>
+                      <Moon size={12} strokeWidth={2.1} aria-hidden="true" />
+                    </S.ToggleIcon>
+                    <S.ToggleThumb $on={isDark} />
+                  </S.ToggleTrack>
+                </S.DarkModeToggle>
+              ) : (
+                <S.CollapsedThemeButton
+                  type="button"
+                  role="switch"
+                  aria-checked={isDark}
+                  aria-label="Dark mode"
+                  title={themeToggleTitle}
+                  onClick={toggleColorMode}
+                >
+                  {isDark ? (
+                    <Moon size={15} strokeWidth={2.1} aria-hidden="true" />
+                  ) : (
+                    <Sun size={15} strokeWidth={2.1} aria-hidden="true" />
+                  )}
+                </S.CollapsedThemeButton>
+              )}
             </S.DarkModeRow>
             {auth.isSignedOut ? (
               <S.SignInButtonWrapper $isExpanded={isExpanded}>

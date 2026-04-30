@@ -1,7 +1,7 @@
 # AFS Versioned Filesystem v1.1 PRD
 
-Last reviewed: 2026-04-29.
-Status: draft for review.
+Last reviewed: 2026-04-30.
+Status: implementation in progress.
 
 ## Summary
 
@@ -12,10 +12,11 @@ The core product decision is:
 
 - AFS versions filesystem state, not source-code commits.
 - Every file write is recorded in a mutation journal.
-- User-visible versions are created at meaningful boundaries, not on every
+- User-visible checkpoints are created at meaningful boundaries, not on every
   write.
-- Checkpoints remain the familiar CLI concept and become the user-facing form
-  of saved filesystem versions.
+- Checkpoint is the primary product noun for saved filesystem state.
+- "Versioned filesystem" is the category and positioning, not the everyday UX
+  noun.
 - Git may be an import/export or code-workspace integration later, but it is
   not the canonical storage or versioning model for v1.1.
 
@@ -24,6 +25,59 @@ assets, and arbitrary workspace state recoverable, inspectable, and easy to
 review while preserving the current AFS strengths: normal local files, MCP
 tools, sync/mount surfaces, Redis-backed durability, and standalone,
 self-managed, and cloud-hosted operation.
+
+## Current Implementation State
+
+Snapshot: 2026-04-30, current local branch/worktree.
+
+Implemented in the current branch:
+
+- Public product language has moved to checkpoint-only UX. `version` remains a
+  category/positioning word, not a CLI/API/UI noun.
+- `afs checkpoint create` supports a checkpoint description, and restore
+  safety checkpoints use structured metadata.
+- `afs checkpoint list` uses active-workspace language instead of head/draft
+  language.
+- Manifest-level diff exists in `internal/controlplane` and is exposed through
+  the workspace diff API. It compares checkpoint-to-checkpoint,
+  checkpoint-to-active, and active-to-checkpoint states at the file/metadata
+  level.
+- `afs checkpoint diff [workspace] <base> <target>` and
+  `afs checkpoint diff [workspace] <checkpoint> --active` are implemented.
+- The UI Checkpoints tab has compare-with-active and restore-preview flows
+  backed by the diff API.
+- Restore creates a safety checkpoint when active state has uncheckpointed
+  changes, returns the safety checkpoint in the restore result, writes restore
+  changelog/audit data, and publishes a root-replace invalidation.
+- Sync restore no longer depends only on an async invalidation event. CLI
+  restore now checks for open handles, stops the managed sync daemon, restores
+  server state, removes local sync state, and restarts sync so the restored
+  active workspace rematerializes cleanly.
+- Root-replace invalidation is available to mount clients and FUSE cache
+  invalidation.
+
+Partially implemented:
+
+- Checkpoint metadata is richer for create/restore, but the full checkpoint
+  detail DTO is not complete.
+- Diff is manifest/file-level only. It reports create, update, delete, rename,
+  metadata, size, byte delta, and hashes where available.
+- The UI diff renders a reviewable changed-file list and summary stats, but not
+  inline text diffs.
+- Restore is safe and scriptable in the CLI, but the final UX polish around
+  explanatory copy and edge cases should be reviewed after a fresh end-to-end
+  run.
+
+Not implemented yet:
+
+- `afs checkpoint show`.
+- `GET /v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}` detail route.
+- JSON output for checkpoint diff/show, if we want it in v1.1.
+- Text diff generation with size and binary guards.
+- Unified history/event model for checkpoints, sessions, and file events.
+- Session-boundary auto-checkpoints.
+- Fork review and accept/reject flow.
+- Path-history UI.
 
 ## Product Thesis
 
@@ -43,8 +97,9 @@ requests.
 
 AFS should copy the useful versioned-filesystem ideas from Mesa-style products:
 durable history, diffs across states, rollback, checkpoints, and parallel
-workspace timelines. AFS should not copy a full Git/JJ-style change graph as
-the default user model.
+workspace timelines. The public language should stay aligned with agent
+ecosystem usage: checkpoints are saved recoverable states. AFS should not copy
+a full Git/JJ-style change graph as the default user model.
 
 ## Problem
 
@@ -60,24 +115,24 @@ Today AFS has the right foundation:
 
 The gap is product coherence around versioning:
 
-- File writes update the live workspace first and may remain dirty until a
+- File writes update the active workspace first and may remain dirty until a
   checkpoint is created.
-- Users can create checkpoints, but they do not yet have a full "version
-  history" experience.
+- Users can create checkpoints, but they do not yet have a full checkpoint
+  history and compare experience.
 - Diffing saved states is not a first-class API, CLI, or UI flow.
 - Restore is available, but there is no strong safety flow for previewing or
-  preserving the current live state before rollback.
+  preserving the current active state before rollback.
 - Changelog and checkpoint data are adjacent, but not yet presented as one
   cohesive timeline.
-- Agent sessions do not naturally create reviewable version boundaries.
+- Agent sessions do not naturally create reviewable checkpoint boundaries.
 
 ## Goals
 
 1. Make AFS feel like a versioned filesystem for agent workspaces.
 2. Preserve the existing workspace/checkpoint mental model.
 3. Record every write in an append-only mutation history.
-4. Create user-visible versions only at meaningful boundaries.
-5. Support fast diffs between live state, checkpoints, and saved versions.
+4. Create user-visible checkpoints only at meaningful boundaries.
+5. Support fast diffs between active state and checkpoints.
 6. Make restore safe by default.
 7. Keep the implementation aligned with the current Redis manifest/blob model.
 8. Keep standalone, self-managed, and cloud modes behaviorally consistent.
@@ -102,7 +157,7 @@ The user-facing nouns should stay simple:
 
 - **Workspace**: a durable filesystem tree.
 - **Live state**: the current mutable workspace contents.
-- **Checkpoint**: a named saved version of the workspace.
+- **Checkpoint**: a named saved filesystem state.
 - **History**: the timeline of checkpoints, restores, forks, sessions, and file
   changes.
 - **Diff**: comparison between two workspace states.
@@ -113,9 +168,9 @@ asking users to learn Git-like concepts for v1.1.
 
 ## Versioning Model
 
-### Live Writes
+### Active Writes
 
-File writes continue to update the live workspace state immediately.
+File writes continue to update the active workspace state immediately.
 
 Every write should append a mutation event containing:
 
@@ -131,14 +186,14 @@ Every write should append a mutation event containing:
 - timestamp
 - source: sync, mount, MCP, browser, import, restore, checkpoint
 
-This is history, not a user-visible version boundary.
+This is history, not a user-visible checkpoint boundary.
 
-### Checkpoints As Versions
+### Checkpoints As Saved States
 
 A checkpoint is an immutable saved filesystem state.
 
-Checkpoints should be enhanced with enough metadata to render a version
-timeline:
+Checkpoints should be enhanced with enough metadata to render a useful
+checkpoint timeline:
 
 - id
 - display name
@@ -152,19 +207,20 @@ timeline:
 - source session id when applicable
 - source agent id/name when applicable
 
-Existing checkpoint commands remain valid. UI may label the section "Versions"
-while still using checkpoint semantics under the hood.
+Existing checkpoint commands remain valid. The UI should also use checkpoint
+language so the product matches how agent tools discuss saved recoverable
+state.
 
 ### Boundary Rules
 
 AFS should not create a checkpoint for every write.
 
-Version boundaries should be created by:
+Checkpoint boundaries should be created by:
 
 - explicit `afs checkpoint create`
 - explicit MCP `checkpoint_create`
 - browser/UI "Create checkpoint"
-- before destructive restore, when live state has uncheckpointed changes
+- before destructive restore, when active state has uncheckpointed changes
 - after import or quickstart seed
 - at configured agent/session boundaries, when enabled
 - at template or workflow milestones, when the template asks for it
@@ -195,32 +251,33 @@ This is enough for v1.1. A DAG inside a single workspace is not required.
 
 ## Product Requirements
 
-### P0: Version History
+### P0: Checkpoint History
 
-Users can list checkpoint/version history in CLI, UI, and API.
+Users can list checkpoint history in CLI, UI, and API.
 
 Requirements:
 
-- Show current head.
-- Show whether live state is dirty relative to head.
-- Show version kind, timestamp, actor, session, file counts, and byte totals.
+- Show active workspace state.
+- Show whether active state has uncheckpointed changes.
+- Show checkpoint kind, timestamp, actor, session, file counts, and byte totals.
 - Preserve existing `checkpoint list` output.
 - Add richer detail in JSON/API responses without breaking existing clients.
 
 Acceptance criteria:
 
 - `afs checkpoint list` still works.
-- UI workspace detail has a clear Versions or History section.
-- API can return version metadata without per-row Redis fanout where practical.
+- UI workspace detail has a clear Checkpoints or History section.
+- API can return checkpoint metadata without per-row Redis fanout where
+  practical.
 
 ### P0: Diff Between States
 
 Users can compare:
 
 - checkpoint to checkpoint
-- checkpoint to live state
-- live state to current head
-- fork base to fork head, when fork metadata is available
+- checkpoint to active state
+- active state to a checkpoint
+- fork base to fork result, when fork metadata is available
 
 Initial diff levels:
 
@@ -242,8 +299,8 @@ Restore should be hard to misuse.
 
 Requirements:
 
-- Restoring a checkpoint overwrites live state, as today.
-- If live state is dirty, AFS creates a safety checkpoint first by default.
+- Restoring a checkpoint overwrites active state, as today.
+- If active state is dirty, AFS creates a safety checkpoint first by default.
 - Restore records a lifecycle event and file change events.
 - Restore UI shows a preview diff before the destructive action.
 - CLI restore says exactly what will happen and which safety checkpoint was
@@ -251,27 +308,27 @@ Requirements:
 
 Acceptance criteria:
 
-- Dirty live state is not lost without a recoverable checkpoint.
+- Dirty active state is not lost without a recoverable checkpoint.
 - `checkpoint restore` remains scriptable.
 - Restore errors are clear when the checkpoint does not exist or a conflict is
   detected.
 
 ### P0: Unified History Foundation
 
-Versioning should build on the event-history merge plan rather than creating a
-third history system.
+Checkpoint-backed versioning should build on the event-history merge plan
+rather than creating a third history system.
 
 Requirements:
 
-- Checkpoint/version lifecycle events and file mutation events are queryable
-  from one history surface.
+- Checkpoint lifecycle events and file mutation events are queryable from one
+  history surface.
 - File events can be filtered out by default to avoid noisy UI.
 - Session rows can expand to reveal related file changes.
 - Checkpoint rows can expand to reveal changed paths.
 
 Acceptance criteria:
 
-- Version timeline and activity/history UI use the same backend event model.
+- Checkpoint timeline and activity/history UI use the same backend event model.
 - Existing `/activity` and `/changes` readers can remain aliases during
   migration.
 
@@ -305,10 +362,10 @@ branches.
 Requirements:
 
 - Fork metadata records source workspace and base checkpoint.
-- UI can compare fork head to fork base.
+- UI can compare fork result to fork base.
 - Users can keep, delete, or manually apply fork results.
-- A first "accept fork result" flow may replace parent live state from fork
-  head only after an explicit preview and safety checkpoint.
+- A first "accept fork result" flow may replace parent active state from fork
+  result only after an explicit preview and safety checkpoint.
 
 Non-goal for v1.1:
 
@@ -337,30 +394,22 @@ Acceptance criteria:
 
 ## API Shape
 
-Prefer adding version-oriented aliases while preserving checkpoint routes.
+Keep checkpoint as the public API noun for v1.1.
 
 Potential endpoints:
 
 ```text
-GET  /v1/workspaces/{workspace_id}/versions
-GET  /v1/workspaces/{workspace_id}/versions/{version_id}
-POST /v1/workspaces/{workspace_id}/versions
-GET  /v1/workspaces/{workspace_id}/diff?base=<id|head|live>&head=<id|head|live>
+GET  /v1/workspaces/{workspace_id}/checkpoints
+GET  /v1/workspaces/{workspace_id}/checkpoints/{checkpoint_id}
+POST /v1/workspaces/{workspace_id}/checkpoints
+GET  /v1/workspaces/{workspace_id}/diff?base=<id|active>&target=<id|active>
 POST /v1/workspaces/{workspace_id}:restore
 GET  /v1/workspaces/{workspace_id}/events
 GET  /v1/workspaces/{workspace_id}/paths/history?path=/notes/foo.md
 ```
 
-Existing checkpoint endpoints remain supported:
-
-```text
-GET  /v1/workspaces/{workspace_id}/checkpoints
-POST /v1/workspaces/{workspace_id}/checkpoints
-POST /v1/workspaces/{workspace_id}:restore
-```
-
-The version endpoints can initially be thin aliases over checkpoint service
-methods with richer DTO names.
+No `/versions` alias is planned for the first release. It adds another noun
+without improving the agent-facing model.
 
 ## CLI Shape
 
@@ -369,8 +418,8 @@ Do not remove existing checkpoint commands.
 P0 additions:
 
 ```bash
-afs checkpoint diff [workspace] <base> <head>
-afs checkpoint diff [workspace] <checkpoint> --live
+afs checkpoint diff [workspace] <base> <target>
+afs checkpoint diff [workspace] <checkpoint> --active
 afs checkpoint show [workspace] <checkpoint>
 ```
 
@@ -381,28 +430,23 @@ afs history [workspace] [--files] [--session <id>] [--since <duration>]
 afs path history [workspace] <path>
 ```
 
-Open naming question:
-
-- Should the CLI introduce `afs version ...` as a friendlier alias, or should
-  it keep the existing `checkpoint` language to avoid expanding the command
-  surface?
-
 Recommendation for v1.1:
 
 - Keep `checkpoint` in the CLI.
-- Use "Versions" in the UI where it helps product comprehension.
+- Do not add `afs version` aliases.
+- Explain checkpoint as a saved filesystem state in help text.
 
 ## UI Shape
 
-Workspace detail should gain a cohesive versioning surface.
+Workspace detail should gain a cohesive checkpointing surface.
 
-### Versions Tab
+### Checkpoints Tab
 
 Shows:
 
-- current live state status: clean or dirty
-- current head checkpoint
-- checkpoint/version list
+- active state status: clean or dirty
+- active workspace status
+- checkpoint list
 - kind, actor, time, file count, byte count
 - actions: view, diff, restore
 
@@ -410,7 +454,7 @@ Shows:
 
 Shows:
 
-- base and head selectors
+- base and target selectors
 - changed file list
 - text diff for supported files
 - binary/large-file summary
@@ -420,24 +464,24 @@ Shows:
 
 Shows:
 
-- warning that restore updates live state
-- preview of changes from live to target checkpoint
+- warning that restore updates active state
+- preview of changes from active to target checkpoint
 - safety checkpoint name when dirty state exists
 - explicit confirmation
 
 ### History Tab Alignment
 
-The existing event-history merge should feed the version timeline where
+The existing event-history merge should feed the checkpoint timeline where
 possible. Checkpoint rows should expand into file changes, and session rows
 should expand into the file events they produced.
 
 ## MCP Behavior
 
-MCP file tools should continue to write live state.
+MCP file tools should continue to write active state.
 
-Versioning behavior:
+Checkpointing behavior:
 
-- `checkpoint_create` creates a version boundary.
+- `checkpoint_create` creates a saved-state boundary.
 - File mutation tools append file events.
 - Workspace profiles that include checkpoint permission can create explicit
   task or milestone checkpoints.
@@ -452,11 +496,11 @@ Use the current Redis-backed manifest/blob/checkpoint model as the foundation.
 Likely implementation approach:
 
 1. Extend checkpoint metadata rather than inventing a separate version store.
-2. Add richer version DTOs in `internal/controlplane`.
+2. Add richer checkpoint DTOs in `internal/controlplane`.
 3. Add diff service methods that compare manifests.
 4. Add text diff generation with size and binary guards.
 5. Add safety-checkpoint behavior around restore.
-6. Connect version lifecycle events to the unified events plan.
+6. Connect checkpoint lifecycle events to the unified events plan.
 7. Add UI/API/CLI surfaces after backend contracts are stable.
 
 Potential metadata additions:
@@ -489,54 +533,64 @@ storage rewrite.
 
 ## Rollout Plan
 
-### Phase 0: Contract Review
+### Phase 0: Contract Review - mostly complete
 
-- Review this PRD.
-- Decide CLI naming: checkpoint-only vs version aliases.
-- Decide default auto-checkpoint policy.
-- Decide restore safety behavior and confirmation wording.
+- [x] Review this PRD.
+- [x] Confirm checkpoint-only public naming.
+- [x] Decide default auto-checkpoint policy: manual by default, safety
+  checkpoint before restore.
+- [x] Decide restore safety behavior: default-on safety checkpoint plus explicit
+  restore action.
+- [ ] Final pass on CLI/UI confirmation wording after end-to-end restore smoke
+  testing.
 
-### Phase 1: Backend Version DTOs And Diff
+### Phase 1: Backend Checkpoint DTOs And Diff - partially complete
 
-- Add version DTOs backed by existing checkpoints.
-- Add manifest diff service method.
-- Add API route for diff.
-- Add tests for checkpoint-to-checkpoint and checkpoint-to-live diff.
-- Add binary and size guards.
+- [ ] Add complete richer checkpoint DTOs backed by existing savepoints.
+- [x] Add manifest diff service method.
+- [x] Add API route for diff.
+- [x] Add tests for checkpoint-to-checkpoint and checkpoint-to-active diff.
+- [ ] Add text diff generation with binary and size guards.
 
-### Phase 2: CLI Diff And Show
+### Phase 2: CLI Diff And Show - partially complete
 
-- Add `checkpoint show`.
-- Add `checkpoint diff`.
-- Keep output concise and scriptable.
-- Add JSON output if current command conventions support it.
+- [ ] Add `checkpoint show`.
+- [x] Add `checkpoint diff`.
+- [x] Keep output concise and scriptable.
+- [ ] Add JSON output if current command conventions support it.
 
-### Phase 3: Safe Restore
+### Phase 3: Safe Restore - mostly complete
 
-- Detect dirty live state before restore.
-- Create safety checkpoint by default.
-- Emit clear audit/event rows.
-- Update CLI and API tests.
+- [x] Detect dirty active state before restore.
+- [x] Create safety checkpoint by default.
+- [x] Emit audit/event rows and restore changelog rows.
+- [x] Publish root-replace invalidation after restore.
+- [x] Coordinate CLI sync restore by stopping/restarting the managed sync
+  daemon and rematerializing the local folder.
+- [x] Update CLI and API tests.
+- [ ] Run a final manual restore smoke test against the local control plane and
+  UI with a real `~/afs` sync folder.
 
-### Phase 4: UI Versions And Diff
+### Phase 4: UI Checkpoints And Diff - partially complete
 
-- Add Versions tab or section.
-- Add diff view.
-- Add restore preview flow.
-- Keep layout aligned with current Redis UI shell.
+- [x] Redesign the existing Checkpoints tab around checkpoint history.
+- [x] Add file-level diff view.
+- [x] Add restore preview flow.
+- [ ] Add text diff view if content diffs ship in v1.1.
+- [ ] Final visual/browser QA against the Redis UI shell.
 
-### Phase 5: History Integration
+### Phase 5: History Integration - not started
 
-- Wire checkpoint/version rows into unified history.
-- Add expandable checkpoint rows.
-- Add path-history follow-up if event indexing is ready.
+- [ ] Wire checkpoint rows into unified history.
+- [ ] Add expandable checkpoint rows.
+- [ ] Add path-history follow-up if event indexing is ready.
 
-### Phase 6: Fork Review
+### Phase 6: Fork Review - not started
 
-- Add fork base metadata.
-- Add compare fork to source base.
-- Add explicit accept/reject/delete UX.
-- Defer automatic merge until there is strong product demand.
+- [ ] Add fork base metadata.
+- [ ] Add compare fork to source base.
+- [ ] Add explicit accept/reject/delete UX.
+- [ ] Defer automatic merge until there is strong product demand.
 
 ## Success Metrics
 
@@ -573,7 +627,7 @@ Mitigation:
 - Do not add branches/bookmarks/rebase/merge unless a concrete AFS workflow
   requires them.
 
-### Risk: Too Many Versions
+### Risk: Too Many Checkpoints
 
 Mitigation:
 
@@ -597,44 +651,59 @@ Mitigation:
 - Generate content diffs only for text files under a limit.
 - Use dirty-path metadata as it lands.
 
-### Risk: Confusing Checkpoint Vs Version Language
+### Risk: Confusing Checkpoint And Versioning Language
 
 Mitigation:
 
-- Treat checkpoint as the CLI/storage noun.
-- Treat version as the UI/product framing.
+- Treat checkpoint as the CLI, API, MCP, UI, and docs noun.
+- Treat versioned filesystem as product/category positioning.
 - Do not introduce more nouns until needed.
 
 ## Open Questions For Review
 
-1. Should the CLI add `afs version` aliases, or should v1.1 keep only
-   `checkpoint` commands?
-2. Should safety checkpoints before restore be mandatory, default-on with
-   `--no-safety-checkpoint`, or prompted?
-3. Should session-close auto-checkpoints ship in v1.1, or wait until after
-   manual version history and diff are live?
-4. What is the first text-diff size limit?
-5. Should fork acceptance replace parent live state in v1.1, or should fork
+Resolved during implementation:
+
+- Public naming is checkpoint-only for CLI, API, MCP, UI, and docs.
+- Safety checkpoints before restore are default-on.
+- Automatic session checkpoints remain opt-in.
+
+Still open:
+
+1. Should session-close auto-checkpoints ship in v1.1, or wait until after
+   manual checkpoint history and diff are live?
+2. What is the first text-diff size limit?
+3. Should `checkpoint diff` and `checkpoint show` include JSON output in v1.1?
+4. Should fork acceptance replace parent active state in v1.1, or should fork
    review stop at compare/delete/manual copy?
-6. Should path history be part of v1.1, or a follow-up after unified events?
+5. Should path history be part of v1.1, or a follow-up after unified events?
 
 ## Recommended V1.1 Cut
 
-Ship this first:
+Already covered in the current branch:
 
-1. Version list backed by checkpoints.
-2. Checkpoint detail metadata.
-3. Diff between checkpoint/live states.
-4. CLI `checkpoint diff`.
-5. UI Versions tab and diff view.
-6. Safety checkpoint before restore.
-7. Event/history integration for checkpoint rows.
+1. Checkpoint history backed by existing savepoints.
+2. Manifest-level diff between checkpoint and active states.
+3. CLI `checkpoint diff`.
+4. UI Checkpoints tab redesign and file-level diff/restore preview.
+5. Safety checkpoint before restore.
+6. Root-replace invalidation and local sync rematerialization after restore.
+
+Remaining before calling v1.1 complete:
+
+1. Complete checkpoint detail metadata and expose checkpoint detail through API
+   and CLI `checkpoint show`.
+2. Decide whether v1.1 needs JSON output for checkpoint diff/show.
+3. Either add text diff generation with binary/size guards or explicitly defer
+   content diffs from the first v1.1 cut.
+4. Wire checkpoint lifecycle rows into the unified history/event surface.
+5. Run final local control-plane, CLI, sync-folder, and UI restore smoke tests.
 
 Defer:
 
 - Git integration.
 - Custom branch/bookmark model.
 - Automatic merge.
-- Per-write versions.
+- Per-write checkpoints.
+- Session-boundary auto-checkpoints unless a concrete workflow needs them.
+- Fork accept/reject flow unless the fork review work becomes urgent.
 - Full path-history UI.
-

@@ -229,7 +229,7 @@ export const SignInButtonWrapper = styled.div<{ $isExpanded: boolean }>`
 export const DarkModeRow = styled.div<{ $isExpanded: boolean }>`
   display: flex;
   justify-content: center;
-  padding: ${({ $isExpanded }) => ($isExpanded ? "10px 12px 4px" : "10px 8px 4px")};
+  padding: ${({ $isExpanded }) => ($isExpanded ? "8px 12px 4px" : "8px 8px 4px")};
 `;
 
 export const DarkModeToggle = styled.button`
@@ -248,16 +248,25 @@ export const DarkModeToggle = styled.button`
 
 export const ToggleTrack = styled.span<{ $on: boolean }>`
   position: relative;
-  width: 52px;
-  height: 28px;
+  width: 46px;
+  height: 24px;
   border-radius: 999px;
-  background: ${({ $on }) => ($on ? "var(--afs-ink-soft)" : "var(--afs-panel-strong)")};
-  border: 1px solid ${({ $on }) => ($on ? "transparent" : "var(--afs-line)")};
+  background: var(--afs-panel);
+  border: 1px solid var(--afs-line-strong);
   transition: background 0.2s ease, border-color 0.2s ease;
   display: flex;
   align-items: center;
-  padding: 0 7px;
+  padding: 0 6px;
   justify-content: space-between;
+
+  ${DarkModeToggle}:hover & {
+    background: var(--afs-panel-strong);
+  }
+
+  [data-theme="dark"] & {
+    background: var(--afs-bg-soft);
+    border-color: var(--afs-line-strong);
+  }
 `;
 
 export const ToggleIcon = styled.span<{ $active: boolean }>`
@@ -265,18 +274,58 @@ export const ToggleIcon = styled.span<{ $active: boolean }>`
   z-index: 1;
   display: inline-flex;
   color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-muted)")};
-  opacity: ${({ $active }) => ($active ? 1 : 0.54)};
+  opacity: ${({ $active }) => ($active ? 1 : 0.78)};
   transition: color 0.2s ease, opacity 0.2s ease;
+
+  [data-theme="dark"] & {
+    color: ${({ $active }) => ($active ? "var(--afs-ink)" : "var(--afs-ink-soft)")};
+    opacity: ${({ $active }) => ($active ? 1 : 0.86)};
+  }
 `;
 
 export const ToggleThumb = styled.span<{ $on: boolean }>`
   position: absolute;
-  top: 3px;
-  left: ${({ $on }) => ($on ? "25px" : "3px")};
-  width: 22px;
-  height: 22px;
+  top: 2px;
+  left: ${({ $on }) => ($on ? "24px" : "2px")};
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--afs-bg-soft);
+  background: var(--afs-panel-strong);
   box-shadow: 0 1px 4px rgba(8, 6, 13, 0.22);
   transition: left 0.2s ease;
+
+  [data-theme="dark"] & {
+    background: var(--afs-panel);
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.35);
+  }
+`;
+
+export const CollapsedThemeButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--afs-line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--afs-ink-soft);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: var(--afs-panel);
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-focus);
+    outline-offset: 2px;
+  }
+
+  [data-theme="dark"] & {
+    border-color: var(--afs-line-strong);
+    color: var(--afs-ink);
+  }
 `;

@@ -401,6 +401,10 @@ func TestSaveCheckpointEmitsChangelog(t *testing.T) {
 		Workspace:             storageID,
 		ExpectedHead:          initialCheckpointName,
 		CheckpointID:          "cp-1",
+		Description:           "Agent checkpoint.",
+		Kind:                  CheckpointKindManual,
+		Source:                CheckpointSourceMCP,
+		Author:                "codex",
 		Manifest:              childManifest,
 		Blobs:                 map[string][]byte{"blob-a": []byte("aaa"), "blob-b": []byte("bbbbb")},
 		FileCount:             2,
@@ -413,6 +417,28 @@ func TestSaveCheckpointEmitsChangelog(t *testing.T) {
 	}
 	if !saved {
 		t.Fatal("expected checkpoint to be saved")
+	}
+	checkpoint, err := store.GetSavepointMeta(ctx, storageID, "cp-1")
+	if err != nil {
+		t.Fatalf("GetSavepointMeta: %v", err)
+	}
+	if checkpoint.Description != "Agent checkpoint." {
+		t.Errorf("checkpoint description = %q, want Agent checkpoint.", checkpoint.Description)
+	}
+	if checkpoint.Kind != CheckpointKindManual {
+		t.Errorf("checkpoint kind = %q, want %q", checkpoint.Kind, CheckpointKindManual)
+	}
+	if checkpoint.Source != CheckpointSourceMCP {
+		t.Errorf("checkpoint source = %q, want %q", checkpoint.Source, CheckpointSourceMCP)
+	}
+	if checkpoint.Author != "codex" {
+		t.Errorf("checkpoint author = %q, want codex", checkpoint.Author)
+	}
+	if checkpoint.SessionID != "sess-xyz" {
+		t.Errorf("checkpoint session = %q, want sess-xyz", checkpoint.SessionID)
+	}
+	if checkpoint.ParentSavepoint != initialCheckpointName {
+		t.Errorf("checkpoint parent = %q, want %q", checkpoint.ParentSavepoint, initialCheckpointName)
 	}
 
 	resp, err := store.ListChangelog(ctx, storageID, ChangelogListRequest{Limit: 100})

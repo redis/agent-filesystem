@@ -296,15 +296,40 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/main.go", []byte("package updated\n")); err != nil {
 		t.Fatalf("Echo(/main.go) returned error: %v", err)
 	}
-	if err := cmdCheckpoint([]string{"checkpoint", "create", "repo", "after-edit"}); err != nil {
+	if err := cmdCheckpoint([]string{"checkpoint", "create", "repo", "after-edit", "--description", "Before restoring a known-good file."}); err != nil {
 		t.Fatalf("cmdCheckpoint(create) returned error: %v", err)
+	}
+	checkpointMeta, err := store.getSavepointMeta(context.Background(), "repo", "after-edit")
+	if err != nil {
+		t.Fatalf("getSavepointMeta(after-edit) returned error: %v", err)
+	}
+	if checkpointMeta.Description != "Before restoring a known-good file." {
+		t.Fatalf("checkpoint description = %q, want %q", checkpointMeta.Description, "Before restoring a known-good file.")
+	}
+	diffOutput, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "diff", "repo", "initial", "after-edit"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(diff) returned error: %v", err)
+	}
+	if !strings.Contains(diffOutput, "checkpoint diff") || !strings.Contains(diffOutput, "Update") || !strings.Contains(diffOutput, "/main.go") {
+		t.Fatalf("cmdCheckpoint(diff) output = %q, want update for /main.go", diffOutput)
 	}
 
 	if err := client.New(store.rdb, rootKey).Echo(context.Background(), "/main.go", []byte("package broken\n")); err != nil {
 		t.Fatalf("Echo(/main.go broken) returned error: %v", err)
 	}
-	if err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "after-edit"}); err != nil {
+	if err := store.markWorkspaceRootDirty(context.Background(), "repo"); err != nil {
+		t.Fatalf("MarkWorkspaceRootDirty() returned error: %v", err)
+	}
+	restoreOutput, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "restore", "repo", "after-edit"})
+	})
+	if err != nil {
 		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
+	}
+	if !strings.Contains(restoreOutput, "safety checkpoint") || !strings.Contains(restoreOutput, "restore-safety-") {
+		t.Fatalf("cmdCheckpoint(restore) output = %q, want safety checkpoint row", restoreOutput)
 	}
 
 	liveMain, err := client.New(store.rdb, rootKey).Cat(context.Background(), "/main.go")
@@ -330,8 +355,44 @@ func TestCheckpointCommandsCreateAndRestore(t *testing.T) {
 	if !strings.Contains(listOutput, "initial") || !strings.Contains(listOutput, "after-edit") {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want both checkpoint names", listOutput)
 	}
-	if !strings.Contains(listOutput, "head") {
-		t.Fatalf("cmdCheckpoint(list) output = %q, want head marker", listOutput)
+	if !strings.Contains(listOutput, "active") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want active marker", listOutput)
+	}
+	strippedListOutput := stripAnsi(listOutput)
+	if !strings.Contains(strippedListOutput, "Checkpoint") || !strings.Contains(strippedListOutput, "Active") || !strings.Contains(strippedListOutput, "Created") || !strings.Contains(strippedListOutput, "Size") {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want checkpoint table headers", listOutput)
+	}
+	var checkpointHeaderLine, initialLine, activeLine string
+	for _, line := range strings.Split(strippedListOutput, "\n") {
+		switch {
+		case strings.Contains(line, "Checkpoint") && strings.Contains(line, "Active") && strings.Contains(line, "Created"):
+			checkpointHeaderLine = line
+		case strings.Contains(line, "initial"):
+			initialLine = line
+		case strings.Contains(line, "after-edit"):
+			activeLine = line
+		}
+	}
+	if checkpointHeaderLine == "" || initialLine == "" || activeLine == "" {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want header and checkpoint rows", listOutput)
+	}
+	activeIdx := strings.Index(checkpointHeaderLine, "Active")
+	createdIdx := strings.Index(checkpointHeaderLine, "Created")
+	sizeIdx := strings.Index(checkpointHeaderLine, "Size")
+	if activeIdx == -1 || createdIdx == -1 || sizeIdx == -1 || activeIdx >= createdIdx || createdIdx >= sizeIdx {
+		t.Fatalf("checkpoint list header = %q, want Active, Created, Size columns", checkpointHeaderLine)
+	}
+	if len(initialLine) < createdIdx || len(activeLine) < sizeIdx {
+		t.Fatalf("cmdCheckpoint(list) output = %q, want rows wide enough for active and date columns", listOutput)
+	}
+	if got := strings.TrimSpace(activeLine[activeIdx:createdIdx]); got != "active" {
+		t.Fatalf("active checkpoint column = %q, want active\nheader: %q\nrow: %q", got, checkpointHeaderLine, activeLine)
+	}
+	if got := strings.TrimSpace(initialLine[activeIdx:createdIdx]); got != "" {
+		t.Fatalf("inactive checkpoint column = %q, want empty\nheader: %q\nrow: %q", got, checkpointHeaderLine, initialLine)
+	}
+	if got := activeLine[createdIdx:sizeIdx]; strings.Contains(got, "active") {
+		t.Fatalf("created column = %q, did not expect active marker\nheader: %q\nrow: %q", got, checkpointHeaderLine, activeLine)
 	}
 	if strings.Contains(listOutput, "T") || strings.Contains(listOutput, "Z") {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want human-readable timestamps instead of raw RFC3339", listOutput)
@@ -566,6 +627,140 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	}
 	if workspaceMeta.HeadSavepoint != "initial" {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
+	}
+}
+
+func TestCheckpointRestoreIgnoresManagedSyncDaemonHandles(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "repo"
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
+	}
+
+	localRoot := filepath.Join(t.TempDir(), "repo")
+	if err := saveState(state{
+		StartedAt:        time.Now().UTC(),
+		RedisAddr:        cfg.RedisAddr,
+		RedisDB:          cfg.RedisDB,
+		CurrentWorkspace: "repo",
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+		LocalPath:        localRoot,
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	orig := checkOpenHandlesUnderPath
+	checkOpenHandlesUnderPath = func(root string) ([]openFileHandle, error) {
+		if root != localRoot {
+			t.Fatalf("checkOpenHandlesUnderPath(%q), want %q", root, localRoot)
+		}
+		return []openFileHandle{
+			{PID: os.Getpid(), Command: "afs", Path: localRoot},
+			{PID: os.Getpid(), Command: "afs", Path: filepath.Join(localRoot, "README.md")},
+		}, nil
+	}
+	t.Cleanup(func() { checkOpenHandlesUnderPath = orig })
+
+	origTerminate := checkpointRestoreTerminatePID
+	origStart := checkpointRestoreStartSyncServices
+	stopped := false
+	restarted := false
+	checkpointRestoreTerminatePID = func(pid int, timeout time.Duration) error {
+		if pid != os.Getpid() {
+			t.Fatalf("checkpointRestoreTerminatePID(%d), want %d", pid, os.Getpid())
+		}
+		stopped = true
+		return nil
+	}
+	checkpointRestoreStartSyncServices = func(cfg config, foreground bool) error {
+		if cfg.LocalPath != localRoot {
+			t.Fatalf("restart LocalPath = %q, want %q", cfg.LocalPath, localRoot)
+		}
+		if foreground {
+			t.Fatal("restore restart should run sync in background")
+		}
+		restarted = true
+		return nil
+	}
+	t.Cleanup(func() {
+		checkpointRestoreTerminatePID = origTerminate
+		checkpointRestoreStartSyncServices = origStart
+	})
+
+	err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "initial"})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(restore) returned error: %v", err)
+	}
+	if !stopped || !restarted {
+		t.Fatalf("restore sync lifecycle stopped=%v restarted=%v, want both true", stopped, restarted)
+	}
+}
+
+func TestCheckpointRestoreRejectsActiveSyncClientWithOpenHandles(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	cfg.CurrentWorkspace = "repo"
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
+	}
+
+	localRoot := t.TempDir()
+	if err := saveState(state{
+		StartedAt:        time.Now().UTC(),
+		RedisAddr:        cfg.RedisAddr,
+		RedisDB:          cfg.RedisDB,
+		CurrentWorkspace: "repo",
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+		LocalPath:        localRoot,
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	orig := checkOpenHandlesUnderPath
+	checkOpenHandlesUnderPath = func(root string) ([]openFileHandle, error) {
+		if root != localRoot {
+			t.Fatalf("checkOpenHandlesUnderPath(%q), want %q", root, localRoot)
+		}
+		return []openFileHandle{
+			{PID: os.Getpid(), Command: "afs", Path: localRoot},
+			{PID: 123, Command: "editor", Path: filepath.Join(localRoot, "main.go")},
+		}, nil
+	}
+	t.Cleanup(func() { checkOpenHandlesUnderPath = orig })
+
+	err := cmdCheckpoint([]string{"checkpoint", "restore", "repo", "initial"})
+	if err == nil {
+		t.Fatal("cmdCheckpoint(restore) returned nil error, want open handle rejection")
+	}
+	if !strings.Contains(err.Error(), "files are open") || !strings.Contains(err.Error(), "editor pid 123") {
+		t.Fatalf("cmdCheckpoint(restore) error = %q, want open handle guidance", err)
 	}
 }
 

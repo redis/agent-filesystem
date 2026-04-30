@@ -878,7 +878,9 @@ func TestCmdCheckpointHelpListsSubcommands(t *testing.T) {
 	for _, want := range []string{
 		"checkpoint <subcommand>",
 		"create [workspace] [checkpoint]",
+		"diff [workspace] <base> <target>",
 		"restore [workspace] <checkpoint>",
+		"checkpoint diff demo initial before-refactor",
 		"checkpoint restore demo initial",
 	} {
 		if !strings.Contains(out, want) {
@@ -898,7 +900,7 @@ func TestCmdCheckpointRestoreHelpExplainsLiveRestoreBehavior(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Restore the workspace live state to the selected checkpoint",
+		"Restore the active workspace state to the selected checkpoint",
 		"checkpoint restore [workspace] <checkpoint>",
 	} {
 		if !strings.Contains(out, want) {

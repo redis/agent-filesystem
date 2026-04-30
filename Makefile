@@ -3,11 +3,13 @@ BINDIR ?= $(PREFIX)/bin
 NPM ?= npm
 UI_DIR ?= ui
 
-# Version metadata injected via ldflags. Tries git-describe for a tagged
-# release, falls back to the short SHA on a tagless checkout. Appends
-# `-dirty` when the worktree has uncommitted changes. Consumers can override
-# AFS_VERSION at make time to force a specific value, e.g. for CI tagging.
-AFS_VERSION := $(shell git describe --tags --dirty --always 2>/dev/null || echo dev)
+# Version metadata injected via ldflags. Core AFS releases use product tags
+# named `vX.Y.Z` or `afs-vX.Y.Z`; package-specific SDK tags are intentionally
+# ignored so they never leak into the CLI/control-plane version string.
+# Consumers can override AFS_VERSION at make time to force a specific value,
+# e.g. for CI tagging.
+AFS_VERSION_BASE ?= v0.1.0
+AFS_VERSION ?= $(shell AFS_VERSION_BASE="$(AFS_VERSION_BASE)" scripts/resolve-afs-version.sh 2>/dev/null || echo dev)
 AFS_COMMIT := $(shell git rev-parse --short=7 HEAD 2>/dev/null)
 AFS_BUILD_DATE := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 VERSION_LDFLAGS := -X github.com/redis/agent-filesystem/internal/version.Version=$(AFS_VERSION) \

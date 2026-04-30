@@ -1,10 +1,13 @@
 package client
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // Invalidate operation kinds published to other clients sharing an FS key.
@@ -27,6 +30,11 @@ const (
 	// InvalidateOpContent means a file's byte contents changed. Subscribers
 	// drop the kernel page cache for the file (and refresh size/mtime).
 	InvalidateOpContent = "content"
+
+	// InvalidateOpRootReplace means the live workspace root was replaced as
+	// one operation, typically by restoring a checkpoint. Sync clients should
+	// treat Redis as authoritative and rematerialize the local tree.
+	InvalidateOpRootReplace = "root-replace"
 )
 
 // InvalidateEvent is the payload broadcast on the per-FS-key pub/sub channel
@@ -55,6 +63,50 @@ func decodeInvalidate(payload []byte) (*InvalidateEvent, error) {
 		return nil, err
 	}
 	return &ev, nil
+}
+
+// PublishInvalidation appends an invalidation event to the durable change
+// stream and broadcasts it to live subscribers for fsKey. It is used by the
+// control plane for server-side mutations such as checkpoint restore.
+func PublishInvalidation(ctx context.Context, rdb *redis.Client, fsKey string, ev InvalidateEvent) error {
+	if rdb == nil {
+		return errors.New("publish invalidation: nil redis client")
+	}
+	if fsKey == "" {
+		return errors.New("publish invalidation: empty fs key")
+	}
+	if ev.Op == "" {
+		return errors.New("publish invalidation: empty op")
+	}
+	cleaned := ev.Paths[:0]
+	for _, p := range ev.Paths {
+		if p != "" {
+			cleaned = append(cleaned, p)
+		}
+	}
+	if len(cleaned) == 0 {
+		return errors.New("publish invalidation: no paths")
+	}
+	ev.Paths = cleaned
+	if ev.Origin == "" {
+		ev.Origin = "server"
+	}
+	payload, err := encodeInvalidate(ev)
+	if err != nil {
+		return err
+	}
+	keys := newKeyBuilder(fsKey)
+	if err := rdb.XAdd(ctx, &redis.XAddArgs{
+		Stream: keys.changesStream(),
+		MaxLen: 10000,
+		Approx: true,
+		Values: map[string]interface{}{
+			"payload": string(payload),
+		},
+	}).Err(); err != nil {
+		return err
+	}
+	return rdb.Publish(ctx, keys.invalidateChannel(), payload).Err()
 }
 
 // ChangeStreamEntry is one entry from the per-workspace durable change

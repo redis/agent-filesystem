@@ -204,6 +204,44 @@ func TestDisableInvalidationPublishingSilencesPublisher(t *testing.T) {
 	}
 }
 
+func TestPublishInvalidationWritesStreamAndPubSub(t *testing.T) {
+	rdb, ctx := setupTestRedis(t)
+
+	const fsKey = "server-publish-test"
+	reader := NewWithCache(rdb, fsKey, time.Hour).(*nativeClient)
+	events := make(chan InvalidateEvent, 4)
+	subCtx, cancelSub := context.WithCancel(ctx)
+	defer cancelSub()
+	if err := reader.SubscribeInvalidations(subCtx, func(ev InvalidateEvent) {
+		events <- ev
+	}); err != nil {
+		t.Fatalf("SubscribeInvalidations: %v", err)
+	}
+	waitForSubscriber(t, rdb, reader.keys.invalidateChannel())
+
+	if err := PublishInvalidation(ctx, rdb, fsKey, InvalidateEvent{
+		Origin: "control-plane",
+		Op:     InvalidateOpRootReplace,
+		Paths:  []string{"/"},
+	}); err != nil {
+		t.Fatalf("PublishInvalidation: %v", err)
+	}
+
+	if !waitForEvent(events, 2*time.Second, func(ev InvalidateEvent) bool {
+		return ev.Origin == "control-plane" && ev.Op == InvalidateOpRootReplace && len(ev.Paths) == 1 && ev.Paths[0] == "/"
+	}) {
+		t.Fatal("did not receive root-replace invalidation within 2s")
+	}
+
+	entries, err := reader.ReadChangeStream(ctx, "0-0", 10)
+	if err != nil {
+		t.Fatalf("ReadChangeStream: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Event.Op != InvalidateOpRootReplace || entries[0].Event.Paths[0] != "/" {
+		t.Fatalf("stream entries = %#v, want one root-replace event", entries)
+	}
+}
+
 // waitForSubscriber blocks until PUBSUB NUMSUB reports at least one
 // subscriber on channel. Prevents races where the writer's PUBLISH beats
 // the subscriber goroutine to the channel.

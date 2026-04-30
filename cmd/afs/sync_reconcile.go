@@ -74,6 +74,108 @@ func (f *fullReconciler) run(ctx context.Context, onProgress ProgressFunc) error
 	return f.warmStart(ctx, onProgress)
 }
 
+// replaceFromRemote treats the live Redis root as authoritative and
+// rematerializes the local sync folder from scratch. This is used for
+// checkpoint restore, where the user explicitly chose to replace active state
+// instead of merging local edits back up.
+func (f *fullReconciler) replaceFromRemote(ctx context.Context, onProgress ProgressFunc) error {
+	if f.r.store == nil || f.r.store.rdb == nil {
+		return fmt.Errorf("root replace requires a store with Redis connection")
+	}
+	if err := ensureNoOpenHandlesUnderPath(f.r.root, os.Getpid()); err != nil {
+		return err
+	}
+
+	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
+	if err != nil {
+		return fmt.Errorf("get workspace meta: %w", err)
+	}
+	fsKey := controlplane.WorkspaceFSKey(controlplane.WorkspaceStorageID(meta))
+
+	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint, onProgress)
+	if err != nil {
+		return fmt.Errorf("build manifest: %w", err)
+	}
+	if onProgress != nil {
+		onProgress(0, int64(stats.FileCount+stats.DirCount))
+	}
+
+	var done int64
+	if _, err := materializeManifestToDirectory(f.r.root, m, func(blobID string) ([]byte, error) {
+		data, ok := blobs[blobID]
+		if !ok {
+			return nil, fmt.Errorf("blob %q missing during root replace", blobID)
+		}
+		return data, nil
+	}, manifestMaterializeOptions{
+		preserveMetadata: true,
+		onProgress: func(p importStats) {
+			done = int64(p.Files + p.Dirs + p.Symlinks)
+			if onProgress != nil {
+				onProgress(done, int64(stats.FileCount+stats.DirCount))
+			}
+		},
+	}); err != nil {
+		return fmt.Errorf("materialize: %w", err)
+	}
+
+	if err := f.replaceStateFromManifest(m, blobs); err != nil {
+		return err
+	}
+	f.r.state.markDirty()
+	return nil
+}
+
+func (f *fullReconciler) replaceStateFromManifest(m manifest, blobs map[string][]byte) error {
+	now := time.Now().UTC()
+	next := make(map[string]SyncEntry, len(m.Entries))
+	for manifestPath, entry := range m.Entries {
+		rel := strings.TrimPrefix(manifestPath, "/")
+		if rel == "" {
+			continue
+		}
+		syncEntry := SyncEntry{
+			Type:          entry.Type,
+			Mode:          entry.Mode,
+			Size:          entry.Size,
+			RemoteMtimeMs: entry.MtimeMs,
+			LastSyncedAt:  now,
+		}
+		switch entry.Type {
+		case "file":
+			data, err := manifestEntryData(entry, func(blobID string) ([]byte, error) {
+				data, ok := blobs[blobID]
+				if !ok {
+					return nil, fmt.Errorf("blob %q missing while rebuilding sync state", blobID)
+				}
+				return data, nil
+			})
+			if err != nil {
+				return err
+			}
+			hash := sha256Hex(data)
+			syncEntry.LocalHash = hash
+			syncEntry.RemoteHash = hash
+			if fi, statErr := os.Stat(filepath.Join(f.r.root, filepath.FromSlash(rel))); statErr == nil {
+				syncEntry.LocalMtimeMs = fi.ModTime().UnixMilli()
+			}
+		case "symlink":
+			syncEntry.Target = entry.Target
+		}
+		next[rel] = syncEntry
+	}
+
+	f.r.state.mu.Lock()
+	f.r.state.state.Entries = make(map[string]SyncEntry, len(next))
+	for rel, entry := range next {
+		entry.Version = f.r.state.nextVersion()
+		f.r.state.state.Entries[rel] = entry
+	}
+	f.r.state.dirty = true
+	f.r.state.mu.Unlock()
+	return nil
+}
+
 // isColdStart returns true when the local folder is empty (or missing) and
 // there is no persisted SyncState. This means we can skip the diff entirely
 // and just pull everything from Redis in bulk.
@@ -1052,6 +1154,9 @@ func (p *remoteSubscriptionPump) dispatchInvalidateEvent(ev client.InvalidateEve
 			p.log.RemoteChange(path, "prefix")
 			p.send(remoteEvent{Path: path})
 		}
+	case client.InvalidateOpRootReplace:
+		p.log.Info("root replacement requested")
+		p.send(remoteEvent{RootReplace: true})
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -222,10 +223,6 @@ func printChangelogRow(row controlplane.ChangelogEntryRow, showSession bool) {
 	} else if t, err := time.Parse(time.RFC3339, when); err == nil {
 		when = t.Local().Format("15:04:05")
 	}
-	op := row.Op
-	if op == "" {
-		op = "?"
-	}
 	delta := formatDeltaBytes(row.DeltaBytes)
 	path := row.Path
 	if row.PrevPath != "" {
@@ -233,7 +230,7 @@ func printChangelogRow(row controlplane.ChangelogEntryRow, showSession bool) {
 	}
 	prefix := fmt.Sprintf("  %s %s %s %s",
 		clr(ansiDim, when),
-		colorForOp(op),
+		colorForChangelogOp(row),
 		clr(ansiDim, delta),
 		path,
 	)
@@ -243,16 +240,50 @@ func printChangelogRow(row controlplane.ChangelogEntryRow, showSession bool) {
 	fmt.Println(prefix)
 }
 
-func colorForOp(op string) string {
-	switch op {
-	case "put", "mkdir", "symlink":
-		return clr(ansiBold+ansiGreen, padLeft(op, 8))
-	case "delete", "rmdir":
-		return clr(ansiBold+ansiOrange, padLeft(op, 8))
+const changelogOpWidth = 13
+
+func changelogDisplayOp(row controlplane.ChangelogEntryRow) string {
+	switch row.Op {
+	case "put":
+		if changelogRowHasPrevious(row) {
+			return "Update"
+		}
+		return "Create"
+	case "delete":
+		return "Delete"
+	case "mkdir":
+		return "Create folder"
+	case "rmdir":
+		return "Delete folder"
+	case "symlink":
+		if changelogRowHasPrevious(row) {
+			return "Update link"
+		}
+		return "Create link"
 	case "chmod":
-		return clr(ansiBold, padLeft(op, 8))
+		return "Change mode"
+	case "":
+		return "?"
 	default:
-		return padLeft(op, 8)
+		return row.Op
+	}
+}
+
+func changelogRowHasPrevious(row controlplane.ChangelogEntryRow) bool {
+	return strings.TrimSpace(row.PrevHash) != "" || strings.TrimSpace(row.PrevPath) != ""
+}
+
+func colorForChangelogOp(row controlplane.ChangelogEntryRow) string {
+	label := padLeft(changelogDisplayOp(row), changelogOpWidth)
+	switch row.Op {
+	case "put", "mkdir", "symlink":
+		return clr(ansiBold+ansiGreen, label)
+	case "delete", "rmdir":
+		return clr(ansiBold+ansiOrange, label)
+	case "chmod":
+		return clr(ansiBold, label)
+	default:
+		return label
 	}
 }
 
@@ -344,7 +375,7 @@ func cmdSessionSummary(args []string) error {
 	counts := map[string]int{}
 	var added, removed int64
 	for _, row := range resp.Entries {
-		counts[row.Op]++
+		counts[changelogDisplayOp(row)]++
 		if row.DeltaBytes > 0 {
 			added += row.DeltaBytes
 		} else if row.DeltaBytes < 0 {
@@ -357,10 +388,22 @@ func cmdSessionSummary(args []string) error {
 		{Label: "session", Value: shortSession(flags.sessionID)},
 		{Label: "entries", Value: strconv.Itoa(len(resp.Entries))},
 	}
-	for _, op := range []string{"put", "delete", "mkdir", "rmdir", "symlink", "chmod"} {
-		if n, ok := counts[op]; ok {
-			rows = append(rows, boxRow{Label: op, Value: strconv.Itoa(n)})
+	seenLabels := map[string]struct{}{}
+	for _, label := range []string{"Create", "Update", "Delete", "Create folder", "Delete folder", "Create link", "Update link", "Change mode"} {
+		if n, ok := counts[label]; ok {
+			rows = append(rows, boxRow{Label: strings.ToLower(label), Value: strconv.Itoa(n)})
+			seenLabels[label] = struct{}{}
 		}
+	}
+	extraLabels := make([]string, 0)
+	for label := range counts {
+		if _, ok := seenLabels[label]; !ok {
+			extraLabels = append(extraLabels, label)
+		}
+	}
+	sort.Strings(extraLabels)
+	for _, label := range extraLabels {
+		rows = append(rows, boxRow{Label: strings.ToLower(label), Value: strconv.Itoa(counts[label])})
 	}
 	rows = append(rows, boxRow{Label: "bytes added", Value: formatBytes(added)})
 	rows = append(rows, boxRow{Label: "bytes removed", Value: formatBytes(removed)})

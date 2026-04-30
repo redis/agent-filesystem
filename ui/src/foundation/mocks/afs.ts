@@ -65,6 +65,8 @@ function buildSavepoint(
     author,
     createdAt,
     note,
+    kind: name === "initial" ? "import" : "manual",
+    source: "demo",
     fileCount: files.length,
     folderCount: folderCount(files),
     totalBytes: bytesCount(files),

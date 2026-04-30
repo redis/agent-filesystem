@@ -237,7 +237,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "workspace_fork",
-			Description: "Fork a workspace at its current head into a new workspace",
+			Description: "Fork a workspace from its current checkpoint into a new workspace",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -259,7 +259,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "checkpoint_create",
-			Description: "Create a new checkpoint from the current live workspace state",
+			Description: "Create a new checkpoint from the active workspace state",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -270,7 +270,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "checkpoint_restore",
-			Description: "Restore a workspace to a checkpoint in the live workspace root",
+			Description: "Restore the active workspace state to a checkpoint",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -335,7 +335,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_write",
-			Description: "Write a full file in a workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, or file_delete_lines for that. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called. Paths must be absolute inside the workspace, for example /src/main.go.",
+			Description: "Write a full file in a workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, or file_delete_lines for that. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called. Paths must be absolute inside the workspace, for example /src/main.go.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -361,7 +361,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_replace",
-			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, callers should be explicit about whether all occurrences are intended. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, callers should be explicit about whether all occurrences are intended. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -380,7 +380,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_insert",
-			Description: "Insert content at a line boundary in a text file. Use this for additive edits where an exact insertion point is known. Do not use it for broad rewrites or ambiguous structural edits. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Insert content at a line boundary in a text file. Use this for additive edits where an exact insertion point is known. Do not use it for broad rewrites or ambiguous structural edits. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -394,7 +394,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_delete_lines",
-			Description: "Delete a line range from a text file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Delete a line range from a text file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -408,7 +408,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_patch",
-			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters. This tool supports replace, insert, and delete operations with optional line anchors, surrounding context checks, and a file hash precondition. File edits update the live workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters. This tool supports replace, insert, and delete operations with optional line anchors, surrounding context checks, and a file hash precondition. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -704,7 +704,10 @@ func (s *afsMCPServer) toolCheckpointCreate(ctx context.Context, args map[string
 	if err := validateAFSName("checkpoint", checkpointID); err != nil {
 		return nil, err
 	}
-	saved, err := saveAFSWorkspaceOrLiveRoot(ctx, s.cfg, s.store, workspace, checkpointID, false)
+	saved, err := saveAFSWorkspaceOrLiveRoot(ctx, s.cfg, s.store, workspace, checkpointID, false, controlplane.SaveCheckpointFromLiveOptions{
+		Kind:   controlplane.CheckpointKindManual,
+		Source: controlplane.CheckpointSourceMCP,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -725,15 +728,20 @@ func (s *afsMCPServer) toolCheckpointRestore(ctx context.Context, args map[strin
 	if err != nil {
 		return nil, err
 	}
-	_, err = resetAFSWorkspaceHead(ctx, s.service, workspace, checkpointID)
+	result, err := resetAFSWorkspaceHead(ctx, s.service, workspace, checkpointID)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"workspace":  workspace,
 		"checkpoint": checkpointID,
 		"mode":       "live-workspace",
-	}, nil
+	}
+	if result.SafetyCheckpointCreated {
+		payload["safety_checkpoint"] = result.SafetyCheckpointID
+		payload["safety_checkpoint_created"] = true
+	}
+	return payload, nil
 }
 
 func (s *afsMCPServer) toolFileRead(ctx context.Context, args map[string]any) (any, error) {

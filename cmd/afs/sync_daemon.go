@@ -245,6 +245,23 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 				if err := d.full.run(dctx, nil); err != nil && !errors.Is(err, context.Canceled) {
 					fmt.Fprintf(os.Stderr, "afs sync: full reconcile failed: %v\n", err)
 				}
+			case <-d.reconciler.rootReplaceRequests():
+				d.reconciler.suppressLocalEventsDuringRestore(true)
+				if err := d.full.replaceFromRemote(dctx, nil); err != nil {
+					d.reconciler.suppressLocalEventsDuringRestore(false)
+					if !errors.Is(err, context.Canceled) {
+						fmt.Fprintf(os.Stderr, "afs sync: checkpoint restore local replace failed: %v\n", err)
+					}
+					continue
+				}
+				if d.watcher != nil {
+					if err := d.watcher.resetRecursive(d.cfg.LocalRoot); err != nil {
+						fmt.Fprintf(os.Stderr, "afs sync: refresh watcher after restore: %v\n", err)
+					}
+				}
+				time.AfterFunc(2*d.cfg.WatcherDebounce, func() {
+					d.reconciler.suppressLocalEventsDuringRestore(false)
+				})
 			}
 		}
 	}()

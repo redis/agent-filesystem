@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/agent-filesystem/mount/client"
@@ -21,6 +22,7 @@ type remoteEvent struct {
 	Path         string // workspace-relative POSIX path; empty means "root, full reconciliation needed"
 	NeedsContent bool   // true for InvalidateOpContent
 	FullSweep    bool   // true for InvalidateOpPrefix "/"
+	RootReplace  bool   // true when a checkpoint restore replaced the root
 }
 
 // reconciler is the single writer for SyncState. Watcher events, downloader
@@ -51,8 +53,10 @@ type reconciler struct {
 	chunkSize      int
 	chunkThreshold int
 
-	pendingFullSweep bool
-	fullSweepRequest chan struct{}
+	pendingFullSweep    bool
+	fullSweepRequest    chan struct{}
+	rootReplaceRequest  chan struct{}
+	suppressLocalEvents atomic.Bool
 }
 
 func newReconciler(
@@ -76,24 +80,25 @@ func newReconciler(
 		chunkThreshold = defaultChunkThreshold
 	}
 	return &reconciler{
-		state:            state,
-		root:             root,
-		workspace:        workspace,
-		store:            store,
-		fs:               fs,
-		echo:             echo,
-		conflict:         conflict,
-		ignore:           ignore,
-		maxFileBytes:     maxFileBytes,
-		readonly:         readonly,
-		log:              log,
-		chunkSize:        chunkSize,
-		chunkThreshold:   chunkThreshold,
-		uploadCh:         make(chan uploadOp, 256),
-		downloadCh:       make(chan downloadOp, 256),
-		uploadResCh:      make(chan uploadResult, 256),
-		downloadResCh:    make(chan downloadResult, 256),
-		fullSweepRequest: make(chan struct{}, 1),
+		state:              state,
+		root:               root,
+		workspace:          workspace,
+		store:              store,
+		fs:                 fs,
+		echo:               echo,
+		conflict:           conflict,
+		ignore:             ignore,
+		maxFileBytes:       maxFileBytes,
+		readonly:           readonly,
+		log:                log,
+		chunkSize:          chunkSize,
+		chunkThreshold:     chunkThreshold,
+		uploadCh:           make(chan uploadOp, 256),
+		downloadCh:         make(chan downloadOp, 256),
+		uploadResCh:        make(chan uploadResult, 256),
+		downloadResCh:      make(chan downloadResult, 256),
+		fullSweepRequest:   make(chan struct{}, 1),
+		rootReplaceRequest: make(chan struct{}, 1),
 	}
 }
 
@@ -114,12 +119,27 @@ func (r *reconciler) downloadOut() chan<- downloadResult { return r.downloadResC
 // startup completion).
 func (r *reconciler) fullSweepRequests() <-chan struct{} { return r.fullSweepRequest }
 
+// rootReplaceRequests is signalled when the control plane replaces the live
+// root as one operation, for example after checkpoint restore.
+func (r *reconciler) rootReplaceRequests() <-chan struct{} { return r.rootReplaceRequest }
+
 // requestFullSweep posts a full-sweep request unless one is already queued.
 func (r *reconciler) requestFullSweep() {
 	select {
 	case r.fullSweepRequest <- struct{}{}:
 	default:
 	}
+}
+
+func (r *reconciler) requestRootReplace() {
+	select {
+	case r.rootReplaceRequest <- struct{}{}:
+	default:
+	}
+}
+
+func (r *reconciler) suppressLocalEventsDuringRestore(suppress bool) {
+	r.suppressLocalEvents.Store(suppress)
 }
 
 // run drains all event sources until ctx is cancelled. The reconciler is the
@@ -160,6 +180,9 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	if ev.Path == "" {
 		return
 	}
+	if r.suppressLocalEvents.Load() {
+		return
+	}
 	if requestID, ok := syncControlRequestID(ev.Path); ok {
 		r.handleSyncControlRequest(ctx, ev.Path, requestID)
 		return
@@ -173,6 +196,9 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	abs := filepath.Join(r.root, filepath.FromSlash(ev.Path))
 	info, err := os.Lstat(abs)
 	if errors.Is(err, fs.ErrNotExist) {
+		if exp, ok := r.echo.consume(ev.Path); ok && exp.kind == "delete" {
+			return
+		}
 		fmt.Fprintf(os.Stderr, "afs sync: handleLocalEvent %s: ErrNotExist → handleLocalDelete (kindHint=%s)\n", ev.Path, ev.KindHint)
 		r.log.LocalChange(ev.Path, "deleted")
 		r.handleLocalDelete(ev.Path)
@@ -498,6 +524,10 @@ func (r *reconciler) handleLocalDelete(rel string) {
 }
 
 func (r *reconciler) handleRemoteEvent(ctx context.Context, ev remoteEvent) {
+	if ev.RootReplace {
+		r.requestRootReplace()
+		return
+	}
 	if ev.FullSweep {
 		r.requestFullSweep()
 		return

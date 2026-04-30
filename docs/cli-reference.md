@@ -28,7 +28,7 @@ Primary commands:
 | `afs up` | Start sync or mount for the selected workspace. |
 | `afs down` | Stop the local runtime and unmount. |
 | `afs status` | Show connection, workspace, and sync or mount status. |
-| `afs sync` | Explicit operations for a running sync daemon. |
+| `afs file` | Workspace file operations. |
 | `afs workspace` | Create, list, use, clone, fork, delete, or import workspaces. |
 | `afs database` | List or select control-plane databases. |
 | `afs checkpoint` | Create, list, and restore checkpoints. |
@@ -227,7 +227,7 @@ Subcommands:
 | `afs workspace current` | Show the workspace used when a workspace argument is omitted. |
 | `afs workspace use <workspace-name-or-id>` | Set the current workspace. |
 | `afs workspace clone [workspace] <directory>` | Export a workspace to a local directory. Destination must be empty. |
-| `afs workspace fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current saved head. |
+| `afs workspace fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current checkpoint. |
 | `afs workspace delete <workspace>...` | Delete one or more workspaces and local materialized state. |
 | `afs workspace import [--force] [--database <database>] [--mount-at-source] <workspace> <directory>` | Import a local directory into a workspace. |
 
@@ -265,23 +265,31 @@ Subcommands:
 | Command | Meaning |
 | --- | --- |
 | `afs checkpoint list [workspace]` | List checkpoints newest first. |
-| `afs checkpoint create [workspace] [checkpoint]` | Save the current live workspace state. |
-| `afs checkpoint restore [workspace] <checkpoint>` | Restore live state to a checkpoint. |
+| `afs checkpoint create [workspace] [checkpoint] [--description <text>]` | Save the active workspace state. |
+| `afs checkpoint diff [workspace] <base> <target>` | Compare two checkpoints or workspace states. |
+| `afs checkpoint diff [workspace] <checkpoint> --active` | Compare a checkpoint to the active workspace. |
+| `afs checkpoint restore [workspace] <checkpoint>` | Restore active state to a checkpoint. |
 
 Examples:
 
 ```bash
 afs checkpoint list demo
-afs checkpoint create demo before-refactor
+afs checkpoint create demo before-refactor --description "Before the agent rewrite"
+afs checkpoint diff demo before-refactor --active
 afs checkpoint restore demo initial
 ```
 
 Checkpoint rules:
 
-- File edits change live state.
+- File edits change active state.
 - Checkpoints are explicit.
 - If a checkpoint name is omitted, AFS generates a timestamped name.
-- Restoring a checkpoint overwrites live workspace state.
+- Restoring a checkpoint overwrites active workspace state. If the active workspace
+  has unsaved changes, AFS first creates a `safety` checkpoint and prints its
+  ID in the restore output.
+- In sync mode, restore replaces the local sync folder from the restored active
+  state. AFS checks for open handles first and asks you to close them before it
+  starts replacing files.
 
 ## Search
 
@@ -366,22 +374,23 @@ afs session log <session-id>
 afs session summary <session-id>
 ```
 
-## Sync Daemon Operations
+## File Operations
 
-### `afs sync create-exclusive`
+### `afs file create-exclusive`
 
 ```bash
-afs sync create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
+afs file create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
 ```
 
-Asks the running sync daemon to atomically create `<path>` exactly once across
-all clients. The path must be absolute inside the workspace.
+Creates `<path>` only if it does not already exist in the workspace. The create
+is atomic across connected AFS clients. Requires AFS to be running in sync mode
+on this machine. The path must be absolute inside the workspace.
 
 Examples:
 
 ```bash
-afs sync create-exclusive /tasks/001.claim
-afs sync create-exclusive --content "agent-a\n" /tasks/001.claim
+afs file create-exclusive /tasks/001.claim
+afs file create-exclusive --content "agent-a\n" /tasks/001.claim
 ```
 
 ## MCP Server

@@ -568,31 +568,6 @@ export const EditorArea = styled.textarea`
   }
 `;
 
-export const SavepointGrid = styled.div`
-  display: grid;
-  gap: 12px;
-`;
-
-export const SavepointRow = styled.div`
-  ${insetSurface}
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-
-  &:hover {
-    background: var(--afs-panel);
-    border-color: var(--afs-ink-soft);
-  }
-
-  @media (max-width: 760px) {
-    flex-direction: column;
-  }
-`;
-
 export const ActivityList = styled.div`
   display: flex;
   flex-direction: column;

@@ -170,6 +170,43 @@ func TestPrepareSyncBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testi
 	}
 }
 
+func TestPrepareSyncBootstrapLocalCreatesTrackedSession(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeLocal
+	cfg.RedisAddr = mr.Addr()
+	cfg.CurrentWorkspace = "repo"
+	cfg.LocalPath = filepath.Join(t.TempDir(), "repo")
+	cfg.agentSettings = agentSettings{
+		ID:   "agt_local",
+		Name: "Local Agent",
+	}
+	saveTempConfig(t, cfg)
+
+	if err := cmdWorkspace([]string{"workspace", "create", "repo"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	bootstrap, closeFn, err := prepareSyncBootstrap(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("prepareSyncBootstrap() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if strings.TrimSpace(bootstrap.sessionID) == "" {
+		t.Fatal("expected local sync bootstrap to include a tracked session id")
+	}
+	if bootstrap.heartbeatEvery <= 0 {
+		t.Fatalf("bootstrap heartbeatEvery = %v, want > 0", bootstrap.heartbeatEvery)
+	}
+	if bootstrap.cfg.ID != "agt_local" {
+		t.Fatalf("bootstrap agent id = %q, want agt_local", bootstrap.cfg.ID)
+	}
+}
+
 func TestPrepareSyncBootstrapCloudResolvesWorkspaceAcrossDatabases(t *testing.T) {
 	t.Helper()
 

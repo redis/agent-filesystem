@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
 )
 
@@ -284,7 +286,7 @@ func TestSyncCreateExclusiveRequestCreatesRemoteAndLocal(t *testing.T) {
 	}
 }
 
-func TestCmdSyncCreateExclusiveRoundTrip(t *testing.T) {
+func TestCmdFileCreateExclusiveRoundTrip(t *testing.T) {
 	t.Helper()
 
 	env := newSyncTestEnv(t)
@@ -321,8 +323,8 @@ func TestCmdSyncCreateExclusiveRoundTrip(t *testing.T) {
 		t.Fatalf("saveState() returned error: %v", err)
 	}
 
-	if err := cmdSync([]string{"sync", "create-exclusive", "--content", "agent-b\n", "/tasks/002.claim"}); err != nil {
-		t.Fatalf("cmdSync(create-exclusive) returned error: %v", err)
+	if err := cmdFile([]string{"file", "create-exclusive", "--content", "agent-b\n", "/tasks/002.claim"}); err != nil {
+		t.Fatalf("cmdFile(create-exclusive) returned error: %v", err)
 	}
 	assertEventually(t, 3*time.Second, "remote 002.claim", func() bool {
 		return env.remoteExists(t, "tasks/002.claim")
@@ -331,8 +333,8 @@ func TestCmdSyncCreateExclusiveRoundTrip(t *testing.T) {
 		t.Fatalf("remote content = %q, want %q", got, "agent-b\n")
 	}
 
-	if err := cmdSync([]string{"sync", "create-exclusive", "/tasks/002.claim"}); err == nil {
-		t.Fatal("second cmdSync(create-exclusive) should fail, got success")
+	if err := cmdFile([]string{"file", "create-exclusive", "/tasks/002.claim"}); err == nil {
+		t.Fatal("second cmdFile(create-exclusive) should fail, got success")
 	}
 }
 
@@ -503,6 +505,55 @@ func TestSyncStreamCatchUpAfterOffline(t *testing.T) {
 	assertEventually(t, 3*time.Second, "missed.txt via stream catch-up", func() bool {
 		return env.localExists("missed.txt") && env.readLocalFile(t, "missed.txt") == "offline-change"
 	})
+}
+
+func TestSyncRootReplaceRematerializesLocalTree(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+
+	orig := checkOpenHandlesUnderPath
+	checkOpenHandlesUnderPath = func(root string) ([]openFileHandle, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { checkOpenHandlesUnderPath = orig })
+
+	env.writeLocalFile(t, "current.txt", "current")
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "current.txt remote", func() bool {
+		return env.remoteExists(t, "current.txt")
+	})
+
+	ctx := testCtx()
+	restored := []byte("restored")
+	if err := env.cp.PutWorkspaceMeta(ctx, controlplane.WorkspaceMeta{Name: env.workspace, HeadSavepoint: "restored"}); err != nil {
+		t.Fatalf("PutWorkspaceMeta(restored): %v", err)
+	}
+	if err := controlplane.SyncWorkspaceRoot(ctx, env.cp, env.workspace, controlplane.Manifest{
+		Workspace: env.workspace,
+		Savepoint: "restored",
+		Entries: map[string]controlplane.ManifestEntry{
+			"/":             {Type: "dir", Mode: 0o755},
+			"/restored.txt": {Type: "file", Mode: 0o644, Size: int64(len(restored)), Inline: base64.StdEncoding.EncodeToString(restored)},
+		},
+	}); err != nil {
+		t.Fatalf("SyncWorkspaceRoot(restored): %v", err)
+	}
+	if err := client.PublishInvalidation(ctx, env.rdb, env.mountKey, client.InvalidateEvent{
+		Origin: "control-plane",
+		Op:     client.InvalidateOpRootReplace,
+		Paths:  []string{"/"},
+	}); err != nil {
+		t.Fatalf("PublishInvalidation(root replace): %v", err)
+	}
+
+	assertEventually(t, 5*time.Second, "restored tree to materialize", func() bool {
+		return env.localExists("restored.txt") && env.readLocalFile(t, "restored.txt") == "restored" && !env.localExists("current.txt")
+	})
+	if env.remoteExists(t, "current.txt") {
+		t.Fatalf("current.txt was re-uploaded after root replace")
+	}
 }
 
 // Regression: deleting a local file and then triggering a full reconciliation

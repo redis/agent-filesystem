@@ -233,6 +233,8 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		ID:           initialSavepoint,
 		Name:         initialSavepoint,
 		Description:  "Initial import snapshot.",
+		Kind:         controlplane.CheckpointKindImport,
+		Source:       controlplane.CheckpointSourceImport,
 		Author:       "afs",
 		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
@@ -901,16 +903,31 @@ func applyWorkspaceSelection(cfg *config, selection workspaceSelection) error {
 	return nil
 }
 
-func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats, syncWorkspaceRoot bool) (bool, error) {
+func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, localManifest manifest, blobs map[string][]byte, stats manifestStats, syncWorkspaceRoot bool, options ...controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
 	cfg, err := loadAFSConfig()
 	if err != nil {
 		return false, err
+	}
+	var metadata controlplane.SaveCheckpointFromLiveOptions
+	if len(options) > 0 {
+		metadata = options[0]
+	}
+	if strings.TrimSpace(metadata.Kind) == "" {
+		metadata.Kind = controlplane.CheckpointKindManual
+	}
+	if strings.TrimSpace(metadata.Source) == "" {
+		metadata.Source = controlplane.CheckpointSourceCLI
 	}
 	service := controlPlaneServiceFromStore(cfg, store)
 	saved, err := service.SaveCheckpoint(ctx, controlplane.SaveCheckpointRequest{
 		Workspace:             workspace,
 		ExpectedHead:          expectedHead,
 		CheckpointID:          savepointID,
+		Description:           metadata.Description,
+		Kind:                  metadata.Kind,
+		Source:                metadata.Source,
+		Author:                metadata.Author,
+		CreatedBy:             metadata.CreatedBy,
 		Manifest:              controlPlaneManifestFromAFS(localManifest),
 		Blobs:                 blobs,
 		FileCount:             stats.FileCount,

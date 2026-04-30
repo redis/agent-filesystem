@@ -170,7 +170,7 @@ func (r *FSRoot) handleInvalidation(ev client.InvalidateEvent) {
 			// Don't touch the kernel here: afsfs Readdir will re-populate
 			// from the fresh LsLong on next READDIR, and go-fuse has no
 			// "invalidate the listing only" operation.
-		case client.InvalidateOpPrefix:
+		case client.InvalidateOpPrefix, client.InvalidateOpRootReplace:
 			r.invalidatePathPrefix(p)
 			r.notifyPrefixChange(p)
 		case client.InvalidateOpContent:

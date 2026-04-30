@@ -13,7 +13,7 @@ Define one shared control-plane contract for:
 
 The current shared model is workspace-first:
 
-- one workspace owns one working copy state
+- one workspace owns one active filesystem state
 - one workspace owns one checkpoint timeline
 - files are read and written directly against the workspace view
 - aggregate workspace listing is served through the control-plane catalog
@@ -40,7 +40,7 @@ Each workspace has:
 
 - one backing database
 - one AFS key namespace
-- one current working-copy state
+- one active filesystem state
 - zero or more immutable checkpoints
 - recent audit activity
 
@@ -50,7 +50,7 @@ An immutable saved state within a workspace.
 
 ### File
 
-A path inside the current workspace view, readable and editable by the browser/editor and CLI.
+A path inside the active workspace view, readable and editable by the browser/editor and CLI.
 
 ## Workspace Summary Contract
 
@@ -143,6 +143,15 @@ Database-scoped equivalents remain available:
 `POST /workspaces/{workspace_id}:restore` accepts:
 
 - `checkpoint_id`
+
+It returns a restore result:
+
+- `restored`
+- `checkpoint_id`
+- `workspace_id`
+- `workspace_name`
+- `safety_checkpoint_created`
+- `safety_checkpoint_id` when AFS preserved unsaved active state before restore
 
 ### Files and Browser
 

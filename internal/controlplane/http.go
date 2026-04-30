@@ -29,11 +29,19 @@ type forkWorkspaceRequest struct {
 
 type saveFromLiveRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
+	Description  string `json:"description,omitempty"`
+	Kind         string `json:"kind,omitempty"`
+	Source       string `json:"source,omitempty"`
+	Author       string `json:"author,omitempty"`
 }
 
 type saveCheckpointRequest struct {
 	ExpectedHead          string            `json:"expected_head"`
 	CheckpointID          string            `json:"checkpoint_id"`
+	Description           string            `json:"description,omitempty"`
+	Kind                  string            `json:"kind,omitempty"`
+	Source                string            `json:"source,omitempty"`
+	Author                string            `json:"author,omitempty"`
 	Manifest              Manifest          `json:"manifest"`
 	Blobs                 map[string][]byte `json:"blobs"`
 	DirCount              int               `json:"dir_count"`
@@ -899,7 +907,12 @@ func handleWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		saved, err := manager.SaveCheckpointFromLive(r.Context(), databaseID, workspace, input.CheckpointID)
+		saved, err := manager.SaveCheckpointFromLiveWithOptions(r.Context(), databaseID, workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
+			Description: input.Description,
+			Kind:        input.Kind,
+			Source:      input.Source,
+			Author:      input.Author,
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -932,11 +945,12 @@ func handleWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		if err := manager.RestoreCheckpoint(r.Context(), databaseID, workspace, input.CheckpointID); err != nil {
+		result, err := manager.RestoreCheckpointWithResult(r.Context(), databaseID, workspace, input.CheckpointID)
+		if err != nil {
 			writeError(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusOK, result)
 	case strings.HasSuffix(workspacePath, "/checkpoints"):
 		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
 		switch r.Method {
@@ -962,6 +976,10 @@ func handleWorkspaceRoute(
 				Workspace:             workspace,
 				ExpectedHead:          input.ExpectedHead,
 				CheckpointID:          input.CheckpointID,
+				Description:           input.Description,
+				Kind:                  input.Kind,
+				Source:                input.Source,
+				Author:                input.Author,
 				Manifest:              input.Manifest,
 				Blobs:                 input.Blobs,
 				FileCount:             input.FileCount,
@@ -995,6 +1013,24 @@ func handleWorkspaceRoute(
 			r.URL.Query().Get("view"),
 			r.URL.Query().Get("path"),
 			depth,
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/diff"):
+		workspace := strings.TrimSuffix(workspacePath, "/diff")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.DiffWorkspace(
+			r.Context(),
+			databaseID,
+			workspace,
+			r.URL.Query().Get("base"),
+			r.URL.Query().Get("head"),
 		)
 		if err != nil {
 			writeError(w, err)
@@ -1214,7 +1250,12 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		saved, err := manager.SaveResolvedCheckpointFromLive(r.Context(), workspace, input.CheckpointID)
+		saved, err := manager.SaveResolvedCheckpointFromLiveWithOptions(r.Context(), workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
+			Description: input.Description,
+			Kind:        input.Kind,
+			Source:      input.Source,
+			Author:      input.Author,
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1247,11 +1288,12 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		if err := manager.RestoreResolvedCheckpoint(r.Context(), workspace, input.CheckpointID); err != nil {
+		result, err := manager.RestoreResolvedCheckpointWithResult(r.Context(), workspace, input.CheckpointID)
+		if err != nil {
 			writeError(w, err)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusOK, result)
 	case strings.HasSuffix(workspacePath, "/checkpoints"):
 		workspace := strings.TrimSuffix(workspacePath, "/checkpoints")
 		switch r.Method {
@@ -1277,6 +1319,10 @@ func handleResolvedWorkspaceRoute(
 				Workspace:             workspace,
 				ExpectedHead:          input.ExpectedHead,
 				CheckpointID:          input.CheckpointID,
+				Description:           input.Description,
+				Kind:                  input.Kind,
+				Source:                input.Source,
+				Author:                input.Author,
 				Manifest:              input.Manifest,
 				Blobs:                 input.Blobs,
 				FileCount:             input.FileCount,
@@ -1309,6 +1355,23 @@ func handleResolvedWorkspaceRoute(
 			r.URL.Query().Get("view"),
 			r.URL.Query().Get("path"),
 			depth,
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/diff"):
+		workspace := strings.TrimSuffix(workspacePath, "/diff")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.DiffResolvedWorkspace(
+			r.Context(),
+			workspace,
+			r.URL.Query().Get("base"),
+			r.URL.Query().Get("head"),
 		)
 		if err != nil {
 			writeError(w, err)

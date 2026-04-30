@@ -86,15 +86,23 @@ type workspaceListResponse struct {
 }
 
 type checkpointSummary struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Author      string `json:"author,omitempty"`
-	Note        string `json:"note,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	FileCount   int    `json:"file_count"`
-	FolderCount int    `json:"folder_count"`
-	TotalBytes  int64  `json:"total_bytes"`
-	IsHead      bool   `json:"is_head"`
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	Author             string `json:"author,omitempty"`
+	Note               string `json:"note,omitempty"`
+	Kind               string `json:"kind,omitempty"`
+	Source             string `json:"source,omitempty"`
+	CreatedBy          string `json:"created_by,omitempty"`
+	SessionID          string `json:"session_id,omitempty"`
+	AgentID            string `json:"agent_id,omitempty"`
+	AgentName          string `json:"agent_name,omitempty"`
+	ParentCheckpointID string `json:"parent_checkpoint_id,omitempty"`
+	ManifestHash       string `json:"manifest_hash,omitempty"`
+	CreatedAt          string `json:"created_at"`
+	FileCount          int    `json:"file_count"`
+	FolderCount        int    `json:"folder_count"`
+	TotalBytes         int64  `json:"total_bytes"`
+	IsHead             bool   `json:"is_head"`
 }
 
 type activityEvent struct {
@@ -211,6 +219,15 @@ type restoreCheckpointRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 }
 
+type RestoreCheckpointResult struct {
+	Restored                bool   `json:"restored"`
+	CheckpointID            string `json:"checkpoint_id"`
+	SafetyCheckpointID      string `json:"safety_checkpoint_id,omitempty"`
+	SafetyCheckpointCreated bool   `json:"safety_checkpoint_created"`
+	WorkspaceID             string `json:"workspace_id,omitempty"`
+	WorkspaceName           string `json:"workspace_name,omitempty"`
+}
+
 type createWorkspaceSessionRequest struct {
 	AgentID         string `json:"agent_id,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
@@ -296,12 +313,25 @@ type SaveCheckpointRequest struct {
 	Workspace             string
 	ExpectedHead          string
 	CheckpointID          string
+	Description           string
+	Kind                  string
+	Source                string
+	Author                string
+	CreatedBy             string
 	Manifest              Manifest
 	Blobs                 map[string][]byte
 	FileCount             int
 	DirCount              int
 	TotalBytes            int64
 	SkipWorkspaceRootSync bool
+}
+
+type SaveCheckpointFromLiveOptions struct {
+	Description string
+	Kind        string
+	Source      string
+	Author      string
+	CreatedBy   string
 }
 
 type workspaceUsageStats struct {
@@ -349,6 +379,11 @@ func (s *Service) ListCheckpoints(ctx context.Context, workspace string, limit i
 }
 
 func (s *Service) RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
+	_, err := s.restoreCheckpoint(ctx, workspace, checkpointID)
+	return err
+}
+
+func (s *Service) RestoreCheckpointWithResult(ctx context.Context, workspace, checkpointID string) (RestoreCheckpointResult, error) {
 	return s.restoreCheckpoint(ctx, workspace, checkpointID)
 }
 
@@ -394,11 +429,19 @@ func (s *Service) GetPathLastWriter(ctx context.Context, workspace, path string)
 	return s.store.GetPathLastWriter(ctx, storageID, path)
 }
 
-// SaveCheckpointFromLive builds a manifest from the live workspace root in
-// Redis and saves it as a new checkpoint. This encapsulates the full server-
-// side flow so that remote clients (self-hosted mode) can create checkpoints
-// without direct Redis access.
 func (s *Service) SaveCheckpointFromLive(ctx context.Context, workspace, checkpointID string) (bool, error) {
+	return s.saveCheckpointFromLive(ctx, workspace, checkpointID, SaveCheckpointFromLiveOptions{})
+}
+
+// SaveCheckpointFromLiveWithOptions builds a manifest from the live workspace
+// root in Redis and saves it as a new checkpoint with caller-provided metadata.
+func (s *Service) SaveCheckpointFromLiveWithOptions(ctx context.Context, workspace, checkpointID string, options SaveCheckpointFromLiveOptions) (bool, error) {
+	return s.saveCheckpointFromLive(ctx, workspace, checkpointID, options)
+}
+
+// saveCheckpointFromLive encapsulates the full server-side flow so that remote
+// clients can create checkpoints without direct Redis access.
+func (s *Service) saveCheckpointFromLive(ctx context.Context, workspace, checkpointID string, options SaveCheckpointFromLiveOptions) (bool, error) {
 	if err := ValidateName("workspace", workspace); err != nil {
 		return false, fmt.Errorf("save-from-live validate: %w", err)
 	}
@@ -434,6 +477,11 @@ func (s *Service) SaveCheckpointFromLive(ctx context.Context, workspace, checkpo
 		Workspace:             storageID,
 		ExpectedHead:          meta.HeadSavepoint,
 		CheckpointID:          checkpointID,
+		Description:           options.Description,
+		Kind:                  options.Kind,
+		Source:                options.Source,
+		Author:                options.Author,
+		CreatedBy:             options.CreatedBy,
 		Manifest:              manifest,
 		Blobs:                 blobs,
 		FileCount:             fileCount,
@@ -898,6 +946,10 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		return workspaceDetail{}, err
 	}
 	stats := s.currentWorkspaceStats(ctx, storageID, headMeta)
+	dirty, err := s.workspaceDirtyState(ctx, storageID, meta)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
 	activity, err := s.listWorkspaceActivity(ctx, storageID, activityListRequest{Limit: 25})
 	if err != nil {
 		return workspaceDetail{}, err
@@ -912,11 +964,11 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		DatabaseName:     meta.DatabaseName,
 		RedisKey:         WorkspaceFSKey(storageID),
 		Region:           meta.Region,
-		Status:           workspaceStatus(meta),
+		Status:           workspaceStatus(dirty),
 		Source:           workspaceSource(meta),
 		CreatedAt:        meta.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:        meta.UpdatedAt.UTC().Format(time.RFC3339),
-		DraftState:       draftState(meta),
+		DraftState:       draftState(dirty),
 		HeadCheckpointID: meta.HeadSavepoint,
 		Tags:             append([]string(nil), meta.Tags...),
 		FileCount:        stats.FileCount,
@@ -929,17 +981,7 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 	}
 
 	for _, checkpoint := range checkpoints {
-		detail.Checkpoints = append(detail.Checkpoints, checkpointSummary{
-			ID:          checkpoint.ID,
-			Name:        checkpoint.Name,
-			Author:      defaultString(checkpoint.Author, "afs"),
-			Note:        checkpoint.Description,
-			CreatedAt:   checkpoint.CreatedAt.UTC().Format(time.RFC3339),
-			FileCount:   checkpoint.FileCount,
-			FolderCount: checkpoint.DirCount,
-			TotalBytes:  checkpoint.TotalBytes,
-			IsHead:      checkpoint.ID == meta.HeadSavepoint,
-		})
+		detail.Checkpoints = append(detail.Checkpoints, checkpointSummaryFromMeta(checkpoint, meta.HeadSavepoint))
 	}
 	return detail, nil
 }
@@ -1060,68 +1102,191 @@ func (s *Service) listCheckpoints(ctx context.Context, workspace string, limit i
 	}
 	items := make([]checkpointSummary, 0, len(checkpoints))
 	for _, checkpoint := range checkpoints {
-		items = append(items, checkpointSummary{
-			ID:          checkpoint.ID,
-			Name:        checkpoint.Name,
-			Author:      defaultString(checkpoint.Author, "afs"),
-			Note:        checkpoint.Description,
-			CreatedAt:   checkpoint.CreatedAt.UTC().Format(time.RFC3339),
-			FileCount:   checkpoint.FileCount,
-			FolderCount: checkpoint.DirCount,
-			TotalBytes:  checkpoint.TotalBytes,
-			IsHead:      checkpoint.ID == meta.HeadSavepoint,
-		})
+		items = append(items, checkpointSummaryFromMeta(checkpoint, meta.HeadSavepoint))
 	}
 	return items, nil
 }
 
-func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID string) error {
+func checkpointSummaryFromMeta(checkpoint SavepointMeta, headSavepoint string) checkpointSummary {
+	return checkpointSummary{
+		ID:                 checkpoint.ID,
+		Name:               checkpoint.Name,
+		Author:             defaultString(checkpoint.Author, "afs"),
+		Note:               checkpoint.Description,
+		Kind:               checkpointKind(checkpoint.Kind),
+		Source:             checkpointSource(checkpoint.Source),
+		CreatedBy:          checkpoint.CreatedBy,
+		SessionID:          checkpoint.SessionID,
+		AgentID:            checkpoint.AgentID,
+		AgentName:          checkpoint.AgentName,
+		ParentCheckpointID: checkpoint.ParentSavepoint,
+		ManifestHash:       checkpoint.ManifestHash,
+		CreatedAt:          checkpoint.CreatedAt.UTC().Format(time.RFC3339),
+		FileCount:          checkpoint.FileCount,
+		FolderCount:        checkpoint.DirCount,
+		TotalBytes:         checkpoint.TotalBytes,
+		IsHead:             checkpoint.ID == headSavepoint,
+	}
+}
+
+func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID string) (RestoreCheckpointResult, error) {
 	if err := ValidateName("workspace", workspace); err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	if err := ValidateName("checkpoint", checkpointID); err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)
 	if err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	storageID := workspaceStorageID(meta)
+	result := RestoreCheckpointResult{
+		Restored:      true,
+		CheckpointID:  checkpointID,
+		WorkspaceID:   storageID,
+		WorkspaceName: meta.Name,
+	}
 	if err := CheckImportLock(ctx, s.store, storageID); err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	exists, err := s.store.SavepointExists(ctx, storageID, checkpointID)
 	if err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	if !exists {
-		return os.ErrNotExist
+		return RestoreCheckpointResult{}, os.ErrNotExist
+	}
+	safetyCheckpointID, saved, err := s.createRestoreSafetyCheckpoint(ctx, storageID, checkpointID)
+	if err != nil {
+		return RestoreCheckpointResult{}, err
+	}
+	if saved {
+		result.SafetyCheckpointID = safetyCheckpointID
+		result.SafetyCheckpointCreated = true
+		meta, err = s.store.GetWorkspaceMeta(ctx, storageID)
+		if err != nil {
+			return RestoreCheckpointResult{}, err
+		}
 	}
 	// Capture the current manifest before moving head so we can diff against
 	// the restore target for the changelog.
 	priorManifest, err := s.store.GetManifest(ctx, storageID, meta.HeadSavepoint)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	if err := s.store.MoveWorkspaceHead(ctx, storageID, checkpointID, time.Now().UTC()); err != nil {
 		if err == redis.TxFailedErr {
-			return ErrWorkspaceConflict
+			return RestoreCheckpointResult{}, ErrWorkspaceConflict
 		}
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	manifestValue, err := s.store.GetManifest(ctx, storageID, checkpointID)
 	if err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
 	}
 	if err := SyncWorkspaceRoot(ctx, s.store, storageID, manifestValue); err != nil {
-		return err
+		return RestoreCheckpointResult{}, err
+	}
+	if err := afsclient.PublishInvalidation(ctx, s.store.rdb, WorkspaceFSKey(storageID), afsclient.InvalidateEvent{
+		Origin: "control-plane",
+		Op:     afsclient.InvalidateOpRootReplace,
+		Paths:  []string{"/"},
+	}); err != nil {
+		return RestoreCheckpointResult{}, err
 	}
 	template := s.buildChangelogTemplate(ctx, storageID, checkpointID, ChangeSourceServerRestore)
 	writeChangeEntries(ctx, s.store.rdb, storageID, manifestDiff(priorManifest, manifestValue, template))
-	return s.store.Audit(ctx, storageID, "checkpoint_restore", map[string]any{
+	fields := map[string]any{
 		"checkpoint": checkpointID,
 		"mode":       "canonical-only",
+	}
+	if result.SafetyCheckpointCreated {
+		fields["safety_checkpoint"] = result.SafetyCheckpointID
+	}
+	return result, s.store.Audit(ctx, storageID, "checkpoint_restore", fields)
+}
+
+func (s *Service) createRestoreSafetyCheckpoint(ctx context.Context, workspace, checkpointID string) (string, bool, error) {
+	safetyCheckpointID := restoreSafetyCheckpointName()
+	saved, err := s.saveCheckpointFromLive(ctx, workspace, safetyCheckpointID, SaveCheckpointFromLiveOptions{
+		Description: fmt.Sprintf("Safety checkpoint before restoring %s.", checkpointID),
+		Kind:        CheckpointKindSafety,
+		Source:      CheckpointSourceServer,
+		Author:      "afs",
 	})
+	if err != nil {
+		return "", false, fmt.Errorf("restore safety checkpoint: %w", err)
+	}
+	return safetyCheckpointID, saved, nil
+}
+
+func restoreSafetyCheckpointName() string {
+	return "restore-safety-" + time.Now().UTC().Format("20060102-150405.000000000")
+}
+
+func checkpointKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return CheckpointKindManual
+	}
+	return kind
+}
+
+func checkpointSource(source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return CheckpointSourceServer
+	}
+	return source
+}
+
+func checkpointAuthorFromIdentity(identity AuthIdentity) string {
+	if value := strings.TrimSpace(identity.Name); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(identity.Email); value != "" {
+		return value
+	}
+	return strings.TrimSpace(identity.Subject)
+}
+
+func (s *Service) checkpointAttribution(ctx context.Context, storageID string, input SaveCheckpointRequest) SavepointMeta {
+	meta := SavepointMeta{
+		Kind:      checkpointKind(input.Kind),
+		Source:    checkpointSource(input.Source),
+		Author:    strings.TrimSpace(input.Author),
+		CreatedBy: strings.TrimSpace(input.CreatedBy),
+	}
+	if identity, ok := AuthIdentityFromContext(ctx); ok {
+		if meta.CreatedBy == "" {
+			meta.CreatedBy = strings.TrimSpace(identity.Subject)
+		}
+		if meta.Author == "" {
+			meta.Author = checkpointAuthorFromIdentity(identity)
+		}
+	}
+	sc, ok := ChangeSessionContextFromContext(ctx)
+	if ok && strings.TrimSpace(sc.SessionID) != "" {
+		meta.SessionID = strings.TrimSpace(sc.SessionID)
+		if s != nil && s.store != nil {
+			record, err := s.store.GetWorkspaceSession(ctx, storageID, meta.SessionID)
+			if err == nil {
+				meta.AgentID = strings.TrimSpace(record.AgentID)
+				meta.AgentName = strings.TrimSpace(record.Label)
+				if meta.AgentName == "" {
+					meta.AgentName = strings.TrimSpace(record.Hostname)
+				}
+				if meta.Author == "" {
+					meta.Author = firstNonEmpty(meta.AgentName, meta.AgentID)
+				}
+			}
+		}
+	}
+	if meta.Author == "" {
+		meta.Author = "afs"
+	}
+	return meta
 }
 
 func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointRequest) (bool, error) {
@@ -1163,12 +1328,19 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 		return false, err
 	}
 
+	attribution := s.checkpointAttribution(ctx, storageID, input)
 	savepointMeta := SavepointMeta{
 		Version:         formatVersion,
 		ID:              input.CheckpointID,
 		Name:            input.CheckpointID,
-		Description:     "",
-		Author:          "afs",
+		Description:     strings.TrimSpace(input.Description),
+		Kind:            attribution.Kind,
+		Source:          attribution.Source,
+		Author:          attribution.Author,
+		CreatedBy:       attribution.CreatedBy,
+		SessionID:       attribution.SessionID,
+		AgentID:         attribution.AgentID,
+		AgentName:       attribution.AgentName,
 		Workspace:       storageID,
 		ParentSavepoint: input.ExpectedHead,
 		ManifestHash:    manifestHash,
@@ -1341,17 +1513,20 @@ func (s *Service) forkWorkspace(ctx context.Context, sourceWorkspace, newWorkspa
 		DefaultSavepoint: initialCheckpointName,
 	}
 	checkpointMeta := SavepointMeta{
-		Version:      formatVersion,
-		ID:           initialCheckpointName,
-		Name:         initialCheckpointName,
-		Description:  "Forked from " + sourceWorkspace + ".",
-		Author:       "afs",
-		Workspace:    newWorkspaceID,
-		ManifestHash: manifestHash,
-		CreatedAt:    now,
-		FileCount:    stats.FileCount,
-		DirCount:     stats.DirCount,
-		TotalBytes:   stats.TotalBytes,
+		Version:         formatVersion,
+		ID:              initialCheckpointName,
+		Name:            initialCheckpointName,
+		Description:     "Forked from " + sourceWorkspace + ".",
+		Kind:            CheckpointKindFork,
+		Source:          CheckpointSourceServer,
+		Author:          "afs",
+		Workspace:       newWorkspaceID,
+		ParentSavepoint: sourceMeta.HeadSavepoint,
+		ManifestHash:    manifestHash,
+		CreatedAt:       now,
+		FileCount:       stats.FileCount,
+		DirCount:        stats.DirCount,
+		TotalBytes:      stats.TotalBytes,
 	}
 
 	if err := s.store.PutWorkspaceMeta(ctx, workspaceMeta); err != nil {
@@ -1797,6 +1972,10 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 		return workspaceSummary{}, err
 	}
 	stats := s.currentWorkspaceStats(ctx, storageID, headMeta)
+	dirty, err := s.workspaceDirtyState(ctx, storageID, meta)
+	if err != nil {
+		return workspaceSummary{}, err
+	}
 	lastCheckpointAt := meta.UpdatedAt.UTC().Format(time.RFC3339)
 	if len(checkpoints) > 0 {
 		lastCheckpointAt = checkpoints[0].CreatedAt.UTC().Format(time.RFC3339)
@@ -1808,17 +1987,31 @@ func (s *Service) buildWorkspaceSummary(ctx context.Context, meta WorkspaceMeta)
 		DatabaseID:       meta.DatabaseID,
 		DatabaseName:     meta.DatabaseName,
 		RedisKey:         WorkspaceFSKey(storageID),
-		Status:           workspaceStatus(meta),
+		Status:           workspaceStatus(dirty),
 		FileCount:        stats.FileCount,
 		FolderCount:      stats.FolderCount,
 		TotalBytes:       stats.TotalBytes,
 		CheckpointCount:  len(checkpoints),
-		DraftState:       draftState(meta),
+		DraftState:       draftState(dirty),
 		LastCheckpointAt: lastCheckpointAt,
 		UpdatedAt:        meta.UpdatedAt.UTC().Format(time.RFC3339),
 		Region:           meta.Region,
 		Source:           workspaceSource(meta),
 	}, nil
+}
+
+func (s *Service) workspaceDirtyState(ctx context.Context, storageID string, meta WorkspaceMeta) (bool, error) {
+	if s == nil || s.store == nil {
+		return meta.DirtyHint, nil
+	}
+	dirty, known, err := WorkspaceRootDirtyState(ctx, s.store, storageID)
+	if err != nil {
+		return false, err
+	}
+	if known {
+		return dirty, nil
+	}
+	return meta.DirtyHint, nil
 }
 
 func (s *Service) currentWorkspaceStats(ctx context.Context, workspace string, fallback SavepointMeta) workspaceUsageStats {
@@ -1950,6 +2143,8 @@ func createWorkspaceWithMetadata(ctx context.Context, cfg Config, store *Store, 
 		ID:           initialCheckpointName,
 		Name:         initialCheckpointName,
 		Description:  "Initial workspace state.",
+		Kind:         CheckpointKindSystem,
+		Source:       CheckpointSourceServer,
 		Author:       "afs",
 		Workspace:    workspaceID,
 		ManifestHash: manifestHash,
@@ -2030,15 +2225,15 @@ func workspaceSource(meta WorkspaceMeta) string {
 	}
 }
 
-func workspaceStatus(meta WorkspaceMeta) string {
-	if meta.DirtyHint {
+func workspaceStatus(dirty bool) string {
+	if dirty {
 		return "attention"
 	}
 	return "healthy"
 }
 
-func draftState(meta WorkspaceMeta) string {
-	if meta.DirtyHint {
+func draftState(dirty bool) string {
+	if dirty {
 		return "dirty"
 	}
 	return "clean"

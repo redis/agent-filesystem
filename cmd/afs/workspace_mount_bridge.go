@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -58,7 +59,7 @@ func seedWorkspaceMountKey(ctx context.Context, store *afsStore, workspace strin
 	return mountKey, headSavepoint, initialized, nil
 }
 
-func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string) (bool, error) {
+func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace, expectedHead, savepointID string, options ...controlplane.SaveCheckpointFromLiveOptions) (bool, error) {
 	redisKey, err := store.resolveWorkspaceRedisKey(ctx, workspace)
 	if err != nil {
 		return false, err
@@ -68,7 +69,7 @@ func saveWorkspaceRootCheckpoint(ctx context.Context, store *afsStore, workspace
 		return false, err
 	}
 
-	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, rootManifest, blobs, stats, false)
+	saved, err := saveAFSManifest(ctx, store, workspace, expectedHead, savepointID, rootManifest, blobs, stats, false, options...)
 	if err != nil {
 		return false, err
 	}

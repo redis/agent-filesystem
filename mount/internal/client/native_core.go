@@ -172,30 +172,13 @@ func (c *nativeClient) publishInvalidate(ctx context.Context, op string, paths .
 	if len(cleaned) == 0 {
 		return
 	}
-	payload, err := encodeInvalidate(InvalidateEvent{
+	ev := InvalidateEvent{
 		Origin: c.originID,
 		Op:     op,
 		Paths:  cleaned,
-	})
-	if err != nil {
-		log.Printf("afs: invalidate encode failed op=%s paths=%v: %v", op, cleaned, err)
-		return
 	}
-	if err := c.rdb.Publish(ctx, c.keys.invalidateChannel(), payload).Err(); err != nil {
-		// Best-effort broadcast. Log once per failure; callers never see it.
+	if err := PublishInvalidation(ctx, c.rdb, c.key, ev); err != nil {
 		log.Printf("afs: invalidate publish failed op=%s paths=%v: %v", op, cleaned, err)
-	}
-	// Append to the durable change stream so offline clients can catch up
-	// on reconnect. Best-effort: a failure here does not block the mutation.
-	if err := c.rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: c.keys.changesStream(),
-		MaxLen: 10000,
-		Approx: true,
-		Values: map[string]interface{}{
-			"payload": string(payload),
-		},
-	}).Err(); err != nil {
-		log.Printf("afs: change stream append failed op=%s: %v", op, err)
 	}
 }
 
@@ -409,7 +392,7 @@ func (c *nativeClient) applyRemoteInvalidation(ev *InvalidateEvent) {
 			c.cache.Invalidate(dirCacheKey(parentOf(p)))
 		case InvalidateOpDir:
 			c.cache.Invalidate(dirCacheKey(p))
-		case InvalidateOpPrefix:
+		case InvalidateOpPrefix, InvalidateOpRootReplace:
 			c.cache.InvalidatePrefix(p)
 			c.cache.InvalidatePrefix(dirCachePrefix(p))
 		case InvalidateOpContent:

@@ -64,6 +64,14 @@ export type AFSSavepoint = {
   author: string;
   createdAt: string;
   note: string;
+  kind?: string;
+  source?: string;
+  createdBy?: string;
+  sessionId?: string;
+  agentId?: string;
+  agentName?: string;
+  parentCheckpointId?: string;
+  manifestHash?: string;
   fileCount: number;
   folderCount: number;
   totalBytes: number;
@@ -170,6 +178,52 @@ export type AFSFileContent = {
   binary: boolean;
   content?: string;
   target?: string;
+};
+
+export type AFSDiffOp = "create" | "update" | "delete" | "rename" | "metadata";
+
+export type AFSDiffState = {
+  view: AFSWorkspaceView;
+  checkpointId?: string;
+  manifestHash?: string;
+  fileCount: number;
+  folderCount: number;
+  totalBytes: number;
+};
+
+export type AFSDiffSummary = {
+  total: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  renamed: number;
+  metadataChanged: number;
+  bytesAdded: number;
+  bytesRemoved: number;
+};
+
+export type AFSDiffEntry = {
+  op: AFSDiffOp;
+  path: string;
+  previousPath?: string;
+  kind?: AFSTreeItemKind;
+  previousKind?: AFSTreeItemKind;
+  sizeBytes?: number;
+  previousSizeBytes?: number;
+  deltaBytes?: number;
+  contentHash?: string;
+  previousHash?: string;
+  mode?: number;
+  previousMode?: number;
+};
+
+export type AFSWorkspaceDiffResponse = {
+  workspaceId: string;
+  workspaceName?: string;
+  base: AFSDiffState;
+  head: AFSDiffState;
+  summary: AFSDiffSummary;
+  entries: AFSDiffEntry[];
 };
 
 export type AFSWorkspace = {
@@ -299,8 +353,8 @@ export type CreateWorkspaceInput = {
 export type UpdateWorkspaceInput = {
   databaseId?: string;
   workspaceId: string;
-  name: string;
-  description: string;
+  name?: string;
+  description?: string;
   cloudAccount?: string;
   databaseName?: string;
   region?: string;
@@ -340,6 +394,13 @@ export type GetWorkspaceFileContentInput = {
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;
+};
+
+export type GetWorkspaceDiffInput = {
+  databaseId?: string;
+  workspaceId: string;
+  base: AFSWorkspaceView;
+  head: AFSWorkspaceView;
 };
 
 export type SaveDatabaseInput = {

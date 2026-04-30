@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	afsclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -90,6 +91,71 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 	}
 	if record.State != workspaceSessionStateStale {
 		t.Fatalf("stored session state = %q, want %q", record.State, workspaceSessionStateStale)
+	}
+}
+
+func TestServiceRestoreCheckpointAllowsActiveWritableWorkspaceSession(t *testing.T) {
+	t.Helper()
+
+	service, ctx := newWorkspaceSessionTestService(t)
+	if _, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		ClientKind: "sync",
+		Hostname:   "devbox",
+		LocalPath:  "/tmp/repo",
+		Label:      "Codex",
+		Readonly:   false,
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
+	}
+
+	if err := service.RestoreCheckpoint(ctx, "repo", "initial"); err != nil {
+		t.Fatalf("RestoreCheckpoint() returned error: %v", err)
+	}
+}
+
+func TestServiceRestoreCheckpointAllowsReadonlyWorkspaceSession(t *testing.T) {
+	t.Helper()
+
+	service, ctx := newWorkspaceSessionTestService(t)
+	if _, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		ClientKind: "mount",
+		Hostname:   "devbox",
+		LocalPath:  "/tmp/repo",
+		Readonly:   true,
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
+	}
+
+	if err := service.RestoreCheckpoint(ctx, "repo", "initial"); err != nil {
+		t.Fatalf("RestoreCheckpoint() returned error: %v", err)
+	}
+}
+
+func TestServiceRestoreCheckpointPublishesRootReplaceInvalidation(t *testing.T) {
+	t.Helper()
+
+	service, ctx := newWorkspaceSessionTestService(t)
+	if err := service.RestoreCheckpoint(ctx, "repo", "initial"); err != nil {
+		t.Fatalf("RestoreCheckpoint() returned error: %v", err)
+	}
+
+	meta, err := service.store.GetWorkspaceMeta(ctx, "repo")
+	if err != nil {
+		t.Fatalf("GetWorkspaceMeta() returned error: %v", err)
+	}
+	c := afsclient.New(service.store.rdb, WorkspaceFSKey(WorkspaceStorageID(meta)))
+	readCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	entries, err := c.ReadChangeStream(readCtx, "0-0", 10)
+	if err != nil {
+		t.Fatalf("ReadChangeStream() returned error: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(ReadChangeStream()) = %d, want 1", len(entries))
+	}
+	event := entries[0].Event
+	if event.Op != afsclient.InvalidateOpRootReplace || len(event.Paths) != 1 || event.Paths[0] != "/" {
+		t.Fatalf("restore invalidation = %#v, want root replace for /", event)
 	}
 }
 
@@ -254,4 +320,32 @@ func TestServiceWorkspaceSessionCatalogLifecycle(t *testing.T) {
 	if catalogRecord.CloseReason != "expired" {
 		t.Fatalf("catalog close_reason after expiry = %q, want %q", catalogRecord.CloseReason, "expired")
 	}
+}
+
+func newWorkspaceSessionTestService(t *testing.T) (*Service, context.Context) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	cfg := Config{
+		RedisConfig: RedisConfig{
+			RedisAddr: mr.Addr(),
+			RedisDB:   0,
+		},
+	}
+	store := NewStore(rdb)
+	ctx := context.Background()
+
+	if err := createWorkspaceWithMetadata(ctx, cfg, store, "repo", workspaceCreateSpec{
+		DatabaseID:   "db-demo",
+		DatabaseName: "demo",
+		CloudAccount: "Redis Cloud / Test",
+		Region:       "us-test-1",
+		Source:       sourceBlank,
+	}); err != nil {
+		t.Fatalf("createWorkspaceWithMetadata() returned error: %v", err)
+	}
+	return NewService(cfg, store), ctx
 }
