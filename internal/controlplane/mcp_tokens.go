@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	mcpAccessTokenPrefix      = "afs_mcp"
+	mcpAccessTokenPrefix       = "afs_mcp"
 	mcpControlPlaneTokenPrefix = "afs_cp"
 
 	mcpScopeWorkspacePrefix = "workspace:"
@@ -99,6 +99,10 @@ func (m *DatabaseManager) CreateResolvedMCPAccessToken(ctx context.Context, work
 	if !databaseProfileVisibleToSubject(profile, subject) {
 		return mcpAccessTokenResponse{}, os.ErrNotExist
 	}
+	route, err = m.claimSharedWorkspaceForSubject(ctx, profile, route)
+	if err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
 	return m.createMCPAccessTokenRecord(ctx, subject, label, profile.ID, route.WorkspaceID, route.Name, input)
 }
 
@@ -117,7 +121,25 @@ func (m *DatabaseManager) CreateMCPAccessToken(ctx context.Context, databaseID, 
 	if !databaseProfileVisibleToSubject(profile, subject) {
 		return mcpAccessTokenResponse{}, os.ErrNotExist
 	}
+	route, err = m.claimSharedWorkspaceForSubject(ctx, profile, route)
+	if err != nil {
+		return mcpAccessTokenResponse{}, err
+	}
 	return m.createMCPAccessTokenRecord(ctx, subject, label, profile.ID, route.WorkspaceID, route.Name, input)
+}
+
+func (m *DatabaseManager) claimSharedWorkspaceForSubject(ctx context.Context, profile databaseProfile, route workspaceCatalogRoute) (workspaceCatalogRoute, error) {
+	if strings.TrimSpace(profile.OwnerSubject) != "" || strings.TrimSpace(route.OwnerSubject) != "" || authSubjectFromContext(ctx) == "" {
+		return route, nil
+	}
+	detail, err := m.GetWorkspace(ctx, profile.ID, route.WorkspaceID)
+	if err != nil {
+		return workspaceCatalogRoute{}, err
+	}
+	route.WorkspaceID = detail.ID
+	route.Name = detail.Name
+	route.OwnerSubject = detail.OwnerSubject
+	return route, nil
 }
 
 func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subject, label, databaseID, workspaceID, workspaceName string, input createMCPAccessTokenRequest) (mcpAccessTokenResponse, error) {

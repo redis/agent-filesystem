@@ -1144,31 +1144,51 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 	}
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	catalog := m.catalog
+	profiles := make(map[string]databaseProfile, len(m.profiles))
+	for id, profile := range m.profiles {
+		profiles[id] = profile
+	}
+	m.mu.Unlock()
 
-	if m.catalog == nil {
+	if catalog == nil {
 		return workspaceSessionListResponse{Items: []workspaceSessionInfo{}}, nil
 	}
 	subject := authSubjectFromContext(ctx)
 
-	records, err := m.catalog.ListSessions(ctx, databaseID)
+	records, err := catalog.ListSessions(ctx, databaseID)
 	if err != nil {
 		return workspaceSessionListResponse{}, err
 	}
 
 	now := time.Now().UTC()
 	items := make([]workspaceSessionInfo, 0, len(records))
+	workspaceOwnersByDatabase := make(map[string]map[string]catalogOwnerInfo)
 	for _, record := range records {
 		if sessionCatalogRecordLeaseExpired(record, now) {
-			_ = m.catalog.UpsertSession(ctx, staleSessionCatalogRecord(record, now, "expired"))
+			_ = catalog.UpsertSession(ctx, staleSessionCatalogRecord(record, now, "expired"))
 			continue
 		}
-		profile, ok := m.profiles[record.DatabaseID]
+		profile, ok := profiles[record.DatabaseID]
 		if !ok {
 			continue
 		}
 		if !databaseProfileVisibleToSubject(profile, subject) {
 			continue
+		}
+		if subject != "" && strings.TrimSpace(profile.OwnerSubject) == "" {
+			owners, ok := workspaceOwnersByDatabase[record.DatabaseID]
+			if !ok {
+				owners, err = catalog.ListWorkspaceOwners(ctx, record.DatabaseID)
+				if err != nil {
+					return workspaceSessionListResponse{}, err
+				}
+				workspaceOwnersByDatabase[record.DatabaseID] = owners
+			}
+			owner, ok := owners[record.WorkspaceID]
+			if !ok || strings.TrimSpace(owner.Subject) != subject {
+				continue
+			}
 		}
 		databaseName := record.DatabaseID
 		if strings.TrimSpace(profile.Name) != "" {

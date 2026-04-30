@@ -404,6 +404,86 @@ func TestListAgentSessionsSkipsOrphanedDatabaseRecords(t *testing.T) {
 	}
 }
 
+func TestListAgentSessionsScopesSharedDatabaseSessionsToWorkspaceOwner(t *testing.T) {
+	manager, databaseID := newTestManager(t)
+
+	manager.mu.Lock()
+	profile := manager.profiles[databaseID]
+	profile.OwnerSubject = ""
+	profile.OwnerLabel = ""
+	manager.profiles[databaseID] = profile
+	manager.mu.Unlock()
+
+	aliceCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "alice@example.com",
+		Name:    "Alice",
+		Email:   "alice@example.com",
+	})
+	bobCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "bob@example.com",
+		Name:    "Bob",
+		Email:   "bob@example.com",
+	})
+
+	aliceWorkspace, err := manager.CreateWorkspace(aliceCtx, databaseID, createWorkspaceRequest{
+		Name:        "alice-repo",
+		Description: "Alice workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace(alice) returned error: %v", err)
+	}
+	bobWorkspace, err := manager.CreateWorkspace(bobCtx, databaseID, createWorkspaceRequest{
+		Name:        "bob-repo",
+		Description: "Bob workspace",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace(bob) returned error: %v", err)
+	}
+
+	if _, err := manager.CreateWorkspaceSession(aliceCtx, databaseID, aliceWorkspace.ID, createWorkspaceSessionRequest{
+		AgentID:         "agt_alice",
+		ClientKind:      "sync",
+		AFSVersion:      "test",
+		Hostname:        "alice-mac",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/alice-repo",
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceSession(alice) returned error: %v", err)
+	}
+	if _, err := manager.CreateWorkspaceSession(bobCtx, databaseID, bobWorkspace.ID, createWorkspaceSessionRequest{
+		AgentID:         "agt_bob",
+		ClientKind:      "sync",
+		AFSVersion:      "test",
+		Hostname:        "bob-mac",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/bob-repo",
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceSession(bob) returned error: %v", err)
+	}
+
+	aliceSessions, err := manager.ListAgentSessions(aliceCtx, "")
+	if err != nil {
+		t.Fatalf("ListAgentSessions(alice) returned error: %v", err)
+	}
+	if len(aliceSessions.Items) != 1 {
+		t.Fatalf("len(ListAgentSessions(alice).Items) = %d, want 1: %#v", len(aliceSessions.Items), aliceSessions.Items)
+	}
+	if aliceSessions.Items[0].AgentID != "agt_alice" {
+		t.Fatalf("alice visible agent = %q, want agt_alice", aliceSessions.Items[0].AgentID)
+	}
+
+	bobSessions, err := manager.ListAgentSessions(bobCtx, "")
+	if err != nil {
+		t.Fatalf("ListAgentSessions(bob) returned error: %v", err)
+	}
+	if len(bobSessions.Items) != 1 {
+		t.Fatalf("len(ListAgentSessions(bob).Items) = %d, want 1: %#v", len(bobSessions.Items), bobSessions.Items)
+	}
+	if bobSessions.Items[0].AgentID != "agt_bob" {
+		t.Fatalf("bob visible agent = %q, want agt_bob", bobSessions.Items[0].AgentID)
+	}
+}
+
 func TestListAgentSessionsReconcilesDeadSessions(t *testing.T) {
 	manager, databaseID := newTestManager(t)
 	ctx := context.Background()
