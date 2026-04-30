@@ -27,8 +27,8 @@ Two parallel streams. Duplicate effort, drift risk, two UI tabs.
 Readers today:
 - `GET /v1/…/activity` → audit stream, via `activityFromAudit` text synthesis.
 - `GET /v1/…/changes` → changelog stream.
-- UI tabs: `Events` (activity), `File Changes` (changelog). Each own query.
-- CLI `afs log` → changelog.
+- UI tabs: workspace `History` (activity) and `Changelog`. Each own query today, with the merge converging them later.
+- CLI `afs session log` → changelog.
 
 Overlap: every `save` in audit = N `put` rows in changelog with matching `checkpoint_id`. Every `session_start` has no counterpart in changelog but is the anchor for a block of agent_sync rows.
 
@@ -102,7 +102,7 @@ Ships to prod. Validate entry shape in `redis-cli` for a few days. Zero user imp
 1. Replace `ListAudit` + `ListChangelog` with `ListEvents(kind=…, session_id=…, since=…, limit=…)` against the unified stream. Old funcs become thin wrappers for back-compat.
 2. `activityFromAudit` retargets the events stream (filtering `kind != file` by default).
 3. New endpoint `GET /v1/…/events` (canonical). Keep `/activity` + `/changes` returning the same data filtered until UI migrates.
-4. UI: collapse `Events` + `File Changes` tabs into one `History` tab with a filter pill set (lifecycle on, file ops off by default). CLI `afs log` keeps its current filter (file ops only).
+4. UI: collapse workspace `History` + `Changelog` into one `History` tab with a filter pill set (lifecycle on, file ops off by default). CLI `afs session log` keeps its current filter (file ops only).
 
 Ships. Users still see two tabs if we delay the UI collapse, but the backend is unified.
 

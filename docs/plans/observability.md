@@ -56,7 +56,7 @@ Companion keys:
 |---|---|
 | Session timeline | `XRANGE afs:{id}:workspace:changelog - +` filtered by `session_id` (V1); small enough for short sessions |
 | Workspace recent feed | `XREVRANGE afs:{id}:workspace:changelog + - COUNT N` |
-| Path history | deep: scan stream; V1 ship the "last writer" from `path:last` only |
+| Path activity | deep: scan stream; V1 ship the "last writer" from `path:last` only |
 | Session summary totals | `HGETALL afs:{id}:sess:{sid}:summary` |
 
 If session-filter scans get expensive later, add `afs:{id}:sess:{sid}:entries` (list of entry IDs) as a secondary index, or a second stream scoped to the session.
@@ -86,7 +86,7 @@ client path instead of reviving the retired Redis module.
 ### UI surfaces
 1. **Session detail page** — new tab "Changes." Paginated timeline, filter by op, search by path. Header shows totals: `N added · M modified · K deleted · +X MB / -Y MB`.
 2. **Workspace activity page** — existing page, enrich each row with actor (session + agent identity) and expose "view session changes" link.
-3. **Path history** — click any path, see ordered list of sessions that touched it.
+3. **Path activity** — click any path, see ordered list of sessions that touched it.
 4. **Agent runs list** — for a given user, list their sessions with summary line "touched 47 files, +2.3 MB" so you can scan "what did each agent do today."
 
 ### CLI surface
@@ -125,7 +125,7 @@ thresholds configurable per workspace.
 ### Restore, checkpoint, import semantics
 - **Restore**: append-only — emit new entries with `source=server_restore` for every path the restore mutated. Stream is never rewritten.
 - **Checkpoint save**: each modified path emits one entry tagged `checkpoint_id`.
-- **Import**: seed the stream with one `source=import` entry per imported file so path history is populated from day one.
+- **Import**: seed the stream with one `source=import` entry per imported file so path activity is populated from day one.
 - **Fork** (backend-only today): if/when it becomes user-facing, add `parent_workspace_id` + `forked_from_entry_id` to the workspace record and keep child streams independent. Not in scope for V1.
 
 ### Write-path sketch

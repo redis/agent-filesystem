@@ -255,6 +255,36 @@ func TestListChangelogFiltersBySession(t *testing.T) {
 	}
 }
 
+func TestListChangelogFiltersByPath(t *testing.T) {
+	store, _ := newTestStore(t)
+	ctx := context.Background()
+
+	entries := []ChangeEntry{
+		{SessionID: "sess-a", Op: ChangeOpPut, Path: "/docs/readme.md", Source: ChangeSourceCheckpoint},
+		{SessionID: "sess-a", Op: ChangeOpRename, Path: "/docs/README.md", PrevPath: "/docs/readme.md", Source: ChangeSourceCheckpoint},
+		{SessionID: "sess-b", Op: ChangeOpPut, Path: "/docs/notes.md", Source: ChangeSourceCheckpoint},
+	}
+	pipe := store.rdb.Pipeline()
+	enqueueChangeEntries(ctx, pipe, "ws1", entries)
+	if _, err := pipe.Exec(ctx); err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+
+	resp, err := store.ListChangelog(ctx, "ws1", ChangelogListRequest{Path: "/docs/readme.md", Limit: 10})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(resp.Entries) != 2 {
+		t.Fatalf("filtered count = %d, want 2", len(resp.Entries))
+	}
+	if resp.Entries[0].Path != "/docs/readme.md" {
+		t.Fatalf("first path = %q, want %q", resp.Entries[0].Path, "/docs/readme.md")
+	}
+	if resp.Entries[1].PrevPath != "/docs/readme.md" {
+		t.Fatalf("rename prev path = %q, want %q", resp.Entries[1].PrevPath, "/docs/readme.md")
+	}
+}
+
 func TestListChangelogPaginationCursorsAreExclusive(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()

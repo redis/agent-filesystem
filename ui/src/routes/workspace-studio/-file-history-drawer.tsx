@@ -4,6 +4,7 @@ import styled from "styled-components";
 import { NoticeBody, NoticeCard, NoticeTitle, Tag } from "../../components/afs-kit";
 import { afsApi, formatBytes } from "../../foundation/api/afs";
 import {
+  useChangelog,
   useDiffFileVersionsMutation,
   useFileHistory,
   useFileVersionContent,
@@ -12,6 +13,7 @@ import {
 } from "../../foundation/hooks/use-afs";
 import { shortDateTime } from "../../foundation/time-format";
 import type {
+  AFSChangelogEntry,
   AFSFileHistoryLineage,
   AFSFileHistoryResponse,
   AFSFileVersion,
@@ -41,6 +43,16 @@ export function FileHistoryDrawer({
   initialVersionId,
   onClose,
 }: Props) {
+  const pathActivityQuery = useChangelog(
+    {
+      databaseId,
+      workspaceId,
+      path,
+      limit: 25,
+      direction: "desc",
+    },
+    path.trim() !== "",
+  );
   const historyQuery = useFileHistory(
     {
       databaseId,
@@ -56,6 +68,7 @@ export function FileHistoryDrawer({
   const undeleteMutation = useUndeleteFileVersionMutation();
   const [extraPages, setExtraPages] = useState<AFSFileHistoryResponse[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>("");
+  const [targetVersionId, setTargetVersionId] = useState(initialVersionId ?? "");
   const [panelMode, setPanelMode] = useState<"content" | "diff">("content");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
@@ -63,6 +76,7 @@ export function FileHistoryDrawer({
   useEffect(() => {
     setExtraPages([]);
     setSelectedKey("");
+    setTargetVersionId(initialVersionId ?? "");
     setPanelMode("content");
     setActionMessage(null);
     setLoadMoreError(null);
@@ -117,18 +131,21 @@ export function FileHistoryDrawer({
     if (flattenedVersions.length === 0) {
       return;
     }
-    if (selectedKey !== "") {
-      return;
-    }
-    if (initialVersionId) {
-      const exact = flattenedVersions.find((entry) => entry.version.versionId === initialVersionId);
+    if (targetVersionId) {
+      const exact = flattenedVersions.find((entry) => entry.version.versionId === targetVersionId);
       if (exact) {
-        setSelectedKey(versionSelectionKey(exact.version));
+        const nextKey = versionSelectionKey(exact.version);
+        if (selectedKey !== nextKey) {
+          setSelectedKey(nextKey);
+        }
         return;
       }
     }
+    if (selectedKey !== "") {
+      return;
+    }
     setSelectedKey(versionSelectionKey(flattenedVersions[0].version));
-  }, [flattenedVersions, initialVersionId, selectedKey]);
+  }, [flattenedVersions, selectedKey, targetVersionId]);
 
   const selected = useMemo<SelectedVersion | null>(
     () =>
@@ -145,12 +162,12 @@ export function FileHistoryDrawer({
           fileId: selected.version.fileId,
           ordinal: selected.version.ordinal,
         }
-      : initialVersionId
+      : targetVersionId
         ? {
             databaseId,
             workspaceId,
             path,
-            versionId: initialVersionId,
+            versionId: targetVersionId,
           }
         : {
             databaseId,
@@ -158,7 +175,7 @@ export function FileHistoryDrawer({
             path,
             versionId: "",
           },
-    selected != null || Boolean(initialVersionId),
+    selected != null || Boolean(targetVersionId),
   );
 
   const displayedVersion = selected?.version;
@@ -234,12 +251,25 @@ export function FileHistoryDrawer({
     setActionMessage(`Undeleted ${response.undeletedFromVersionId} into the working copy.`);
   }
 
+  function handlePathActivitySelect(entry: AFSChangelogEntry) {
+    setActionMessage(null);
+    setPanelMode("content");
+    if (!entry.versionId) {
+      return;
+    }
+    setTargetVersionId(entry.versionId);
+    const exact = flattenedVersions.find((item) => item.version.versionId === entry.versionId);
+    if (exact) {
+      setSelectedKey(versionSelectionKey(exact.version));
+    }
+  }
+
   return (
     <Overlay onClick={onClose}>
       <Panel onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true">
         <Header>
           <HeaderText>
-            <Title>History</Title>
+            <Title>File history</Title>
             <PathText>{path}</PathText>
           </HeaderText>
           <Button size="small" kind="ghost" onClick={onClose}>
@@ -256,6 +286,49 @@ export function FileHistoryDrawer({
 
         <Body>
           <Sidebar>
+            <SidebarSection>
+              <SidebarSectionHeader>
+                <SectionTitle>Path activity</SectionTitle>
+                <SectionCaption>Recent file operations for this path.</SectionCaption>
+              </SidebarSectionHeader>
+              {pathActivityQuery.isLoading ? <EmptyMessage>Loading path activity…</EmptyMessage> : null}
+              {pathActivityQuery.isError ? (
+                <EmptyMessage role="alert">
+                  {pathActivityQuery.error instanceof Error ? pathActivityQuery.error.message : "Unable to load path activity."}
+                </EmptyMessage>
+              ) : null}
+              {!pathActivityQuery.isLoading && !pathActivityQuery.isError && (pathActivityQuery.data?.entries.length ?? 0) === 0 ? (
+                <EmptyMessage>No recent path activity for this file.</EmptyMessage>
+              ) : null}
+              {pathActivityQuery.data?.entries.map((entry) => {
+                const linkedToSelected = entry.versionId != null
+                  && displayedVersion != null
+                  && entry.versionId === displayedVersion.versionId;
+                return (
+                  <ActivityButton
+                    key={entry.id}
+                    type="button"
+                    $active={linkedToSelected}
+                    onClick={() => handlePathActivitySelect(entry)}
+                  >
+                    <VersionTitleRow>
+                      <strong>{entry.op}</strong>
+                      <span>{shortDateTime(entry.occurredAt ?? "")}</span>
+                    </VersionTitleRow>
+                    <VersionMeta>
+                      <span>{activityActorLabel(entry)}</span>
+                      <span>{entry.versionId ? `v${linkedOrdinal(entry.versionId, flattenedVersions) ?? "?"}` : "event only"}</span>
+                    </VersionMeta>
+                  </ActivityButton>
+                );
+              })}
+            </SidebarSection>
+
+            <SidebarSection>
+              <SidebarSectionHeader>
+                <SectionTitle>File history</SectionTitle>
+                <SectionCaption>Ordered versions for this file lineage.</SectionCaption>
+              </SidebarSectionHeader>
             {historyQuery.isLoading ? <EmptyMessage>Loading file history…</EmptyMessage> : null}
             {historyQuery.isError ? (
               <EmptyMessage role="alert">
@@ -308,6 +381,7 @@ export function FileHistoryDrawer({
                 {loadMoreError ? <InlineError role="alert">{loadMoreError}</InlineError> : null}
               </LoadMoreWrap>
             ) : null}
+            </SidebarSection>
           </Sidebar>
 
           <DetailPane>
@@ -418,6 +492,22 @@ function versionSelectionKey(version: Pick<AFSFileVersion, "fileId" | "ordinal">
   return `${version.fileId}:${version.ordinal}`;
 }
 
+function linkedOrdinal(
+  versionId: string,
+  flattenedVersions: Array<{ lineage: AFSFileHistoryLineage; version: AFSFileVersion }>,
+) {
+  return flattenedVersions.find((entry) => entry.version.versionId === versionId)?.version.ordinal;
+}
+
+function activityActorLabel(entry: AFSChangelogEntry) {
+  return entry.label?.trim()
+    || entry.agentId?.trim()
+    || entry.sessionId?.trim()
+    || entry.user?.trim()
+    || entry.source?.trim()
+    || "system";
+}
+
 const Overlay = styled.div`
   position: fixed;
   inset: 0;
@@ -486,6 +576,28 @@ const Sidebar = styled.div`
   gap: 12px;
 `;
 
+const SidebarSection = styled.div`
+  display: grid;
+  gap: 10px;
+`;
+
+const SidebarSectionHeader = styled.div`
+  display: grid;
+  gap: 4px;
+`;
+
+const SectionTitle = styled.h3`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 14px;
+`;
+
+const SectionCaption = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 12px;
+`;
+
 const DetailPane = styled.div`
   min-height: 0;
   overflow: auto;
@@ -533,6 +645,10 @@ const VersionButton = styled.button<{ $active: boolean }>`
   color: var(--afs-ink);
   padding: 10px 12px;
   cursor: pointer;
+`;
+
+const ActivityButton = styled(VersionButton)`
+  background: ${({ $active }) => ($active ? "var(--afs-focus-soft)" : "rgba(255, 255, 255, 0.45)")};
 `;
 
 const VersionTitleRow = styled.div`

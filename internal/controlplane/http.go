@@ -570,6 +570,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		}
 		response, err := manager.ListAllChangelog(r.Context(), ChangelogListRequest{
 			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 			Limit:     limit,
@@ -806,6 +807,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			}
 			response, err := manager.ListGlobalChangelog(r.Context(), databaseID, ChangelogListRequest{
 				SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+				Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 				Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 				Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 				Limit:     limit,
@@ -1445,6 +1447,7 @@ func handleWorkspaceRoute(
 		}
 		req := ChangelogListRequest{
 			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 			Limit:     limit,

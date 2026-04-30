@@ -291,6 +291,9 @@ func (c *httpControlPlaneClient) ListChangelog(ctx context.Context, workspace st
 	if strings.TrimSpace(req.SessionID) != "" {
 		params.Set("session_id", req.SessionID)
 	}
+	if strings.TrimSpace(req.Path) != "" {
+		params.Set("path", req.Path)
+	}
 	if strings.TrimSpace(req.Since) != "" {
 		params.Set("since", req.Since)
 	}

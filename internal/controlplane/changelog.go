@@ -388,6 +388,7 @@ const AgentIDHeader = "X-AFS-Agent-Id"
 // ChangelogListRequest parameterizes a changelog read. All fields optional.
 type ChangelogListRequest struct {
 	SessionID string // if set, entries are filtered to this session
+	Path      string // if set, entries are filtered to this path or prev_path
 	Since     string // entry ID to read after (exclusive) — start of the range
 	Until     string // entry ID to read up to (exclusive) — end of the range
 	Limit     int    // hard cap on entries returned; default 100, max 1000
@@ -498,9 +499,9 @@ func (s *Store) ListChangelog(ctx context.Context, storageID string, req Changel
 	if req.Until != "" {
 		end = "(" + req.Until
 	}
-	// Over-fetch when filtering by session so we have enough rows after filter.
+	// Over-fetch when filtering so we have enough rows after in-memory filters.
 	fetch := int64(limit)
-	if req.SessionID != "" {
+	if req.SessionID != "" || req.Path != "" {
 		fetch = int64(limit) * 4
 		if fetch > 4000 {
 			fetch = 4000
@@ -522,6 +523,9 @@ func (s *Store) ListChangelog(ctx context.Context, storageID string, req Changel
 	for _, m := range msgs {
 		row := rowFromStreamMessage(m)
 		if req.SessionID != "" && row.SessionID != req.SessionID {
+			continue
+		}
+		if req.Path != "" && row.Path != req.Path && row.PrevPath != req.Path {
 			continue
 		}
 		entries = append(entries, row)
