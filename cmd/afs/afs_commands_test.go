@@ -639,7 +639,7 @@ func TestCmdImportSelfHostedCreatesWorkspace(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.ProductMode = productModeSelfHosted
 	cfg.URL = server.URL
-	cfg.DatabaseID = ""
+	cfg.DatabaseID = "primary"
 	cfg.WorkRoot = t.TempDir()
 	saveTempConfig(t, cfg)
 
@@ -669,6 +669,133 @@ func TestCmdImportSelfHostedCreatesWorkspace(t *testing.T) {
 	}
 	if detail.FolderCount != 1 {
 		t.Fatalf("FolderCount = %d, want %d", detail.FolderCount, 1)
+	}
+}
+
+func TestCmdImportDirectForceReplacePreservesVersioningHistory(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdImport([]string{"import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(initial) returned error: %v", err)
+	}
+
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	service := controlPlaneServiceFromStore(loadedCfg, store)
+	if _, err := service.UpdateWorkspaceVersioningPolicy(context.Background(), "repo", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main // v2\n")
+	if err := cmdImport([]string{"import", "--force", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(force) returned error: %v", err)
+	}
+
+	policy, err := service.GetWorkspaceVersioningPolicy(context.Background(), "repo")
+	if err != nil {
+		t.Fatalf("GetWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	if policy.Mode != controlplane.WorkspaceVersioningModeAll {
+		t.Fatalf("policy.Mode = %q, want %q", policy.Mode, controlplane.WorkspaceVersioningModeAll)
+	}
+
+	history, err := service.GetFileHistoryPage(context.Background(), "repo", controlplane.FileHistoryRequest{
+		Path:        "/main.go",
+		NewestFirst: false,
+	})
+	if err != nil {
+		t.Fatalf("GetFileHistoryPage() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 1 {
+		t.Fatalf("history lineages = %#v, want one lineage with one imported version", history.Lineages)
+	}
+	content, err := service.GetFileVersionContent(context.Background(), "repo", history.Lineages[0].Versions[0].VersionID)
+	if err != nil {
+		t.Fatalf("GetFileVersionContent() returned error: %v", err)
+	}
+	if content.Content != "package main // v2\n" {
+		t.Fatalf("version content = %q, want %q", content.Content, "package main // v2\n")
+	}
+}
+
+func TestCmdImportSelfHostedForceReplacePreservesVersioningHistory(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdImport([]string{"import", "codex", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(initial) returned error: %v", err)
+	}
+
+	_, service, closeFn, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSControlPlane() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if _, err := service.UpdateWorkspaceVersioningPolicy(context.Background(), "codex", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main // hosted v2\n")
+	if err := cmdImport([]string{"import", "--force", "codex", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(force) returned error: %v", err)
+	}
+
+	policy, err := service.GetWorkspaceVersioningPolicy(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	if policy.Mode != controlplane.WorkspaceVersioningModeAll {
+		t.Fatalf("policy.Mode = %q, want %q", policy.Mode, controlplane.WorkspaceVersioningModeAll)
+	}
+
+	history, err := service.GetFileHistoryPage(context.Background(), "codex", controlplane.FileHistoryRequest{
+		Path:        "/main.go",
+		NewestFirst: false,
+	})
+	if err != nil {
+		t.Fatalf("GetFileHistoryPage() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 1 {
+		t.Fatalf("history lineages = %#v, want one lineage with one imported version", history.Lineages)
+	}
+	content, err := service.GetFileVersionContent(context.Background(), "codex", history.Lineages[0].Versions[0].VersionID)
+	if err != nil {
+		t.Fatalf("GetFileVersionContent() returned error: %v", err)
+	}
+	if content.Content != "package main // hosted v2\n" {
+		t.Fatalf("version content = %q, want %q", content.Content, "package main // hosted v2\n")
 	}
 }
 

@@ -45,6 +45,13 @@ type syncDaemonReady struct {
 	Error string `json:"error,omitempty"`
 }
 
+func syncVersioningStorageID(cfg config, workspace string) string {
+	if id := strings.TrimSpace(cfg.CurrentWorkspaceID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(workspace)
+}
+
 func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(), error) {
 	return prepareSyncBootstrapForWorkspace(ctx, cfg, "")
 }
@@ -166,7 +173,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		Readonly:     runtimeCfg.ReadOnly,
 		Interactive:  foreground,
 		Rdb:          rdb,
-		StorageID:    bootstrap.redisKey,
+		StorageID:    syncVersioningStorageID(runtimeCfg, bootstrap.workspace),
 		SessionID:    bootstrap.sessionID,
 		AgentID:      runtimeCfg.ID,
 		Label:        runtimeCfg.Name,
@@ -411,7 +418,7 @@ func runSyncDaemon() error {
 		MaxFileBytes: syncSizeCapBytes(cfg),
 		Readonly:     cfg.ReadOnly,
 		Rdb:          rdb,
-		StorageID:    mountKey,
+		StorageID:    syncVersioningStorageID(cfg, workspace),
 		SessionID:    sessionID,
 		AgentID:      cfg.ID,
 		Label:        cfg.Name,

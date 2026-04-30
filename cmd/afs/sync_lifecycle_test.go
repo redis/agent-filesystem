@@ -100,3 +100,20 @@ func TestWaitForSyncDaemonReadyReportsChildError(t *testing.T) {
 		t.Fatalf("waitForSyncDaemonReady() error = %q, want child error detail", err)
 	}
 }
+
+func TestSyncVersioningStorageIDPrefersCurrentWorkspaceID(t *testing.T) {
+	cfg := config{
+		CurrentWorkspace:   "repo",
+		CurrentWorkspaceID: "ws_repo",
+	}
+	if got := syncVersioningStorageID(cfg, "repo"); got != "ws_repo" {
+		t.Fatalf("syncVersioningStorageID() = %q, want %q", got, "ws_repo")
+	}
+}
+
+func TestSyncVersioningStorageIDFallsBackToWorkspaceName(t *testing.T) {
+	cfg := config{CurrentWorkspace: "repo"}
+	if got := syncVersioningStorageID(cfg, "repo"); got != "repo" {
+		t.Fatalf("syncVersioningStorageID() = %q, want %q", got, "repo")
+	}
+}

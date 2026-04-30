@@ -110,11 +110,12 @@ type DatabaseListResponse = databaseListResponse
 type UpsertDatabaseRequest = upsertDatabaseRequest
 
 type DatabaseManager struct {
-	mu       sync.Mutex
-	catalog  catalogStore
-	profiles map[string]databaseProfile
-	order    []string
-	runtimes map[string]*databaseRuntime
+	mu                 sync.Mutex
+	catalog            catalogStore
+	configPathOverride string
+	profiles           map[string]databaseProfile
+	order              []string
+	runtimes           map[string]*databaseRuntime
 
 	// Stats cache populated by the background poller. Keyed by database ID.
 	// Protected by statsMu so callers hitting ListDatabases don't contend
@@ -145,12 +146,13 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 	}
 
 	manager := &DatabaseManager{
-		catalog:    catalog,
-		profiles:   make(map[string]databaseProfile, len(loadedProfiles)),
-		order:      make([]string, 0, len(loadedProfiles)),
-		runtimes:   make(map[string]*databaseRuntime),
-		stats:      make(map[string]RedisStats),
-		pollerStop: make(chan struct{}),
+		catalog:            catalog,
+		configPathOverride: configPathOverride,
+		profiles:           make(map[string]databaseProfile, len(loadedProfiles)),
+		order:              make([]string, 0, len(loadedProfiles)),
+		runtimes:           make(map[string]*databaseRuntime),
+		stats:              make(map[string]RedisStats),
+		pollerStop:         make(chan struct{}),
 	}
 	for _, profile := range loadedProfiles {
 		if err := validateDatabaseProfile(profile); err != nil {
@@ -397,7 +399,7 @@ func (m *DatabaseManager) ensureBootstrapDatabase(ctx context.Context) error {
 }
 
 func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) error {
-	profile, ok := bootstrapDatabaseProfileFromContext(ctx)
+	profile, ok := m.bootstrapDatabaseProfile(ctx)
 	if !ok {
 		return nil
 	}
@@ -431,6 +433,16 @@ func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) err
 		return err
 	}
 	return nil
+}
+
+func (m *DatabaseManager) bootstrapDatabaseProfile(ctx context.Context) (databaseProfile, bool) {
+	if profile, ok := bootstrapDatabaseProfileFromContext(ctx); ok {
+		return profile, true
+	}
+	if len(m.order) > 0 {
+		return databaseProfile{}, false
+	}
+	return bootstrapDatabaseProfileFromConfigPath(m.configPathOverride)
 }
 
 func (m *DatabaseManager) normalizeBootstrapProfilesLocked(canonical databaseProfile) bool {
