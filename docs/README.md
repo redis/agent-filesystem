@@ -8,6 +8,12 @@ It is the single root for docs, active backlog notes, and longer design plans.
 
 ## Current References
 
+- `agent-filesystem.md` - agent-facing operating guide for AFS workspaces, MCP,
+  checkpoints, and CLI use.
+- `cli-reference.md` - full AFS CLI command reference.
+- `typescript-reference.md` - TypeScript SDK command and API reference.
+- `python-reference.md` - Python SDK command and API reference.
+- `mcp-reference.md` - local and hosted MCP setup, profiles, tools, and arguments.
 - `afs-control-plane-api.md` - the shared workspace/checkpoint/file HTTP contract.
 - `afs-cloud-control-plane-design.md` - active hosted control-plane architecture.
 - `afs-cloud-control-plane-byodb-design.md` - external database and private data-plane design.

@@ -19,9 +19,19 @@ import {
   DocSection,
   DocSubheading,
   InlineCode,
+  Step,
 } from "../../components/doc-kit";
 import { searchBenchmark } from "../../foundation/performance-data";
 import { pythonSdkSample, typescriptSdkSample } from "./afs-samples";
+import { HighlightedCode } from "./syntax-code";
+
+const docsReferenceBaseHref = "https://github.com/redis/agent-filesystem/blob/main/docs";
+const referenceDocHref = {
+  cli: `${docsReferenceBaseHref}/cli-reference.md`,
+  mcp: `${docsReferenceBaseHref}/mcp-reference.md`,
+  python: `${docsReferenceBaseHref}/python-reference.md`,
+  typescript: `${docsReferenceBaseHref}/typescript-reference.md`,
+} as const;
 
 export type DocsTopicId =
   | "how-it-works"
@@ -32,7 +42,8 @@ export type DocsTopicId =
   | "typescript-sdk"
   | "python-sdk"
   | "self-managed"
-  | "performance";
+  | "performance"
+  | "faq";
 
 export type DocsTopic = {
   id: DocsTopicId;
@@ -45,7 +56,8 @@ export type DocsTopic = {
     | "/docs/typescript-sdk"
     | "/docs/python-sdk"
     | "/docs/self-managed"
-    | "/docs/performance";
+    | "/docs/performance"
+    | "/docs/faq";
   eyebrow: string;
   title: string;
   summary: string;
@@ -133,6 +145,36 @@ const BenchmarkSummary = styled.div`
   color: var(--afs-muted, #6d6e71);
   font-size: 13px;
   line-height: 1.45;
+`;
+
+const FAQList = styled.div`
+  display: grid;
+  border-top: 1px solid var(--afs-line, #e6e6e6);
+`;
+
+const FAQItem = styled.div`
+  display: grid;
+  gap: 7px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--afs-line, #e6e6e6);
+`;
+
+const FAQQuestion = styled.div`
+  color: var(--afs-ink, #282828);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+`;
+
+const ReferenceDocLink = styled.a`
+  color: var(--afs-accent, #064ea2);
+  font-weight: 800;
+  text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
 `;
 
 const howItWorksTopic: DocsTopic = {
@@ -239,7 +281,7 @@ sync directory, live mount, or direct MCP file tools`}</code>
 const cliTopic: DocsTopic = {
   id: "cli",
   path: "/docs/cli",
-  eyebrow: "First run",
+  eyebrow: "CLI Docs",
   title: "AFS CLI Workflow",
   summary:
     "Install, sign in, create or import a workspace, start the local surface, and use the daily commands.",
@@ -253,6 +295,11 @@ const cliTopic: DocsTopic = {
             workspace, start sync or mount mode, create checkpoints, and launch
             the MCP server.
           </DocProse>
+          <DocProse>
+            <ReferenceDocLink href={referenceDocHref.cli} rel="noreferrer" target="_blank">
+              Full CLI command reference
+            </ReferenceDocLink>
+          </DocProse>
           <CodeBlock>
             <code>{`afs login
 afs setup
@@ -264,6 +311,34 @@ afs up`}</code>
             workspace and local path setup. <InlineCode>afs up</InlineCode>{" "}
             starts the saved workspace using the saved mode.
           </DocProse>
+        </>
+      ),
+    },
+    {
+      heading: "The Whole Loop",
+      body: (
+        <>
+          <Step n={1} title="Sign in">
+            <InlineCode>afs login</InlineCode> connects your local CLI to AFS
+            Cloud or a control plane. The CLI keeps the token locally so future
+            commands can create and mount workspaces without another browser
+            step.
+          </Step>
+          <Step n={2} title="Create a workspace">
+            <InlineCode>afs workspace create myworkspace</InlineCode> creates an
+            empty workspace with an initial checkpoint. This workspace is the
+            shared state agents and tools will work against.
+          </Step>
+          <Step n={3} title="Expose it locally">
+            <InlineCode>afs up myworkspace ~/afs</InlineCode> starts the local
+            AFS runtime and exposes the workspace at <InlineCode>~/afs</InlineCode>.
+            Use your editor, shell, and agents there like any other directory.
+          </Step>
+          <Step n={4} title="Checkpoint the good state">
+            <InlineCode>afs checkpoint create myworkspace before-refactor</InlineCode>{" "}
+            saves a named restore point. Live edits are immediate, while
+            checkpoints are deliberate moments in the workspace timeline.
+          </Step>
         </>
       ),
     },
@@ -529,6 +604,11 @@ const mcpAgentsTopic: DocsTopic = {
             server over stdio. It is meant to be launched by an MCP client, not
             used as a long-running web server.
           </DocProse>
+          <DocProse>
+            <ReferenceDocLink href={referenceDocHref.mcp} rel="noreferrer" target="_blank">
+              Full MCP tool reference
+            </ReferenceDocLink>
+          </DocProse>
           <CodeBlock>
             <code>{`{
   "mcpServers": {
@@ -557,11 +637,15 @@ const mcpAgentsTopic: DocsTopic = {
           </DocProse>
           <DocSubheading>TypeScript</DocSubheading>
           <CodeBlock>
-            <code>{typescriptSdkSample}</code>
+            <code>
+              <HighlightedCode code={typescriptSdkSample} language="typescript" />
+            </code>
           </CodeBlock>
           <DocSubheading>Python</DocSubheading>
           <CodeBlock>
-            <code>{pythonSdkSample}</code>
+            <code>
+              <HighlightedCode code={pythonSdkSample} language="python" />
+            </code>
           </CodeBlock>
         </>
       ),
@@ -647,6 +731,11 @@ const typescriptSdkTopic: DocsTopic = {
             The client uses the hosted MCP endpoint by default and can point at
             a Self-managed control plane with one environment variable.
           </DocProse>
+          <DocProse>
+            <ReferenceDocLink href={referenceDocHref.typescript} rel="noreferrer" target="_blank">
+              TypeScript command reference
+            </ReferenceDocLink>
+          </DocProse>
           <CodeBlock>
             <code>{`npm install redis-afs
 export AFS_API_KEY="afs_..."
@@ -689,7 +778,9 @@ export AFS_API_BASE_URL="http://127.0.0.1:8091"`}</code>
             checkpoint, and shell helpers.
           </DocProse>
           <CodeBlock>
-            <code>{typescriptSdkSample}</code>
+            <code>
+              <HighlightedCode code={typescriptSdkSample} language="typescript" />
+            </code>
           </CodeBlock>
         </>
       ),
@@ -777,6 +868,11 @@ const pythonSdkTopic: DocsTopic = {
             context-manager-friendly mount. Use it for agents, workers, and
             automation that should talk to AFS directly.
           </DocProse>
+          <DocProse>
+            <ReferenceDocLink href={referenceDocHref.python} rel="noreferrer" target="_blank">
+              Python command reference
+            </ReferenceDocLink>
+          </DocProse>
           <CodeBlock>
             <code>{`pip install redis-afs
 export AFS_API_KEY="afs_..."
@@ -819,11 +915,18 @@ export AFS_API_BASE_URL="http://127.0.0.1:8091"`}</code>
             cleaned up when your agent finishes.
           </DocProse>
           <CodeBlock>
-            <code>{pythonSdkSample}</code>
+            <code>
+              <HighlightedCode code={pythonSdkSample} language="python" />
+            </code>
           </CodeBlock>
           <CodeBlock>
-            <code>{`with afs.fs.mount(workspaces=[{"name": "foobar"}], mode="rw") as fs:
-    fs.write_file("/README.md", "hello")`}</code>
+            <code>
+              <HighlightedCode
+                code={`with afs.fs.mount(workspaces=[{"name": "foobar"}], mode="rw") as fs:
+    fs.write_file("/README.md", "hello")`}
+                language="python"
+              />
+            </code>
           </CodeBlock>
         </>
       ),
@@ -898,7 +1001,7 @@ const selfManagedTopic: DocsTopic = {
   id: "self-managed",
   path: "/docs/self-managed",
   eyebrow: "Deployment",
-  title: "Cloud, Self-Managed, And Standalone Modes",
+  title: "Deployments: Cloud, Self-managed, and Standalone",
   summary:
     "Choose the right control-plane and Redis topology for local development, teams, and agent-only workflows.",
   sections: [
@@ -1026,6 +1129,133 @@ afs grep -E "error|warning" --workspace demo`}</code>
   related: ["cli", "local-files", "how-it-works"],
 };
 
+const faqTopic: DocsTopic = {
+  id: "faq",
+  path: "/docs/faq",
+  eyebrow: "Reference",
+  title: "Frequently Asked Questions",
+  summary:
+    "Answers for data import, egress, large files, versioning, Git providers, POSIX behavior, and search speed.",
+  sections: [
+    {
+      heading: "Common Questions",
+      body: (
+        <FAQList>
+          <FAQItem>
+            <FAQQuestion>
+              My data lives in GitHub, GitLab, S3, or Drive. Can I sync it to AFS?
+            </FAQQuestion>
+            <DocProse>
+              Today, the clean path is to bring that data into a local
+              directory first, then import or sync it with AFS. For Git
+              upstreams, clone or check out the Git project the way you already
+              do, then run <InlineCode>afs workspace import</InlineCode> or{" "}
+              <InlineCode>afs up --mode sync</InlineCode>. For non-Git systems
+              like S3 or Google Drive, use their API or CLI in a small script
+              and let AFS own the workspace state after the files land locally.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>How does egress metering work?</FAQQuestion>
+            <DocProse>
+              Local and Self-managed AFS do not add an AFS egress meter. Reads
+              happen through sync, live mount, MCP tools, the CLI, or the
+              control-plane API against your configured Redis/control-plane
+              deployment. If you run AFS on hosted infrastructure, the normal
+              provider bandwidth and Redis network policies still apply.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>
+              Does AFS handle large files like datasets, models, and media?
+            </FAQQuestion>
+            <DocProse>
+              Yes, within the shape of an agent workspace. AFS stores file
+              content in Redis-backed external content keys, supports byte-range
+              reads and writes in the mount path, and syncs changed large files
+              in chunks. The default sync per-file cap is 2 GB, so keep
+              generated artifacts and temporary bulk data out with{" "}
+              <InlineCode>.afsignore</InlineCode> when they do not belong in the
+              workspace timeline.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Does my agent really need versioning?</FAQQuestion>
+            <DocProse>
+              If the agent is doing throwaway scratch work, maybe not. If the
+              work needs human review, rollback, audit history, or parallel
+              exploration, versioning becomes the safety rail. In AFS, edits
+              update the live workspace, checkpoints save deliberate restore
+              points, and forks let another agent explore a second line of work
+              without clobbering the first one.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Why can't I just use GitHub or GitLab?</FAQQuestion>
+            <DocProse>
+              You can, and you should keep using Git providers for source
+              control, pull requests, and long-lived project history. AFS is for
+              the live workspace around that source: generated files, prompts,
+              logs, datasets, agent scratch state, checkpoints, forks, local
+              sync, live mount, and MCP file tools. It gives agents a
+              filesystem-shaped place to work before everything is ready to
+              become a Git commit.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>
+              How is this different from S3 or S3-style filesystems?
+            </FAQQuestion>
+            <DocProse>
+              Object storage is excellent for durable blobs. AFS is a workspace
+              system: it keeps a file tree, live edits, search, checkpoints,
+              forks, and local execution surfaces together. Use S3-style storage
+              for large durable objects and archival data; use AFS when agents
+              need to edit a working tree, checkpoint the state, fork into
+              parallel attempts, and keep normal tools pointed at a local path.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Is AFS POSIX compatible?</FAQQuestion>
+            <DocProse>
+              AFS is designed to feel like a normal filesystem to editors,
+              shells, agents, and sandboxes. Sync mode gives you a real local
+              directory on disk. Live mount mode exposes the workspace through
+              NFS on macOS and FUSE on Linux. That covers the everyday Unix tool
+              workflow, but AFS does not pretend to be a perfect replacement for
+              a mature shared POSIX filesystem in every multi-writer edge case.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>How fast is AFS?</FAQQuestion>
+            <DocProse>
+              For the current Redis Search benchmark, indexed literal{" "}
+              <InlineCode>afs grep</InlineCode> runs in tens of milliseconds:
+              17.35 ms for a rare literal and 42.56 ms for a common literal on
+              a 4,000-file markdown corpus. Sync mode keeps a real local
+              directory on disk for editors and tools, while live mount and MCP
+              give agents direct access to the same Redis-backed workspace.
+            </DocProse>
+          </FAQItem>
+          <FAQItem>
+            <FAQQuestion>Okay, but is AFS fast enough for agents?</FAQQuestion>
+            <DocProse>
+              AFS is built around time-to-useful-work. An agent can start from a
+              workspace, search the tree, read the files it needs, write
+              changes, and checkpoint the result without cloning or
+              materializing everything up front. For regex-heavy searches, use{" "}
+              <InlineCode>rg</InlineCode> on a synced or mounted workspace; for
+              ordinary literal search, <InlineCode>afs grep</InlineCode> uses
+              the indexed fast path when Redis Search is available.
+            </DocProse>
+          </FAQItem>
+        </FAQList>
+      ),
+    },
+  ],
+  related: ["how-it-works", "cli", "self-managed"],
+};
+
 export const docsTopics = [
   howItWorksTopic,
   cliTopic,
@@ -1036,6 +1266,7 @@ export const docsTopics = [
   pythonSdkTopic,
   selfManagedTopic,
   performanceTopic,
+  faqTopic,
 ] as const satisfies ReadonlyArray<DocsTopic>;
 
 export const docsTopicById = {
@@ -1048,6 +1279,7 @@ export const docsTopicById = {
   "python-sdk": pythonSdkTopic,
   "self-managed": selfManagedTopic,
   performance: performanceTopic,
+  faq: faqTopic,
 } satisfies Record<DocsTopicId, DocsTopic>;
 
 export function DocsTopicPage({ topic }: { topic: DocsTopic }) {

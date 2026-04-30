@@ -36,6 +36,7 @@ import { Route as DocsPerformanceRouteImport } from './routes/docs_.performance'
 import { Route as DocsMcpAgentsRouteImport } from './routes/docs_.mcp-agents'
 import { Route as DocsLocalFilesRouteImport } from './routes/docs_.local-files'
 import { Route as DocsHowItWorksRouteImport } from './routes/docs_.how-it-works'
+import { Route as DocsFaqRouteImport } from './routes/docs_.faq'
 import { Route as DocsCliRouteImport } from './routes/docs_.cli'
 import { Route as AgentsAddRouteImport } from './routes/agents_.add'
 import { Route as TemplatesInstalledWorkspaceIdRouteImport } from './routes/templates.installed.$workspaceId'
@@ -175,6 +176,11 @@ const DocsHowItWorksRoute = DocsHowItWorksRouteImport.update({
   path: '/docs/how-it-works',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DocsFaqRoute = DocsFaqRouteImport.update({
+  id: '/docs_/faq',
+  path: '/docs/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const DocsCliRoute = DocsCliRouteImport.update({
   id: '/docs_/cli',
   path: '/docs/cli',
@@ -210,6 +216,7 @@ export interface FileRoutesByFullPath {
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
   '/docs/cli': typeof DocsCliRoute
+  '/docs/faq': typeof DocsFaqRoute
   '/docs/how-it-works': typeof DocsHowItWorksRoute
   '/docs/local-files': typeof DocsLocalFilesRoute
   '/docs/mcp-agents': typeof DocsMcpAgentsRoute
@@ -242,6 +249,7 @@ export interface FileRoutesByTo {
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents/add': typeof AgentsAddRoute
   '/docs/cli': typeof DocsCliRoute
+  '/docs/faq': typeof DocsFaqRoute
   '/docs/how-it-works': typeof DocsHowItWorksRoute
   '/docs/local-files': typeof DocsLocalFilesRoute
   '/docs/mcp-agents': typeof DocsMcpAgentsRoute
@@ -275,6 +283,7 @@ export interface FileRoutesById {
   '/workspaces': typeof WorkspacesRouteWithChildren
   '/agents_/add': typeof AgentsAddRoute
   '/docs_/cli': typeof DocsCliRoute
+  '/docs_/faq': typeof DocsFaqRoute
   '/docs_/how-it-works': typeof DocsHowItWorksRoute
   '/docs_/local-files': typeof DocsLocalFilesRoute
   '/docs_/mcp-agents': typeof DocsMcpAgentsRoute
@@ -309,6 +318,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/agents/add'
     | '/docs/cli'
+    | '/docs/faq'
     | '/docs/how-it-works'
     | '/docs/local-files'
     | '/docs/mcp-agents'
@@ -341,6 +351,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/agents/add'
     | '/docs/cli'
+    | '/docs/faq'
     | '/docs/how-it-works'
     | '/docs/local-files'
     | '/docs/mcp-agents'
@@ -373,6 +384,7 @@ export interface FileRouteTypes {
     | '/workspaces'
     | '/agents_/add'
     | '/docs_/cli'
+    | '/docs_/faq'
     | '/docs_/how-it-works'
     | '/docs_/local-files'
     | '/docs_/mcp-agents'
@@ -406,6 +418,7 @@ export interface RootRouteChildren {
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
   AgentsAddRoute: typeof AgentsAddRoute
   DocsCliRoute: typeof DocsCliRoute
+  DocsFaqRoute: typeof DocsFaqRoute
   DocsHowItWorksRoute: typeof DocsHowItWorksRoute
   DocsLocalFilesRoute: typeof DocsLocalFilesRoute
   DocsMcpAgentsRoute: typeof DocsMcpAgentsRoute
@@ -608,6 +621,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsHowItWorksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/docs_/faq': {
+      id: '/docs_/faq'
+      path: '/docs/faq'
+      fullPath: '/docs/faq'
+      preLoaderRoute: typeof DocsFaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/docs_/cli': {
       id: '/docs_/cli'
       path: '/docs/cli'
@@ -695,6 +715,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesRoute: WorkspacesRouteWithChildren,
   AgentsAddRoute: AgentsAddRoute,
   DocsCliRoute: DocsCliRoute,
+  DocsFaqRoute: DocsFaqRoute,
   DocsHowItWorksRoute: DocsHowItWorksRoute,
   DocsLocalFilesRoute: DocsLocalFilesRoute,
   DocsMcpAgentsRoute: DocsMcpAgentsRoute,
