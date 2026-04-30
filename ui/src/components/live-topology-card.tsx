@@ -3,6 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
 import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
+import { BotIcon, FoldersIcon } from "./lucide-icons";
+import { formatBytes } from "../foundation/api/afs";
 import { AgentDetailDialog } from "../foundation/tables/agents-table";
 import { displayWorkspaceName } from "../foundation/workspace-display";
 
@@ -128,17 +130,15 @@ const AgentNode = styled.button<{ $i: number }>`
   }
 `;
 
-const AgentIcon = styled.div<{ $hue: number }>`
+const NodeIconBox = styled.div<{ $active?: boolean }>`
   width: 26px;
   height: 26px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 800;
-  color: #fff;
-  background: ${({ $hue }) => `hsl(${$hue}, 72%, 52%)`};
+  color: ${({ $active }) => ($active ? "var(--afs-ok, #22c55e)" : "var(--afs-accent, #dc2626)")};
+  background: color-mix(in srgb, currentColor 14%, transparent);
   flex-shrink: 0;
 `;
 
@@ -254,19 +254,6 @@ const WorkspaceNode = styled.button<{ $i: number }>`
   }
 `;
 
-const FolderIcon = styled.div`
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  background: var(--afs-accent-soft);
-  color: var(--afs-accent);
-  flex-shrink: 0;
-`;
-
 const WorkspaceMeta = styled.div`
   display: flex;
   flex-direction: column;
@@ -329,51 +316,23 @@ const EmptyColumn = styled.div`
   text-align: center;
 `;
 
-/* ---- Status dot ---- */
-const StatusDot = styled.span<{ $active: boolean }>`
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: ${({ $active }) => ($active ? "#22c55e" : "#d4d4d8")};
-  flex-shrink: 0;
-`;
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-const CLIENT_KIND_MAP: Record<string, { icon: string; hue: number }> = {
-  claude: { icon: "C", hue: 262 },
-  "claude-code": { icon: "C", hue: 262 },
-  openai: { icon: "G", hue: 160 },
-  gpt: { icon: "G", hue: 160 },
-  custom: { icon: "B", hue: 30 },
-};
-
-function agentVisual(clientKind: string): { icon: string; hue: number } {
-  const lower = clientKind.toLowerCase();
-  for (const [key, val] of Object.entries(CLIENT_KIND_MAP)) {
-    if (lower.includes(key)) return val;
-  }
-  // Hash the string to a hue for unknown agents
-  let hash = 0;
-  for (let i = 0; i < lower.length; i++) {
-    hash = lower.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = ((hash % 360) + 360) % 360;
-  return { icon: lower === "" ? "A" : lower[0].toUpperCase(), hue };
-}
 
 function displayLocalPath(path: string): string {
   return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
 }
 
-function displayAgentName(agent: AFSAgentSession): string {
+function displaySystemName(agent: AFSAgentSession): string {
+  return agent.hostname.trim() || "unknown host";
+}
+
+function displayAgentId(agent: AFSAgentSession): string {
   return (
-    agent.label?.trim() ||
     agent.agentId?.trim() ||
-    agent.hostname.trim() ||
-    "agent"
+    agent.sessionId.trim() ||
+    "id not reported"
   );
 }
 
@@ -581,17 +540,18 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
             <EmptyColumn>No agents connected</EmptyColumn>
           ) : (
             agents.map((agent, i) => {
-              const vis = agentVisual(agent.clientKind);
-              const localPath = displayLocalPath(agent.localPath);
-              const agentName = displayAgentName(agent);
+              const systemName = displaySystemName(agent);
+              const agentId = displayAgentId(agent);
+              const mountedPath = displayLocalPath(agent.localPath);
               const methodLabel = agent.clientKind.trim() || "agent";
+              const active = agent.state === "active";
               return (
                 <AgentNode
                   key={agent.sessionId}
                   $i={i}
                   type="button"
-                  aria-label={`Open details for ${agentName}`}
-                  title={`Open details for ${agentName}`}
+                  aria-label={`Open details for ${systemName}`}
+                  title={`Open details for ${systemName}`}
                   onClick={() => {
                     setSelectedAgent(agent);
                   }}
@@ -599,17 +559,14 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
                     agentRefs.current[i] = el;
                   }}
                 >
-                  <StatusDot $active={agent.state === "active"} />
-                  <AgentIcon $hue={vis.hue} title={methodLabel}>
-                    {vis.icon}
-                  </AgentIcon>
+                  <NodeIconBox $active={active} title={methodLabel}>
+                    <BotIcon customSize={18} />
+                  </NodeIconBox>
                   <AgentText>
-                    <AgentLabel>{agentName}</AgentLabel>
-                    <AgentMeta>
-                      {agent.hostname || agent.sessionId.slice(0, 8)}
-                    </AgentMeta>
-                    {localPath ? (
-                      <AgentPath title={localPath}>{localPath}</AgentPath>
+                    <AgentLabel title={systemName}>{systemName}</AgentLabel>
+                    <AgentMeta title={agentId}>{agentId}</AgentMeta>
+                    {mountedPath ? (
+                      <AgentPath title={agent.localPath}>{mountedPath}</AgentPath>
                     ) : null}
                   </AgentText>
                 </AgentNode>
@@ -655,11 +612,16 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
                     wsRefs.current[i] = el;
                   }}
                 >
-                  <FolderIcon>&#128193;</FolderIcon>
+                  <NodeIconBox title="Workspace">
+                    <FoldersIcon customSize={18} />
+                  </NodeIconBox>
                   <WorkspaceMeta>
                     <WorkspaceName>{workspaceLabel}</WorkspaceName>
                     <WorkspaceFiles>
                       {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"}
+                    </WorkspaceFiles>
+                    <WorkspaceFiles>
+                      Size: {formatBytes(ws.totalBytes)}
                     </WorkspaceFiles>
                   </WorkspaceMeta>
                 </WorkspaceNode>
