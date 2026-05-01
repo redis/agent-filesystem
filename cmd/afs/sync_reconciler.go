@@ -161,12 +161,16 @@ func (r *reconciler) suppressLocalEventsDuringRestore(suppress bool) {
 func (r *reconciler) run(ctx context.Context, local <-chan LocalEvent, remote <-chan remoteEvent) {
 	r.localCh = local
 	r.remoteCh = remote
+	symlinkSweep := time.NewTicker(500 * time.Millisecond)
+	defer symlinkSweep.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			close(r.uploadCh)
 			close(r.downloadCh)
 			return
+		case <-symlinkSweep.C:
+			r.sweepMissingLocalSymlinks(ctx)
 		case ev, ok := <-r.localCh:
 			if !ok {
 				r.localCh = nil
@@ -192,6 +196,14 @@ func (r *reconciler) run(ctx context.Context, local <-chan LocalEvent, remote <-
 // whether to enqueue an upload, drop as echo, or trigger conflict resolution.
 func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	if ev.Path == "" {
+		return
+	}
+	if ev.Path == "." {
+		info, err := os.Lstat(r.root)
+		if err != nil || !info.IsDir() {
+			return
+		}
+		r.handleLocalDir(ctx, ev.Path, r.root, info)
 		return
 	}
 	if r.suppressLocalEvents.Load() {
@@ -245,7 +257,7 @@ func (r *reconciler) handleLocalEvent(ctx context.Context, ev LocalEvent) {
 	case info.Mode()&os.ModeSymlink != 0:
 		r.handleLocalSymlink(ev.Path, abs)
 	case info.IsDir():
-		r.handleLocalDir(ev.Path, abs, info)
+		r.handleLocalDir(ctx, ev.Path, abs, info)
 	case info.Mode().IsRegular():
 		r.handleLocalFile(ev.Path, abs, info)
 	default:
@@ -859,10 +871,11 @@ func (r *reconciler) handleLocalSymlink(rel, abs string) {
 	}
 }
 
-func (r *reconciler) handleLocalDir(rel, abs string, info fs.FileInfo) {
+func (r *reconciler) handleLocalDir(ctx context.Context, rel, abs string, info fs.FileInfo) {
 	r.state.mu.Lock()
 	stored, hasStored := r.state.state.Entries[rel]
 	r.state.mu.Unlock()
+	r.reconcileLocalDirDeletes(ctx, rel)
 	if hasStored && stored.Type == "dir" {
 		return
 	}
@@ -873,6 +886,50 @@ func (r *reconciler) handleLocalDir(rel, abs string, info fs.FileInfo) {
 		Mode:        uint32(info.Mode() & fs.ModePerm),
 		StoredEntry: stored,
 		HasStored:   hasStored,
+	}
+}
+
+func (r *reconciler) reconcileLocalDirDeletes(ctx context.Context, rel string) {
+	prefix := ""
+	if rel != "." {
+		prefix = strings.TrimSuffix(rel, "/") + "/"
+	}
+	missing := make([]string, 0)
+	r.state.mu.Lock()
+	for path, entry := range r.state.state.Entries {
+		if entry.Deleted || entry.Type == "dir" {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(r.root, filepath.FromSlash(path))); errors.Is(err, fs.ErrNotExist) {
+			missing = append(missing, path)
+		}
+	}
+	r.state.mu.Unlock()
+	for _, missingPath := range missing {
+		r.handleLocalDelete(ctx, missingPath, "remove")
+	}
+}
+
+func (r *reconciler) sweepMissingLocalSymlinks(ctx context.Context) {
+	if r.suppressLocalEvents.Load() {
+		return
+	}
+	missing := make([]string, 0)
+	r.state.mu.Lock()
+	for path, entry := range r.state.state.Entries {
+		if entry.Deleted || entry.Type != "symlink" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(r.root, filepath.FromSlash(path))); errors.Is(err, fs.ErrNotExist) {
+			missing = append(missing, path)
+		}
+	}
+	r.state.mu.Unlock()
+	for _, missingPath := range missing {
+		r.handleLocalDelete(ctx, missingPath, "remove")
 	}
 }
 

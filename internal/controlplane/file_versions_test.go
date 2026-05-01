@@ -936,6 +936,64 @@ func TestStoreRecordFileVersionMutationSymlinkTargetChange(t *testing.T) {
 	}
 }
 
+func TestStoreRecordFileVersionMutationSeedsBaselineForExistingTrackedFile(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	version, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:        "/notes/existing.txt",
+		Exists:      true,
+		Kind:        "file",
+		Mode:        0o644,
+		Content:     []byte("before\n"),
+		ContentHash: textSHA256("before\n"),
+		BlobID:      textSHA256("before\n"),
+		SizeBytes:   int64(len("before\n")),
+	}, VersionedFileSnapshot{
+		Path:        "/notes/existing.txt",
+		Exists:      true,
+		Kind:        "file",
+		Mode:        0o644,
+		Content:     []byte("after\n"),
+		ContentHash: textSHA256("after\n"),
+		BlobID:      textSHA256("after\n"),
+		SizeBytes:   int64(len("after\n")),
+	}, FileVersionMutationMetadata{Source: ChangeSourceAgentSync})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(existing tracked file) returned error: %v", err)
+	}
+	if got := version.Ordinal; got != 2 {
+		t.Fatalf("version.Ordinal = %d, want 2", got)
+	}
+
+	history, err := service.GetFileHistory(context.Background(), "repo", "/notes/existing.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 2 {
+		t.Fatalf("history.Lineages = %#v, want one lineage with baseline + mutation", history.Lineages)
+	}
+	if got := history.Lineages[0].Versions[0].Op; got != ChangeOpPut {
+		t.Fatalf("baseline op = %q, want %q", got, ChangeOpPut)
+	}
+	if got := history.Lineages[0].Versions[0].ContentHash; got != textSHA256("before\n") {
+		t.Fatalf("baseline content hash = %q, want %q", got, textSHA256("before\n"))
+	}
+	if got := history.Lineages[0].Versions[1].ContentHash; got != textSHA256("after\n") {
+		t.Fatalf("mutation content hash = %q, want %q", got, textSHA256("after\n"))
+	}
+}
+
 func TestForkWorkspacePreservesFileHistoryAndPolicy(t *testing.T) {
 	t.Helper()
 

@@ -77,7 +77,25 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 	if err != nil {
 		return nil, err
 	}
+	before = applyLargeFileGuardrail(policy, before)
 	after = applyLargeFileGuardrail(policy, after)
+	if !trackedAlready && !rename && before.Exists && after.Exists && snapshotsEquivalent(before, after) && strings.TrimSpace(metadata.Source) != ChangeSourceVersionRestore {
+		return nil, nil
+	}
+	if !trackedAlready && before.Exists {
+		historyIDs, err := s.ListPathHistoryVersionIDs(ctx, workspace, lineagePath)
+		if err != nil {
+			return nil, err
+		}
+		if len(historyIDs) > 0 {
+			return nil, ErrWorkspaceConflict
+		}
+	}
+	if !trackedAlready && before.Exists && !skipFileVersionHeadValidation(metadata.Source) {
+		if _, err := s.AppendFileVersion(ctx, workspace, lineage.FileID, baselineVersionForSnapshot(before, metadata)); err != nil {
+			return nil, err
+		}
+	}
 	if after.Exists && after.Kind == "file" && after.BlobID != "" && after.Content != nil {
 		if err := s.SaveBlobs(ctx, workspace, map[string][]byte{after.BlobID: after.Content}); err != nil {
 			return nil, err
@@ -152,6 +170,25 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 		return nil, err
 	}
 	return &appended, nil
+}
+
+func baselineVersionForSnapshot(snapshot VersionedFileSnapshot, metadata FileVersionMutationMetadata) FileVersion {
+	version := FileVersion{
+		Path:          snapshot.Path,
+		Kind:          versionKindForSnapshot(snapshot, VersionedFileSnapshot{}),
+		Op:            versionOpForSnapshot(snapshot),
+		Source:        strings.TrimSpace(metadata.Source),
+		SessionID:     strings.TrimSpace(metadata.SessionID),
+		AgentID:       strings.TrimSpace(metadata.AgentID),
+		User:          strings.TrimSpace(metadata.User),
+		CheckpointIDs: nil,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if checkpointID := strings.TrimSpace(metadata.CheckpointID); checkpointID != "" {
+		version.CheckpointIDs = []string{checkpointID}
+	}
+	populateVersionFromSnapshot(&version, snapshot)
+	return version
 }
 
 func skipFileVersionHeadValidation(source string) bool {
