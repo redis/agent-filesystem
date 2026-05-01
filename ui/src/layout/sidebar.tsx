@@ -12,7 +12,6 @@ import {
   RedisLogoDarkFullIcon,
   RedisLogoDarkMinIcon,
 } from "@redis-ui/icons/multicolor";
-import { Moon, Sun } from "lucide-react";
 import * as S from "./sidebar.styles";
 import {
   adminNavigationItem,
@@ -22,9 +21,9 @@ import {
 } from "./navigation-items";
 import type { NavigationItem } from "./navigation-items";
 import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
-import { useColorMode } from "../foundation/theme-context";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { afsApi } from "../foundation/api/afs";
+import { ThemeModeToggle } from "../components/theme-mode-toggle";
 
 const SIDEBAR_LOCALSTORAGE_KEY = "afs_sidebar_open";
 
@@ -65,14 +64,11 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const router = useRouter();
   const auth = useAuthSession();
-  const { colorMode, toggleColorMode } = useColorMode();
   const { databases, isLoading } = useDatabaseScope();
 
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
-  const isDark = colorMode === "dark";
-  const themeToggleTitle = isDark ? "Switch to light mode" : "Switch to dark mode";
   const profileLabel = auth.supportsAccountAuth ? auth.displayName : "Logged in";
   const avatarLabel = auth.supportsAccountAuth ? auth.displayName : "AFS";
 
@@ -196,41 +192,7 @@ export function AppSidebar() {
           <>
             <SideBar.Divider fullWidth />
             <S.DarkModeRow $isExpanded={isExpanded}>
-              {isExpanded ? (
-                <S.DarkModeToggle
-                  type="button"
-                  role="switch"
-                  aria-checked={isDark}
-                  aria-label="Dark mode"
-                  title={themeToggleTitle}
-                  onClick={toggleColorMode}
-                >
-                  <S.ToggleTrack $on={isDark}>
-                    <S.ToggleIcon $active={!isDark}>
-                      <Sun size={12} strokeWidth={2.1} aria-hidden="true" />
-                    </S.ToggleIcon>
-                    <S.ToggleIcon $active={isDark}>
-                      <Moon size={12} strokeWidth={2.1} aria-hidden="true" />
-                    </S.ToggleIcon>
-                    <S.ToggleThumb $on={isDark} />
-                  </S.ToggleTrack>
-                </S.DarkModeToggle>
-              ) : (
-                <S.CollapsedThemeButton
-                  type="button"
-                  role="switch"
-                  aria-checked={isDark}
-                  aria-label="Dark mode"
-                  title={themeToggleTitle}
-                  onClick={toggleColorMode}
-                >
-                  {isDark ? (
-                    <Moon size={15} strokeWidth={2.1} aria-hidden="true" />
-                  ) : (
-                    <Sun size={15} strokeWidth={2.1} aria-hidden="true" />
-                  )}
-                </S.CollapsedThemeButton>
-              )}
+              <ThemeModeToggle compact={!isExpanded} />
             </S.DarkModeRow>
             {auth.isSignedOut ? (
               <S.SignInButtonWrapper $isExpanded={isExpanded}>

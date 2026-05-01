@@ -14,6 +14,7 @@
   --afs-line-strong: rgba(8, 6, 13, 0.16);
   --afs-ink: #08060d;
   --afs-ink-soft: #40384d;
+  --afs-ink-on-accent: #ffffff;
   --afs-muted: #626b78;
   --afs-accent: #2563eb;
   --afs-accent-soft: rgba(37, 99, 235, 0.1);
@@ -36,6 +37,7 @@
   --afs-line-strong: rgba(86, 127, 148, 0.8);
   --afs-ink: #f2f5f4;
   --afs-ink-soft: #c5d1d4;
+  --afs-ink-on-accent: #07131a;
   --afs-muted: #98aab1;
   --afs-accent: #60a5fa;
   --afs-accent-soft: rgba(96, 165, 250, 0.16);

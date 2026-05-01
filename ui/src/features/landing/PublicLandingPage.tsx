@@ -59,13 +59,6 @@ export function PublicLandingPage() {
   return (
     <LandingPage>
       <HeroSection>
-        <HeroKicker>
-          <VersionPill>AFS Cloud</VersionPill>
-          <span>backed by Redis</span>
-          <span>open source</span>
-          <span>MIT</span>
-        </HeroKicker>
-
         <HeroTitle>
           a filesystem
           <HeroTitleLine>
@@ -91,10 +84,6 @@ export function PublicLandingPage() {
             <LogIn size={18} strokeWidth={2} aria-hidden="true" />
             Log in to afs.cloud
           </SecondaryCta>
-          <RepoCta href={githubUrl} target="_blank" rel="noreferrer">
-            <GitBranch size={18} strokeWidth={2} aria-hidden="true" />
-            Clone the repo
-          </RepoCta>
         </HeroActions>
 
         <HeroFacts aria-label="Agent Filesystem facts">
@@ -241,7 +230,7 @@ export function PublicLandingPage() {
 const LandingPage = styled.div`
   width: min(100%, 1480px);
   margin: 0 auto;
-  padding: 88px 32px 72px;
+  padding: 56px 18px 48px;
 
   @media (max-width: 860px) {
     padding: 56px 18px 48px;
@@ -250,54 +239,15 @@ const LandingPage = styled.div`
 
 const HeroSection = styled.section`
   max-width: 980px;
-  min-height: calc(100vh - 270px);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 32px 0 56px;
+  padding: 0px 20px 40px;
 
   @media (max-width: 860px) {
     min-height: auto;
-    padding: 16px 0 40px;
+    padding: 0px 10px 40px;
   }
-`;
-
-const HeroKicker = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 14px 22px;
-  margin-bottom: 42px;
-  color: var(--afs-ink-dim);
-  font-family: var(--afs-font-mono);
-  font-size: var(--afs-fz-md);
-  letter-spacing: var(--afs-tr-caps);
-  text-transform: lowercase;
-
-  span:not(:first-child)::before {
-    content: ".";
-    margin-right: 22px;
-    color: var(--afs-ink-faint);
-  }
-
-  @media (max-width: 640px) {
-    gap: 10px;
-    margin-bottom: 30px;
-
-    span:not(:first-child)::before {
-      content: none;
-    }
-  }
-`;
-
-const VersionPill = styled.span`
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  border: 1px solid var(--afs-accent);
-  padding: 5px 12px;
-  color: var(--afs-accent);
-  letter-spacing: 0.08em;
 `;
 
 const HeroTitle = styled.h1`
@@ -315,7 +265,6 @@ const HeroTitle = styled.h1`
 
   @media (max-width: 640px) {
     font-size: 46px;
-    line-height: 1.05;
   }
 `;
 
@@ -787,7 +736,7 @@ const PublicLinkText = styled.span`
 
   strong {
     color: var(--afs-ink);
-    font-size: 15px;
+    font-size: 20px;
     font-weight: var(--afs-fw-medium);
     letter-spacing: 0;
   }

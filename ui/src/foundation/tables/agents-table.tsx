@@ -279,33 +279,6 @@ const UptimeLabel = styled.span`
   font-weight: 600;
 `;
 
-/* ---- View toggle ---- */
-const ToggleGroup = styled.div`
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--afs-panel);
-  border: 1px solid var(--afs-line);
-`;
-
-const ToggleButton = styled.button<{ $active: boolean }>`
-  border: none;
-  border-radius: 7px;
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "#e4e4e7" : "transparent")};
-  transition: background 160ms ease, color 160ms ease;
-
-  &:hover {
-    color: var(--afs-ink, #18181b);
-    background: ${({ $active }) => ($active ? "#e4e4e7" : "#f0f0f0")};
-  }
-`;
-
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -543,20 +516,22 @@ export function AgentsTable({
           onChange={setSearch}
           placeholder="Search by name, path, workspace..."
         />
-        <ToggleGroup>
-          <ToggleButton
+        <S.ToggleGroup>
+          <S.ToggleButton
             $active={viewMode === "cards"}
+            aria-pressed={viewMode === "cards"}
             onClick={() => setViewMode("cards")}
           >
             Cards
-          </ToggleButton>
-          <ToggleButton
+          </S.ToggleButton>
+          <S.ToggleButton
             $active={viewMode === "table"}
+            aria-pressed={viewMode === "table"}
             onClick={() => setViewMode("table")}
           >
             Table
-          </ToggleButton>
-        </ToggleGroup>
+          </S.ToggleButton>
+        </S.ToggleGroup>
         {toolbarAction}
       </S.HeadingWrap>
 

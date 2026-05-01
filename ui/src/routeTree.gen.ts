@@ -15,6 +15,7 @@ import { Route as SignupRouteImport } from './routes/signup'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as HomeRouteImport } from './routes/home'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as DocsRouteImport } from './routes/docs'
@@ -70,6 +71,11 @@ const McpRoute = McpRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HomeRoute = HomeRouteImport.update({
+  id: '/home',
+  path: '/home',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
@@ -215,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/home': typeof HomeRoute
   '/login': typeof LoginRouteWithChildren
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
@@ -249,6 +256,7 @@ export interface FileRoutesByTo {
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/home': typeof HomeRoute
   '/login': typeof LoginRouteWithChildren
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
@@ -284,6 +292,7 @@ export interface FileRoutesById {
   '/docs': typeof DocsRoute
   '/downloads': typeof DownloadsRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/home': typeof HomeRoute
   '/login': typeof LoginRouteWithChildren
   '/mcp': typeof McpRoute
   '/settings': typeof SettingsRoute
@@ -320,6 +329,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/downloads'
     | '/forgot-password'
+    | '/home'
     | '/login'
     | '/mcp'
     | '/settings'
@@ -354,6 +364,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/downloads'
     | '/forgot-password'
+    | '/home'
     | '/login'
     | '/mcp'
     | '/settings'
@@ -388,6 +399,7 @@ export interface FileRouteTypes {
     | '/docs'
     | '/downloads'
     | '/forgot-password'
+    | '/home'
     | '/login'
     | '/mcp'
     | '/settings'
@@ -423,6 +435,7 @@ export interface RootRouteChildren {
   DocsRoute: typeof DocsRoute
   DownloadsRoute: typeof DownloadsRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  HomeRoute: typeof HomeRoute
   LoginRoute: typeof LoginRouteWithChildren
   McpRoute: typeof McpRoute
   SettingsRoute: typeof SettingsRoute
@@ -485,6 +498,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/home': {
+      id: '/home'
+      path: '/home'
+      fullPath: '/home'
+      preLoaderRoute: typeof HomeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forgot-password': {
@@ -728,6 +748,7 @@ const rootRouteChildren: RootRouteChildren = {
   DocsRoute: DocsRoute,
   DownloadsRoute: DownloadsRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  HomeRoute: HomeRoute,
   LoginRoute: LoginRouteWithChildren,
   McpRoute: McpRoute,
   SettingsRoute: SettingsRoute,

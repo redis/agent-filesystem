@@ -302,12 +302,14 @@ export function WorkspaceTable({
         <S.ToggleGroup>
           <S.ToggleButton
             $active={viewMode === "cards"}
+            aria-pressed={viewMode === "cards"}
             onClick={() => setViewMode("cards")}
           >
             Cards
           </S.ToggleButton>
           <S.ToggleButton
             $active={viewMode === "table"}
+            aria-pressed={viewMode === "table"}
             onClick={() => setViewMode("table")}
           >
             Table

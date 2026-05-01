@@ -461,8 +461,8 @@ export const Tabs = styled.div`
 
 export const TabButton = styled.button<{ $active?: boolean }>`
   border: none;
-  background: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "transparent")};
-  color: ${({ $active }) => ($active ? "#fff" : "var(--afs-muted, #71717a)")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted, #71717a)")};
   padding: 9px 16px;
   border-radius: 10px;
   font-size: 13px;
@@ -472,14 +472,14 @@ export const TabButton = styled.button<{ $active?: boolean }>`
   transition: background 140ms ease, color 140ms ease, transform 140ms ease;
 
   &:hover {
-    color: ${({ $active }) => ($active ? "#fff" : "var(--afs-ink, #18181b)")};
+    color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-ink, #18181b)")};
     transform: translateY(-1px);
   }
 
   [data-skin="situation-room"] && {
     border-radius: var(--afs-r-1);
-    background: ${({ $active }) => ($active ? "var(--afs-accent)" : "transparent")};
-    color: ${({ $active }) => ($active ? "var(--afs-ink-on-accent)" : "var(--afs-ink-dim)")};
+    background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "transparent")};
+    color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-dim)")};
     font-family: var(--afs-font-mono);
     font-weight: var(--afs-fw-regular);
     letter-spacing: var(--afs-tr-caps);
@@ -489,8 +489,8 @@ export const TabButton = styled.button<{ $active?: boolean }>`
 
     &:hover {
       transform: none;
-      color: ${({ $active }) => ($active ? "var(--afs-ink-on-accent)" : "var(--afs-ink)")};
-      background: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-bg-2)")};
+      color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink)")};
+      background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-bg-2)")};
     }
   }
 `;

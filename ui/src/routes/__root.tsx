@@ -61,6 +61,7 @@ function RootLayout() {
   const onAuthRoute = isAuthPath(location.pathname);
   const isPublicAppPath = PUBLIC_APP_PATHS.has(location.pathname);
   const isMarketingPath = isPublicMarketingPath(location.pathname);
+  const forcePublicShell = location.pathname === "/home";
 
   useEffect(() => {
     if (auth.isLoading) return;
@@ -85,7 +86,7 @@ function RootLayout() {
     );
   }
 
-  if (isMarketingPath && (auth.isLoading || auth.isSignedOut)) {
+  if (isMarketingPath && (forcePublicShell || auth.isLoading || auth.isSignedOut)) {
     return (
       <BackgroundPatternProvider>
         <BgFx />

@@ -247,13 +247,18 @@ export const ToggleButton = styled.button<{ $active: boolean }>`
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
-  color: ${({ $active }) => ($active ? "var(--afs-ink, #18181b)" : "var(--afs-muted, #71717a)")};
-  background: ${({ $active }) => ($active ? "var(--afs-line, #d4d4d8)" : "transparent")};
+  color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-muted, #71717a)")};
+  background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "transparent")};
   transition: background 160ms ease, color 160ms ease;
 
   &:hover {
-    color: var(--afs-ink, #18181b);
-    background: ${({ $active }) => ($active ? "var(--afs-line, #d4d4d8)" : "var(--afs-focus-soft, #f0f0f0)")};
+    color: ${({ $active }) => ($active ? "var(--afs-accent, #2563eb)" : "var(--afs-ink, #18181b)")};
+    background: ${({ $active }) => ($active ? "var(--afs-accent-soft, rgba(37, 99, 235, 0.1))" : "var(--afs-focus-soft, #f0f0f0)")};
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-focus);
+    outline-offset: 2px;
   }
 `;
 

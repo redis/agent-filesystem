@@ -1,9 +1,9 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
-import { ArrowRight, BookOpen, CloudDownload, GitBranch, LifeBuoy, LogIn, UserPlus } from "lucide-react";
+import { BookOpen, CloudDownload, GitBranch, LifeBuoy } from "lucide-react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
-import { useColorMode } from "../foundation/theme-context";
+import { ThemeModeToggle } from "../components/theme-mode-toggle";
 
 const publicNavItems = [
   { label: "Docs", path: "/docs", icon: BookOpen },
@@ -13,8 +13,6 @@ const publicNavItems = [
 
 export function PublicShell({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { colorMode, toggleColorMode } = useColorMode();
-  const isDark = colorMode === "dark";
 
   return (
     <PublicFrame>
@@ -52,18 +50,7 @@ export function PublicShell({ children }: { children: ReactNode }) {
         </PublicNav>
 
         <PublicActions>
-          <ThemeButton type="button" onClick={toggleColorMode} aria-label="Toggle color theme">
-            {isDark ? "Light" : "Dark"}
-          </ThemeButton>
-          <GhostAction to="/login">
-            <LogIn size={15} strokeWidth={1.9} aria-hidden="true" />
-            Log in
-          </GhostAction>
-          <PrimaryAction to="/signup">
-            <UserPlus size={15} strokeWidth={1.9} aria-hidden="true" />
-            Create free account
-            <ArrowRight size={15} strokeWidth={1.9} aria-hidden="true" />
-          </PrimaryAction>
+          <ThemeModeToggle />
         </PublicActions>
       </PublicHeader>
 
@@ -85,9 +72,9 @@ const PublicHeader = styled.header`
   display: grid;
   grid-template-columns: minmax(240px, auto) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 20px;
+  gap: 0px;
   min-height: 76px;
-  padding: 14px 32px;
+  padding: 1px 32px;
   border-bottom: 1px solid var(--afs-line);
   background: color-mix(in srgb, var(--afs-bg-1) 92%, transparent);
   backdrop-filter: blur(14px);
@@ -184,7 +171,7 @@ const publicLinkBase = `
   padding: 7px 10px;
   color: var(--afs-ink-dim);
   font-family: var(--afs-font-mono);
-  font-size: var(--afs-fz-sm);
+  font-size: var(--afs-fz-lg);
   letter-spacing: 0;
   line-height: 1;
   text-decoration: none;
@@ -225,37 +212,6 @@ const PublicActions = styled.div`
   @media (max-width: 760px) {
     justify-content: flex-start;
     flex-wrap: wrap;
-  }
-`;
-
-const ThemeButton = styled.button`
-  ${publicLinkBase}
-  background: transparent;
-  cursor: pointer;
-`;
-
-const GhostAction = styled(Link)`
-  ${publicLinkBase}
-  min-height: 40px;
-  border-color: var(--afs-line-strong);
-  padding: 10px 14px;
-  color: var(--afs-ink);
-  background: transparent;
-`;
-
-const PrimaryAction = styled(Link)`
-  ${publicLinkBase}
-  min-height: 40px;
-  border-color: var(--afs-accent);
-  padding: 10px 14px;
-  color: var(--afs-ink-on-accent);
-  background: var(--afs-accent);
-  font-weight: var(--afs-fw-semi);
-
-  &:hover {
-    border-color: var(--afs-accent);
-    background: var(--afs-accent);
-    color: var(--afs-ink-on-accent);
   }
 `;
 

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import styled, { createGlobalStyle } from "styled-components";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
-import { useColorMode } from "../../foundation/theme-context";
+import { ThemeModeToggle } from "../../components/theme-mode-toggle";
 import { searchBenchmark } from "../../foundation/performance-data";
 
 /**
@@ -24,8 +24,6 @@ type AuthShellProps = {
 };
 
 export function AuthShell({ title, subtitle, children }: AuthShellProps) {
-  const { colorMode, toggleColorMode } = useColorMode();
-
   return (
     <Page>
       <AuthRootFontSize />
@@ -85,14 +83,7 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
           <MobileLogoLink to="/">
             <RedisLogoDarkFullIcon />
           </MobileLogoLink>
-          <ThemeToggle
-            type="button"
-            onClick={toggleColorMode}
-            aria-label="Toggle theme"
-            title="Toggle theme"
-          >
-            {colorMode === "dark" ? "☀" : "☾"}
-          </ThemeToggle>
+          <AuthThemeToggle />
         </FormTopBar>
 
         <FormBody>
@@ -137,19 +128,25 @@ const BrandPanel = styled.aside`
   position: relative;
   overflow: hidden;
   display: flex;
-  color: #f6f1ec;
-  background: #071922;
+  color: var(--afs-ink);
+  background: var(--afs-bg-1);
+  border-right: 1px solid var(--afs-line);
 
   &::before {
     content: "";
     position: absolute;
     inset: 0;
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+      linear-gradient(color-mix(in srgb, var(--afs-ink) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--afs-ink) 7%, transparent) 1px, transparent 1px);
     background-size: 42px 42px;
     opacity: 0.36;
     pointer-events: none;
+  }
+
+  @media (max-width: 880px) {
+    border-right: none;
+    border-bottom: 1px solid var(--afs-line);
   }
 `;
 
@@ -196,13 +193,13 @@ const Pill = styled.div`
   width: fit-content;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--afs-accent-soft);
+  border: 1px solid var(--afs-line-strong);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #f6f1ec;
+  color: var(--afs-ink);
 `;
 
 const Headline = styled.h1`
@@ -211,22 +208,22 @@ const Headline = styled.h1`
   line-height: 1.04;
   letter-spacing: 0;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--afs-ink);
 
   s {
     font-style: normal;
-    color: rgba(246, 241, 236, 0.58);
-    text-decoration-color: #ff6a4d;
+    color: var(--afs-ink-dim);
+    text-decoration-color: var(--afs-redis-red);
     text-decoration-thickness: 0.12em;
   }
 `;
 
 const TerminalWindow = styled.div`
   overflow: hidden;
-  border: 1px solid rgba(246, 241, 236, 0.14);
+  border: 1px solid var(--afs-line-strong);
   border-radius: 16px;
-  background: rgba(3, 10, 14, 0.86);
-  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.28);
+  background: var(--afs-bg);
+  box-shadow: var(--afs-shadow-2);
 `;
 
 const TerminalHeader = styled.div`
@@ -235,8 +232,8 @@ const TerminalHeader = styled.div`
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid rgba(246, 241, 236, 0.1);
-  background: rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--afs-line);
+  background: var(--afs-bg-2);
 `;
 
 const TerminalLights = styled.span`
@@ -260,7 +257,7 @@ const TerminalLights = styled.span`
 `;
 
 const TerminalTitle = styled.span`
-  color: rgba(246, 241, 236, 0.54);
+  color: var(--afs-muted);
   font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 12px;
 `;
@@ -275,13 +272,13 @@ const TerminalBody = styled.div`
 `;
 
 const TerminalLine = styled.div`
-  color: #f6f1ec;
+  color: var(--afs-ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 `;
 
 const TerminalComment = styled(TerminalLine)`
-  color: rgba(246, 241, 236, 0.56);
+  color: var(--afs-muted);
 `;
 
 const TerminalGap = styled.div`
@@ -289,10 +286,10 @@ const TerminalGap = styled.div`
 `;
 
 const BenchmarkPanel = styled.section`
-  border: 1px solid rgba(246, 241, 236, 0.12);
+  border: 1px solid var(--afs-line);
   border-radius: 16px;
   padding: 18px;
-  background: rgba(246, 241, 236, 0.06);
+  background: var(--afs-panel);
   display: grid;
   gap: 16px;
 `;
@@ -303,7 +300,7 @@ const BenchmarkHeader = styled.div`
 `;
 
 const BenchmarkEyebrow = styled.span`
-  color: #ff8b70;
+  color: var(--afs-accent);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
@@ -312,14 +309,14 @@ const BenchmarkEyebrow = styled.span`
 
 const BenchmarkTitle = styled.h2`
   margin: 0;
-  color: #ffffff;
+  color: var(--afs-ink);
   font-size: 17px;
   line-height: 1.25;
 `;
 
 const BenchmarkContext = styled.p`
   margin: 0;
-  color: rgba(246, 241, 236, 0.58);
+  color: var(--afs-muted);
   font-size: 12px;
   line-height: 1.45;
 `;
@@ -336,37 +333,37 @@ const BenchmarkGrid = styled.div`
 
 const BenchmarkItem = styled.div`
   min-width: 0;
-  border: 1px solid rgba(246, 241, 236, 0.1);
+  border: 1px solid var(--afs-line);
   border-radius: 12px;
   padding: 14px;
-  background: rgba(3, 10, 14, 0.42);
+  background: var(--afs-bg-soft);
   display: grid;
   gap: 6px;
 `;
 
 const BenchmarkName = styled.span`
-  color: rgba(246, 241, 236, 0.62);
+  color: var(--afs-muted);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 `;
 
 const BenchmarkValue = styled.span`
-  color: #ffffff;
+  color: var(--afs-ink);
   font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 24px;
   line-height: 1;
 `;
 
 const BenchmarkMeta = styled.span`
-  color: rgba(246, 241, 236, 0.54);
+  color: var(--afs-muted);
   font-size: 12px;
 `;
 
 const BrandFooter = styled.p`
   margin: 0;
   font-size: 13px;
-  color: rgba(246, 241, 236, 0.48);
+  color: var(--afs-muted);
 `;
 
 const FormPanel = styled.section`
@@ -401,24 +398,8 @@ const MobileLogoLink = styled(Link)`
   }
 `;
 
-const ThemeToggle = styled.button`
+const AuthThemeToggle = styled(ThemeModeToggle)`
   margin-left: auto;
-  width: 40px;
-  height: 40px;
-  border-radius: 999px;
-  border: 1px solid var(--afs-line);
-  background: var(--afs-panel);
-  color: var(--afs-ink);
-  cursor: pointer;
-  font-size: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    background: var(--afs-panel-strong);
-    border-color: var(--afs-line-strong);
-  }
 `;
 
 const FormBody = styled.div`
