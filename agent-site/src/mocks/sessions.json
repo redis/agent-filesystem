@@ -1,0 +1,63 @@
+{
+  "items": [
+    {
+      "id": "sess-1a2b3c",
+      "agent_id": "claude-opus-4-7",
+      "workspace_id": "payments-portal",
+      "label": "stripe-migration-rev3",
+      "started_at": "2026-05-01T10:48:14Z",
+      "last_seen": "2026-05-01T11:02:11Z",
+      "client": "afs-cli/1.4.2 mcp/stdio",
+      "state": "active",
+      "ops_count": 312,
+      "_actions": [
+        { "verb": "kill", "href": "/sessions/sess-1a2b3c", "method": "DELETE", "idempotent": true },
+        { "verb": "tail", "href": "/activity?session=sess-1a2b3c", "method": "GET", "idempotent": true }
+      ]
+    },
+    {
+      "id": "sess-4d5e6f",
+      "agent_id": "codex",
+      "workspace_id": "gpt-eval-harness",
+      "label": "eval-v0.4-tuning",
+      "started_at": "2026-05-01T09:14:00Z",
+      "last_seen": "2026-05-01T11:01:50Z",
+      "client": "afs-sdk-py/0.6.1",
+      "state": "active",
+      "ops_count": 88,
+      "_actions": [
+        { "verb": "kill", "href": "/sessions/sess-4d5e6f", "method": "DELETE", "idempotent": true },
+        { "verb": "tail", "href": "/activity?session=sess-4d5e6f", "method": "GET", "idempotent": true }
+      ]
+    },
+    {
+      "id": "sess-7g8h9i",
+      "agent_id": "claude-haiku-4-5",
+      "workspace_id": "scratch-2026-05",
+      "label": "doc-summary-batch",
+      "started_at": "2026-05-01T10:55:00Z",
+      "last_seen": "2026-05-01T11:01:48Z",
+      "client": "afs-sdk-ts/0.6.0",
+      "state": "idle",
+      "ops_count": 14,
+      "_actions": [
+        { "verb": "kill", "href": "/sessions/sess-7g8h9i", "method": "DELETE", "idempotent": true },
+        { "verb": "tail", "href": "/activity?session=sess-7g8h9i", "method": "GET", "idempotent": true }
+      ]
+    },
+    {
+      "id": "sess-jklmn",
+      "agent_id": "user:rowan",
+      "workspace_id": "payments-portal",
+      "label": "shell:zsh@laptop",
+      "started_at": "2026-05-01T08:30:00Z",
+      "last_seen": "2026-05-01T10:45:22Z",
+      "client": "afs-cli/1.4.2",
+      "state": "closing",
+      "ops_count": 3,
+      "_actions": [
+        { "verb": "kill", "href": "/sessions/sess-jklmn", "method": "DELETE", "idempotent": true }
+      ]
+    }
+  ]
+}

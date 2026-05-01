@@ -1,0 +1,641 @@
+/*
+ * tokens.css — the design system. one file. plain CSS variables.
+ * no preprocessor, no styled-components, no theme provider.
+ *
+ * palette is the situation-room dark skin from ui/src/styles/skin-situation-room.css.
+ * keeps look-and-feel consistent with the human ui's dense dark mode.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* ──────────────────────────────────── surface (situation-room dark) */
+  --bg:        #091A23;  /* deep ocean */
+  --bg-1:      #0E2330;  /* panel */
+  --bg-2:      #143142;  /* panel-strong */
+  --fg:        #E8E6DF;  /* warm cream */
+  --fg-strong: #FFFFFF;
+  --dim:       #8A8B85;
+  --faint:     #4A4C48;
+  --line:      #1D3645;
+  --line-strong: #284A5E;
+
+  /* ──────────────────────────────────── state (situation-room canonical) */
+  --ok:        #DCFF1E;  /* lime signal */
+  --err:       #FF4D4D;
+  --warn:      #FFB547;
+  --info:      #6AD7FF;
+
+  /* ──────────────────────────────────── brand */
+  --redis-red: #FF4438;
+
+  /* ──────────────────────────────────── accent (default — see data-accent overrides below) */
+  --accent:      #DCFF1E;                  /* default: lime signal */
+  --accent-dim:  #9BB814;
+  --accent-soft: rgba(220, 255, 30, 0.06);
+  --accent-glow: rgba(220, 255, 30, 0.40);
+  /* on-accent foreground (text color when bg is the accent) */
+  --on-accent:   #091A23;
+
+  /* ──────────────────────────────────── layout */
+  --col:       100ch;
+  --gutter:    1.5rem;
+
+  /* ──────────────────────────────────── type */
+  --mono: 'JetBrains Mono', 'IBM Plex Mono', 'Berkeley Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --base-size: 13px;
+}
+
+/*
+ * ──────────────────────────────────── accent variants (swap with <html data-accent="...">)
+ *
+ *   data-accent="lime"   → DCFF1E   (situation-room canonical, the default)
+ *   data-accent="redis"  → FF4438   (matches the Redis logo color)
+ *   data-accent="cyan"   → 6AD7FF   (calmer, "data-viz" feel)
+ *
+ * one variable. flip <html data-accent="redis"> to preview alternatives.
+ */
+
+:root[data-accent="lime"] {
+  --accent:      #DCFF1E;
+  --accent-dim:  #9BB814;
+  --accent-soft: rgba(220, 255, 30, 0.06);
+  --accent-glow: rgba(220, 255, 30, 0.40);
+  --on-accent:   #091A23;
+}
+
+:root[data-accent="redis"] {
+  --accent:      #FF4438;
+  --accent-dim:  #C9342A;
+  --accent-soft: rgba(255, 68, 56, 0.08);
+  --accent-glow: rgba(255, 68, 56, 0.40);
+  --on-accent:   #091A23;
+}
+
+:root[data-accent="cyan"] {
+  --accent:      #6AD7FF;
+  --accent-dim:  #3FA8CC;
+  --accent-soft: rgba(106, 215, 255, 0.08);
+  --accent-glow: rgba(106, 215, 255, 0.35);
+  --on-accent:   #091A23;
+}
+
+/* ──────────────────────────────────── reset */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--base-size);
+  line-height: 1.55;
+  letter-spacing: 0.01em;
+  font-feature-settings: "calt" 0, "liga" 0;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  padding: var(--gutter);
+}
+
+#root {
+  max-width: var(--col);
+  margin: 0 auto;
+}
+
+/* ──────────────────────────────────── links and verbs */
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(255, 255, 255, 0.18);
+}
+
+a:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+  text-decoration: none;
+}
+
+a:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ──────────────────────────────────── headings */
+
+h1, h2, h3, h4 {
+  font-size: var(--base-size);
+  font-weight: 600;
+  margin: 0;
+  color: var(--fg-strong);
+  letter-spacing: 0.10em;
+  text-transform: lowercase;
+}
+
+h1 { font-size: 18px; letter-spacing: 0.08em; }
+h2 { margin-top: 1.5rem; }
+
+h1::before { content: "#  "; color: var(--dim); }
+h2::before { content: "## "; color: var(--dim); }
+h3::before { content: "### "; color: var(--dim); }
+
+/* ──────────────────────────────────── frame chrome */
+
+.frame .head {
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+  padding-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+.frame .head .path {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.frame .foot {
+  color: var(--dim);
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  font-size: calc(var(--base-size) - 1px);
+}
+
+/* ──────────────────────────────────── top nav */
+
+.topnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5ch;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.topnav a {
+  text-decoration: none;
+  color: var(--dim);
+  text-decoration-color: transparent;
+}
+
+.topnav a:hover {
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.topnav a[aria-current="page"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.topnav .brand {
+  color: var(--fg-strong);
+  font-weight: 600;
+  letter-spacing: 0.10em;
+}
+
+.topnav .brandmark {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: var(--fg-strong);
+  margin-right: 0.5ch;
+}
+
+.topnav .brandmark:hover {
+  background: transparent;
+  color: var(--fg-strong);
+  text-decoration: none;
+}
+
+.topnav .brandmark svg {
+  display: block;
+}
+
+/* ──────────────────────────────────── tables */
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 1ch 0.4rem 0;
+  font-size: calc(var(--base-size) - 1px);
+  text-transform: lowercase;
+  letter-spacing: 0.10em;
+}
+
+td {
+  padding: 0.35rem 1ch 0.35rem 0;
+  border-bottom: 1px dashed var(--line);
+  vertical-align: top;
+}
+
+tr:hover td {
+  background: var(--bg-1);
+}
+
+td.num, th.num {
+  text-align: right;
+}
+
+td.actions {
+  white-space: nowrap;
+}
+td.actions a,
+td.actions button {
+  margin-right: 1.5ch;
+}
+td.actions a:last-child,
+td.actions button:last-child {
+  margin-right: 0;
+}
+
+/* ──────────────────────────────────── code blocks and details */
+
+pre, code, kbd {
+  font-family: var(--mono);
+  font-size: inherit;
+}
+
+pre {
+  background: var(--bg-1);
+  border-left: 2px solid var(--accent);
+  padding: 0.5rem 1ch;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--fg-strong);
+}
+
+code {
+  color: var(--fg-strong);
+}
+
+p code, dd code, td code, li code {
+  background: var(--bg-1);
+  padding: 0 0.5ch;
+  border: 1px solid var(--line);
+}
+
+/* details/summary — the format toggle */
+
+details {
+  margin: 0.25rem 0;
+}
+
+details > summary {
+  cursor: pointer;
+  color: var(--dim);
+  list-style: none;
+  display: inline-block;
+  padding: 0 0.5ch;
+  user-select: none;
+  letter-spacing: 0.05em;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+details > summary::before {
+  content: "[ ";
+  color: var(--faint);
+}
+
+details > summary::after {
+  content: " ]";
+  color: var(--faint);
+}
+
+details[open] > summary {
+  color: var(--accent);
+}
+
+details > summary:hover {
+  color: var(--fg-strong);
+}
+
+.format-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0;
+  align-items: baseline;
+}
+
+.format-row .label {
+  color: var(--dim);
+  margin-right: 1ch;
+}
+
+/* details.expand — collapsible block that wears an h2-shaped summary.
+ * triangle disclosure, no brackets. used for _actions and other long lists. */
+
+details.expand {
+  margin: 1.5rem 0 0.5rem;
+}
+
+details.expand > summary {
+  display: list-item;          /* allow custom marker via ::before */
+  list-style: none;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--fg-strong);
+  letter-spacing: 0.10em;
+  text-transform: lowercase;
+  font-size: var(--base-size);
+  padding: 0;
+  user-select: none;
+}
+
+details.expand > summary::before {
+  content: "▸ ";
+  color: var(--dim);
+}
+details.expand > summary::after {
+  content: "";
+}
+details.expand[open] > summary::before {
+  content: "▾ ";
+  color: var(--accent);
+}
+details.expand > summary:hover {
+  color: var(--accent);
+}
+details.expand > summary .count {
+  color: var(--dim);
+  font-weight: 400;
+  margin-left: 0.5ch;
+}
+
+/* details.expand-inline — inline disclosure used in the actions bar.
+ * pattern: "actions: a · b · c · more ›"     (closed)
+ *          "actions: a · b · c · less ‹      (open + full list below)"
+ */
+
+details.expand-inline {
+  display: inline;
+}
+
+details.expand-inline > summary {
+  display: inline;
+  cursor: pointer;
+  color: var(--dim);
+  font-weight: 400;
+  font-size: var(--base-size);
+  letter-spacing: normal;
+  text-transform: none;
+  list-style: none;
+  padding: 0;
+  user-select: none;
+}
+
+details.expand-inline > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.expand-inline > summary::before {
+  content: "";
+}
+details.expand-inline > summary::after {
+  content: " ›";
+  color: var(--dim);
+}
+details.expand-inline[open] > summary {
+  color: var(--accent);
+}
+details.expand-inline[open] > summary::after {
+  content: " ‹";
+  color: var(--accent);
+}
+details.expand-inline > summary:hover {
+  color: var(--accent);
+}
+
+details.expand-inline > ul,
+details.expand-inline > ol,
+details.expand-inline > .body {
+  margin-top: 0.5rem;
+}
+
+.actions-row {
+  margin: 1rem 0;
+  letter-spacing: 0.02em;
+}
+
+.actions-row .label {
+  color: var(--dim);
+  margin-right: 1ch;
+}
+
+.actions-row .sep,
+.actions-inline .sep {
+  color: var(--faint);
+  margin: 0 0.25ch;
+}
+
+/* compact inline actions for table cells */
+.actions-inline {
+  white-space: normal;
+}
+
+.actions-inline .verb {
+  display: inline-block;
+}
+
+button.more-toggle {
+  font-family: var(--mono);
+  font-size: var(--base-size);
+  background: transparent;
+  color: var(--dim);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.18);
+  text-underline-offset: 2px;
+}
+
+button.more-toggle:hover {
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+button.more-toggle[aria-expanded="true"] {
+  color: var(--accent);
+}
+
+/* full list for detail pages — same dotted-line list style as ul.flat */
+ul.actions-list {
+  margin: 0.5rem 0;
+}
+
+/* breadcrumb — small link line above h1 */
+
+.breadcrumb {
+  margin: 0 0 0.25rem;
+  color: var(--dim);
+  font-size: calc(var(--base-size) - 1px);
+  letter-spacing: 0.05em;
+}
+.breadcrumb a {
+  color: var(--dim);
+  text-decoration: none;
+}
+.breadcrumb a:hover {
+  background: transparent;
+  color: var(--accent);
+  text-decoration: underline;
+}
+.breadcrumb .sep {
+  margin: 0 0.5ch;
+  color: var(--faint);
+}
+
+/* ──────────────────────────────────── chips, tags, badges */
+
+.chip {
+  display: inline-block;
+  padding: 0 0.75ch;
+  border: 1px solid var(--line-strong);
+  color: var(--dim);
+  margin-right: 0.5ch;
+  font-size: calc(var(--base-size) - 1px);
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+}
+
+.chip.ok { color: var(--ok); border-color: var(--ok); }
+.chip.err { color: var(--err); border-color: var(--err); }
+.chip.warn { color: var(--warn); border-color: var(--warn); }
+.chip.info { color: var(--info); border-color: var(--info); }
+
+.k { color: var(--dim); }
+.v { color: var(--fg-strong); }
+.verb { color: var(--accent); font-weight: 600; }
+
+.dim { color: var(--dim); }
+.strong { color: var(--fg-strong); }
+.ok { color: var(--ok); }
+.err { color: var(--err); }
+.info { color: var(--info); }
+.warn { color: var(--warn); }
+
+/* ──────────────────────────────────── forms */
+
+form.inline {
+  display: flex;
+  gap: 1ch;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin: 0.5rem 0;
+}
+
+input[type="text"],
+input[type="search"],
+textarea,
+select {
+  font-family: var(--mono);
+  font-size: var(--base-size);
+  background: var(--bg-1);
+  color: var(--fg-strong);
+  border: 1px solid var(--line-strong);
+  padding: 0.35rem 0.75ch;
+  outline: none;
+}
+
+input:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+textarea {
+  width: 100%;
+  min-height: 5rem;
+  resize: vertical;
+  white-space: pre;
+}
+
+button {
+  font-family: var(--mono);
+  font-size: var(--base-size);
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 0.35rem 1.25ch;
+  cursor: pointer;
+  letter-spacing: 0.10em;
+  text-transform: lowercase;
+}
+
+button:hover {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+button:disabled {
+  color: var(--dim);
+  border-color: var(--line);
+  cursor: not-allowed;
+  background: transparent;
+}
+
+/* ──────────────────────────────────── lists */
+
+ul.flat, ol.flat {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+ul.flat li, ol.flat li {
+  border-bottom: 1px dashed var(--line);
+  padding: 0.35rem 0;
+}
+
+dl.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1.5ch;
+  margin: 0.5rem 0;
+}
+
+dl.kv dt {
+  color: var(--dim);
+}
+
+dl.kv dd {
+  margin: 0;
+  color: var(--fg-strong);
+}
+
+/* ──────────────────────────────────── live row pulse */
+
+.row-new td {
+  border-left: 2px solid var(--accent);
+}
+
+/* ──────────────────────────────────── responsive */
+
+@media (max-width: 80ch) {
+  body { padding: 1rem 0.75rem; }
+}

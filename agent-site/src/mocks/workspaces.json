@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "id": "payments-portal",
+      "name": "payments-portal",
+      "database_id": "db-prod-us-east-1",
+      "status": "healthy",
+      "draft_state": "dirty",
+      "file_count": 412,
+      "folder_count": 38,
+      "total_bytes": 2841093,
+      "checkpoint_count": 11,
+      "last_checkpoint_at": "2026-04-30T18:22:14Z",
+      "updated_at": "2026-05-01T09:14:02Z",
+      "etag": "w/\"a3f4-pp-c11\"",
+      "_actions": [
+        { "verb": "fork", "href": "/workspaces/payments-portal/fork", "method": "POST", "idempotent": false, "schema": { "name": "string" } },
+        { "verb": "checkpoint", "href": "/workspaces/payments-portal/checkpoints", "method": "POST", "idempotent": true, "schema": { "name": "string", "note": "string?" } },
+        { "verb": "restore", "href": "/workspaces/payments-portal/restore", "method": "POST", "idempotent": false, "schema": { "checkpoint_id": "string" } },
+        { "verb": "diff", "href": "/workspaces/payments-portal/diff", "method": "GET", "idempotent": true, "schema": { "base": "ref", "head": "ref" } },
+        { "verb": "delete", "href": "/workspaces/payments-portal", "method": "DELETE", "idempotent": false }
+      ]
+    },
+    {
+      "id": "gpt-eval-harness",
+      "name": "gpt-eval-harness",
+      "database_id": "db-prod-us-east-1",
+      "status": "healthy",
+      "draft_state": "clean",
+      "file_count": 89,
+      "folder_count": 12,
+      "total_bytes": 412884,
+      "checkpoint_count": 4,
+      "last_checkpoint_at": "2026-05-01T08:42:00Z",
+      "updated_at": "2026-05-01T08:42:00Z",
+      "etag": "w/\"7b21-eh-c04\"",
+      "_actions": [
+        { "verb": "fork", "href": "/workspaces/gpt-eval-harness/fork", "method": "POST", "idempotent": false },
+        { "verb": "checkpoint", "href": "/workspaces/gpt-eval-harness/checkpoints", "method": "POST", "idempotent": true },
+        { "verb": "restore", "href": "/workspaces/gpt-eval-harness/restore", "method": "POST", "idempotent": false },
+        { "verb": "delete", "href": "/workspaces/gpt-eval-harness", "method": "DELETE", "idempotent": false }
+      ]
+    },
+    {
+      "id": "scratch-2026-05",
+      "name": "scratch-2026-05",
+      "database_id": "db-dev-local",
+      "status": "degraded",
+      "draft_state": "dirty",
+      "file_count": 23,
+      "folder_count": 4,
+      "total_bytes": 18432,
+      "checkpoint_count": 0,
+      "last_checkpoint_at": null,
+      "updated_at": "2026-05-01T11:02:11Z",
+      "etag": "w/\"00aa-sc-c00\"",
+      "_actions": [
+        { "verb": "checkpoint", "href": "/workspaces/scratch-2026-05/checkpoints", "method": "POST", "idempotent": true },
+        { "verb": "fork", "href": "/workspaces/scratch-2026-05/fork", "method": "POST", "idempotent": false },
+        { "verb": "delete", "href": "/workspaces/scratch-2026-05", "method": "DELETE", "idempotent": false }
+      ]
+    }
+  ],
+  "etag": "w/\"list-3-2026-05-01T11-02\"",
+  "count": 3,
+  "dirty_count": 2
+}

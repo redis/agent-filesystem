@@ -1,0 +1,85 @@
+{
+  "items": [
+    {
+      "id": "cp-pp-011",
+      "workspace_id": "payments-portal",
+      "name": "before-stripe-migration",
+      "parent_id": "cp-pp-010",
+      "created_at": "2026-04-30T18:22:14Z",
+      "author": "agent:claude-opus-4-7",
+      "source": "mcp",
+      "manifest_hash": "sha256:a3f4c19b88d2a4e65b2d1f03c8a7e5d4f8b6c9a1d2e3f4567890abcdef123456",
+      "file_count": 412,
+      "folder_count": 38,
+      "total_bytes": 2841093,
+      "delta_files": 7,
+      "delta_bytes": 18432,
+      "note": "stable point before introducing stripe sdk v9. all tests green.",
+      "_actions": [
+        { "verb": "restore", "href": "/workspaces/payments-portal/restore", "method": "POST", "idempotent": false, "schema": { "checkpoint_id": "cp-pp-011" } },
+        { "verb": "fork-from", "href": "/workspaces/payments-portal/fork", "method": "POST", "idempotent": false, "schema": { "name": "string", "from_checkpoint": "cp-pp-011" } },
+        { "verb": "diff-vs-head", "href": "/workspaces/payments-portal/diff?base=checkpoint:cp-pp-011&head=working-copy", "method": "GET", "idempotent": true }
+      ]
+    },
+    {
+      "id": "cp-pp-010",
+      "workspace_id": "payments-portal",
+      "name": "post-refactor-router",
+      "parent_id": "cp-pp-009",
+      "created_at": "2026-04-29T22:11:30Z",
+      "author": "agent:claude-opus-4-7",
+      "source": "mcp",
+      "manifest_hash": "sha256:7b21d4ef99abc1e2d8c3a9f0b1c2d3e4f5a6b7c8d9e0f1234567890abcdef111",
+      "file_count": 405,
+      "folder_count": 38,
+      "total_bytes": 2822661,
+      "delta_files": 12,
+      "delta_bytes": -4112,
+      "note": "router consolidated. removed 3 dead routes.",
+      "_actions": [
+        { "verb": "restore", "href": "/workspaces/payments-portal/restore", "method": "POST", "idempotent": false, "schema": { "checkpoint_id": "cp-pp-010" } },
+        { "verb": "fork-from", "href": "/workspaces/payments-portal/fork", "method": "POST", "idempotent": false }
+      ]
+    },
+    {
+      "id": "cp-pp-009",
+      "workspace_id": "payments-portal",
+      "name": "import-from-git",
+      "parent_id": null,
+      "created_at": "2026-04-22T14:00:00Z",
+      "author": "user:rowan",
+      "source": "import",
+      "manifest_hash": "sha256:0000aa0000bbb000ccc000ddd000eee000fff000aaa000bbb000ccc000ddd000",
+      "file_count": 393,
+      "folder_count": 36,
+      "total_bytes": 2826773,
+      "delta_files": 393,
+      "delta_bytes": 2826773,
+      "note": "initial import from origin/main @ 8a3f9c2",
+      "_actions": [
+        { "verb": "restore", "href": "/workspaces/payments-portal/restore", "method": "POST", "idempotent": false, "schema": { "checkpoint_id": "cp-pp-009" } },
+        { "verb": "fork-from", "href": "/workspaces/payments-portal/fork", "method": "POST", "idempotent": false }
+      ]
+    },
+    {
+      "id": "cp-eh-004",
+      "workspace_id": "gpt-eval-harness",
+      "name": "v0.4-baseline",
+      "parent_id": "cp-eh-003",
+      "created_at": "2026-05-01T08:42:00Z",
+      "author": "agent:codex",
+      "source": "mcp",
+      "manifest_hash": "sha256:c0de1f1e3a4b5c6d7e8f90a1b2c3d4e5f6789abcdef0123456789abcdef0fed1",
+      "file_count": 89,
+      "folder_count": 12,
+      "total_bytes": 412884,
+      "delta_files": 4,
+      "delta_bytes": 1102,
+      "note": "v0.4 eval suite frozen. 1.0% pass rate above v0.3.",
+      "_actions": [
+        { "verb": "restore", "href": "/workspaces/gpt-eval-harness/restore", "method": "POST", "idempotent": false, "schema": { "checkpoint_id": "cp-eh-004" } },
+        { "verb": "fork-from", "href": "/workspaces/gpt-eval-harness/fork", "method": "POST", "idempotent": false }
+      ]
+    }
+  ]
+}
