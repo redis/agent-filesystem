@@ -2,7 +2,9 @@ package controlplane
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -71,8 +73,14 @@ func (s *Service) resolveDiffOperand(ctx context.Context, workspace, normalizedP
 	switch strings.TrimSpace(strings.ToLower(operand.Ref)) {
 	case "head":
 		content, err := s.getFileContent(ctx, workspace, "head", normalizedPath)
-		if err != nil {
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return resolvedDiffOperand{}, err
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			content, err = s.getFileContent(ctx, workspace, "working-copy", normalizedPath)
+			if err != nil {
+				return resolvedDiffOperand{}, err
+			}
 		}
 		return resolvedDiffOperand{label: "head", content: content.Content, binary: content.Binary}, nil
 	case "working-copy":

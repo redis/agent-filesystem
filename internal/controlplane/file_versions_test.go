@@ -1160,6 +1160,56 @@ func TestServiceDiffFileVersionsAgainstHeadAndWorkingCopy(t *testing.T) {
 	}
 }
 
+func TestServiceDiffFileVersionsHeadFallsBackToWorkingCopyForLiveOnlyPath(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	version, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/drafts/live-only.txt"}, VersionedFileSnapshot{
+		Path:    "/drafts/live-only.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("historical draft\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation() returned error: %v", err)
+	}
+
+	fsKey, _, _, err := EnsureWorkspaceRoot(context.Background(), service.store, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	fsClient := client.New(service.store.rdb, fsKey)
+	if err := fsClient.Mkdir(context.Background(), "/drafts"); err != nil {
+		t.Fatalf("Mkdir() returned error: %v", err)
+	}
+	if err := fsClient.EchoCreate(context.Background(), "/drafts/live-only.txt", []byte("live draft\n"), 0o644); err != nil {
+		t.Fatalf("EchoCreate() returned error: %v", err)
+	}
+
+	diff, err := service.DiffFileVersions(context.Background(), "repo", "/drafts/live-only.txt", FileVersionDiffOperand{
+		VersionID: version.VersionID,
+	}, FileVersionDiffOperand{
+		Ref: "head",
+	})
+	if err != nil {
+		t.Fatalf("DiffFileVersions(head fallback) returned error: %v", err)
+	}
+	if !strings.Contains(diff.Diff, "historical draft\n") || !strings.Contains(diff.Diff, "live draft\n") {
+		t.Fatalf("diff.Diff = %q, want historical and live working-copy content", diff.Diff)
+	}
+}
+
 func TestServiceRestoreFileVersionCreatesNewLatestVersion(t *testing.T) {
 	t.Helper()
 

@@ -126,7 +126,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 		ignore:      ignore,
 		done:        make(chan struct{}),
 	}
-	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
+	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.SessionID, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	if cfg.Rdb != nil && strings.TrimSpace(cfg.StorageID) != "" && strings.TrimSpace(cfg.SessionID) != "" {

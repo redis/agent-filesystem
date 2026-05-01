@@ -640,6 +640,107 @@ func TestSyncHistoryDeleteRecordsTombstone(t *testing.T) {
 	}
 }
 
+func TestCmdFileUndeleteCoordinatesWithActiveSyncDaemon(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	ctx := context.Background()
+	if err := env.cp.PutWorkspaceVersioningPolicy(ctx, env.workspace, controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy: %v", err)
+	}
+	meta, err := env.store.getWorkspaceMeta(ctx, env.workspace)
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta: %v", err)
+	}
+	storageID := controlplane.WorkspaceStorageID(meta)
+	service := controlPlaneServiceFromStore(defaultConfig(), env.store)
+
+	env.startDaemon(t, func(c *syncDaemonConfig) {
+		c.Rdb = env.rdb
+		c.StorageID = storageID
+		c.SessionID = "sess-history-undelete"
+		c.AgentID = "agt-history-undelete"
+		c.Label = "sync/history"
+		c.AgentVersion = "test"
+	})
+	defer env.stopDaemon()
+
+	abs := env.writeLocalFile(t, "undelete.txt", "bring me back\n")
+	assertEventually(t, 3*time.Second, "undelete.txt to land remotely", func() bool {
+		return env.remoteExists(t, "undelete.txt")
+	})
+
+	if err := removeFile(abs); err != nil {
+		t.Fatalf("remove local undelete.txt: %v", err)
+	}
+	assertEventually(t, 3*time.Second, "undelete.txt remote delete", func() bool {
+		return !env.remoteExists(t, "undelete.txt")
+	})
+
+	oldCfgPathOverride := cfgPathOverride
+	cfgPathOverride = filepath.Join(t.TempDir(), "afs.config.json")
+	t.Cleanup(func() {
+		cfgPathOverride = oldCfgPathOverride
+	})
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeLocal
+	cfg.Mode = modeSync
+	cfg.RedisAddr = env.mr.Addr()
+	cfg.RedisDB = 0
+	cfg.LocalPath = env.localRoot
+	cfg.CurrentWorkspace = env.workspace
+	if err := saveConfig(cfg); err != nil {
+		t.Fatalf("saveConfig() returned error: %v", err)
+	}
+
+	st := state{
+		ProductMode:      productModeLocal,
+		RedisAddr:        env.mr.Addr(),
+		RedisDB:          0,
+		CurrentWorkspace: env.workspace,
+		LocalPath:        env.localRoot,
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+	}
+	if err := saveState(st); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	if err := cmdFile([]string{"file", "undelete", "repo", "/undelete.txt"}); err != nil {
+		t.Fatalf("cmdFile(undelete) returned error: %v", err)
+	}
+
+	assertEventually(t, 3*time.Second, "undelete.txt restored locally and remotely", func() bool {
+		return env.localExists("undelete.txt") && env.remoteExists(t, "undelete.txt")
+	})
+	if got := env.readLocalFile(t, "undelete.txt"); got != "bring me back\n" {
+		t.Fatalf("local content after undelete = %q, want %q", got, "bring me back\n")
+	}
+	if got := env.readRemoteFile(t, "undelete.txt"); got != "bring me back\n" {
+		t.Fatalf("remote content after undelete = %q, want %q", got, "bring me back\n")
+	}
+
+	history, err := service.GetFileHistory(ctx, env.workspace, "/undelete.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory(/undelete.txt) returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 {
+		t.Fatalf("len(history.Lineages) = %d, want 1", len(history.Lineages))
+	}
+	versions := history.Lineages[0].Versions
+	if len(versions) != 3 {
+		t.Fatalf("len(versions) = %d, want 3", len(versions))
+	}
+	if got := versions[2].Op; got != controlplane.ChangeOpPut {
+		t.Fatalf("latest undelete op = %q, want %q", got, controlplane.ChangeOpPut)
+	}
+	if got := versions[2].Source; got != controlplane.ChangeSourceVersionUndelete {
+		t.Fatalf("latest undelete source = %q, want %q", got, controlplane.ChangeSourceVersionUndelete)
+	}
+}
+
 func TestSyncHistoryRenamePreservesLineage(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)

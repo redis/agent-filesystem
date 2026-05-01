@@ -452,9 +452,32 @@ func cmdFileUndelete(args []string) error {
 	if parsed.ordinal != nil {
 		selector.Ordinal = *parsed.ordinal
 	}
-	response, err := session.controlPlane.UndeleteFileVersion(context.Background(), selection.ID, parsed.path, selector)
-	if err != nil {
-		return err
+	response := controlplane.FileVersionUndeleteResponse{}
+	if localRoot, ok, rootErr := activeSyncControlRootForWorkspace(session.cfg, selection); rootErr != nil {
+		return rootErr
+	} else if ok {
+		result, controlErr := runSyncControlRequest(localRoot, syncControlRequest{
+			Version:   syncControlVersion,
+			Operation: syncControlOpUndelete,
+			Path:      parsed.path,
+			VersionID: parsed.versionID,
+			FileID:    parsed.fileID,
+			Ordinal:   selector.Ordinal,
+		}, defaultSyncControlTimeout)
+		if controlErr != nil {
+			return controlErr
+		}
+		response = controlplane.FileVersionUndeleteResponse{
+			WorkspaceID:            selection.ID,
+			Path:                   result.Path,
+			VersionID:              result.VersionID,
+			UndeletedFromVersionID: result.SourceID,
+		}
+	} else {
+		response, err = session.controlPlane.UndeleteFileVersion(context.Background(), selection.ID, parsed.path, selector)
+		if err != nil {
+			return err
+		}
 	}
 	printBox(markerSuccess+" "+clr(ansiBold, "file undeleted from history"), []boxRow{
 		{Label: "workspace", Value: selection.Name},

@@ -557,6 +557,53 @@ func cmdWorkspaceImport(args []string) error {
 	return nil
 }
 
+func loadStateForMountAtSource() (state, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state{}, nil
+		}
+		return state{}, err
+	}
+
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	if backendName != mountBackendNone || strings.TrimSpace(st.ArchivePath) != "" {
+		return state{}, fmt.Errorf("AFS already has an active mounted filesystem state; run '%s down' first", filepath.Base(os.Args[0]))
+	}
+	return st, nil
+}
+
+func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
+	_, store, closeStore, err := openAFSStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	workspaceMeta, err := store.getWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	m, blobs, err := liveWorkspaceManifest(ctx, store, workspace, workspaceMeta.HeadSavepoint)
+	if err != nil {
+		return err
+	}
+	targetDir, err = expandPath(targetDir)
+	if err != nil {
+		return err
+	}
+	_, err = materializeManifestToDirectory(targetDir, m, func(blobID string) ([]byte, error) {
+		data, ok := blobs[blobID]
+		if !ok {
+			return nil, fmt.Errorf("live workspace blob %q is missing during clone", blobID)
+		}
+		return data, nil
+	}, manifestMaterializeOptions{})
+	return err
+}
 func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
 	targetDir, err := expandPath(targetDir)
 	if err != nil {

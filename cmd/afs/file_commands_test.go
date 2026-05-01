@@ -257,6 +257,30 @@ func TestCmdFileHistoryAndShow(t *testing.T) {
 		t.Fatalf("cmdFile(diff) output = %q, want historical and working-copy content", diffOutput)
 	}
 
+	liveOnlyVersion, err := cpStore.RecordFileVersionMutation(context.Background(), "repo", controlplane.VersionedFileSnapshot{Path: "/notes/live-only.txt"}, controlplane.VersionedFileSnapshot{
+		Path:    "/notes/live-only.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("historical live only\n"),
+	}, controlplane.FileVersionMutationMetadata{Source: controlplane.ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(live-only) returned error: %v", err)
+	}
+	if err := fsClient.EchoCreate(context.Background(), "/notes/live-only.txt", []byte("current live only\n"), 0o644); err != nil {
+		t.Fatalf("EchoCreate(live-only) returned error: %v", err)
+	}
+
+	headFallbackDiff, err := captureStdout(t, func() error {
+		return cmdFile([]string{"file", "diff", "repo", "/notes/live-only.txt", "--from-version", liveOnlyVersion.VersionID, "--to-ref", "head"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFile(diff head fallback) returned error: %v", err)
+	}
+	if !strings.Contains(headFallbackDiff, "historical live only\n") || !strings.Contains(headFallbackDiff, "current live only\n") {
+		t.Fatalf("cmdFile(diff head fallback) output = %q, want historical and live content", headFallbackDiff)
+	}
+
 	restoreOutput, err := captureStdout(t, func() error {
 		return cmdFile([]string{"file", "restore", "repo", "/notes/cli-history.txt", "--version", version.VersionID})
 	})

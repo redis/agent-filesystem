@@ -12,6 +12,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	mountclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -905,6 +906,60 @@ func TestCmdWorkspaceCloneCreatesLocalCopy(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(clonedDir, "docs", "notes.md")); err != nil {
 		t.Fatalf("expected cloned workspace contents: %v", err)
+	}
+}
+
+func TestCmdWorkspaceCloneIncludesLiveWorkspaceChanges(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "docs", "notes.md"), "checkpoint\n")
+
+	if err := cmdImport([]string{"import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport() returned error: %v", err)
+	}
+
+	_, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	fsKey, _, _, err := controlplane.EnsureWorkspaceRoot(context.Background(), store.cp, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	fsClient := mountclient.New(store.rdb, fsKey)
+	if err := fsClient.Echo(context.Background(), "/docs/notes.md", []byte("live workspace change\n")); err != nil {
+		t.Fatalf("Echo(notes.md) returned error: %v", err)
+	}
+	if err := fsClient.EchoCreate(context.Background(), "/docs/live-only.md", []byte("live only\n"), 0o644); err != nil {
+		t.Fatalf("EchoCreate(live-only.md) returned error: %v", err)
+	}
+
+	clonedDir := filepath.Join(t.TempDir(), "repo-live-clone")
+	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
+		t.Fatalf("cmdWorkspace(clone live) returned error: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(clonedDir, "docs", "notes.md")); err != nil {
+		t.Fatalf("ReadFile(notes.md) returned error: %v", err)
+	} else if string(got) != "live workspace change\n" {
+		t.Fatalf("notes.md content = %q, want %q", string(got), "live workspace change\n")
+	}
+	if got, err := os.ReadFile(filepath.Join(clonedDir, "docs", "live-only.md")); err != nil {
+		t.Fatalf("ReadFile(live-only.md) returned error: %v", err)
+	} else if string(got) != "live only\n" {
+		t.Fatalf("live-only.md content = %q, want %q", string(got), "live only\n")
 	}
 }
 

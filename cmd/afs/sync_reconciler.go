@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
 )
 
@@ -33,6 +34,7 @@ type reconciler struct {
 	state     *stateWriter
 	root      string
 	workspace string
+	sessionID string
 	store     *afsStore
 	echo      *echoSuppressor
 	conflict  *conflictNamer
@@ -71,6 +73,7 @@ type renameCandidate struct {
 func newReconciler(
 	state *stateWriter,
 	root, workspace string,
+	sessionID string,
 	store *afsStore,
 	fs client.Client,
 	echo *echoSuppressor,
@@ -92,6 +95,7 @@ func newReconciler(
 		state:              state,
 		root:               root,
 		workspace:          workspace,
+		sessionID:          strings.TrimSpace(sessionID),
 		store:              store,
 		fs:                 fs,
 		echo:               echo,
@@ -293,6 +297,8 @@ func (r *reconciler) executeSyncControlRequest(ctx context.Context, request sync
 	switch request.Operation {
 	case syncControlOpCreateExclusive:
 		return r.executeSyncCreateExclusive(ctx, request)
+	case syncControlOpUndelete:
+		return r.executeSyncUndelete(ctx, request)
 	default:
 		result.Error = fmt.Sprintf("unsupported sync control operation %q", request.Operation)
 		return result
@@ -372,6 +378,138 @@ func (r *reconciler) executeSyncCreateExclusive(ctx context.Context, request syn
 	result.Success = true
 	result.Bytes = len(request.Content)
 	return result
+}
+
+func (r *reconciler) executeSyncUndelete(ctx context.Context, request syncControlRequest) syncControlResult {
+	result := syncControlResult{
+		Version:   syncControlVersion,
+		Operation: syncControlOpUndelete,
+		Path:      request.Path,
+	}
+	if r.readonly {
+		result.Error = "sync daemon is read-only"
+		return result
+	}
+
+	normalizedPath, err := normalizeSyncControlTarget(request.Path)
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Path = normalizedPath
+
+	serviceCtx := ctx
+	if r.sessionID != "" {
+		serviceCtx = controlplane.WithChangeSessionContext(serviceCtx, controlplane.ChangeSessionContext{SessionID: r.sessionID})
+	}
+	service := controlplane.NewService(controlplane.Config{}, r.store.cp)
+	response, err := service.UndeleteFileVersion(serviceCtx, r.workspace, normalizedPath, controlplane.FileVersionSelector{
+		VersionID: strings.TrimSpace(request.VersionID),
+		FileID:    strings.TrimSpace(request.FileID),
+		Ordinal:   request.Ordinal,
+	})
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	if err := r.materializeRemotePathLocally(ctx, normalizedPath); err != nil {
+		result.Error = fmt.Sprintf("materialize undeleted path %q: %v", normalizedPath, err)
+		r.requestFullSweep()
+		return result
+	}
+
+	result.Success = true
+	result.VersionID = strings.TrimSpace(response.VersionID)
+	result.SourceID = strings.TrimSpace(response.UndeletedFromVersionID)
+	return result
+}
+
+func (r *reconciler) materializeRemotePathLocally(ctx context.Context, normalizedPath string) error {
+	remotePath := absoluteRemotePath(normalizedPath)
+	stat, err := r.fs.Stat(ctx, remotePath)
+	if err != nil {
+		return err
+	}
+	if stat == nil {
+		return os.ErrNotExist
+	}
+
+	rel := strings.TrimPrefix(normalizedPath, "/")
+	localAbs := filepath.Join(r.root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(localAbs), 0o755); err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	switch stat.Type {
+	case "file":
+		data, err := r.fs.Cat(ctx, remotePath)
+		if err != nil {
+			return err
+		}
+		mode := stat.Mode
+		if mode == 0 {
+			mode = 0o644
+		}
+		if r.readonly {
+			mode = 0o444
+		}
+		if err := writeAtomicFile(localAbs, data, mode); err != nil {
+			return err
+		}
+		hash := sha256Hex(data)
+		r.echo.markFile(rel, hash)
+		localMtimeMs := now.UnixMilli()
+		if info, err := os.Stat(localAbs); err == nil {
+			localMtimeMs = info.ModTime().UnixMilli()
+		}
+		r.state.mu.Lock()
+		r.state.state.Entries[rel] = SyncEntry{
+			Type:          "file",
+			Mode:          mode,
+			Size:          int64(len(data)),
+			LocalHash:     hash,
+			LocalIdentity: localFileIdentityFromPath(localAbs),
+			RemoteHash:    hash,
+			LocalMtimeMs:  localMtimeMs,
+			RemoteMtimeMs: stat.Mtime,
+			LastSyncedAt:  now,
+			Version:       r.state.nextVersion(),
+		}
+		r.state.dirty = true
+		r.state.mu.Unlock()
+		r.state.markDirty()
+		return nil
+	case "symlink":
+		target, err := r.fs.Readlink(ctx, remotePath)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Lstat(localAbs); err == nil {
+			_ = os.Remove(localAbs)
+		}
+		if err := os.Symlink(target, localAbs); err != nil {
+			return err
+		}
+		r.echo.markSymlink(rel, target)
+		r.state.mu.Lock()
+		r.state.state.Entries[rel] = SyncEntry{
+			Type:          "symlink",
+			Target:        target,
+			LocalIdentity: localFileIdentityFromPath(localAbs),
+			LocalMtimeMs:  stat.Mtime,
+			RemoteMtimeMs: stat.Mtime,
+			LastSyncedAt:  now,
+			Version:       r.state.nextVersion(),
+		}
+		r.state.dirty = true
+		r.state.mu.Unlock()
+		r.state.markDirty()
+		return nil
+	default:
+		return fmt.Errorf("unsupported undelete entry type %q", stat.Type)
+	}
 }
 
 func (r *reconciler) writeSyncControlResult(requestID string, result syncControlResult) {
@@ -511,6 +649,24 @@ func (r *reconciler) enqueueUploadOpAsync(op uploadOp, delay time.Duration, shou
 	}()
 }
 
+func (r *reconciler) stageSyncEntry(path string, entry SyncEntry) {
+	r.state.mu.Lock()
+	entryCopy := entry
+	entryCopy.LastSyncedAt = time.Now().UTC()
+	entryCopy.Version = r.state.nextVersion()
+	r.state.state.Entries[path] = entryCopy
+	r.state.dirty = true
+	r.state.mu.Unlock()
+	r.state.markDirty()
+}
+
+func (r *reconciler) installPendingRename(path, localIdentity string, entry SyncEntry) {
+	entryCopy := entry
+	entryCopy.Deleted = false
+	entryCopy.LocalIdentity = defaultString(strings.TrimSpace(localIdentity), entryCopy.LocalIdentity)
+	r.stageSyncEntry(path, entryCopy)
+}
+
 func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 	fileSize := info.Size()
 	if fileSize > r.maxFileBytes {
@@ -532,42 +688,53 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 			return
 		}
 		hash := compositeHash(hashes)
-		if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
-			return
-		}
-		if !hasStored {
-			if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, actualSize)); ok {
+		if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, actualSize)); ok {
+			r.installPendingRename(rel, localIdentity, candidate.entry)
+			r.uploadCh <- uploadOp{
+				Kind:          opUploadRename,
+				Path:          rel,
+				PrevPath:      candidate.path,
+				AbsPath:       abs,
+				Mode:          uint32(info.Mode() & fs.ModePerm),
+				LocalHash:     candidate.entry.LocalHash,
+				LocalIdentity: localIdentity,
+				StoredEntry:   candidate.entry,
+				HasStored:     true,
+			}
+			if hash != candidate.entry.LocalHash || uint32(info.Mode()&fs.ModePerm) != candidate.entry.Mode {
+				r.stageSyncEntry(rel, SyncEntry{
+					Type:          "file",
+					Mode:          uint32(info.Mode() & fs.ModePerm),
+					Size:          actualSize,
+					LocalHash:     hash,
+					LocalIdentity: localIdentity,
+					RemoteHash:    candidate.entry.RemoteHash,
+					LocalMtimeMs:  info.ModTime().UnixMilli(),
+					RemoteMtimeMs: candidate.entry.RemoteMtimeMs,
+					ChunkSize:     r.chunkSize,
+					ChunkHashes:   append([]string(nil), hashes...),
+				})
+				dirty, _ := diffChunkManifests(candidate.entry.ChunkHashes, hashes)
 				r.uploadCh <- uploadOp{
-					Kind:          opUploadRename,
+					Kind:          opUploadFile,
 					Path:          rel,
-					PrevPath:      candidate.path,
 					AbsPath:       abs,
 					Mode:          uint32(info.Mode() & fs.ModePerm),
-					LocalHash:     candidate.entry.LocalHash,
+					LocalHash:     hash,
 					LocalIdentity: localIdentity,
 					StoredEntry:   candidate.entry,
 					HasStored:     true,
+					Chunked:       true,
+					FileSize:      actualSize,
+					ChunkSize:     r.chunkSize,
+					ChunkHashes:   hashes,
+					DirtyChunks:   dirty,
 				}
-				if hash != candidate.entry.LocalHash || uint32(info.Mode()&fs.ModePerm) != candidate.entry.Mode {
-					dirty, _ := diffChunkManifests(candidate.entry.ChunkHashes, hashes)
-					r.uploadCh <- uploadOp{
-						Kind:          opUploadFile,
-						Path:          rel,
-						AbsPath:       abs,
-						Mode:          uint32(info.Mode() & fs.ModePerm),
-						LocalHash:     hash,
-						LocalIdentity: localIdentity,
-						StoredEntry:   candidate.entry,
-						HasStored:     true,
-						Chunked:       true,
-						FileSize:      actualSize,
-						ChunkSize:     r.chunkSize,
-						ChunkHashes:   hashes,
-						DirtyChunks:   dirty,
-					}
-				}
-				return
 			}
+			return
+		}
+		if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
+			return
 		}
 		dirty, _ := diffChunkManifests(stored.ChunkHashes, hashes)
 		r.uploadCh <- uploadOp{
@@ -595,37 +762,46 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 		return
 	}
 	hash := sha256Hex(data)
-	if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
-		return
-	}
-	if !hasStored {
-		if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, fileSize)); ok {
-			r.uploadCh <- uploadOp{
-				Kind:          opUploadRename,
-				Path:          rel,
-				PrevPath:      candidate.path,
-				AbsPath:       abs,
+	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, fileSize)); ok {
+		r.installPendingRename(rel, localIdentity, candidate.entry)
+		r.uploadCh <- uploadOp{
+			Kind:          opUploadRename,
+			Path:          rel,
+			PrevPath:      candidate.path,
+			AbsPath:       abs,
+			Mode:          uint32(info.Mode() & fs.ModePerm),
+			LocalHash:     candidate.entry.LocalHash,
+			LocalIdentity: localIdentity,
+			StoredEntry:   candidate.entry,
+			HasStored:     true,
+		}
+		if hash != candidate.entry.LocalHash || uint32(info.Mode()&fs.ModePerm) != candidate.entry.Mode {
+			r.stageSyncEntry(rel, SyncEntry{
+				Type:          "file",
 				Mode:          uint32(info.Mode() & fs.ModePerm),
-				LocalHash:     candidate.entry.LocalHash,
+				Size:          fileSize,
+				LocalHash:     hash,
+				LocalIdentity: localIdentity,
+				RemoteHash:    candidate.entry.RemoteHash,
+				LocalMtimeMs:  info.ModTime().UnixMilli(),
+				RemoteMtimeMs: candidate.entry.RemoteMtimeMs,
+			})
+			r.uploadCh <- uploadOp{
+				Kind:          opUploadFile,
+				Path:          rel,
+				AbsPath:       abs,
+				Content:       data,
+				Mode:          uint32(info.Mode() & fs.ModePerm),
+				LocalHash:     hash,
 				LocalIdentity: localIdentity,
 				StoredEntry:   candidate.entry,
 				HasStored:     true,
 			}
-			if hash != candidate.entry.LocalHash || uint32(info.Mode()&fs.ModePerm) != candidate.entry.Mode {
-				r.uploadCh <- uploadOp{
-					Kind:          opUploadFile,
-					Path:          rel,
-					AbsPath:       abs,
-					Content:       data,
-					Mode:          uint32(info.Mode() & fs.ModePerm),
-					LocalHash:     hash,
-					LocalIdentity: localIdentity,
-					StoredEntry:   candidate.entry,
-					HasStored:     true,
-				}
-			}
-			return
 		}
+		return
+	}
+	if hasStored && stored.LocalHash == hash && stored.Type == "file" && stored.Mode == uint32(info.Mode()&fs.ModePerm) {
+		return
 	}
 	r.uploadCh <- uploadOp{
 		Kind:          opUploadFile,
@@ -655,23 +831,22 @@ func (r *reconciler) handleLocalSymlink(rel, abs string) {
 	r.state.mu.Lock()
 	stored, hasStored := r.state.state.Entries[rel]
 	r.state.mu.Unlock()
-	if hasStored && stored.Type == "symlink" && stored.Target == target {
+	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalSymlink(localIdentity, target)); ok {
+		r.installPendingRename(rel, localIdentity, candidate.entry)
+		r.uploadCh <- uploadOp{
+			Kind:          opUploadRename,
+			Path:          rel,
+			PrevPath:      candidate.path,
+			AbsPath:       abs,
+			Symlink:       target,
+			LocalIdentity: localIdentity,
+			StoredEntry:   candidate.entry,
+			HasStored:     true,
+		}
 		return
 	}
-	if !hasStored {
-		if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalSymlink(localIdentity, target)); ok {
-			r.uploadCh <- uploadOp{
-				Kind:          opUploadRename,
-				Path:          rel,
-				PrevPath:      candidate.path,
-				AbsPath:       abs,
-				Symlink:       target,
-				LocalIdentity: localIdentity,
-				StoredEntry:   candidate.entry,
-				HasStored:     true,
-			}
-			return
-		}
+	if hasStored && stored.Type == "symlink" && stored.Target == target {
+		return
 	}
 	r.uploadCh <- uploadOp{
 		Kind:          opUploadSymlink,
