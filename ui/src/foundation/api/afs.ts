@@ -1,16 +1,23 @@
 import { cloneInitialAFSState } from "../mocks/afs";
 import type {
+  AFSAdminOverview,
+  AFSAdminUser,
   AFSChangelogEntry,
   AFSChangelogResponse,
   AFSDatabase,
   AFSDatabaseListResponse,
   AFSAgentSession,
+  AFSDiffEntry,
+  AFSEventEntry,
+  AFSEventListResponse,
   AFSMCPToken,
+  AFSTextDiff,
   CreateSavepointInput,
   CreateMCPTokenInput,
   CreateControlPlaneTokenInput,
   CreateWorkspaceInput,
   GetWorkspaceFileContentInput,
+  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
   AFSActivityEvent,
   AFSActivityListResponse,
@@ -29,6 +36,7 @@ import type {
   AFSWorkspace,
   AFSWorkspaceCapabilities,
   AFSWorkspaceDetail,
+  AFSWorkspaceDiffResponse,
   AFSWorkspaceSource,
   AFSWorkspaceSummary,
   AFSWorkspaceVersioningPolicy,
@@ -86,9 +94,11 @@ type AFSClient = {
   restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
   listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
   listActivityPage: (input: ListActivityInput) => Promise<AFSActivityListResponse>;
+  listEvents: (input: ListEventsInput) => Promise<AFSEventListResponse>;
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
   getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
+  getWorkspaceDiff: (input: GetWorkspaceDiffInput) => Promise<AFSWorkspaceDiffResponse>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
   listAllMCPAccessTokens: () => Promise<AFSMCPToken[]>;
@@ -104,6 +114,11 @@ type AFSClient = {
   getAccount: () => Promise<AFSAccount>;
   resetAccountData: () => Promise<AFSAccount>;
   deleteAccount: () => Promise<AFSAccount>;
+  getAdminOverview: () => Promise<AFSAdminOverview>;
+  listAdminUsers: () => Promise<AFSAdminUser[]>;
+  listAdminDatabases: () => Promise<AFSDatabase[]>;
+  listAdminWorkspaceSummaries: () => Promise<AFSWorkspaceSummary[]>;
+  listAdminAgents: () => Promise<AFSAgentSession[]>;
   resetDemo: () => AFSState;
 };
 
@@ -123,6 +138,18 @@ export type ListActivityInput = {
   workspaceId?: string;
   limit?: number;
   until?: string;
+};
+
+export type ListEventsInput = {
+  databaseId?: string;
+  workspaceId?: string;
+  kind?: string;
+  sessionId?: string;
+  path?: string;
+  since?: string;
+  until?: string;
+  limit?: number;
+  direction?: "asc" | "desc";
 };
 
 type HTTPChangelogEntry = {
@@ -289,6 +316,38 @@ type HTTPActivityList = {
   next_cursor?: string;
 };
 
+type HTTPEventEntry = {
+  id: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  database_id?: string;
+  database_name?: string;
+  created_at?: string;
+  kind: string;
+  op: string;
+  source?: string;
+  actor?: string;
+  session_id?: string;
+  user?: string;
+  label?: string;
+  agent_version?: string;
+  hostname?: string;
+  path?: string;
+  prev_path?: string;
+  size_bytes?: number;
+  delta_bytes?: number;
+  content_hash?: string;
+  prev_hash?: string;
+  mode?: number;
+  checkpoint_id?: string;
+  extras?: Record<string, string>;
+};
+
+type HTTPEventList = {
+  items: HTTPEventEntry[];
+  next_cursor?: string;
+};
+
 type HTTPWorkspaceSessionInfo = {
   session_id: string;
   workspace: string;
@@ -344,6 +403,67 @@ type HTTPFileContent = {
   binary: boolean;
   content?: string;
   target?: string;
+};
+
+type HTTPDiffState = {
+  view: AFSWorkspaceView;
+  checkpoint_id?: string;
+  manifest_hash?: string;
+  file_count: number;
+  folder_count: number;
+  total_bytes: number;
+};
+
+type HTTPDiffSummary = {
+  total: number;
+  created: number;
+  updated: number;
+  deleted: number;
+  renamed: number;
+  metadata_changed: number;
+  bytes_added: number;
+  bytes_removed: number;
+};
+
+type HTTPTextDiffLine = {
+  kind: "context" | "delete" | "insert";
+  old_line?: number;
+  new_line?: number;
+  text: string;
+};
+
+type HTTPTextDiffHunk = {
+  old_start: number;
+  old_lines: number;
+  new_start: number;
+  new_lines: number;
+  lines: HTTPTextDiffLine[];
+};
+
+type HTTPDiffEntry = {
+  op: AFSWorkspaceDiffResponse["entries"][number]["op"];
+  path: string;
+  previous_path?: string;
+  kind?: AFSWorkspaceDiffResponse["entries"][number]["kind"];
+  previous_kind?: AFSWorkspaceDiffResponse["entries"][number]["previousKind"];
+  size_bytes?: number;
+  previous_size_bytes?: number;
+  delta_bytes?: number;
+  text_diff?: {
+    language?: string;
+    previous_exists: boolean;
+    next_exists: boolean;
+    hunks?: HTTPTextDiffHunk[];
+  };
+};
+
+type HTTPWorkspaceDiffResponse = {
+  workspace_id: string;
+  workspace_name: string;
+  base: HTTPDiffState;
+  head: HTTPDiffState;
+  summary: HTTPDiffSummary;
+  entries: HTTPDiffEntry[];
 };
 
 type HTTPWorkspaceVersioningPolicy = {
@@ -524,6 +644,29 @@ type HTTPAccount = {
   deleted_database_count?: number;
   deleted_workspace_count?: number;
   identity_deleted?: boolean;
+};
+
+type HTTPAdminOverview = {
+  user_count: number;
+  database_count: number;
+  workspace_count: number;
+  agent_count: number;
+  active_agent_count: number;
+  stale_agent_count: number;
+  unavailable_database_count: number;
+  total_bytes: number;
+  file_count: number;
+};
+
+type HTTPAdminUser = {
+  subject: string;
+  label?: string;
+  database_count: number;
+  workspace_count: number;
+  mcp_token_count: number;
+  agent_session_count: number;
+  last_seen_at?: string;
+  sources?: string[];
 };
 
 class HTTPError extends Error {
@@ -981,8 +1124,129 @@ function allActivityForState(state: AFSState) {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function allEventsForState(state: AFSState): AFSEventEntry[] {
+  return allActivityForState(state).map((event) => ({
+    id: event.id,
+    workspaceId: event.workspaceId,
+    workspaceName: event.workspaceName,
+    databaseId: event.databaseId,
+    databaseName: event.databaseName,
+    createdAt: event.createdAt,
+    kind: event.scope || event.kind,
+    op: event.kind,
+    actor: event.actor,
+    path: event.path,
+  }));
+}
+
 function activityForState(state: AFSState, limit: number) {
   return allActivityForState(state).slice(0, limit);
+}
+
+function fileSizeBytes(file: AFSFile) {
+  return new TextEncoder().encode(file.content).length;
+}
+
+function demoTextDiff(previous: AFSFile | undefined, next: AFSFile | undefined): AFSTextDiff {
+  const previousLines = previous?.content.split("\n") ?? [];
+  const nextLines = next?.content.split("\n") ?? [];
+  return {
+    language: next?.language ?? previous?.language,
+    previousExists: previous != null,
+    nextExists: next != null,
+    hunks: [
+      {
+        oldStart: 1,
+        oldLines: previousLines.length,
+        newStart: 1,
+        newLines: nextLines.length,
+        lines: [
+          ...previousLines.map((text, index) => ({ kind: "delete" as const, oldLine: index + 1, text })),
+          ...nextLines.map((text, index) => ({ kind: "insert" as const, newLine: index + 1, text })),
+        ],
+      },
+    ],
+  };
+}
+
+function demoDiffState(workspace: AFSWorkspace, view: AFSWorkspaceView, files: AFSFile[]) {
+  const checkpointId = view === "head" ? workspace.headSavepointId : view.startsWith("checkpoint:") ? view.slice("checkpoint:".length) : undefined;
+  return {
+    view,
+    checkpointId,
+    manifestHash: undefined,
+    fileCount: files.length,
+    folderCount: folderCount(files),
+    totalBytes: bytesCount(files),
+  };
+}
+
+function summarizeDiffEntries(entries: AFSDiffEntry[]) {
+  return entries.reduce(
+    (summary, entry) => {
+      summary.total += 1;
+      if (entry.op === "create") summary.created += 1;
+      if (entry.op === "update") summary.updated += 1;
+      if (entry.op === "delete") summary.deleted += 1;
+      if (entry.op === "rename") summary.renamed += 1;
+      if (entry.op === "metadata") summary.metadataChanged += 1;
+      if ((entry.deltaBytes ?? 0) > 0) summary.bytesAdded += entry.deltaBytes ?? 0;
+      if ((entry.deltaBytes ?? 0) < 0) summary.bytesRemoved += Math.abs(entry.deltaBytes ?? 0);
+      return summary;
+    },
+    {
+      total: 0,
+      created: 0,
+      updated: 0,
+      deleted: 0,
+      renamed: 0,
+      metadataChanged: 0,
+      bytesAdded: 0,
+      bytesRemoved: 0,
+    },
+  );
+}
+
+function compareDemoFiles(
+  workspace: AFSWorkspace,
+  baseView: AFSWorkspaceView,
+  headView: AFSWorkspaceView,
+): AFSWorkspaceDiffResponse {
+  const baseFiles = demoFilesForView(workspace, baseView);
+  const headFiles = demoFilesForView(workspace, headView);
+  const baseByPath = new Map(baseFiles.map((file) => [normalizeFilePath(file.path), file]));
+  const headByPath = new Map(headFiles.map((file) => [normalizeFilePath(file.path), file]));
+  const entries: AFSDiffEntry[] = [];
+  const allPaths = new Set([...baseByPath.keys(), ...headByPath.keys()]);
+
+  for (const path of [...allPaths].sort()) {
+    const previous = baseByPath.get(path);
+    const next = headByPath.get(path);
+    if (previous == null && next != null) {
+      const sizeBytes = fileSizeBytes(next);
+      entries.push({ op: "create", path, kind: "file", sizeBytes, deltaBytes: sizeBytes, textDiff: demoTextDiff(undefined, next) });
+      continue;
+    }
+    if (previous != null && next == null) {
+      const previousSizeBytes = fileSizeBytes(previous);
+      entries.push({ op: "delete", path, previousPath: path, previousKind: "file", previousSizeBytes, deltaBytes: previousSizeBytes * -1, textDiff: demoTextDiff(previous, undefined) });
+      continue;
+    }
+    if (previous != null && next != null && previous.content !== next.content) {
+      const previousSizeBytes = fileSizeBytes(previous);
+      const sizeBytes = fileSizeBytes(next);
+      entries.push({ op: "update", path, kind: "file", previousKind: "file", sizeBytes, previousSizeBytes, deltaBytes: sizeBytes - previousSizeBytes, textDiff: demoTextDiff(previous, next) });
+    }
+  }
+
+  return {
+    workspaceId: workspace.id,
+    workspaceName: workspace.name,
+    base: demoDiffState(workspace, baseView, baseFiles),
+    head: demoDiffState(workspace, headView, headFiles),
+    summary: summarizeDiffEntries(entries),
+    entries,
+  };
 }
 
 const demoAFSClient: AFSClient = {
@@ -1372,6 +1636,24 @@ This workspace was created from the AFS Web UI.
     };
   },
 
+  async listEvents(input: ListEventsInput) {
+    await wait();
+    const state = loadState();
+    const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
+    const events = allEventsForState(state)
+      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
+      .filter((event) => input.workspaceId == null || input.workspaceId === "" || event.workspaceId === input.workspaceId)
+      .filter((event) => input.kind == null || input.kind === "" || event.kind === input.kind)
+      .filter((event) => input.sessionId == null || input.sessionId === "" || event.sessionId === input.sessionId)
+      .filter((event) => input.path == null || input.path === "" || event.path === input.path)
+      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
+    const page = events.slice(0, limit);
+    return {
+      items: page,
+      nextCursor: page.length > 0 ? page[page.length - 1].id : undefined,
+    };
+  },
+
   async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
     await wait();
     return { entries: [] };
@@ -1422,6 +1704,16 @@ This workspace was created from the AFS Web UI.
       binary: false,
       content: file.content,
     };
+  },
+
+  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
+    await wait();
+    const state = loadState();
+    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    if (!matchesOptionalDatabase(input.databaseId, workspace)) {
+      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+    }
+    return compareDemoFiles(workspace, input.base, input.head);
   },
 
   async quickstart() {
@@ -1495,6 +1787,39 @@ This workspace was created from the AFS Web UI.
 
   async deleteAccount() {
     throw new Error("Account deletion is not available in demo mode.");
+  },
+
+  async getAdminOverview() {
+    const databases = deriveDemoDatabases(loadState());
+    const state = loadState();
+    const agents = sortWorkspaces(state.workspaces).flatMap((workspace) => normalizeWorkspace(workspace).agents);
+    return {
+      userCount: 0,
+      databaseCount: databases.length,
+      workspaceCount: state.workspaces.length,
+      agentCount: agents.length,
+      activeAgentCount: agents.filter((agent) => agent.state === "active").length,
+      staleAgentCount: agents.filter((agent) => agent.state !== "active").length,
+      unavailableDatabaseCount: databases.filter((database) => Boolean(database.connectionError)).length,
+      totalBytes: state.workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0),
+      fileCount: state.workspaces.reduce((sum, workspace) => sum + workspace.fileCount, 0),
+    };
+  },
+
+  async listAdminUsers() {
+    return [] as AFSAdminUser[];
+  },
+
+  async listAdminDatabases() {
+    return demoAFSClient.listDatabases();
+  },
+
+  async listAdminWorkspaceSummaries() {
+    return demoAFSClient.listWorkspaceSummaries();
+  },
+
+  async listAdminAgents() {
+    return demoAFSClient.listAgents();
   },
 
   resetDemo() {
@@ -1684,6 +2009,58 @@ function mapActivityList(
   };
 }
 
+function mapEventEntry(
+  input: HTTPEventEntry,
+  scope?: {
+    workspaceId?: string;
+    workspaceName?: string;
+    databaseId?: string;
+    databaseName?: string;
+  },
+): AFSEventEntry {
+  return {
+    id: input.id,
+    workspaceId: input.workspace_id ?? scope?.workspaceId,
+    workspaceName: input.workspace_name ?? scope?.workspaceName,
+    databaseId: input.database_id ?? scope?.databaseId,
+    databaseName: input.database_name ?? scope?.databaseName,
+    createdAt: input.created_at,
+    kind: input.kind,
+    op: input.op,
+    source: input.source,
+    actor: input.actor,
+    sessionId: input.session_id,
+    user: input.user,
+    label: input.label,
+    agentVersion: input.agent_version,
+    hostname: input.hostname,
+    path: input.path,
+    prevPath: input.prev_path,
+    sizeBytes: input.size_bytes,
+    deltaBytes: input.delta_bytes,
+    contentHash: input.content_hash,
+    prevHash: input.prev_hash,
+    mode: input.mode,
+    checkpointId: input.checkpoint_id,
+    extras: input.extras,
+  };
+}
+
+function mapEventList(
+  response: HTTPEventList,
+  scope?: {
+    workspaceId?: string;
+    workspaceName?: string;
+    databaseId?: string;
+    databaseName?: string;
+  },
+): AFSEventListResponse {
+  return {
+    items: response.items.map((item) => mapEventEntry(item, scope)),
+    nextCursor: response.next_cursor,
+  };
+}
+
 function mapCheckpoint(input: HTTPCheckpoint): AFSSavepoint {
   return {
     id: input.id,
@@ -1759,6 +2136,32 @@ function changelogSearchParams(input: ListChangelogInput): URLSearchParams {
   return params;
 }
 
+function eventSearchParams(input: ListEventsInput): URLSearchParams {
+  const params = new URLSearchParams();
+  if (input.limit != null && input.limit > 0) {
+    params.set("limit", String(input.limit));
+  }
+  if (input.kind) {
+    params.set("kind", input.kind);
+  }
+  if (input.sessionId) {
+    params.set("session_id", input.sessionId);
+  }
+  if (input.path) {
+    params.set("path", input.path);
+  }
+  if (input.since) {
+    params.set("since", input.since);
+  }
+  if (input.until) {
+    params.set("until", input.until);
+  }
+  if (input.direction) {
+    params.set("direction", input.direction);
+  }
+  return params;
+}
+
 function mapAgentSession(
   input: HTTPWorkspaceSessionInfo,
   workspaceId: string,
@@ -1784,6 +2187,33 @@ function mapAgentSession(
     startedAt: input.started_at,
     lastSeenAt: input.last_seen_at,
     leaseExpiresAt: input.lease_expires_at,
+  };
+}
+
+function mapAdminOverview(input: HTTPAdminOverview): AFSAdminOverview {
+  return {
+    userCount: input.user_count,
+    databaseCount: input.database_count,
+    workspaceCount: input.workspace_count,
+    agentCount: input.agent_count,
+    activeAgentCount: input.active_agent_count,
+    staleAgentCount: input.stale_agent_count,
+    unavailableDatabaseCount: input.unavailable_database_count,
+    totalBytes: input.total_bytes,
+    fileCount: input.file_count,
+  };
+}
+
+function mapAdminUser(input: HTTPAdminUser): AFSAdminUser {
+  return {
+    subject: input.subject,
+    label: input.label,
+    databaseCount: input.database_count,
+    workspaceCount: input.workspace_count,
+    mcpTokenCount: input.mcp_token_count,
+    agentSessionCount: input.agent_session_count,
+    lastSeenAt: input.last_seen_at,
+    sources: input.sources ?? [],
   };
 }
 
@@ -1882,6 +2312,68 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
     binary: input.binary,
     content: input.content,
     target: input.target,
+  };
+}
+
+function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffResponse {
+  return {
+    workspaceId: input.workspace_id,
+    workspaceName: input.workspace_name,
+    base: {
+      view: input.base.view,
+      checkpointId: input.base.checkpoint_id,
+      manifestHash: input.base.manifest_hash,
+      fileCount: input.base.file_count,
+      folderCount: input.base.folder_count,
+      totalBytes: input.base.total_bytes,
+    },
+    head: {
+      view: input.head.view,
+      checkpointId: input.head.checkpoint_id,
+      manifestHash: input.head.manifest_hash,
+      fileCount: input.head.file_count,
+      folderCount: input.head.folder_count,
+      totalBytes: input.head.total_bytes,
+    },
+    summary: {
+      total: input.summary.total,
+      created: input.summary.created,
+      updated: input.summary.updated,
+      deleted: input.summary.deleted,
+      renamed: input.summary.renamed,
+      metadataChanged: input.summary.metadata_changed,
+      bytesAdded: input.summary.bytes_added,
+      bytesRemoved: input.summary.bytes_removed,
+    },
+    entries: input.entries.map((entry) => ({
+      op: entry.op,
+      path: entry.path,
+      previousPath: entry.previous_path,
+      kind: entry.kind,
+      previousKind: entry.previous_kind,
+      sizeBytes: entry.size_bytes,
+      previousSizeBytes: entry.previous_size_bytes,
+      deltaBytes: entry.delta_bytes,
+      textDiff: entry.text_diff == null
+        ? undefined
+        : {
+            language: entry.text_diff.language,
+            previousExists: entry.text_diff.previous_exists,
+            nextExists: entry.text_diff.next_exists,
+            hunks: entry.text_diff.hunks?.map((hunk) => ({
+              oldStart: hunk.old_start,
+              oldLines: hunk.old_lines,
+              newStart: hunk.new_start,
+              newLines: hunk.new_lines,
+              lines: hunk.lines.map((line) => ({
+                kind: line.kind,
+                oldLine: line.old_line,
+                newLine: line.new_line,
+                text: line.text,
+              })),
+            })),
+          },
+    })),
   };
 }
 
@@ -2315,6 +2807,34 @@ const httpAFSClient: AFSClient = {
     return mapActivityList(response);
   },
 
+  async listEvents(input: ListEventsInput): Promise<AFSEventListResponse> {
+    const params = eventSearchParams(input);
+    const query = params.toString();
+    const workspaceId = input.workspaceId?.trim() ?? "";
+    if (workspaceId !== "") {
+      const base = `${workspaceBasePath(input.databaseId, workspaceId)}/events`;
+      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      return mapEventList(response, {
+        workspaceId,
+        databaseId: input.databaseId,
+      });
+    }
+
+    const databaseId = input.databaseId?.trim() ?? "";
+    if (databaseId !== "") {
+      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
+      const base = `/databases/${databaseId}/events`;
+      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      return mapEventList(response, {
+        databaseId,
+        databaseName: database?.name,
+      });
+    }
+
+    const response = await requestJSON<HTTPEventList>(query ? `/events?${query}` : "/events");
+    return mapEventList(response);
+  },
+
   async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId === "") {
@@ -2367,6 +2887,18 @@ const httpAFSClient: AFSClient = {
       }
       throw error;
     }
+  },
+
+  async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
+    const params = new URLSearchParams({
+      base: input.base,
+      head: input.head,
+    });
+    return mapWorkspaceDiff(
+      await requestJSON<HTTPWorkspaceDiffResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/diff?${params.toString()}`,
+      ),
+    );
   },
 
   async quickstart(input: QuickstartInput) {
@@ -2528,6 +3060,38 @@ const httpAFSClient: AFSClient = {
     return mapAccount(await requestJSON<HTTPAccount>("/account", {
       method: "DELETE",
     }));
+  },
+
+  async getAdminOverview() {
+    return mapAdminOverview(await requestJSON<HTTPAdminOverview>("/admin/overview"));
+  },
+
+  async listAdminUsers() {
+    const response = await requestJSON<{ items: HTTPAdminUser[] }>("/admin/users");
+    return response.items.map(mapAdminUser);
+  },
+
+  async listAdminDatabases() {
+    const response = await requestJSON<{ items: HTTPDatabase[] }>("/admin/databases");
+    return response.items.map(mapDatabase);
+  },
+
+  async listAdminWorkspaceSummaries() {
+    const response = await requestJSON<{ items: HTTPWorkspaceSummary[] }>("/admin/workspaces");
+    return response.items.map(mapWorkspaceSummary);
+  },
+
+  async listAdminAgents() {
+    const response = await requestJSON<HTTPWorkspaceSessionList>("/admin/agents");
+    return response.items.map((item) =>
+      mapAgentSession(
+        item,
+        item.workspace_id ?? item.workspace,
+        item.workspace_name ?? item.workspace,
+        item.database_id,
+        item.database_name,
+      ),
+    );
   },
 
   resetDemo() {

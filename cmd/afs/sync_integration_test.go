@@ -781,8 +781,8 @@ func TestCmdFileCreateExclusiveRoundTrip(t *testing.T) {
 		t.Fatalf("saveState() returned error: %v", err)
 	}
 
-	if err := cmdFS([]string{"fs", "create-exclusive", "--content", "agent-b\n", "/tasks/002.claim"}); err != nil {
-		t.Fatalf("cmdFS(create-exclusive) returned error: %v", err)
+	if err := cmdSync([]string{"sync", "create-exclusive", "--content", "agent-b\n", "/tasks/002.claim"}); err != nil {
+		t.Fatalf("cmdSync(create-exclusive) returned error: %v", err)
 	}
 	assertEventually(t, 3*time.Second, "remote 002.claim", func() bool {
 		return env.remoteExists(t, "tasks/002.claim")
@@ -791,8 +791,8 @@ func TestCmdFileCreateExclusiveRoundTrip(t *testing.T) {
 		t.Fatalf("remote content = %q, want %q", got, "agent-b\n")
 	}
 
-	if err := cmdFS([]string{"fs", "create-exclusive", "/tasks/002.claim"}); err == nil {
-		t.Fatal("second cmdFS(create-exclusive) should fail, got success")
+	if err := cmdSync([]string{"sync", "create-exclusive", "/tasks/002.claim"}); err == nil {
+		t.Fatal("second cmdSync(create-exclusive) should fail, got success")
 	}
 }
 

@@ -7,7 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { afsApi } from "../api/afs";
-import type { ListActivityInput, ListChangelogInput } from "../api/afs";
+import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../api/afs";
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
@@ -15,6 +15,7 @@ import type {
   GetFileHistoryInput,
   GetFileVersionContentInput,
   GetWorkspaceFileContentInput,
+  GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
   GetWorkspaceVersioningPolicyInput,
   RestoreSavepointInput,
@@ -42,6 +43,11 @@ type InfiniteChangelogInput = Omit<ListChangelogInput, "since" | "until">;
 export const afsKeys = {
   all: ["afs"] as const,
   account: () => [...afsKeys.all, "account"] as const,
+  adminOverview: () => [...afsKeys.all, "admin", "overview"] as const,
+  adminUsers: () => [...afsKeys.all, "admin", "users"] as const,
+  adminDatabases: () => [...afsKeys.all, "admin", "databases"] as const,
+  adminWorkspaceSummaries: () => [...afsKeys.all, "admin", "workspaces"] as const,
+  adminAgents: () => [...afsKeys.all, "admin", "agents"] as const,
   databases: () => [...afsKeys.all, "databases"] as const,
   workspaceSummaries: (databaseId: string | null) =>
     [...afsKeys.all, "workspaces", databaseId ?? "all", "summaries"] as const,
@@ -56,6 +62,20 @@ export const afsKeys = {
       input.databaseId ?? "all",
       input.workspaceId ?? "all",
       input.limit ?? 50,
+      input.until ?? "",
+    ] as const,
+  events: (input: ListEventsInput) =>
+    [
+      ...afsKeys.all,
+      "events",
+      input.databaseId ?? "all",
+      input.workspaceId ?? "all",
+      input.kind ?? "all",
+      input.sessionId ?? "all",
+      input.path ?? "",
+      input.limit ?? 100,
+      input.direction ?? "desc",
+      input.since ?? "",
       input.until ?? "",
     ] as const,
   changelog: (input: ListChangelogInput) =>
@@ -108,6 +128,17 @@ export const afsKeys = {
       "files",
       input.view,
       input.path,
+    ] as const,
+  workspaceDiff: (input: GetWorkspaceDiffInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "diff",
+      input.base,
+      input.head,
     ] as const,
   workspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) =>
     [
@@ -166,6 +197,51 @@ export function accountQueryOptions() {
   });
 }
 
+export function adminOverviewQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminOverview(),
+    queryFn: () => afsApi.getAdminOverview(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminUsersQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminUsers(),
+    queryFn: () => afsApi.listAdminUsers(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminDatabasesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminDatabases(),
+    queryFn: () => afsApi.listAdminDatabases(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminWorkspaceSummariesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminWorkspaceSummaries(),
+    queryFn: () => afsApi.listAdminWorkspaceSummaries(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminAgentsQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminAgents(),
+    queryFn: () => afsApi.listAdminAgents(),
+    staleTime: AGENT_QUERY_STALE_MS,
+    gcTime: AGENT_QUERY_GC_MS,
+  });
+}
+
 export function workspaceSummariesQueryOptions(databaseId: string | null) {
   return queryOptions({
     queryKey: afsKeys.workspaceSummaries(databaseId),
@@ -211,6 +287,15 @@ export function activityItemsQueryOptions(databaseId: string | null, limit: numb
   });
 }
 
+export function eventsQueryOptions(input: ListEventsInput) {
+  return queryOptions({
+    queryKey: afsKeys.events(input),
+    queryFn: () => afsApi.listEvents(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function changelogQueryOptions(input: ListChangelogInput) {
   return queryOptions({
     queryKey: afsKeys.changelog(input),
@@ -250,6 +335,15 @@ export function workspaceFileContentQueryOptions(input: GetWorkspaceFileContentI
   return queryOptions({
     queryKey: afsKeys.workspaceFile(input),
     queryFn: () => afsApi.getWorkspaceFileContent(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function workspaceDiffQueryOptions(input: GetWorkspaceDiffInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceDiff(input),
+    queryFn: () => afsApi.getWorkspaceDiff(input),
     staleTime: FILESYSTEM_QUERY_STALE_MS,
     gcTime: FILESYSTEM_QUERY_GC_MS,
   });
@@ -323,6 +417,41 @@ export function useAccount(enabled = true) {
   });
 }
 
+export function useAdminOverview(enabled = true) {
+  return useQuery({
+    ...adminOverviewQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminUsers(enabled = true) {
+  return useQuery({
+    ...adminUsersQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminDatabases(enabled = true) {
+  return useQuery({
+    ...adminDatabasesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminWorkspaceSummaries(enabled = true) {
+  return useQuery({
+    ...adminWorkspaceSummariesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminAgents(enabled = true) {
+  return useQuery({
+    ...adminAgentsQueryOptions(),
+    enabled,
+  });
+}
+
 export function useWorkspaceSummaries(databaseId: string | null, enabled = true) {
   return useQuery(
     {
@@ -389,6 +518,15 @@ export function useActivityPage(input: ListActivityInput, enabled = true) {
   );
 }
 
+export function useEvents(input: ListEventsInput, enabled = true) {
+  return useQuery(
+    {
+      ...eventsQueryOptions(input),
+      enabled,
+    },
+  );
+}
+
 export function useChangelog(input: ListChangelogInput, enabled = true) {
   return useQuery(
     {
@@ -418,6 +556,15 @@ export function useWorkspaceFileContent(input: GetWorkspaceFileContentInput, ena
   return useQuery(
     {
       ...workspaceFileContentQueryOptions(input),
+      enabled: enabled && input.workspaceId !== "",
+    },
+  );
+}
+
+export function useWorkspaceDiff(input: GetWorkspaceDiffInput, enabled = true) {
+  return useQuery(
+    {
+      ...workspaceDiffQueryOptions(input),
       enabled: enabled && input.workspaceId !== "",
     },
   );

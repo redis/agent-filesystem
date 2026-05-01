@@ -22,6 +22,7 @@ const (
 	syncControlRequestsDirName   = ".afs-sync/requests"
 	syncControlResultsDirName    = ".afs-sync/results"
 	syncControlOpCreateExclusive = "create-exclusive"
+	syncControlOpUndelete        = "undelete"
 	defaultSyncControlTimeout    = 10 * time.Second
 )
 
@@ -30,6 +31,9 @@ type syncControlRequest struct {
 	Operation string `json:"operation"`
 	Path      string `json:"path"`
 	Content   string `json:"content"`
+	VersionID string `json:"version_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Ordinal   int64  `json:"ordinal,omitempty"`
 }
 
 type syncControlResult struct {
@@ -38,71 +42,23 @@ type syncControlResult struct {
 	Path      string `json:"path"`
 	Success   bool   `json:"success"`
 	Bytes     int    `json:"bytes,omitempty"`
+	VersionID string `json:"version_id,omitempty"`
+	SourceID  string `json:"source_id,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
 
-func cmdFS(args []string) error {
+func cmdSync(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, syncUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
 
-	parsed, err := parseFSDispatchArgs(args[1:])
-	if err != nil {
-		return err
-	}
-	if parsed.subcommand == "" || isHelpArg(parsed.subcommand) {
-		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-
-	switch parsed.subcommand {
-	case "ls":
-		return cmdFSList(parsed.workspace, parsed.args)
-	case "cat":
-		return cmdFSCat(parsed.workspace, parsed.args)
-	case "find":
-		return cmdFSFind(parsed.workspace, parsed.args)
+	switch args[1] {
 	case "create-exclusive":
-		if strings.TrimSpace(parsed.workspace) != "" {
-			return errors.New("--workspace is not supported with fs create-exclusive; use the mounted sync workspace")
-		}
-		return cmdFileCreateExclusive(parsed.args)
-	case "grep":
-		return cmdFSGrep(parsed.workspace, parsed.args)
+		return cmdFileCreateExclusive(args[2:])
 	default:
-		return fmt.Errorf("unknown filesystem subcommand %q\n\n%s", parsed.subcommand, fsUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("unknown sync subcommand %q\n\n%s", args[1], syncUsageText(filepath.Base(os.Args[0])))
 	}
-}
-
-type fsDispatchArgs struct {
-	workspace  string
-	subcommand string
-	args       []string
-}
-
-func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
-	var parsed fsDispatchArgs
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--workspace" || arg == "-w":
-			if i+1 >= len(args) {
-				return parsed, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			parsed.workspace = strings.TrimSpace(args[i])
-		case strings.HasPrefix(arg, "--workspace="):
-			parsed.workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
-		case strings.HasPrefix(arg, "-"):
-			return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", arg, fsUsageText(filepath.Base(os.Args[0])))
-		default:
-			parsed.subcommand = arg
-			parsed.args = args[i+1:]
-			return parsed, nil
-		}
-	}
-	return parsed, nil
 }
 
 func cmdFileCreateExclusive(args []string) error {
@@ -111,7 +67,7 @@ func cmdFileCreateExclusive(args []string) error {
 		return nil
 	}
 
-	fs := flag.NewFlagSet("fs create-exclusive", flag.ContinueOnError)
+	fs := flag.NewFlagSet("file create-exclusive", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var content optionalString
 	var contentFile string
@@ -135,13 +91,13 @@ func cmdFileCreateExclusive(args []string) error {
 	}
 	st, err := loadState()
 	if err != nil {
-		return fmt.Errorf("AFS is not mounted in sync mode: %w\nRun '%s ws mount <workspace> <directory>' first", err, filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode: %w\nRun '%s up --mode sync' first", err, filepath.Base(os.Args[0]))
 	}
 	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
-		return fmt.Errorf("AFS is not mounted in sync mode\nRun '%s ws mount <workspace> <directory>' first", filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not running in sync mode\nRun '%s up --mode sync' first", filepath.Base(os.Args[0]))
 	}
 	if !runtimeStateMatchesConfig(cfg, st) {
-		return fmt.Errorf("running AFS sync process does not match the current config\nUnmount and mount the workspace again")
+		return fmt.Errorf("running AFS sync process does not match the current config\nRun '%s up --mode sync' again", filepath.Base(os.Args[0]))
 	}
 
 	localRoot := strings.TrimSpace(st.LocalPath)
@@ -166,19 +122,63 @@ func cmdFileCreateExclusive(args []string) error {
 		return err
 	}
 
-	requestID, err := randomSuffix()
-	if err != nil {
-		return err
-	}
 	request := syncControlRequest{
 		Version:   syncControlVersion,
 		Operation: syncControlOpCreateExclusive,
 		Path:      normalizedPath,
 		Content:   contentValue,
 	}
-
-	if err := writeSyncControlJSON(syncControlRequestPath(localRoot, requestID), request, 0o600); err != nil {
+	result, err := runSyncControlRequest(localRoot, request, timeout)
+	if err != nil {
 		return err
+	}
+	printBox(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []boxRow{
+		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
+		{Label: "path", Value: result.Path},
+		{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
+	})
+	return nil
+}
+
+func syncUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s sync <subcommand>
+
+Sync-mode control operations.
+
+Subcommands:
+  create-exclusive   Create a workspace file only if it does not already exist
+`, bin)
+}
+
+func fileCreateExclusiveUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s sync create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
+
+Create <path> only if it does not already exist in the workspace. The create is
+atomic across connected AFS clients. Requires AFS to be running in sync mode on
+this machine. The path must be absolute inside the workspace, for example:
+
+  %s sync create-exclusive /tasks/001.claim
+  %s sync create-exclusive --content "agent-a\n" /tasks/001.claim
+`, bin, bin, bin)
+}
+
+func syncControlRequestPath(root, requestID string) string {
+	return filepath.Join(root, syncControlDirName, "requests", requestID+".json")
+}
+
+func syncControlResultPath(root, requestID string) string {
+	return filepath.Join(root, syncControlDirName, "results", requestID+".json")
+}
+
+func runSyncControlRequest(localRoot string, request syncControlRequest, timeout time.Duration) (syncControlResult, error) {
+	requestID, err := randomSuffix()
+	if err != nil {
+		return syncControlResult{}, err
+	}
+	if err := writeSyncControlJSON(syncControlRequestPath(localRoot, requestID), request, 0o600); err != nil {
+		return syncControlResult{}, err
 	}
 
 	resultPath := syncControlResultPath(localRoot, requestID)
@@ -189,74 +189,60 @@ func cmdFileCreateExclusive(args []string) error {
 			_ = os.Remove(resultPath)
 			var result syncControlResult
 			if err := json.Unmarshal(data, &result); err != nil {
-				return fmt.Errorf("parse file operation result: %w", err)
+				return syncControlResult{}, fmt.Errorf("parse file operation result: %w", err)
 			}
 			if !result.Success {
 				if strings.TrimSpace(result.Error) == "" {
-					return errors.New("fs create-exclusive failed")
+					return syncControlResult{}, fmt.Errorf("%s failed", request.Operation)
 				}
-				return errors.New(result.Error)
+				return syncControlResult{}, errors.New(result.Error)
 			}
-			printSection(markerSuccess+" "+clr(ansiBold, "fs create-exclusive"), []outputRow{
-				{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
-				{Label: "path", Value: result.Path},
-				{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
-			})
-			return nil
+			return result, nil
 		}
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+			return syncControlResult{}, err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for fs create-exclusive result for %s", normalizedPath)
+			return syncControlResult{}, fmt.Errorf("timed out waiting for sync control result for %s", request.Path)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func fsUsageText(bin string) string {
-	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs <subcommand>
+func activeSyncControlRootForWorkspace(cfg config, selection workspaceSelection) (string, bool, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
+		return "", false, nil
+	}
+	if !runtimeStateMatchesConfig(cfg, st) {
+		return "", false, nil
+	}
 
-Read, search, and safely write workspace files.
+	selectionID := strings.TrimSpace(selection.ID)
+	selectionName := strings.TrimSpace(selection.Name)
+	stateID := strings.TrimSpace(st.CurrentWorkspaceID)
+	stateName := strings.TrimSpace(st.CurrentWorkspace)
+	if selectionID != "" && stateID != "" && selectionID != stateID {
+		return "", false, nil
+	}
+	if selectionName != "" && stateName != "" && selectionName != stateName && (selectionID == "" || stateID == "" || selectionID != stateID) {
+		return "", false, nil
+	}
 
-Options:
-  -w, --workspace <workspace>   Select the workspace for remote inspection
-
-Subcommands:
-  ls                 List workspace files
-  cat                Print a workspace file
-  find               Find workspace paths by name
-  grep               Search workspace files
-  create-exclusive   Create a workspace file only if it does not already exist
-
-Examples:
-  %s fs -w demo ls
-  %s fs -w demo cat README.md
-  %s fs -w demo find . -name '*.md' -print
-  %s fs -w demo grep Redis
-`, bin, bin, bin, bin, bin)
-}
-
-func fileCreateExclusiveUsageText(bin string) string {
-	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
-
-Create <path> only if it does not already exist in the workspace. The create is
-atomic across connected AFS clients. Requires AFS to be running in sync mode on
-this machine. The path must be absolute inside the workspace, for example:
-
-  %s fs create-exclusive /tasks/001.claim
-  %s fs create-exclusive --content "agent-a\n" /tasks/001.claim
-`, bin, bin, bin)
-}
-
-func syncControlRequestPath(root, requestID string) string {
-	return filepath.Join(root, syncControlDirName, "requests", requestID+".json")
-}
-
-func syncControlResultPath(root, requestID string) string {
-	return filepath.Join(root, syncControlDirName, "results", requestID+".json")
+	localRoot := strings.TrimSpace(st.LocalPath)
+	if localRoot == "" {
+		localRoot = strings.TrimSpace(cfg.LocalPath)
+	}
+	if localRoot == "" {
+		return "", false, errors.New("AFS local sync path is not configured")
+	}
+	return localRoot, true, nil
 }
 
 func isSyncControlPath(rel string) bool {

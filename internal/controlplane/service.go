@@ -405,6 +405,21 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspace string) error {
 	return s.deleteWorkspace(ctx, workspace)
 }
 
+func (s *Service) GetWorkspaceVersioningPolicy(ctx context.Context, workspace string) (WorkspaceVersioningPolicy, error) {
+	return s.store.GetWorkspaceVersioningPolicy(ctx, workspace)
+}
+
+func (s *Service) UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy WorkspaceVersioningPolicy) (WorkspaceVersioningPolicy, error) {
+	normalized := NormalizeWorkspaceVersioningPolicy(policy)
+	if err := ValidateWorkspaceVersioningPolicy(normalized); err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	if err := s.store.PutWorkspaceVersioningPolicy(ctx, workspace, normalized); err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	return normalized, nil
+}
+
 func (s *Service) ListCheckpoints(ctx context.Context, workspace string, limit int) ([]CheckpointSummary, error) {
 	return s.listCheckpoints(ctx, workspace, limit)
 }
@@ -1316,7 +1331,7 @@ func (s *Service) restoreCheckpoint(ctx context.Context, workspace, checkpointID
 	if err != nil {
 		return RestoreCheckpointResult{}, err
 	}
-	writeChangeEntries(ctx, s.store.rdb, annotateChangeEntriesWithVersions(manifestDiff(priorManifest, manifestValue, template), versionsByPath))
+	writeChangeEntries(ctx, s.store.rdb, storageID, annotateChangeEntriesWithVersions(manifestDiff(priorManifest, manifestValue, template), versionsByPath))
 	fields := map[string]any{
 		"checkpoint": checkpointID,
 		"mode":       "canonical-only",
@@ -1659,6 +1674,9 @@ func (s *Service) forkWorkspace(ctx context.Context, sourceWorkspace, newWorkspa
 		return err
 	}
 	if err := s.store.PutSavepoint(ctx, checkpointMeta, newManifest); err != nil {
+		return err
+	}
+	if err := s.store.CloneFileVersionHistory(ctx, sourceStorageID, newWorkspaceID); err != nil {
 		return err
 	}
 	if err := SyncWorkspaceRoot(ctx, s.store, newWorkspaceID, newManifest); err != nil {

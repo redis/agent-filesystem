@@ -1226,7 +1226,7 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
-	case strings.HasSuffix(workspacePath, "/diff"):
+	case strings.HasSuffix(workspacePath, "/diff") && !strings.HasSuffix(workspacePath, "/files/diff"):
 		workspace := strings.TrimSuffix(workspacePath, "/diff")
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -1727,7 +1727,7 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
-	case strings.HasSuffix(workspacePath, "/diff"):
+	case strings.HasSuffix(workspacePath, "/diff") && !strings.HasSuffix(workspacePath, "/files/diff"):
 		workspace := strings.TrimSuffix(workspacePath, "/diff")
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))

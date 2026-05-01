@@ -42,6 +42,29 @@ export type AFSAccount = {
   identityDeleted?: boolean;
 };
 
+export type AFSAdminOverview = {
+  userCount: number;
+  databaseCount: number;
+  workspaceCount: number;
+  agentCount: number;
+  activeAgentCount: number;
+  staleAgentCount: number;
+  unavailableDatabaseCount: number;
+  totalBytes: number;
+  fileCount: number;
+};
+
+export type AFSAdminUser = {
+  subject: string;
+  label?: string;
+  databaseCount: number;
+  workspaceCount: number;
+  mcpTokenCount: number;
+  agentSessionCount: number;
+  lastSeenAt?: string;
+  sources: string[];
+};
+
 export type AFSFile = {
   language: string;
   modifiedAt: string;
@@ -85,6 +108,38 @@ export type AFSActivityEvent = {
   path?: string;
   scope: string;
   title: string;
+};
+
+export type AFSEventEntry = {
+  id: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  databaseId?: string;
+  databaseName?: string;
+  createdAt?: string;
+  kind: string;
+  op: string;
+  source?: string;
+  actor?: string;
+  sessionId?: string;
+  user?: string;
+  label?: string;
+  agentVersion?: string;
+  hostname?: string;
+  path?: string;
+  prevPath?: string;
+  sizeBytes?: number;
+  deltaBytes?: number;
+  contentHash?: string;
+  prevHash?: string;
+  mode?: number;
+  checkpointId?: string;
+  extras?: Record<string, string>;
+};
+
+export type AFSEventListResponse = {
+  items: AFSEventEntry[];
+  nextCursor?: string;
 };
 
 export type AFSChangelogEntry = {
@@ -222,6 +277,74 @@ export type AFSFileVersionUndeleteResponse = {
 export type AFSActivityListResponse = {
   items: AFSActivityEvent[];
   nextCursor?: string;
+};
+
+export type AFSDiffOp = "create" | "update" | "delete" | "rename" | "metadata";
+
+export type AFSTextDiffLine = {
+  kind: "context" | "delete" | "insert";
+  oldLine?: number;
+  newLine?: number;
+  text: string;
+};
+
+export type AFSTextDiffHunk = {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: AFSTextDiffLine[];
+};
+
+export type AFSTextDiff = {
+  language?: string;
+  previousExists: boolean;
+  nextExists: boolean;
+  hunks?: AFSTextDiffHunk[];
+};
+
+export type AFSDiffEntry = {
+  op: AFSDiffOp;
+  path: string;
+  previousPath?: string;
+  kind?: AFSTreeItemKind;
+  previousKind?: AFSTreeItemKind;
+  sizeBytes?: number;
+  previousSizeBytes?: number;
+  deltaBytes?: number;
+  textDiff?: AFSTextDiff;
+};
+
+export type AFSWorkspaceDiffResponse = {
+  workspaceId: string;
+  workspaceName: string;
+  base: {
+    view: AFSWorkspaceView;
+    checkpointId?: string;
+    manifestHash?: string;
+    fileCount: number;
+    folderCount: number;
+    totalBytes: number;
+  };
+  head: {
+    view: AFSWorkspaceView;
+    checkpointId?: string;
+    manifestHash?: string;
+    fileCount: number;
+    folderCount: number;
+    totalBytes: number;
+  };
+  summary: {
+    total: number;
+    created: number;
+    updated: number;
+    deleted: number;
+    renamed: number;
+    metadataChanged: number;
+    bytesAdded: number;
+    bytesRemoved: number;
+  };
+  entries: AFSDiffEntry[];
 };
 
 export type AFSAgentSession = {
@@ -444,6 +567,13 @@ export type GetWorkspaceFileContentInput = {
   workspaceId: string;
   view: AFSWorkspaceView;
   path: string;
+};
+
+export type GetWorkspaceDiffInput = {
+  databaseId?: string;
+  workspaceId: string;
+  base: AFSWorkspaceView;
+  head: AFSWorkspaceView;
 };
 
 export type GetWorkspaceVersioningPolicyInput = {

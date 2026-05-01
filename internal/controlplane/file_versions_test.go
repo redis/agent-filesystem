@@ -455,7 +455,7 @@ func TestRestoreCheckpointCreatesFileVersionsWhenPolicyEnabled(t *testing.T) {
 		t.Fatalf("SyncWorkspaceRoot(edited) returned error: %v", err)
 	}
 
-	if err := service.restoreCheckpoint(context.Background(), "repo", "snapshot"); err != nil {
+	if _, err := service.restoreCheckpoint(context.Background(), "repo", "snapshot"); err != nil {
 		t.Fatalf("restoreCheckpoint() returned error: %v", err)
 	}
 
