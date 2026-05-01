@@ -26,23 +26,18 @@ const (
 	ansiGray   = "\033[90m"
 	// ansiOrange is the 256-color amber Claude Code uses for actionable
 	// text (version numbers, command references, "run this next" hints).
-	// We use it for any `afs …` command a box or setup flow is telling the
-	// user to run next.
+	// We use it for any `afs ...` command a setup flow is telling the user
+	// to run next.
 	ansiOrange  = "\033[38;5;208m"
 	ansiHideCur = "\033[?25l"
 	ansiShowCur = "\033[?25h"
 	ansiClearLn = "\033[2K"
-	// ansiBorder uses cyan for box-drawing characters — visible on both
-	// light and dark terminal backgrounds (unlike ansiDim which vanishes
-	// on light themes).
-	ansiBorder = "\033[36m"
 	// ansiLabel uses bold cyan for row labels — clear on any background.
 	ansiLabel = "\033[36m"
 )
 
-// markerSuccess is the emoji marker we use at the start of success box
-// titles and top-level completion messages. Matches Claude Code's install
-// banner.
+// markerSuccess is the emoji marker older call sites still pass at the start
+// of success titles. Plain output strips it before rendering.
 const markerSuccess = "✅"
 
 var (
@@ -53,8 +48,6 @@ var (
 const (
 	bannerIndent = "  "
 	maxCLIWidth  = 80
-	maxBoxWidth  = maxCLIWidth - len(bannerIndent) - 2
-	maxBoxText   = maxBoxWidth - 4
 )
 
 func init() {
@@ -222,39 +215,7 @@ func startStep(label string) *uiStep {
 		stop:  make(chan struct{}),
 		done:  make(chan struct{}),
 	}
-
-	if !colorTerm {
-		fmt.Printf("  %s...", label)
-		close(s.done)
-		return s
-	}
-
-	hideCursor()
-	go func() {
-		defer close(s.done)
-		i := 0
-		ticker := time.NewTicker(80 * time.Millisecond)
-		defer ticker.Stop()
-
-		s.mu.Lock()
-		lbl := s.label
-		s.mu.Unlock()
-		fmt.Printf("\r%s  %s%s%s %s", ansiClearLn, ansiYellow, spinFrames[0], ansiReset, lbl)
-
-		for {
-			select {
-			case <-s.stop:
-				return
-			case <-ticker.C:
-				i++
-				s.mu.Lock()
-				lbl = s.label
-				s.mu.Unlock()
-				fmt.Printf("\r%s  %s%s%s %s",
-					ansiClearLn, ansiYellow, spinFrames[i%len(spinFrames)], ansiReset, lbl)
-			}
-		}
-	}()
+	close(s.done)
 	return s
 }
 
@@ -284,25 +245,17 @@ func (s *uiStep) succeed(detail string) {
 	}
 	<-s.done
 
-	if !colorTerm {
-		if detail != "" {
-			fmt.Printf(" %s\n", detail)
-		} else {
-			fmt.Println(" ok")
-		}
-		return
-	}
-
 	s.mu.Lock()
 	lbl := s.label
 	s.mu.Unlock()
 
-	suffix := ""
+	lbl = stripAnsi(strings.TrimSpace(lbl))
+	detail = stripAnsi(strings.TrimSpace(detail))
 	if detail != "" {
-		suffix = ansiDim + " · " + ansiReset + detail
+		fmt.Printf("%s: %s\n", lbl, detail)
+	} else {
+		fmt.Printf("%s: ok\n", lbl)
 	}
-	fmt.Printf("\r%s  %s✓%s %s%s\n", ansiClearLn, ansiGreen, ansiReset, lbl, suffix)
-	showCursor()
 }
 
 func (s *uiStep) fail(detail string) {
@@ -313,175 +266,147 @@ func (s *uiStep) fail(detail string) {
 	}
 	<-s.done
 
-	if !colorTerm {
-		fmt.Printf(" FAILED: %s\n", detail)
-		return
-	}
-
 	s.mu.Lock()
 	lbl := s.label
 	s.mu.Unlock()
 
-	suffix := ""
+	lbl = stripAnsi(strings.TrimSpace(lbl))
+	detail = stripAnsi(strings.TrimSpace(detail))
 	if detail != "" {
-		suffix = " " + ansiRed + detail + ansiReset
+		fmt.Printf("%s: failed: %s\n", lbl, detail)
+	} else {
+		fmt.Printf("%s: failed\n", lbl)
 	}
-	fmt.Printf("\r%s  %s✗%s %s%s\n", ansiClearLn, ansiRed, ansiReset, lbl, suffix)
-	showCursor()
 }
 
 // ---------------------------------------------------------------------------
-// Box rendering
+// Plain output rendering
 // ---------------------------------------------------------------------------
 
-type boxRow struct {
+type outputRow struct {
 	Label string
 	Value string
 }
 
-func printBox(title string, rows []boxRow) {
+func printSection(title string, rows []outputRow) {
+	fmt.Printf("\n")
+
+	title = plainOutputTitle(title)
+	if title != "" {
+		fmt.Println(title)
+	}
+
+	fmt.Printf("\n")
+
 	maxLabel := 0
 	for _, r := range rows {
-		if w := runeWidth(r.Label); w > maxLabel {
+		if w := runeWidth(stripAnsi(r.Label)); w > maxLabel {
 			maxLabel = w
 		}
-	}
-	if maxLabel > maxBoxText-3 {
-		maxLabel = maxBoxText - 3
-	}
-
-	type fmtLine struct {
-		content string
-		empty   bool
-	}
-	var lines []fmtLine
-
-	if title != "" {
-		lines = append(lines, fmtLine{content: fitDisplayText(title, maxBoxText)})
-		lines = append(lines, fmtLine{empty: true})
 	}
 
 	for _, r := range rows {
 		if r.Label == "" && r.Value == "" {
-			lines = append(lines, fmtLine{empty: true})
+			fmt.Println()
 			continue
 		}
-		var content string
-		if r.Label != "" {
-			label := padVisibleText(r.Label, maxLabel)
-			valueWidth := maxBoxText - maxLabel - 3
-			if valueWidth < 0 {
-				valueWidth = 0
-			}
-			content = fmt.Sprintf("%s   %s",
-				clr(ansiLabel, label),
-				fitDisplayText(r.Value, valueWidth))
+		label := stripAnsi(strings.TrimSpace(r.Label))
+		value := stripAnsi(strings.TrimSpace(r.Value))
+		if label == "" {
+			fmt.Println(fitDisplayText(value, maxCLIWidth))
+		} else if value == "" {
+			fmt.Println(label)
 		} else {
-			content = fitDisplayText(r.Value, maxBoxText)
-		}
-		lines = append(lines, fmtLine{content: content})
-	}
-
-	maxWidth := 0
-	for _, l := range lines {
-		if w := runeWidth(l.content); w > maxWidth {
-			maxWidth = w
+			valueWidth := maxCLIWidth - maxLabel - 2
+			if valueWidth < 1 {
+				valueWidth = 1
+			}
+			value = fitDisplayText(value, valueWidth)
+			fmt.Printf("%s  %s\n", padVisibleText(label, maxLabel), value)
 		}
 	}
-	if maxWidth < 36 {
-		maxWidth = 36
-	}
-	innerWidth := maxWidth + 4
-	if innerWidth > maxBoxWidth {
-		innerWidth = maxBoxWidth
-	}
-	// Make sure the box is at least as wide as the branded top border so the
-	// header gradient and title don't overflow a too-narrow box.
-	if min := brandHeaderMinInnerWidth(); innerWidth < min {
-		innerWidth = min
-	}
+	fmt.Printf("\n")
+}
 
-	if !colorTerm {
-		fmt.Println()
-		fmt.Printf("  Redis Agent Filesystem (AFS) %s\n", version.Short())
-		fmt.Println()
-		for _, l := range lines {
-			if l.empty {
-				fmt.Println()
-			} else {
-				fmt.Printf("  %s\n", stripAnsi(l.content))
+func printPlainTable(headers []string, rows [][]string) {
+	widths := make([]int, len(headers))
+	for i, header := range headers {
+		widths[i] = runeWidth(header)
+	}
+	for _, row := range rows {
+		for i := range headers {
+			if i >= len(row) {
+				continue
+			}
+			if width := runeWidth(row[i]); width > widths[i] {
+				widths[i] = width
 			}
 		}
-		fmt.Println()
-		return
 	}
-
-	b := ansiBorder
-	r := ansiReset
-
-	// Branded top border, centered: ╭──── ░▒▓█ Redis Agent Filesystem (AFS) v0.1.1234 █▓▒░ ────╮
-	brandLabel, brandVisible := brandHeaderLabel()
-	totalFill := innerWidth - brandVisible - 2 // 2 for the spaces around brand
-	if totalFill < 2 {
-		totalFill = 2
+	printPlainTableRow(headers, widths)
+	for _, row := range rows {
+		printPlainTableRow(row, widths)
 	}
-	leftFill := totalFill / 2
-	rightFill := totalFill - leftFill
-	fmt.Println()
-	fmt.Printf("  %s╭%s %s%s %s%s╮%s\n", b, strings.Repeat("─", leftFill), ansiReset, brandLabel, ansiBorder, strings.Repeat("─", rightFill), r)
-	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
+}
 
-	for _, l := range lines {
-		if l.empty {
-			fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
-		} else {
-			rightPad := innerWidth - 2 - runeWidth(l.content)
-			if rightPad < 2 {
-				rightPad = 2
-			}
-			fmt.Printf("  %s│%s  %s%s%s│%s\n",
-				b, r, l.content, strings.Repeat(" ", rightPad), b, r)
+func printPlainTableRow(cols []string, widths []int) {
+	used := 0
+	for i, width := range widths {
+		value := ""
+		if i < len(cols) {
+			value = stripAnsi(strings.TrimSpace(cols[i]))
 		}
+		if i > 0 {
+			fmt.Print("  ")
+			used += 2
+		}
+		if i == len(widths)-1 {
+			remaining := maxCLIWidth - used
+			if remaining < 1 {
+				remaining = 1
+			}
+			value = fitDisplayText(value, remaining)
+			fmt.Print(value)
+			used += runeWidth(value)
+			continue
+		}
+		value = padVisibleText(value, width)
+		fmt.Print(value)
+		used += runeWidth(value)
 	}
-
-	fmt.Printf("  %s│%s%s%s│%s\n", b, r, strings.Repeat(" ", innerWidth), b, r)
-	fmt.Printf("  %s╰%s╯%s\n", b, strings.Repeat("─", innerWidth), r)
 	fmt.Println()
 }
 
-// brandHeaderLabel returns the colorised brand string used in the box top
-// border, plus its visible width (runes, no ANSI). Width covers the gradient
-// glyphs, the spaces around the title, and the title + version text.
+func plainOutputTitle(title string) string {
+	title = stripAnsi(strings.TrimSpace(title))
+	title = strings.TrimPrefix(title, markerSuccess)
+	title = strings.TrimSpace(title)
+	for _, prefix := range []string{"✓", "○", "■", "●"} {
+		title = strings.TrimPrefix(title, prefix)
+		title = strings.TrimSpace(title)
+	}
+	return title
+}
+
+// brandHeaderLabel returns the colorized brand string used by help/setup
+// surfaces, plus its visible width (runes, no ANSI).
 func brandHeaderLabel() (string, int) {
 	brandText := "Redis Agent Filesystem (AFS)"
 	versionSuffix := strings.TrimSpace(version.Short())
-	gradient := ansiGray + "░" + ansiRed + "▒" + ansiBRed + "▓" + ansiBold + ansiBRed + "█" + ansiReset
-	gradientR := ansiBold + ansiBRed + "█" + ansiReset + ansiBRed + "▓" + ansiRed + "▒" + ansiGray + "░" + ansiReset
 	versionPart := ""
 	if versionSuffix != "" {
 		versionPart = " " + ansiDim + versionSuffix + ansiReset
 	}
-	label := gradient + " " + ansiBold + brandText + ansiReset + versionPart + " " + gradientR
+	label := ansiBold + brandText + ansiReset + versionPart
 	textWidth := utf8.RuneCountInString(brandText)
 	if versionSuffix != "" {
 		textWidth += 1 + utf8.RuneCountInString(versionSuffix)
 	}
-	visible := 4 + 1 + textWidth + 1 + 4 // ░▒▓█ + space + text + space + █▓▒░
+	visible := textWidth
 	return label, visible
 }
 
-// brandHeaderMinInnerWidth is the smallest box inner-width that fits the
-// brand top border without truncating the title. Allows ≥2 dashes of fill on
-// each side of the brand label so the header still looks centered.
-func brandHeaderMinInnerWidth() int {
-	_, brandVisible := brandHeaderLabel()
-	return brandVisible + 2 + 4 // brand + 2 spaces around it + 2 dashes per side
-}
-
-// printBrandHeader emits the brand line every non-box CLI command should
-// start with, matching the gradient + title + version that box-based
-// commands carry inside their top border. Box commands skip this — their
-// box header already covers it.
+// printBrandHeader emits the brand line for guided setup and help surfaces.
 func printBrandHeader(w io.Writer) {
 	fmt.Fprint(w, brandHeaderString())
 }
@@ -491,10 +416,10 @@ func printBrandHeader(w io.Writer) {
 // embed it in fmt.Sprintf templates.
 func brandHeaderString() string {
 	if !colorTerm {
-		return fmt.Sprintf("\n  Redis Agent Filesystem (AFS) %s\n\n", version.Short())
+		return fmt.Sprintf("\nRedis Agent Filesystem (AFS) %s\n\n", version.Short())
 	}
 	label, _ := brandHeaderLabel()
-	return fmt.Sprintf("\n  %s\n\n", label)
+	return fmt.Sprintf("\n%s\n\n", label)
 }
 
 // ---------------------------------------------------------------------------

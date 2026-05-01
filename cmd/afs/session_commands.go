@@ -14,28 +14,30 @@ import (
 	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
-func cmdSession(args []string) error {
-	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, sessionUsageText(filepath.Base(os.Args[0])))
+func cmdLog(args []string) error {
+	if len(args) > 1 && isHelpArg(args[1]) {
+		fmt.Fprint(os.Stderr, logUsageText(filepath.Base(os.Args[0])))
 		return nil
+	}
+	if len(args) < 2 {
+		return cmdSessionLog(nil)
 	}
 
 	switch args[1] {
-	case "log":
-		return cmdSessionLog(args[2:])
 	case "summary":
 		return cmdSessionSummary(args[2:])
 	default:
-		return fmt.Errorf("unknown session subcommand %q\n\n%s", args[1], sessionUsageText(filepath.Base(os.Args[0])))
+		return cmdSessionLog(args[1:])
 	}
 }
 
 type sessionLogFlags struct {
-	workspace string
-	sessionID string
-	limit     int
-	follow    bool
-	all       bool
+	workspace       string
+	sessionID       string
+	sessionExplicit bool
+	limit           int
+	follow          bool
+	all             bool
 }
 
 func parseSessionLogArgs(args []string) (sessionLogFlags, error) {
@@ -83,6 +85,7 @@ func parseSessionLogArgs(args []string) (sessionLogFlags, error) {
 	}
 	if len(positionals) == 1 {
 		flags.sessionID = positionals[0]
+		flags.sessionExplicit = true
 	}
 	return flags, nil
 }
@@ -100,13 +103,6 @@ func cmdSessionLog(args []string) error {
 		return fmt.Errorf("%s\n\n%s", err, sessionLogUsageText(filepath.Base(os.Args[0])))
 	}
 
-	if flags.sessionID == "" && !flags.all {
-		st, err := loadState()
-		if err == nil {
-			flags.sessionID = strings.TrimSpace(st.SessionID)
-		}
-	}
-
 	ctx := context.Background()
 	cfg, service, closeFn, err := openAFSControlPlane(ctx)
 	if err != nil {
@@ -117,6 +113,9 @@ func cmdSessionLog(args []string) error {
 	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
 	if err != nil {
 		return err
+	}
+	if flags.sessionID == "" && !flags.all {
+		flags.sessionID = defaultLogSessionID(selection)
 	}
 
 	if flags.follow {
@@ -133,7 +132,7 @@ func cmdSessionLog(args []string) error {
 		return err
 	}
 
-	printChangelogEntries(selection.Name, flags.sessionID, resp.Entries, flags.all)
+	printChangelogEntries(selection.Name, flags.sessionID, flags.sessionExplicit, resp.Entries, flags.all)
 	return nil
 }
 
@@ -149,7 +148,7 @@ func followChangelog(ctx context.Context, service afsControlPlane, workspace str
 	}
 	// Reverse-sort back to chronological order so the tail reads naturally.
 	entries := reverseEntries(initial.Entries)
-	printChangelogEntries(workspace, flags.sessionID, entries, flags.all)
+	printChangelogEntries(workspace, flags.sessionID, flags.sessionExplicit, entries, flags.all)
 
 	var cursor string
 	if len(entries) > 0 {
@@ -172,7 +171,7 @@ func followChangelog(ctx context.Context, service afsControlPlane, workspace str
 				if errors.Is(err, context.Canceled) {
 					return nil
 				}
-				fmt.Fprintf(os.Stderr, "afs session log: refresh failed: %v\n", err)
+				fmt.Fprintf(os.Stderr, "afs log: refresh failed: %v\n", err)
 				continue
 			}
 			if len(resp.Entries) == 0 {
@@ -200,20 +199,22 @@ func reverseEntries(in []controlplane.ChangelogEntryRow) []controlplane.Changelo
 	return out
 }
 
-func printChangelogEntries(workspace, sessionID string, entries []controlplane.ChangelogEntryRow, showSession bool) {
-	header := "session " + shortSession(sessionID)
-	if sessionID == "" {
-		header = "all sessions"
+func printChangelogEntries(workspace, sessionID string, sessionExplicit bool, entries []controlplane.ChangelogEntryRow, showSession bool) {
+	fmt.Println()
+	fmt.Printf("workspace: %s\n", workspace)
+	if sessionExplicit && strings.TrimSpace(sessionID) != "" {
+		fmt.Printf("session: %s\n", strings.TrimSpace(sessionID))
 	}
-	header += " · workspace " + workspace
-	fmt.Println(clr(ansiBold, header))
+	fmt.Println()
 	if len(entries) == 0 {
-		fmt.Println(clr(ansiDim, "  (no changes recorded)"))
+		fmt.Println(clr(ansiDim, "(no changes recorded)"))
+		fmt.Println()
 		return
 	}
 	for _, row := range entries {
 		printChangelogRow(row, showSession)
 	}
+	fmt.Println()
 }
 
 func printChangelogRow(row controlplane.ChangelogEntryRow, showSession bool) {
@@ -228,14 +229,14 @@ func printChangelogRow(row controlplane.ChangelogEntryRow, showSession bool) {
 	if row.PrevPath != "" {
 		path = row.PrevPath + " → " + path
 	}
-	prefix := fmt.Sprintf("  %s %s %s %s",
+	prefix := fmt.Sprintf("%s  %s  %s  %s",
 		clr(ansiDim, when),
 		colorForChangelogOp(row),
 		clr(ansiDim, delta),
 		path,
 	)
 	if showSession && row.SessionID != "" {
-		prefix += clr(ansiDim, "  ["+shortSession(row.SessionID)+"]")
+		prefix += clr(ansiDim, "  session "+row.SessionID)
 	}
 	fmt.Println(prefix)
 }
@@ -294,15 +295,45 @@ func padLeft(s string, n int) string {
 	return strings.Repeat(" ", n-len(s)) + s
 }
 
-func shortSession(sessionID string) string {
-	s := strings.TrimSpace(sessionID)
-	if s == "" {
-		return "(none)"
+func defaultLogSessionID(selection workspaceSelection) string {
+	if sessionID := attachmentSessionIDForWorkspace(selection); sessionID != "" {
+		return sessionID
 	}
-	if len(s) <= 12 {
-		return s
+	st, err := loadState()
+	if err != nil {
+		return ""
 	}
-	return s[:8] + "…"
+	if selection.Name != "" && strings.TrimSpace(st.CurrentWorkspace) != "" && strings.TrimSpace(st.CurrentWorkspace) != selection.Name {
+		return ""
+	}
+	if selection.ID != "" && strings.TrimSpace(st.CurrentWorkspaceID) != "" && strings.TrimSpace(st.CurrentWorkspaceID) != selection.ID {
+		return ""
+	}
+	return strings.TrimSpace(st.SessionID)
+}
+
+func attachmentSessionIDForWorkspace(selection workspaceSelection) string {
+	reg, err := loadAttachmentRegistry()
+	if err != nil {
+		return ""
+	}
+	var matches []string
+	for _, rec := range reg.Attachments {
+		if strings.TrimSpace(rec.SessionID) == "" {
+			continue
+		}
+		if selection.ID != "" && strings.TrimSpace(rec.WorkspaceID) == selection.ID {
+			matches = append(matches, strings.TrimSpace(rec.SessionID))
+			continue
+		}
+		if selection.Name != "" && strings.TrimSpace(rec.Workspace) == selection.Name {
+			matches = append(matches, strings.TrimSpace(rec.SessionID))
+		}
+	}
+	if len(matches) != 1 {
+		return ""
+	}
+	return matches[0]
 }
 
 func formatDeltaBytes(delta int64) string {
@@ -342,16 +373,6 @@ func cmdSessionSummary(args []string) error {
 		return fmt.Errorf("%s\n\n%s", err, sessionSummaryUsageText(filepath.Base(os.Args[0])))
 	}
 
-	if flags.sessionID == "" {
-		st, err := loadState()
-		if err == nil {
-			flags.sessionID = strings.TrimSpace(st.SessionID)
-		}
-	}
-	if flags.sessionID == "" {
-		return fmt.Errorf("no active session; pass a session id explicitly or run '%s up' first", filepath.Base(os.Args[0]))
-	}
-
 	ctx := context.Background()
 	cfg, service, closeFn, err := openAFSControlPlane(ctx)
 	if err != nil {
@@ -362,6 +383,12 @@ func cmdSessionSummary(args []string) error {
 	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
 	if err != nil {
 		return err
+	}
+	if flags.sessionID == "" {
+		flags.sessionID = defaultLogSessionID(selection)
+	}
+	if flags.sessionID == "" {
+		return fmt.Errorf("no active session; pass a session id explicitly or attach a workspace first")
 	}
 
 	resp, err := service.ListChangelog(ctx, selection.Name, controlplane.ChangelogListRequest{
@@ -383,15 +410,15 @@ func cmdSessionSummary(args []string) error {
 		}
 	}
 
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: selection.Name},
-		{Label: "session", Value: shortSession(flags.sessionID)},
+		{Label: "session", Value: flags.sessionID},
 		{Label: "entries", Value: strconv.Itoa(len(resp.Entries))},
 	}
 	seenLabels := map[string]struct{}{}
 	for _, label := range []string{"Create", "Update", "Delete", "Create folder", "Delete folder", "Create link", "Update link", "Change mode"} {
 		if n, ok := counts[label]; ok {
-			rows = append(rows, boxRow{Label: strings.ToLower(label), Value: strconv.Itoa(n)})
+			rows = append(rows, outputRow{Label: strings.ToLower(label), Value: strconv.Itoa(n)})
 			seenLabels[label] = struct{}{}
 		}
 	}
@@ -403,45 +430,45 @@ func cmdSessionSummary(args []string) error {
 	}
 	sort.Strings(extraLabels)
 	for _, label := range extraLabels {
-		rows = append(rows, boxRow{Label: strings.ToLower(label), Value: strconv.Itoa(counts[label])})
+		rows = append(rows, outputRow{Label: strings.ToLower(label), Value: strconv.Itoa(counts[label])})
 	}
-	rows = append(rows, boxRow{Label: "bytes added", Value: formatBytes(added)})
-	rows = append(rows, boxRow{Label: "bytes removed", Value: formatBytes(removed)})
-	printBox(clr(ansiBold, "session summary"), rows)
+	rows = append(rows, outputRow{Label: "bytes added", Value: formatBytes(added)})
+	rows = append(rows, outputRow{Label: "bytes removed", Value: formatBytes(removed)})
+	printSection(clr(ansiBold, "log summary"), rows)
 	return nil
 }
 
-func sessionUsageText(bin string) string {
+func logUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s session <subcommand>
+  %s log [session-id] [flags]
+  %s log summary [session-id] [flags]
 
 Subcommands:
-  log [session-id] [flags]   Tail the file-change log for a session
   summary [session-id]       Totals for a session (files + bytes)
 
-Flags (log):
-  --workspace, -w <name>     Override the current workspace
+Flags:
+  --workspace, -w <name>     Read log entries for a specific workspace
   --limit <n>                Number of recent entries to show (default 50)
   --follow, -f               Stream new entries as they arrive
   --all                      Show every session (not just the current one)
 
 Examples:
-  %s session log
-  %s session log --follow
-  %s session log <session-id>
-  %s session summary <session-id>
-`, bin, bin, bin, bin, bin)
+  %s log
+  %s log --follow
+  %s log <session-id>
+  %s log summary <session-id>
+`, bin, bin, bin, bin, bin, bin)
 }
 
 func sessionLogUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s session log [session-id] [flags]
+  %s log [session-id] [flags]
 
-Show file-change history for an AFS session. Defaults to the session
-recorded by 'afs up' on this machine.
+Show file-change history for an AFS session. Defaults to the session for the
+attached workspace on this machine.
 
 Flags:
-  --workspace, -w <name>   Override the current workspace
+  --workspace, -w <name>   Read log entries for a specific workspace
   --limit <n>              Number of recent entries to show (default 50)
   --follow, -f             Stream new entries every 2 seconds
   --all                    Include entries from other sessions
@@ -450,12 +477,12 @@ Flags:
 
 func sessionSummaryUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s session summary [session-id] [flags]
+  %s log summary [session-id] [flags]
 
 Show per-session totals (file counts by op, bytes added/removed).
-Defaults to the session recorded by 'afs up' on this machine.
+Defaults to the session for the attached workspace on this machine.
 
 Flags:
-  --workspace, -w <name>   Override the current workspace
+  --workspace, -w <name>   Summarize a specific workspace
 `, bin)
 }

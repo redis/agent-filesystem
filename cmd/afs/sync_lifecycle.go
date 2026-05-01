@@ -46,6 +46,10 @@ type syncDaemonReady struct {
 }
 
 func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(), error) {
+	return prepareSyncBootstrapForWorkspace(ctx, cfg, "")
+}
+
+func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requestedWorkspace string) (syncBootstrap, func(), error) {
 	resolvedCfg, service, closeFn, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
 		return syncBootstrap{}, func() {}, err
@@ -60,10 +64,15 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 		}
 	}
 
-	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
+	var selection workspaceSelection
+	if strings.TrimSpace(requestedWorkspace) != "" {
+		selection, err = resolveWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service, requestedWorkspace)
+	} else {
+		selection, err = currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
+	}
 	if err != nil {
 		closeFn()
-		return syncBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can sync: %w", err)
+		return syncBootstrap{}, func() {}, fmt.Errorf("a workspace is required before AFS can sync: %w", err)
 	}
 
 	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
@@ -97,11 +106,11 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 // startSyncServices is the sync-mode counterpart to startServices. It boots
 // Redis (if managed), opens the live workspace root, does the initial
 // reconciliation (blocking with progress), then re-execs itself as a
-// background daemon process and returns — exactly like mount mode. The parent
-// `afs up` process exits and returns control to the shell.
+// background daemon process and returns. The parent attach process exits and
+// returns control to the shell.
 func startSyncServices(cfg config, foreground bool) error {
 	if strings.TrimSpace(cfg.LocalPath) == "" {
-		return errors.New("localPath is required when mode=sync; run `afs setup` or set localPath in afs.config.json")
+		return errors.New("localPath is required when mode=sync; run `afs ws attach <workspace> <directory>`")
 	}
 	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {
@@ -226,7 +235,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		<-sigCh
 		signal.Stop(sigCh)
 
-		// Full cleanup — same as `afs down`.
+		// Full cleanup for the foreground daemon.
 		fmt.Println()
 		stopStep := startStep("Stopping sync daemon")
 		stopSessionLifecycle()
@@ -234,13 +243,7 @@ func startSyncServices(cfg config, foreground bool) error {
 		daemon.Stop()
 		stopStep.succeed("clean")
 
-		cleanStep := startStep("Removing local sync folder")
-		if err := os.RemoveAll(localRoot); err != nil {
-			cleanStep.fail(err.Error())
-		} else {
-			cleanStep.succeed(localRoot)
-		}
-		_ = removeSyncState(bootstrap.workspace)
+		fmt.Printf("local: preserved at %s\n", localRoot)
 		if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(os.Stderr, "afs sync: cleanup state file: %v\n", err)
 		}
@@ -634,16 +637,16 @@ func printSyncReadyBox(cfg config, workspace, localRoot string) {
 	title := statusTitle(markerSuccess, 0)
 	rows := statusRows(cfg, workspace, localRoot, modeSync, "", cfg.RedisAddr, cfg.RedisDB)
 	if cfg.ReadOnly {
-		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
+		rows = append(rows, outputRow{Label: "readonly", Value: "yes"})
 	}
-	rows = append(rows, boxRow{})
-	rows = append(rows, boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")})
-	printBox(title, rows)
+	rows = append(rows, outputRow{})
+	rows = append(rows, outputRow{Label: "detach", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws detach "+shellQuote(localRoot))})
+	printSection(title, rows)
 }
 
-// stopSyncServicesIfActive performs the cleanup that cmdDown needs when the
-// running daemon was started in sync mode.
-func stopSyncServicesIfActive(st state) (bool, error) {
+// stopSyncServicesIfActive performs detach cleanup when the running daemon was
+// started in sync mode.
+func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
 	if strings.TrimSpace(st.Mode) != modeSync {
 		return false, nil
 	}
@@ -658,21 +661,16 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 			s.succeed(fmt.Sprintf("pid %d", st.SyncPID))
 		}
 	}
-	// Remove the local sync folder — the source of truth is Redis, and
-	// `afs up` will re-populate it. Same semantics as mount mode removing
-	// the mountpoint.
-	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" {
-		s := startStep("Removing local sync folder")
+	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" && deleteLocal {
 		if err := os.RemoveAll(localPath); err != nil {
-			s.fail(err.Error())
-			fmt.Printf("  %s local sync folder preserved at %s\n", clr(ansiYellow, "!"), localPath)
-		} else {
-			s.succeed(localPath)
+			fmt.Printf("  %s local sync folder preserved at %s (%v)\n", clr(ansiYellow, "!"), localPath, err)
 		}
 	}
 
-	// Clean up sync state file.
-	if workspace := strings.TrimSpace(st.CurrentWorkspace); workspace != "" {
+	if deleteLocal {
+		// Clean up sync state only when the user explicitly deletes the local
+		// copy; otherwise it remains as the baseline for a later re-attach.
+		workspace := strings.TrimSpace(st.CurrentWorkspace)
 		_ = removeSyncState(workspace)
 	}
 	closeManagedWorkspaceSession(configFromState(st), strings.TrimSpace(st.CurrentWorkspace), strings.TrimSpace(st.SessionID))
@@ -680,6 +678,12 @@ func stopSyncServicesIfActive(st state) (bool, error) {
 	if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return true, err
 	}
-	fmt.Printf("\n  %s afs sync stopped\n\n", clr(ansiDim, "■"))
+	local := "preserved"
+	if deleteLocal {
+		local = "deleted"
+	}
+	fmt.Printf("Detached workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
+	fmt.Printf("path   %s\n", st.LocalPath)
+	fmt.Printf("local  %s\n", local)
 	return true, nil
 }

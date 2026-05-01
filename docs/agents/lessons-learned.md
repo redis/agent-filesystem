@@ -12,13 +12,18 @@ future agents should not have to rediscover.
   admin routes before they resolve workspace names. Otherwise bearer tokens do
   not attach an auth subject and duplicate workspace-name errors can expose
   cross-tenant workspace/database identifiers.
+- Auth commands are nested under `afs auth`. Keep authentication
+  login/logout/status under that command family; top-level `afs status`
+  remains the workspace attachment status. Use `afs auth login`,
+  `afs auth logout`, and `afs auth status` in help text, docs, and install
+  scripts.
 - `cmd/afs/auth_commands.go` treats cloud-vs-self-managed login as a hostname
   allowlist problem. When the public cloud domain changes, update that list
-  alongside the default cloud URL or `afs login --url <new-cloud-host>` will
-  silently route users into the self-managed flow.
-- Plain `afs login` should ask Cloud vs Self-managed before opening any browser
-  login. Keep `--cloud`, `--self-hosted`, and token handoff noninteractive for
-  scripted install paths.
+  alongside the default cloud URL or `afs auth login --url <new-cloud-host>`
+  will silently route users into the self-managed flow.
+- Plain `afs auth login` should ask Cloud vs Self-managed before opening any
+  browser login. Keep `--cloud`, `--self-hosted`, and token handoff
+  noninteractive for scripted install paths.
 - Keep docs, active backlog notes, and long-form plans under the single `docs/`
   root. Raw benchmark output belongs in `/tmp` or another artifact directory,
   with durable conclusions summarized in `docs/performance.md`.
@@ -41,9 +46,9 @@ future agents should not have to rediscover.
 
 - Quote route filenames that contain `$` when running shell or git commands in
   `zsh`, for example `git add "ui/src/routes/workspaces.$workspaceId.tsx"`.
-- If `afs login` reports `Unknown command: login`, check whether the user is
-  running a stale local `./afs` binary from an old checkout or worktree. The
-  current PATH install should print `login` in `afs --help`; rebuild or use the
+- If `afs auth login` reports `Unknown command: auth`, check whether the user
+  is running a stale local `./afs` binary from an old checkout or worktree. The
+  current PATH install should print `auth` in `afs --help`; rebuild or use the
   repo-root binary before debugging auth flow code.
 
 ## UI Semantics

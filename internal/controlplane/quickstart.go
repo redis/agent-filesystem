@@ -39,7 +39,7 @@ type QuickstartResponse struct {
 // control plane, creating a default database if needed. It is idempotent and
 // safe to call on every boot: if the workspace already exists (from an
 // earlier boot or a prior Quickstart call), it returns without mutating
-// anything. Intended for self-hosted deployments so a fresh `afs login
+// anything. Intended for self-hosted deployments so a fresh `afs auth login
 // --self-hosted` lands the user on a usable workspace without manual setup.
 func (m *DatabaseManager) SeedGettingStarted(ctx context.Context) error {
 	_, err := m.Quickstart(ctx, QuickstartRequest{})
@@ -424,17 +424,16 @@ getting-started/
 
 1. **Browse files** — Click through the file tree on the left to explore.
 2. **Create a checkpoint** — Go to the Checkpoints tab and save a snapshot.
-3. **Connect an agent** — Mount this workspace locally or use MCP tools.
+3. **Connect an agent** — Attach this workspace locally or use MCP tools.
 4. **Edit and compare** — Have an agent modify ` + "`examples/hello.py`" + `, then
    compare the workspace state against your checkpoint.
 
 ## Connect an agent
 
-**Option A: Mount locally**
+**Option A: Attach locally**
 ` + "```bash" + `
-afs workspace use getting-started
-afs up
-# The workspace appears at ~/afs/getting-started/
+afs ws attach getting-started ~/getting-started
+# The workspace appears at ~/getting-started/
 ` + "```" + `
 
 **Option B: MCP tools**
@@ -466,14 +465,11 @@ Get an AI agent working with AFS in under 5 minutes.
 - AFS binary installed (you already have this if you can see this file)
 - Redis running (AFS stores everything in Redis)
 
-## Step 1: Mount the workspace
+## Step 1: Attach the workspace
 
 ` + "```bash" + `
-# Select this workspace
-afs workspace use getting-started
-
-# Start the sync daemon — files appear at ~/afs/getting-started/
-afs up
+# Attach this workspace; files appear at ~/getting-started/
+afs ws attach getting-started ~/getting-started
 ` + "```" + `
 
 Your agent can now read and write files in that directory using normal file I/O.
@@ -483,7 +479,7 @@ Your agent can now read and write files in that directory using normal file I/O.
 Have your agent edit a file:
 
 ` + "```bash" + `
-echo "print('Modified by agent')" >> ~/afs/getting-started/examples/hello.py
+echo "print('Modified by agent')" >> ~/getting-started/examples/hello.py
 ` + "```" + `
 
 AFS syncs the change to Redis automatically.
@@ -491,7 +487,7 @@ AFS syncs the change to Redis automatically.
 ## Step 3: Create a checkpoint
 
 ` + "```bash" + `
-afs checkpoint save --name "after-agent-edit" --note "Agent modified hello.py"
+afs cp create getting-started after-agent-edit --description "Agent modified hello.py"
 ` + "```" + `
 
 Or use the web UI — go to the Checkpoints tab and click **Save checkpoint**.
@@ -500,10 +496,10 @@ Or use the web UI — go to the Checkpoints tab and click **Save checkpoint**.
 
 ` + "```bash" + `
 # List checkpoints
-afs checkpoint list
+afs cp list getting-started
 
 # Restore to a previous state
-afs checkpoint restore initial
+afs cp restore getting-started initial
 ` + "```" + `
 
 ## Using MCP instead

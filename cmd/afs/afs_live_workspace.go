@@ -146,7 +146,7 @@ func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace
 	}
 
 	if printResult {
-		printBox(markerSuccess+" "+clr(ansiBold, "save complete"), []boxRow{
+		printSection(markerSuccess+" "+clr(ansiBold, "save complete"), []outputRow{
 			{Label: "workspace", Value: workspace},
 			{Label: "savepoint", Value: savepointID},
 			{Label: "source", Value: "live workspace"},

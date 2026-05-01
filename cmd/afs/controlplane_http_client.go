@@ -39,11 +39,12 @@ type httpForkWorkspaceRequest struct {
 }
 
 type httpSaveFromLiveRequest struct {
-	CheckpointID string `json:"checkpoint_id"`
-	Description  string `json:"description,omitempty"`
-	Kind         string `json:"kind,omitempty"`
-	Source       string `json:"source,omitempty"`
-	Author       string `json:"author,omitempty"`
+	CheckpointID   string `json:"checkpoint_id"`
+	Description    string `json:"description,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Author         string `json:"author,omitempty"`
+	AllowUnchanged bool   `json:"allow_unchanged,omitempty"`
 }
 
 type httpSaveCheckpointRequest struct {
@@ -59,6 +60,7 @@ type httpSaveCheckpointRequest struct {
 	DirCount              int                   `json:"dir_count"`
 	TotalBytes            int64                 `json:"total_bytes"`
 	SkipWorkspaceRootSync bool                  `json:"skip_workspace_root_sync"`
+	AllowUnchanged        bool                  `json:"allow_unchanged,omitempty"`
 }
 
 type httpSaveCheckpointResponse struct {
@@ -218,6 +220,43 @@ func (c *httpControlPlaneClient) GetCheckpoint(ctx context.Context, workspace, c
 	return out, err
 }
 
+func (c *httpControlPlaneClient) GetTree(ctx context.Context, workspace, view, treePath string, depth int) (controlplane.TreeResponse, error) {
+	params := url.Values{}
+	if strings.TrimSpace(view) != "" {
+		params.Set("view", strings.TrimSpace(view))
+	}
+	if strings.TrimSpace(treePath) != "" {
+		params.Set("path", strings.TrimSpace(treePath))
+	}
+	if depth > 0 {
+		params.Set("depth", strconv.Itoa(depth))
+	}
+	rel := c.workspacePath(workspace, "tree")
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.TreeResponse
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetFileContent(ctx context.Context, workspace, view, filePath string) (controlplane.FileContentResponse, error) {
+	params := url.Values{}
+	if strings.TrimSpace(view) != "" {
+		params.Set("view", strings.TrimSpace(view))
+	}
+	if strings.TrimSpace(filePath) != "" {
+		params.Set("path", strings.TrimSpace(filePath))
+	}
+	rel := c.workspacePath(workspace, "files", "content")
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.FileContentResponse
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error) {
 	params := url.Values{}
 	if strings.TrimSpace(baseView) != "" {
@@ -263,6 +302,7 @@ func (c *httpControlPlaneClient) SaveCheckpoint(ctx context.Context, input contr
 		DirCount:              input.DirCount,
 		TotalBytes:            input.TotalBytes,
 		SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+		AllowUnchanged:        input.AllowUnchanged,
 	}, &out, http.StatusCreated)
 	return out.Saved, err
 }
@@ -280,11 +320,12 @@ func (c *httpControlPlaneClient) SaveCheckpointFromLiveWithOptions(ctx context.C
 	}
 	var out httpSaveCheckpointResponse
 	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":save-from-live", httpSaveFromLiveRequest{
-		CheckpointID: checkpointID,
-		Description:  options.Description,
-		Kind:         options.Kind,
-		Source:       options.Source,
-		Author:       options.Author,
+		CheckpointID:   checkpointID,
+		Description:    options.Description,
+		Kind:           options.Kind,
+		Source:         options.Source,
+		Author:         options.Author,
+		AllowUnchanged: options.AllowUnchanged,
 	}, &out, http.StatusCreated)
 	return out.Saved, err
 }

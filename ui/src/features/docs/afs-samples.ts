@@ -27,13 +27,13 @@ result = fs.bash().exec("cat /foobar/src/README.md")
 print(result.stdout)
 fs.close()`;
 
-export const cliGettingStartedSample = `afs login
-afs workspace create foobar
-afs up foobar ~/afs/foobar
+export const cliGettingStartedSample = `afs auth login
+afs ws create foobar
+afs ws attach foobar ~/afs/foobar
 
 echo "hello world" > ~/afs/foobar/src/README.md
 cat ~/afs/foobar/src/README.md
-afs checkpoint create foobar first-readme`;
+afs cp create foobar first-readme`;
 
 export const mcpGettingStartedSample = `{
   "mcpServers": {

@@ -25,6 +25,34 @@ func TestConfigPathDefaultsToAFSConfig(t *testing.T) {
 	}
 }
 
+func TestWorkspaceRootShortcutsAreHiddenAliases(t *testing.T) {
+	t.Helper()
+
+	for _, command := range []string{"attach", "detach", "create", "list", "info", "import", "fork", "delete"} {
+		if !isWorkspaceRootShortcut(command) {
+			t.Fatalf("isWorkspaceRootShortcut(%q) = false, want true", command)
+		}
+	}
+	for _, command := range []string{"status", "fs", "cp", "log", "config", "reset"} {
+		if isWorkspaceRootShortcut(command) {
+			t.Fatalf("isWorkspaceRootShortcut(%q) = true, want false", command)
+		}
+	}
+
+	got := workspaceRootShortcutArgs([]string{"attach", "demo", "~/demo"})
+	want := []string{"ws", "attach", "demo", "~/demo"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("workspaceRootShortcutArgs() = %q, want %q", got, want)
+	}
+
+	out := captureStderrText(t, printUsage)
+	for _, hidden := range []string{"  attach", "  detach", "  create", "  list", "  import", "  fork", "  delete", "  reset"} {
+		if strings.Contains(out, hidden) {
+			t.Fatalf("top-level help should not document hidden shortcut %q:\n%s", hidden, out)
+		}
+	}
+}
+
 func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 	t.Helper()
 
@@ -61,11 +89,11 @@ func TestConfigSourceStatusRowSelfHostedUsesControlPlaneURL(t *testing.T) {
 			URL: "http://127.0.0.1:8091",
 		},
 	})
-	if row.Label != "config source" {
-		t.Fatalf("configSourceStatusRow(self-hosted).Label = %q, want %q", row.Label, "config source")
+	if row.Label != "control plane" {
+		t.Fatalf("configSourceStatusRow(self-hosted).Label = %q, want %q", row.Label, "control plane")
 	}
-	if row.Value != "Self-managed: http://127.0.0.1:8091" {
-		t.Fatalf("configSourceStatusRow(self-hosted).Value = %q, want %q", row.Value, "Self-managed: http://127.0.0.1:8091")
+	if row.Value != "http://127.0.0.1:8091" {
+		t.Fatalf("configSourceStatusRow(self-hosted).Value = %q, want %q", row.Value, "http://127.0.0.1:8091")
 	}
 }
 
@@ -131,7 +159,6 @@ func TestStatusRowsNoMountBackendWhenNone(t *testing.T) {
 	t.Helper()
 
 	rows := statusRows(config{}, "myws", "/tmp/local", "sync", mountBackendNone, "localhost:6379", 0)
-	// Expect: workspace, local, database, mode — no mount backend row.
 	labels := make([]string, len(rows))
 	for i, r := range rows {
 		labels[i] = r.Label
@@ -140,12 +167,12 @@ func TestStatusRowsNoMountBackendWhenNone(t *testing.T) {
 		if l == "mount backend" {
 			t.Fatalf("statusRows() should not include mount backend for backendNone, got labels %v", labels)
 		}
+		if l == "workspace" || l == "local" {
+			t.Fatalf("statusRows(sync) should not include saved %s row, got labels %v", l, labels)
+		}
 	}
-	if rows[0].Label != "workspace" || rows[0].Value != "myws" {
-		t.Fatalf("rows[0] = %+v, want workspace=myws", rows[0])
-	}
-	if rows[2].Label != "database" || rows[2].Value != "redis://localhost:6379/0" {
-		t.Fatalf("rows[2] = %+v, want database row", rows[2])
+	if rows[0].Label != "database" || rows[0].Value != "redis://localhost:6379/0" {
+		t.Fatalf("rows[0] = %+v, want database row", rows[0])
 	}
 }
 
@@ -258,11 +285,28 @@ func TestCmdStatusNotRunningShowsSelfHostedConfigURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdStatusNotRunning() returned error: %v", err)
 	}
-	if !strings.Contains(out, "config source") || !strings.Contains(out, "Self-managed: http://127.0.0.1:8091") {
-		t.Fatalf("cmdStatusNotRunning() output = %q, want Self-managed config source row", out)
+	clean := stripAnsi(out)
+	for _, want := range []string{
+		"AFS Daemon Not Running",
+		"control plane",
+		"http://127.0.0.1:8091",
+		"mode",
+		"config file",
+		"database",
+	} {
+		if !strings.Contains(clean, want) {
+			t.Fatalf("cmdStatusNotRunning() output = %q, want substring %q", clean, want)
+		}
 	}
-	if !strings.Contains(out, "http://127.0.0.1:8091") {
-		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane url", out)
+	if strings.Contains(clean, "attach") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, did not expect attach helper", clean)
+	}
+	controlIndex := strings.Index(clean, "control plane")
+	modeIndex := strings.Index(clean, "mode")
+	configIndex := strings.Index(clean, "config file")
+	databaseIndex := strings.Index(clean, "database")
+	if !(controlIndex < modeIndex && modeIndex < configIndex && configIndex < databaseIndex) {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane, mode, config file, database order", clean)
 	}
 }
 
@@ -338,19 +382,16 @@ func TestCmdUpShowsStatusWhenAlreadyRunning(t *testing.T) {
 		t.Fatalf("saveState() returned error: %v", err)
 	}
 
-	out, err := captureStdout(t, cmdUp)
+	out, err := captureStdout(t, cmdStatus)
 	if err != nil {
-		t.Fatalf("cmdUp() returned error: %v", err)
+		t.Fatalf("cmdStatus() returned error: %v", err)
 	}
 	if !strings.Contains(out, "AFS Running") {
-		t.Fatalf("cmdUp() output = %q, want status output", out)
-	}
-	if strings.Contains(out, "Run 'afs down' first") {
-		t.Fatalf("cmdUp() output still contains old already-running error: %q", out)
+		t.Fatalf("cmdStatus() output = %q, want status output", out)
 	}
 }
 
-func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
+func TestCmdStatusDoesNotPrintBannerForOperationalOutput(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -373,17 +414,17 @@ func TestCmdUpDoesNotPrintBannerWhenStarting(t *testing.T) {
 	saveTempConfig(t, cfg)
 
 	out, err := captureStdout(t, func() error {
-		return cmdUpArgs([]string{})
+		return cmdStatus()
 	})
 	if err != nil {
-		t.Fatalf("cmdUpArgs() returned error: %v", err)
+		t.Fatalf("cmdStatus() returned error: %v", err)
 	}
-	if !strings.Contains(out, "AFS Running") {
-		t.Fatalf("cmdUpArgs() output = %q, want ready output", out)
+	if strings.Contains(out, "Redis Agent Filesystem") {
+		t.Fatalf("cmdStatus() output = %q, want no banner", out)
 	}
 }
 
-func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
+func TestDetachAllStopsWithoutSavingMountedWorkspace(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -416,22 +457,24 @@ func TestCmdDownStopsWithoutSavingMountedWorkspace(t *testing.T) {
 		t.Fatalf("saveState() returned error: %v", err)
 	}
 
-	out, err := captureStdout(t, cmdDown)
+	out, err := captureStdout(t, func() error {
+		return detachAllActive(true)
+	})
 	if err != nil {
-		t.Fatalf("cmdDown() returned error: %v", err)
+		t.Fatalf("detachAllActive() returned error: %v", err)
 	}
 
 	if strings.Contains(out, "Saving mounted workspace") {
-		t.Fatalf("cmdDown() output = %q, want no mounted workspace save step", out)
+		t.Fatalf("detachAllActive() output = %q, want no mounted workspace save step", out)
 	}
-	if !strings.Contains(out, "afs stopped") {
-		t.Fatalf("cmdDown() output = %q, want stopped message", out)
+	if !strings.Contains(out, "Detached workspace demo") {
+		t.Fatalf("detachAllActive() output = %q, want detach message", out)
 	}
 	if _, err := os.Stat(mountpoint); !os.IsNotExist(err) {
-		t.Fatalf("mountpoint should be removed after cmdDown(), stat err = %v", err)
+		t.Fatalf("mountpoint should be removed after detachAllActive(--delete), stat err = %v", err)
 	}
 	if _, err := os.Stat(statePath()); !os.IsNotExist(err) {
-		t.Fatalf("statePath() should be removed after cmdDown(), stat err = %v", err)
+		t.Fatalf("statePath() should be removed after detachAllActive(), stat err = %v", err)
 	}
 }
 
@@ -500,4 +543,17 @@ func captureStderr(t *testing.T, fn func() error) (string, error) {
 		t.Fatalf("io.ReadAll() returned error: %v", readErr)
 	}
 	return string(out), runErr
+}
+
+func captureStderrText(t *testing.T, fn func()) string {
+	t.Helper()
+
+	out, err := captureStderr(t, func() error {
+		fn()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureStderrText() returned error: %v", err)
+	}
+	return out
 }

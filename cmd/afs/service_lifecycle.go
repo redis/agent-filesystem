@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,71 +23,6 @@ type mountBootstrap struct {
 	initializedRoot bool
 	sessionID       string
 	heartbeatEvery  time.Duration
-}
-
-// cmdUp loads config, applies one-shot overrides, and starts the selected
-// local surface.
-func cmdUp() error {
-	return cmdUpArgs(nil)
-}
-
-func cmdUpArgs(args []string) error {
-	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, upUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-
-	opts, err := parseUpOptions(args)
-	if err != nil {
-		return err
-	}
-
-	if st, err := loadState(); err == nil {
-		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
-			return cmdStatus()
-		}
-	}
-
-	cfg, err := loadConfigForUpWithOverridesAndMode(opts.positionals, opts.overrides, opts.mode)
-	if err != nil {
-		return err
-	}
-	productMode, err := effectiveProductMode(cfg)
-	if err != nil {
-		return err
-	}
-	mode, err := effectiveMode(cfg)
-	if err != nil {
-		return err
-	}
-	switch productMode {
-	case productModeLocal:
-		// Direct mode supports the existing sync/mount behavior below.
-	case productModeSelfHosted, productModeCloud:
-		if mode == modeSync {
-			return startSyncServices(cfg, opts.foreground)
-		}
-		if mode == modeMount {
-			if err := cleanupStaleMount(cfg); err != nil {
-				return err
-			}
-			return startServices(cfg)
-		}
-		return fmt.Errorf("'afs up' in %s mode currently supports sync or mount only\nRun '%s up --mode sync', '%s up --mode mount', or update config first", productMode, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
-	default:
-		return fmt.Errorf("'afs up' is not supported yet in %s mode\nUse workspace/checkpoint commands through the control plane for now", productMode)
-	}
-	if mode == modeSync {
-		return startSyncServices(cfg, opts.foreground)
-	}
-	if mode == modeNone {
-		cfg.MountBackend = mountBackendNone
-		return startServices(cfg)
-	}
-	if err := cleanupStaleMount(cfg); err != nil {
-		return err
-	}
-	return startServices(cfg)
 }
 
 func cleanupStaleMount(cfg config) error {
@@ -122,20 +56,36 @@ func isAFSMountEntry(entry string) bool {
 	return strings.Contains(v, "fuse.agent-filesystem") || strings.Contains(v, "agent-filesystem on ") || strings.Contains(v, " agent-filesystem ")
 }
 
-func cmdDown() error {
+func detachAllActive(deleteLocal bool) error {
+	reg, err := loadAttachmentRegistry()
+	if err != nil {
+		return err
+	}
+	if len(reg.Attachments) > 0 {
+		for len(reg.Attachments) > 0 {
+			rec := reg.Attachments[0]
+			if err := stopAttachment(rec, deleteLocal); err != nil {
+				return err
+			}
+			reg.Attachments = reg.Attachments[1:]
+			printDetachResult(rec, deleteLocal)
+		}
+		return saveAttachmentRegistry(reg)
+	}
+	return detachLegacyState(deleteLocal)
+}
+
+func detachLegacyState(deleteLocal bool) error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			printBox(clr(ansiBold, "AFS not running"), []boxRow{
-				{Label: "status", Value: "already stopped"},
-				{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" up")},
-			})
+			fmt.Println("not attached")
 			return nil
 		}
 		return err
 	}
 
-	if handled, err := stopSyncServicesIfActive(st); handled || err != nil {
+	if handled, err := stopSyncServicesIfActive(st, deleteLocal); handled || err != nil {
 		return err
 	}
 
@@ -223,7 +173,7 @@ func cmdDown() error {
 		}
 	}
 
-	if st.CreatedLocalPath && st.ArchivePath == "" && !backend.IsMounted(st.LocalPath) {
+	if deleteLocal && st.CreatedLocalPath && st.ArchivePath == "" && !backend.IsMounted(st.LocalPath) {
 		removeErr := removeEmptyMountpoint(st.LocalPath)
 		if removeErr != nil {
 			fmt.Printf("  %s empty mountpoint at %s could not be removed automatically (%v)\n", clr(ansiYellow, "!"), st.LocalPath, removeErr)
@@ -234,10 +184,13 @@ func cmdDown() error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "afs stopped"), []boxRow{
-		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
-		{Label: "local", Value: st.LocalPath},
-	})
+	local := "preserved"
+	if deleteLocal {
+		local = "deleted"
+	}
+	fmt.Printf("Detached workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
+	fmt.Printf("path   %s\n", st.LocalPath)
+	fmt.Printf("local  %s\n", local)
 	return nil
 }
 
@@ -339,11 +292,11 @@ func startServices(cfg config) error {
 
 	store := newAFSStore(rdb)
 	if productMode == productModeLocal {
-		workspaceStep := startStep("Ensuring current workspace")
+		workspaceStep := startStep("Ensuring workspace")
 		workspace, err = ensureMountWorkspace(ctx, runtimeCfg, store)
 		if err != nil {
 			workspaceStep.fail(err.Error())
-			return fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
+			return fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
 		}
 		workspaceStep.succeed(workspace)
 		if err := store.checkImportLock(ctx, workspace); err != nil {
@@ -466,7 +419,7 @@ func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, fun
 	selection, err := currentWorkspaceSelectionFromControlPlane(ctx, resolvedCfg, service)
 	if err != nil {
 		closeFn()
-		return mountBootstrap{}, func() {}, fmt.Errorf("a current workspace is required before AFS can mount a filesystem: %w", err)
+		return mountBootstrap{}, func() {}, fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
 	}
 
 	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)

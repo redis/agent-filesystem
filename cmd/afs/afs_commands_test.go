@@ -59,6 +59,14 @@ func (s stubAFSControlPlane) GetCheckpoint(context.Context, string, string) (con
 	return controlplane.CheckpointDetail{}, fmt.Errorf("unexpected GetCheckpoint call")
 }
 
+func (s stubAFSControlPlane) GetTree(context.Context, string, string, string, int) (controlplane.TreeResponse, error) {
+	return controlplane.TreeResponse{}, fmt.Errorf("unexpected GetTree call")
+}
+
+func (s stubAFSControlPlane) GetFileContent(context.Context, string, string, string) (controlplane.FileContentResponse, error) {
+	return controlplane.FileContentResponse{}, fmt.Errorf("unexpected GetFileContent call")
+}
+
 func (s stubAFSControlPlane) DiffWorkspace(context.Context, string, string, string) (controlplane.WorkspaceDiffResponse, error) {
 	return controlplane.WorkspaceDiffResponse{}, fmt.Errorf("unexpected DiffWorkspace call")
 }

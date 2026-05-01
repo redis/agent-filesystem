@@ -28,11 +28,12 @@ type forkWorkspaceRequest struct {
 }
 
 type saveFromLiveRequest struct {
-	CheckpointID string `json:"checkpoint_id"`
-	Description  string `json:"description,omitempty"`
-	Kind         string `json:"kind,omitempty"`
-	Source       string `json:"source,omitempty"`
-	Author       string `json:"author,omitempty"`
+	CheckpointID   string `json:"checkpoint_id"`
+	Description    string `json:"description,omitempty"`
+	Kind           string `json:"kind,omitempty"`
+	Source         string `json:"source,omitempty"`
+	Author         string `json:"author,omitempty"`
+	AllowUnchanged bool   `json:"allow_unchanged,omitempty"`
 }
 
 type saveCheckpointRequest struct {
@@ -48,6 +49,7 @@ type saveCheckpointRequest struct {
 	FileCount             int               `json:"file_count"`
 	TotalBytes            int64             `json:"total_bytes"`
 	SkipWorkspaceRootSync bool              `json:"skip_workspace_root_sync"`
+	AllowUnchanged        bool              `json:"allow_unchanged,omitempty"`
 }
 
 type HandlerOptions struct {
@@ -1007,10 +1009,11 @@ func handleWorkspaceRoute(
 			return
 		}
 		saved, err := manager.SaveCheckpointFromLiveWithOptions(r.Context(), databaseID, workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
-			Description: input.Description,
-			Kind:        input.Kind,
-			Source:      input.Source,
-			Author:      input.Author,
+			Description:    input.Description,
+			Kind:           input.Kind,
+			Source:         input.Source,
+			Author:         input.Author,
+			AllowUnchanged: input.AllowUnchanged,
 		})
 		if err != nil {
 			writeError(w, err)
@@ -1101,6 +1104,7 @@ func handleWorkspaceRoute(
 				DirCount:              input.DirCount,
 				TotalBytes:            input.TotalBytes,
 				SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+				AllowUnchanged:        input.AllowUnchanged,
 			})
 			if err != nil {
 				writeError(w, err)
@@ -1383,10 +1387,11 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		saved, err := manager.SaveResolvedCheckpointFromLiveWithOptions(r.Context(), workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
-			Description: input.Description,
-			Kind:        input.Kind,
-			Source:      input.Source,
-			Author:      input.Author,
+			Description:    input.Description,
+			Kind:           input.Kind,
+			Source:         input.Source,
+			Author:         input.Author,
+			AllowUnchanged: input.AllowUnchanged,
 		})
 		if err != nil {
 			writeError(w, err)
@@ -1477,6 +1482,7 @@ func handleResolvedWorkspaceRoute(
 				DirCount:              input.DirCount,
 				TotalBytes:            input.TotalBytes,
 				SkipWorkspaceRootSync: input.SkipWorkspaceRootSync,
+				AllowUnchanged:        input.AllowUnchanged,
 			})
 			if err != nil {
 				writeError(w, err)

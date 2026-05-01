@@ -34,17 +34,17 @@ Implemented in the current branch:
 
 - Public product language has moved to checkpoint-only UX. `version` remains a
   category/positioning word, not a CLI/API/UI noun.
-- `afs checkpoint create` supports a checkpoint description, and restore
+- `afs cp create` supports a checkpoint description, and restore
   safety checkpoints use structured metadata.
-- `afs checkpoint list` uses active-workspace language instead of head/draft
+- `afs cp list` uses active-workspace language instead of head/draft
   language.
 - Manifest-level diff exists in `internal/controlplane` and is exposed through
   the workspace diff API. It compares checkpoint-to-checkpoint,
   checkpoint-to-active, and active-to-checkpoint states at the file/metadata
   level.
-- `afs checkpoint diff [workspace] <base> <target>` and
-  `afs checkpoint diff [workspace] <checkpoint> --active` are implemented.
-- `afs checkpoint show [workspace] <checkpoint>` is implemented with
+- `afs cp diff [workspace] <base> <target>` and
+  `afs cp diff [workspace] <checkpoint> --active` are implemented.
+- `afs cp show [workspace] <checkpoint>` is implemented with
   human-readable default output and `--json` for structured agent use.
 - `checkpoint diff --json` is implemented for agents, while default CLI diff
   remains human-readable and includes bounded text hunks when available.
@@ -226,7 +226,7 @@ AFS should not create a checkpoint for every write.
 
 Checkpoint boundaries should be created by:
 
-- explicit `afs checkpoint create`
+- explicit `afs cp create`
 - explicit MCP `checkpoint_create`
 - browser/UI "Create checkpoint"
 - before destructive restore, when active state has uncheckpointed changes
@@ -274,7 +274,7 @@ Requirements:
 
 Acceptance criteria:
 
-- `afs checkpoint list` still works.
+- `afs cp list` still works.
 - UI workspace detail has a clear Checkpoints or History section.
 - API can return checkpoint metadata without per-row Redis fanout where
   practical.
@@ -432,9 +432,9 @@ Do not remove existing checkpoint commands.
 P0 additions:
 
 ```bash
-afs checkpoint diff [workspace] <base> <target>
-afs checkpoint diff [workspace] <checkpoint> --active
-afs checkpoint show [workspace] <checkpoint>
+afs cp diff [workspace] <base> <target>
+afs cp diff [workspace] <checkpoint> --active
+afs cp show [workspace] <checkpoint>
 ```
 
 P1 additions:

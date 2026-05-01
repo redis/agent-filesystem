@@ -16,6 +16,7 @@ const referenceDocs = [
 ] as const;
 
 const tocItems = [
+  { href: "#terms", label: "AFS basics" },
   { href: "#getting-started", label: "Getting started" },
   { href: "#how-it-works", label: "How AFS works" },
   { href: "#cli", label: "CLI workflow" },
@@ -73,6 +74,88 @@ export function DocsDocumentPage() {
           </ContentsSection>
         </ArticleHeader>
 
+        <DocSection id="terms">
+          <SectionEyebrow>Plain English</SectionEyebrow>
+          <h2>AFS Basics</h2>
+          <p>
+            Agent Filesystem (AFS) gives agents a shared, versioned file tree
+            backed by Redis. In AFS, each file tree is a workspace. A workspace
+            can be attached to any local directory, so agents can read and write
+            shared state through ordinary filesystem paths.
+          </p>
+          <p>
+            When a workspace is attached, the local directory becomes a live
+            view of the Redis-backed workspace. Changes written to that
+            directory sync back to Redis, and changes from other attached agents
+            sync back down to the local directory.
+          </p>
+          <TerminalBlock code={`afs ws attach memories /agent/memories`} />
+          <p>
+            This attaches the <InlineCode>memories</InlineCode> workspace at{" "}
+            <InlineCode>/agent/memories</InlineCode>. Agent 1 can edit files in
+            that folder, Agent 2 can attach the same workspace somewhere else,
+            and both agents still work against one shared filesystem.
+          </p>
+          <p>
+            Redis stores the workspace metadata, file manifests, file contents,
+            checkpoints, and activity. Local edits update the live workspace
+            state immediately. When an agent reaches an important moment, it can
+            create a checkpoint to save that state as a named restore point.
+          </p>
+
+          <SystemDiagram aria-label="AFS system diagram">
+            <DiagramRow>
+              <DiagramNode>
+                <strong>Agent 1</strong>
+                <span>/agent/memories</span>
+              </DiagramNode>
+              <DiagramNode>
+                <strong>Agent 2</strong>
+                <span>/tmp/memories</span>
+              </DiagramNode>
+              <DiagramNode>
+                <strong>Agent 3</strong>
+                <span>MCP or SDK tools</span>
+              </DiagramNode>
+            </DiagramRow>
+            <DiagramArrow>attach to the same</DiagramArrow>
+            <DiagramNode>
+              <strong>Workspace: memories</strong>
+              <span>one shared live file tree</span>
+            </DiagramNode>
+            <DiagramArrow>stores live state and checkpoints in</DiagramArrow>
+            <DiagramNode>
+              <strong>Redis</strong>
+              <span>metadata, manifests, file contents, checkpoints, and activity</span>
+            </DiagramNode>
+            <DiagramCaption>Many local views, one Redis-backed workspace.</DiagramCaption>
+          </SystemDiagram>
+
+          <DefinitionList>
+            <div>
+              <dt>AFS</dt>
+              <dd>The system that turns Redis-backed workspace state into files agents can use.</dd>
+            </div>
+            <div>
+              <dt>Workspace</dt>
+              <dd>A named file tree with one live editable state.</dd>
+            </div>
+            <div>
+              <dt>Live state</dt>
+              <dd>The current version of the workspace. Edits update this immediately.</dd>
+            </div>
+            <div>
+              <dt>Checkpoint</dt>
+              <dd>An explicit restore point you create when the live state is worth saving.</dd>
+            </div>
+          </DefinitionList>
+
+          <Note>
+            AFS is not Git. Checkpoints are explicit save points for workspace
+            state; Git can still live inside a workspace if your project uses it.
+          </Note>
+        </DocSection>
+
         <DocSection id="getting-started">
           <h2>Getting Started</h2>
           <p>
@@ -92,7 +175,7 @@ export function DocsDocumentPage() {
               file tree agents and local tools will edit.
             </li>
             <li>
-              <strong>Expose it locally.</strong> Run <InlineCode>afs up</InlineCode>{" "}
+              <strong>Attach it locally.</strong> Run <InlineCode>afs ws attach</InlineCode>{" "}
               so editors, shells, test runners, and agents can use the files.
             </li>
             <li>
@@ -102,17 +185,17 @@ export function DocsDocumentPage() {
           </NumberedList>
 
           <TerminalBlock
-            code={`afs login
-afs workspace create getting-started
-afs up getting-started ~/afs/getting-started
+            code={`afs auth login
+afs ws create getting-started
+afs ws attach getting-started ~/afs/getting-started
 
 echo "hello world" > ~/afs/getting-started/README.md
-afs checkpoint create getting-started first-local-edit`}
+afs cp create getting-started first-local-edit`}
           />
 
           <Note>
-            The core loop is small: authenticate once, choose a workspace, run{" "}
-            <InlineCode>afs up</InlineCode>, edit files, and checkpoint the state
+            The core loop is small: authenticate once, attach a workspace, edit
+            files, and checkpoint the state
             worth keeping.
           </Note>
         </DocSection>
@@ -121,40 +204,32 @@ afs checkpoint create getting-started first-local-edit`}
           <SectionEyebrow>Core model</SectionEyebrow>
           <h2>How AFS Works</h2>
           <p>
-            A workspace is a complete file tree for source code, prompts, logs,
-            generated files, notes, and agent scratch state. Redis is the
-            canonical store for workspace metadata, manifests, blobs,
-            checkpoints, live roots, and activity.
+            Every surface talks to the same workspace model. The CLI, browser,
+            MCP server, and SDKs may look different, but they all read from and
+            write to the Redis-backed live workspace state.
           </p>
 
-          <DefinitionList>
-            <div>
-              <dt>Workspace</dt>
-              <dd>A named file tree backed by Redis.</dd>
-            </div>
-            <div>
-              <dt>Live root</dt>
-              <dd>The current editable workspace state.</dd>
-            </div>
-            <div>
-              <dt>Checkpoint</dt>
-              <dd>A saved restore point you create deliberately.</dd>
-            </div>
-            <div>
-              <dt>Fork</dt>
-              <dd>A second workspace copied from another line of work.</dd>
-            </div>
-          </DefinitionList>
-
-          <CodeBlock
-            code={`afs CLI / Web UI / MCP tools
-        |
-control plane + workspace service
-        |
-Redis: metadata, manifests, blobs, live roots, activity
-        |
-sync directory, live mount, or direct MCP file tools`}
-          />
+          <NumberedList>
+            <li>
+              <strong>A client chooses a workspace.</strong> That can be a CLI
+              command, a browser action, an SDK call, or an MCP tool call.
+            </li>
+            <li>
+              <strong>The control plane resolves the workspace.</strong> It
+              applies auth, finds the workspace metadata, and routes the
+              operation to the workspace service.
+            </li>
+            <li>
+              <strong>Redis holds the source of truth.</strong> Metadata,
+              manifests, file blobs, the live root, checkpoints, and activity
+              are stored there.
+            </li>
+            <li>
+              <strong>Local files are a surface, not the source of truth.</strong>{" "}
+              Sync mode writes changes back to AFS, and mount mode serves the
+              same workspace through a filesystem path.
+            </li>
+          </NumberedList>
 
           <p>
             Edits change live state. They do not automatically create a
@@ -167,7 +242,7 @@ sync directory, live mount, or direct MCP file tools`}
           <SectionEyebrow>Daily operation</SectionEyebrow>
           <h2>CLI Workflow</h2>
           <p>
-            The CLI owns authentication, workspace selection, local lifecycle,
+            The CLI owns authentication, workspace attachment, local lifecycle,
             config, checkpoints, search, and the built-in MCP server.
           </p>
           <p>
@@ -178,9 +253,8 @@ sync directory, live mount, or direct MCP file tools`}
 
           <h3>Fresh setup</h3>
           <TerminalBlock
-            code={`afs login
-afs setup
-afs up`}
+            code={`afs auth login
+afs ws attach getting-started ~/getting-started`}
           />
 
           <h3>Create, import, and start</h3>
@@ -190,13 +264,11 @@ afs up`}
           </p>
           <TerminalBlock
             code={`# New workspace
-afs workspace create demo
-afs workspace use demo
-afs up
+afs ws create demo
+afs ws attach demo ~/demo
 
 # Existing directory
-afs workspace import demo ~/src/demo
-afs up demo ~/src/demo`}
+afs ws import --attach-at-source demo ~/src/demo`}
           />
 
           <h3>Daily commands</h3>
@@ -212,37 +284,37 @@ afs up demo ~/src/demo`}
                 <td>
                   <InlineCode>afs status</InlineCode>
                 </td>
-                <td>Check login, selected workspace, local path, and runtime.</td>
+                <td>Check daemon status, configuration, and local attachments.</td>
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs workspace list</InlineCode>
+                  <InlineCode>afs ws list</InlineCode>
                 </td>
                 <td>See available workspaces.</td>
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs workspace current</InlineCode>
+                  <InlineCode>afs ws attach</InlineCode>
                 </td>
-                <td>Print the active workspace for omitted workspace args.</td>
+                <td>Attach a workspace to a local folder.</td>
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs checkpoint create</InlineCode>
+                  <InlineCode>afs cp create</InlineCode>
                 </td>
                 <td>Save the current live workspace as a restore point.</td>
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs grep TODO</InlineCode>
+                  <InlineCode>afs fs grep --workspace demo TODO</InlineCode>
                 </td>
                 <td>Search workspace files directly through AFS.</td>
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs down</InlineCode>
+                  <InlineCode>afs ws detach</InlineCode>
                 </td>
-                <td>Stop the local runtime.</td>
+                <td>Detach a workspace while preserving local files by default.</td>
               </tr>
             </tbody>
           </MarkdownTable>
@@ -252,7 +324,7 @@ afs up demo ~/src/demo`}
             code={`afs config get redis.url
 afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs config set mount.path ~/afs/demo
+afs config set mode sync
 afs config list`}
           />
         </DocSection>
@@ -262,21 +334,20 @@ afs config list`}
           <h2>Workspaces and Checkpoints</h2>
           <p>
             Workspaces are the durable unit of collaboration. You create one for
-            a project, import one from an existing folder, select it for daily
-            commands, fork it for parallel work, and checkpoint the states that
+            a project, import one from an existing folder, attach it for local
+            work, fork it for parallel work, and checkpoint the states that
             matter.
           </p>
 
           <TerminalBlock
-            code={`afs workspace create demo
-afs workspace import demo ~/src/demo
-afs workspace list
-afs workspace use demo
-afs workspace fork demo demo-experiment
+            code={`afs ws create demo
+afs ws import --attach-at-source demo ~/src/demo
+afs ws list
+afs ws fork demo demo-experiment
 
-afs checkpoint create demo before-refactor
-afs checkpoint list demo
-afs checkpoint restore demo before-refactor`}
+afs cp create demo before-refactor
+afs cp list demo
+afs cp restore demo before-refactor`}
           />
 
           <MarkdownTable>
@@ -324,16 +395,15 @@ afs checkpoint restore demo before-refactor`}
 
           <h3>Sync mode</h3>
           <TerminalBlock
-            code={`afs workspace use demo
-afs up --mode sync
+            code={`afs ws attach demo ~/afs/demo
 cd ~/afs/demo`}
           />
 
           <h3>Live mount mode</h3>
           <TerminalBlock
-            code={`afs config set mount.backend nfs
-afs up demo ~/afs/demo --mode mount
-afs down`}
+            code={`afs config set --mode mount --mount-backend nfs
+afs ws attach demo ~/afs/demo
+afs ws detach demo`}
           />
 
           <h3>Import hygiene</h3>
@@ -418,8 +488,8 @@ dist/
           </MarkdownTable>
 
           <TerminalBlock
-            code={`afs workspace create demo
-afs checkpoint create demo before-agent
+            code={`afs ws create demo
+afs cp create demo before-agent
 afs mcp --workspace demo --profile workspace-rw-checkpoint`}
           />
         </DocSection>
@@ -551,7 +621,7 @@ export AFS_API_BASE_URL="http://127.0.0.1:8091"`}
           <TerminalBlock
             code={`afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs up --control-plane-url http://127.0.0.1:8091 getting-started`}
+afs ws attach getting-started ~/getting-started`}
           />
         </DocSection>
 
@@ -559,7 +629,7 @@ afs up --control-plane-url http://127.0.0.1:8091 getting-started`}
           <SectionEyebrow>Search</SectionEyebrow>
           <h2>Performance</h2>
           <p>
-            Literal <InlineCode>afs grep</InlineCode> uses the Redis Search
+            Literal <InlineCode>afs fs grep</InlineCode> uses the Redis Search
             indexed path when it is available, then verifies candidate file
             contents through AFS. Regex searches use the non-indexed traversal
             path.
@@ -593,13 +663,13 @@ afs up --control-plane-url http://127.0.0.1:8091 getting-started`}
           </MarkdownTable>
 
           <TerminalBlock
-            code={`afs grep "TODO" --workspace demo
-afs grep -l -i --workspace demo "disk full"
-afs grep -E "error|warning" --workspace demo`}
+            code={`afs fs grep --workspace demo "TODO"
+afs fs grep -l -i --workspace demo "disk full"
+afs fs grep --workspace demo -E "error|warning"`}
           />
 
           <Note>
-            Use <InlineCode>afs grep</InlineCode> for ordinary literal searches
+            Use <InlineCode>afs fs grep</InlineCode> for ordinary literal searches
             over a Redis-backed workspace. Use <InlineCode>rg</InlineCode> on a
             synced or mounted workspace for regex-heavy scans.
           </Note>
@@ -904,6 +974,61 @@ const Note = styled.p`
 
 const Warning = styled(Note)`
   border-left-color: #b42318;
+`;
+
+const SystemDiagram = styled.figure`
+  display: grid;
+  gap: 10px;
+  margin: 20px 0 22px;
+  padding: 16px 0;
+  border-top: 1px solid var(--afs-line, #dfe3e6);
+  border-bottom: 1px solid var(--afs-line, #dfe3e6);
+`;
+
+const DiagramRow = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 10px;
+`;
+
+const DiagramNode = styled.div`
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--afs-line, #dfe3e6);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--afs-panel, #f6f8fa) 78%, transparent);
+
+  strong {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--afs-ink, #1f2328);
+    font-size: 13px;
+    font-weight: 760;
+    line-height: 1.35;
+  }
+
+  span {
+    display: block;
+    color: var(--afs-muted, #4e5961);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+`;
+
+const DiagramArrow = styled.div`
+  color: var(--afs-muted, #4e5961);
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", "Cascadia Code", monospace);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+`;
+
+const DiagramCaption = styled.figcaption`
+  color: var(--afs-muted, #4e5961);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
 `;
 
 const DefinitionList = styled.dl`

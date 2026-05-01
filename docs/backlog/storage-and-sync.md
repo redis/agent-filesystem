@@ -18,7 +18,7 @@ Status: active follow-up notes.
 
 ### Mounted Incremental Checkpoints
 
-Goal: make `afs checkpoint create` in mounted mode scale with changed paths
+Goal: make `afs cp create` in mounted mode scale with changed paths
 rather than total workspace size.
 
 Keep:
@@ -56,7 +56,7 @@ is verification and polish:
 
 ### Search Benchmarks
 
-`afs grep` now has an optional RediSearch-backed fast path for simple literal
+`afs fs grep` now has an optional RediSearch-backed fast path for simple literal
 search. Keep future search work benchmarked in two modes:
 
 - Redis search available and index ready

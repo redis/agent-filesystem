@@ -27,7 +27,7 @@ func buildManifestFromDirectoryWithOptions(root, workspace, savepoint string, ig
 	return worktree.BuildManifestFromDirectory(root, workspace, savepoint, opts)
 }
 
-// buildManifestStreaming is the fast path used by `afs workspace import`. It
+// buildManifestStreaming is the fast path used by `afs ws import`. It
 // hands non-inline blobs to the supplied sink so the caller can pipeline them
 // to Redis and drop the in-memory buffers incrementally.
 func buildManifestStreaming(root, workspace, savepoint string, ignorer *migrationIgnore, sink worktree.BlobSink, onProgress func(importStats)) (manifest, manifestStats, error) {

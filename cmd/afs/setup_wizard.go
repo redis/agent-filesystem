@@ -17,15 +17,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// cmdSetup walks the user through workspace selection, mode (sync/mount), and
-// local path configuration. It assumes `afs login` has already connected the
-// CLI to a control plane (cloud or self-hosted) — if not, it invokes the
-// login flow inline so a single `afs setup` on a fresh machine still works.
-// It deliberately does not start services.
+// cmdSetup walks the user through the basic connection defaults. It starts
+// with configuration source, then asks only the follow-up questions needed for
+// that source. It deliberately does not start services.
 func cmdSetup() error {
 	if st, err := loadState(); err == nil {
 		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
-			return fmt.Errorf("afs is currently running\nRun '%s down' first", filepath.Base(os.Args[0]))
+			detachCmd := filepath.Base(os.Args[0]) + " down"
+			if localPath := strings.TrimSpace(st.LocalPath); localPath != "" {
+				detachCmd = filepath.Base(os.Args[0]) + " ws detach " + shellQuote(localPath)
+			}
+			return fmt.Errorf("afs is currently attached\nRun '%s' first", detachCmd)
 		}
 	}
 
@@ -38,24 +40,6 @@ func cmdSetup() error {
 		firstRun = false
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
-	}
-
-	// If the CLI isn't pointed at a control plane yet, run login inline so a
-	// fresh `afs setup` doesn't dead-end. Local-mode configs skip this — they
-	// don't need a control plane and keep the Redis-only flow below.
-	if needsLoginBeforeSetup(cfg) {
-		fmt.Println("  " + clr(ansiDim, "No control plane configured yet — let's connect first."))
-		fmt.Println()
-		if err := cmdLogin(nil); err != nil {
-			return err
-		}
-		reloaded, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		cfg = reloaded
-		firstRun = false
-		fmt.Println()
 	}
 
 	fmt.Println("  " + clr(ansiDim, "AFS stores workspace state in Redis and can optionally expose"))
@@ -85,7 +69,7 @@ func cmdSetup() error {
 		return err
 	}
 	fmt.Printf("  %s Saved to %s\n", clr(ansiDim, "▸"), clr(ansiBold, compactDisplayPath(configPath())))
-	fmt.Printf("  %s Run %s to start AFS\n\n", clr(ansiDim, "▸"), clr(ansiOrange, filepath.Base(os.Args[0])+" up"))
+	fmt.Printf("  %s Run %s to attach a workspace\n\n", clr(ansiDim, "▸"), clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach"))
 	return nil
 }
 
@@ -114,22 +98,19 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  What would you like to change?")
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change mode "+clr(ansiDim, "("+setupModeLabel(cfg)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
-		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
 		if showRedisConnection {
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "6")+"  Save and exit")
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Save and exit")
 		} else {
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Save and exit")
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Save and exit")
 		}
 		fmt.Fprintln(out)
 
-		defaultChoice := "5"
+		defaultChoice := "2"
 		if showRedisConnection {
-			defaultChoice = "6"
+			defaultChoice = "3"
 		}
 		choice, err := promptString(r, out, "  Choose", defaultChoice)
 		if err != nil {
@@ -139,55 +120,28 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 
 		switch strings.TrimSpace(choice) {
 		case "1":
-			if err := promptModeSetup(r, out, &cfg); err != nil {
+			if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
 				return cfg, err
 			}
 		case "2":
-			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
-				return cfg, err
-			}
-		case "3":
-			mode, err := effectiveMode(cfg)
-			if err != nil {
-				return cfg, err
-			}
-			if mode == modeSync {
-				if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
-					return cfg, err
-				}
-			} else {
-				if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
-					return cfg, err
-				}
-			}
-		case "4":
 			if showRedisConnection {
 				if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
 					return cfg, err
 				}
 			} else {
-				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
-					return cfg, err
-				}
-			}
-		case "5":
-			if showRedisConnection {
-				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
-					return cfg, err
-				}
-			} else {
 				return cfg, nil
 			}
-		case "6", "":
+		case "3", "":
 			if showRedisConnection {
 				return cfg, nil
 			}
-			return cfg, nil
+			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1 or 2."))
+			fmt.Fprintln(out)
 		default:
 			if showRedisConnection {
-				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, 5, or 6."))
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, or 3."))
 			} else {
-				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, or 5."))
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1 or 2."))
 			}
 			fmt.Fprintln(out)
 		}
@@ -210,30 +164,16 @@ func needsLoginBeforeSetup(cfg config) bool {
 }
 
 func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
-	// First-run default is sync, so a user who just blows through with Enter
-	// ends up on the recommended path.
-	if strings.TrimSpace(cfg.Mode) == "" {
-		cfg.Mode = modeSync
-	}
-	if err := promptModeSetup(r, out, &cfg); err != nil {
+	if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
 		return cfg, err
 	}
-	// Configure the backend appropriate for this product mode. `afs login`
-	// already picked cloud vs self-hosted and set cfg.URL, so self-hosted /
-	// cloud modes only need a workspace; local mode still needs Redis details.
-	if err := setupWizardBackend(r, out, &cfg); err != nil {
-		return cfg, err
-	}
-	mode, err := effectiveMode(cfg)
+
+	connection, err := effectiveProductMode(cfg)
 	if err != nil {
 		return cfg, err
 	}
-	if mode == modeSync {
-		if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
-			return cfg, err
-		}
-	} else {
-		if err := promptLocalFilesystemSetup(r, out, &cfg, true); err != nil {
+	if connection == productModeLocal {
+		if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
 			return cfg, err
 		}
 	}
@@ -242,7 +182,7 @@ func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 
 // setupWizardBackend dispatches to the right per-mode setup step. Unlike the
 // older promptBackendSetup it does NOT re-prompt for the control plane URL —
-// that's `afs login`'s job.
+// that's `afs auth login`'s job.
 func setupWizardBackend(r *bufio.Reader, out io.Writer, cfg *config) error {
 	connection, err := effectiveProductMode(*cfg)
 	if err != nil {

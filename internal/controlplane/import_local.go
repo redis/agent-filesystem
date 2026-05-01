@@ -29,7 +29,7 @@ type ImportLocalResponse struct {
 }
 
 // ImportLocal creates a workspace from a directory on the local filesystem.
-// It mirrors the behaviour of `afs workspace import` but runs via the HTTP API.
+// It mirrors the behaviour of `afs ws import` but runs via the HTTP API.
 func (m *DatabaseManager) ImportLocal(ctx context.Context, databaseID string, input ImportLocalRequest) (ImportLocalResponse, error) {
 	workspace := strings.TrimSpace(input.Name)
 	if err := ValidateName("workspace", workspace); err != nil {

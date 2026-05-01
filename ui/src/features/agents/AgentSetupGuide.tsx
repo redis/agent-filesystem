@@ -27,10 +27,10 @@ export function AgentSetupGuide({ compact = false }: Props) {
   const { config: authConfig } = useAuthSession();
   const isCloud = authConfig.productMode === "cloud";
   const installCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
-  const loginCmd = `afs login`;
-  const setupCmd = `afs setup`;
+  const loginCmd = `afs auth login`;
+  const attachCmd = `afs ws attach <workspace> ~/workspace`;
   const manualCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o afs && chmod +x afs`;
-  const manualConfigCmd = `afs login --self-hosted --url ${controlPlaneUrl}`;
+  const manualConfigCmd = `afs auth login --self-hosted --url ${controlPlaneUrl}`;
 
   const mcpConfig = JSON.stringify(
     {
@@ -146,35 +146,49 @@ export function AgentSetupGuide({ compact = false }: Props) {
                     </CopyButton>
                   </CodeContainer>
                   <StepHint>
-                    Once <InlineCode>afs up</InlineCode> is running, the agent
-                    appears on this page with a live status indicator.
+                    After a workspace is attached, the agent appears on this
+                    page with a live status indicator.
                   </StepHint>
+
+                  <StepDivider />
+
+                  <StepNumber>3</StepNumber>
+                  <StepTitle>Attach a workspace</StepTitle>
+                  <StepDesc>
+                    Pick any workspace and attach it to a local folder.
+                  </StepDesc>
+                  <CodeContainer>
+                    <CodePre>{attachCmd}</CodePre>
+                    <CopyButton
+                      type="button"
+                      onClick={() => copyToClipboard(attachCmd, "attach")}
+                    >
+                      {copied === "attach" ? "Copied!" : "Copy"}
+                    </CopyButton>
+                  </CodeContainer>
                 </>
               ) : (
                 <>
                   <StepDivider />
 
                   <StepNumber>2</StepNumber>
-                  <StepTitle>Pick a workspace</StepTitle>
+                  <StepTitle>Attach a workspace</StepTitle>
                   <StepDesc>
-                    <InlineCode>afs setup</InlineCode> lists workspaces on this
-                    control plane and sets a local sync path. A{" "}
-                    <InlineCode>getting-started</InlineCode> workspace is
-                    pre-created on first boot, so you can accept the default
-                    and jump straight to <InlineCode>afs up</InlineCode>.
+                    The installer points the CLI at this control plane. Attach
+                    any workspace to a local folder when you are ready to work.
                   </StepDesc>
                   <CodeContainer>
-                    <CodePre>{setupCmd}</CodePre>
+                    <CodePre>{attachCmd}</CodePre>
                     <CopyButton
                       type="button"
-                      onClick={() => copyToClipboard(setupCmd, "setup")}
+                      onClick={() => copyToClipboard(attachCmd, "attach")}
                     >
-                      {copied === "setup" ? "Copied!" : "Copy"}
+                      {copied === "attach" ? "Copied!" : "Copy"}
                     </CopyButton>
                   </CodeContainer>
                   <StepHint>
-                    Once <InlineCode>afs up</InlineCode> is running, the agent
-                    appears here with a live status indicator.
+                    Once the workspace is attached, the agent appears here with
+                    a live status indicator.
                   </StepHint>
                 </>
               )}
@@ -257,7 +271,7 @@ export function AgentSetupGuide({ compact = false }: Props) {
             You still need the <InlineCode>afs</InlineCode> CLI installed
             {isCloud ? (
               <>
-                {" "}and signed in (via <InlineCode>afs login</InlineCode>)
+                {" "}and signed in (via <InlineCode>afs auth login</InlineCode>)
                 for MCP to authenticate against your workspaces.
               </>
             ) : (

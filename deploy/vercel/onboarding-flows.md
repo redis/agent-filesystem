@@ -26,15 +26,15 @@ As of 2026-04-17, the hosted production deploy now has these pieces in place:
 - workspace data plane uses Redis Cloud via `REDIS_URL`
 - first-run hosted bootstrap auto-seeds a managed database profile when the
   catalog is empty
-- `afs login` can launch a browser flow automatically
+- `afs auth login` can launch a browser flow automatically
 - `/connect-cli` can create or reuse `getting-started` and hand the CLI back a
   short-lived onboarding token
-- `afs login [--control-plane-url <url>] [--workspace <workspace>]`
+- `afs auth login [--control-plane-url <url>] [--workspace <workspace>]`
   exchanges that browser bootstrap into local CLI config
-- `afs logout` and `afs status` exist
+- `afs auth logout` and `afs status` exist
 
-This means the hosted service can now support the initial "run `afs login`,
-finish browser handoff, then run `afs up`" flow.
+This means the hosted service can now support the initial "run `afs auth login`,
+finish browser handoff, then run `afs ws attach`" flow.
 
 ## Product Modes
 
@@ -65,8 +65,8 @@ The developer:
 
 1. clones the repo
 2. runs `make`
-3. runs `./afs setup`
-4. chooses `Cloud Managed`, `Self Managed`, or `Local`
+3. runs `./afs auth login`
+4. runs `./afs ws attach`
 
 ### Local
 
@@ -85,12 +85,10 @@ The developer:
 - hosted flow creates or reuses `getting-started`
 - browser hands the CLI a short-lived onboarding token through the localhost
   callback
-- CLI stores its durable local config and then continues with `afs up`
+- CLI stores its durable local config and then continues with `afs ws attach`
 
 Near-term improvement:
 
-- make `afs setup` kick directly into the browser flow after `Cloud Managed` is
-  selected
 - add real hosted account auth and web sessions ahead of workspace access
 
 ## Flow B: Web-First
@@ -101,9 +99,9 @@ The developer:
 2. signs in or creates an account
 3. lands in the default `getting-started` workspace
 4. downloads the CLI from the workspace page
-5. runs `afs login`
+5. runs `afs auth login`
 6. finishes the browser handoff
-7. runs `afs up`
+7. runs `afs ws attach getting-started ~/getting-started`
 8. starts using AFS
 
 ### Important rule
@@ -135,7 +133,7 @@ Long-term, we can decide whether to fully rename the hosted surface or keep
 
 - downloadable CLI artifacts from `/v1/cli`
 - `getting-started` default onboarding in the hosted UI
-- browser-first CLI auth handoff via `afs login`
+- browser-first CLI auth handoff via `afs auth login`
 - hosted control plane bootstrapped against Neon + Redis Cloud
 
 ## Remaining Hosted Capabilities
@@ -144,8 +142,8 @@ To support both entry ramps cleanly, the next missing pieces are:
 
 - real browser sign-up/sign-in and account model
 - hosted session identity beyond one-time CLI bootstrap
-- direct browser launch from `afs setup`
-- smoother first-run `afs up` UX for cloud mode
+- direct browser launch from `afs auth login`
+- smoother first-run `afs ws attach` UX for cloud mode
 - production-domain auth, onboarding, and smoke coverage
 
 ## Auth Milestone
@@ -176,5 +174,5 @@ Important deployment rule:
 1. keep preview deploys healthy and repeatable on Vercel
 2. add real hosted account auth
 3. make the CLI/browser handoff consume the authenticated web session
-4. make cloud-mode `afs up` feel first-class after login
+4. make cloud-mode `afs ws attach` feel first-class after login
 5. add durable end-to-end coverage on the public production domain

@@ -326,8 +326,8 @@
 <div class="out">  <span class="ok">✓</span> seeding 14-day pro trial · checkpoint <span class="key">c0.0001</span></div>
 <div class="out">  <span class="cmt"># next steps:</span></div>
 <div class="out">  <span class="cmt">    1. install the cli  →</span> <span class="key">brew install afs</span></div>
-<div class="out">  <span class="cmt">    2. login to device  →</span> <span class="key">afs login</span></div>
-<div class="out">  <span class="cmt">    3. point an agent   →</span> <span class="key">afs mount /ws/main</span></div>
+<div class="out">  <span class="cmt">    2. login to device  →</span> <span class="key">afs auth login</span></div>
+<div class="out">  <span class="cmt">    3. point an agent   →</span> <span class="key">afs ws attach main ~/main</span></div>
 <div><span class="pr">root@afs ~$</span> afs fleet --tail</div>
 <div class="out"><span class="cmt">  streaming live signals from the fleet...</span></div>
 <div class="out"><span class="cmt">  04:21:17</span>  <span class="ok">●</span> us-east-1   <span class="num">221k ops/s</span>  p50 <span class="num">1.2ms</span></div>
@@ -380,7 +380,7 @@
           <div class="row">
             <label class="check"><input type="checkbox" checked> remember this device</label>
           </div>
-          <button class="btn" type="submit">$ afs login <span>→</span></button>
+          <button class="btn" type="submit">$ afs auth login <span>→</span></button>
         </form>
 
         <!-- SIGN UP -->

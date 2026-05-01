@@ -68,7 +68,7 @@ use a workspace-scoped hosted token.
 
 | Family | Tools |
 | --- | --- |
-| Status/admin | `afs_status`, `workspace_list`, `workspace_current`, `workspace_use`, `workspace_create`, `workspace_fork` |
+| Status/admin | `afs_status`, `workspace_list`, `workspace_create`, `workspace_fork` |
 | Checkpoints | `checkpoint_list`, `checkpoint_create`, `checkpoint_restore` |
 | File reads | `file_read`, `file_lines`, `file_list`, `file_glob`, `file_grep` |
 | File writes | `file_write`, `file_create_exclusive`, `file_replace`, `file_insert`, `file_delete_lines`, `file_patch` |
@@ -84,7 +84,7 @@ token management tools.
 
 Local stdio MCP only.
 
-Shows local AFS configuration and selected workspace.
+Shows local AFS configuration and attachment status.
 
 Arguments: none.
 
@@ -94,25 +94,6 @@ Lists available workspaces.
 
 Arguments: none for local MCP. Hosted control-plane MCP may scope results by
 the authenticated identity.
-
-### `workspace_current`
-
-Shows the current workspace. In workspace-scoped hosted MCP, this is the
-workspace available to the token.
-
-Arguments: none.
-
-### `workspace_use`
-
-Local stdio MCP only.
-
-Sets the current workspace in local AFS config.
-
-Arguments:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `workspace` | Yes | Workspace name. |
 
 ### `workspace_create`
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -72,6 +73,47 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 	}
 }
 
+func TestSaveConfigStripsRuntimeWorkspaceAndPathState(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = "127.0.0.1:6380"
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = "http://127.0.0.1:8091"
+	cfg.DatabaseID = "db-local"
+	cfg.CurrentWorkspace = "demo"
+	cfg.CurrentWorkspaceID = "ws_demo"
+	cfg.LocalPath = "/tmp/demo"
+	cfg.Mode = modeMount
+	cfg.MountBackend = mountBackendNFS
+	cfg.ReadOnly = true
+	cfg.Name = "agent"
+	saveTempConfig(t, cfg)
+
+	raw, err := os.ReadFile(configPath())
+	if err != nil {
+		t.Fatalf("ReadFile(config) returned error: %v", err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatalf("Unmarshal(config) returned error: %v", err)
+	}
+	for _, key := range []string{"currentWorkspace", "currentWorkspaceID", "localPath", "mount", "logs"} {
+		if _, ok := saved[key]; ok {
+			t.Fatalf("config should not persist runtime key %q: %s", key, string(raw))
+		}
+	}
+	if got, ok := saved["mode"].(string); !ok || got != modeMount {
+		t.Fatalf("config should persist mode %q, got %v in %s", modeMount, saved["mode"], string(raw))
+	}
+	if _, ok := saved["controlPlane"]; !ok {
+		t.Fatalf("config should keep controlPlane settings: %s", string(raw))
+	}
+	if _, ok := saved["agent"]; !ok {
+		t.Fatalf("config should keep agent settings: %s", string(raw))
+	}
+}
+
 func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 	t.Helper()
 
@@ -104,6 +146,84 @@ func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 	}
 	if got.MountBackend != mountBackendNone {
 		t.Fatalf("MountBackend = %q, want %q", got.MountBackend, mountBackendNone)
+	}
+}
+
+func TestCmdConfigSetModePersistsRuntimeMode(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	if err := cmdConfig([]string{"config", "set", "mode", "mount"}); err != nil {
+		t.Fatalf("cmdConfig(set mode mount) returned error: %v", err)
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.Mode != modeMount {
+		t.Fatalf("Mode = %q, want %q", cfg.Mode, modeMount)
+	}
+	value, err := getConfigKey(cfg, "mode")
+	if err != nil {
+		t.Fatalf("getConfigKey(mode) returned error: %v", err)
+	}
+	if value != modeMount {
+		t.Fatalf("getConfigKey(mode) = %q, want %q", value, modeMount)
+	}
+
+	if err := cmdConfig([]string{"config", "set", "--mode", "sync"}); err != nil {
+		t.Fatalf("cmdConfig(set --mode sync) returned error: %v", err)
+	}
+	cfg, err = loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() after --mode returned error: %v", err)
+	}
+	if got, err := effectiveMode(cfg); err != nil || got != modeSync {
+		t.Fatalf("effectiveMode() = %q, %v; want %q", got, err, modeSync)
+	}
+}
+
+func TestCmdConfigResetRemovesConfigAndState(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	if err := os.WriteFile(configFile, []byte(`{"mode":"mount"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+		t.Fatalf("MkdirAll(stateDir) returned error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir(), "attachments.json"), []byte(`{"attachments":[]}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(state) returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdConfig([]string{"config", "reset"})
+	})
+	if err != nil {
+		t.Fatalf("cmdConfig(reset) returned error: %v", err)
+	}
+	if _, err := os.Stat(configFile); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("config file still exists after reset: %v", err)
+	}
+	if _, err := os.Stat(stateDir()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state dir still exists after reset: %v", err)
+	}
+	if !strings.Contains(out, "local state reset") {
+		t.Fatalf("cmdConfig(reset) output = %q, want local state reset", out)
 	}
 }
 
@@ -529,17 +649,18 @@ func TestCmdConfigHelpListsConfigurableSettings(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"Redis connection",
-		"Configuration source",
-		"--config-source",
-		"--redis-url",
-		"--mount-backend",
-		"--mountpoint",
-		"workspace use <workspace>",
+		"config.source",
+		"controlPlane.url",
+		"redis.url",
+		"sync.fileSizeCapMB",
+		"config set controlPlane.url",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("config help output = %q, want substring %q", out, want)
 		}
+	}
+	if strings.Contains(out, "Legacy shortcuts") {
+		t.Fatalf("config help output still includes legacy shortcuts:\n%s", out)
 	}
 }
 
@@ -673,28 +794,23 @@ func TestLoadConfigForUpAppliesModeOverrideAndSavesConfig(t *testing.T) {
 	}
 }
 
-func TestCmdUpHelpListsPositionalOverrides(t *testing.T) {
+func TestCmdStatusHelpListsVerboseFlag(t *testing.T) {
 	t.Helper()
 
 	out, err := captureStderr(t, func() error {
-		return cmdUpArgs([]string{"--help"})
+		return cmdStatusArgs([]string{"--help"})
 	})
 	if err != nil {
-		t.Fatalf("cmdUpArgs(--help) returned error: %v", err)
+		t.Fatalf("cmdStatusArgs(--help) returned error: %v", err)
 	}
 
 	for _, want := range []string{
-		"up <workspace> [<mountpoint>]",
-		"--mode <sync|mount>",
-		"Redis connection, mount backend, and readonly mode come from config",
-		"Current workspace must already be selected",
-		"If Redis DB or mountpoint are missing",
-		"config set",
-		"up --mode sync",
-		"up claude-code ~/.claude",
+		"status [--verbose]",
+		"--verbose, -v",
+		"control-plane, session, and process details",
 	} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("up help output = %q, want substring %q", out, want)
+			t.Fatalf("status help output = %q, want substring %q", out, want)
 		}
 	}
 }
@@ -893,15 +1009,15 @@ func TestCmdCheckpointRestoreHelpExplainsLiveRestoreBehavior(t *testing.T) {
 	t.Helper()
 
 	out, err := captureStderr(t, func() error {
-		return cmdCheckpoint([]string{"checkpoint", "restore", "--help"})
+		return cmdCheckpoint([]string{"cp", "restore", "--help"})
 	})
 	if err != nil {
 		t.Fatalf("cmdCheckpoint(restore --help) returned error: %v", err)
 	}
 
 	for _, want := range []string{
-		"Restore the active workspace state to the selected checkpoint",
-		"checkpoint restore [workspace] <checkpoint>",
+		"Restore workspace state to the selected checkpoint",
+		"cp restore [workspace] <checkpoint>",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("checkpoint restore help output = %q, want substring %q", out, want)

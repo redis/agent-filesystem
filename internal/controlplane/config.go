@@ -34,7 +34,7 @@ func LoadConfig(configPathOverride string) (Config, error) {
 		return cfg, err
 	}
 	if !present {
-		return cfg, fmt.Errorf("no configuration found\nCreate %s or run afs setup first", configPath(configPathOverride))
+		return cfg, fmt.Errorf("no configuration found\nCreate %s, run afs auth login, or run afs setup", configPath(configPathOverride))
 	}
 	return cfg, nil
 }

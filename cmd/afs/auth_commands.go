@@ -35,15 +35,52 @@ type authExchangeResponse struct {
 
 var runBrowserLoginFlow = launchBrowserLoginFlow
 
-// cmdLogout clears any cached cloud login and flips the product mode back
-// to local-only.
-func cmdLogout(args []string) error {
-	return cmdAuthLogout(args)
+func cmdAuth(args []string) error {
+	if len(args) < 2 || isHelpArg(args[1]) {
+		fmt.Fprint(os.Stderr, authUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	switch args[1] {
+	case "help":
+		return cmdAuthHelp(args[2:])
+	case "login":
+		return cmdLogin(args[2:])
+	case "logout":
+		return cmdAuthLogout(args[2:])
+	case "status":
+		return cmdAuthStatus(args[2:])
+	default:
+		return fmt.Errorf("unknown auth command %q\n\n%s", args[1], authUsageText(filepath.Base(os.Args[0])))
+	}
 }
 
-// cmdLogin connects the CLI to a control plane. Plain `afs login` asks whether
-// to use AFS Cloud or a Self-managed control plane before opening any browser
-// flow. Flags and token handoff stay noninteractive for install/script paths.
+func cmdAuthHelp(args []string) error {
+	if len(args) == 0 {
+		fmt.Fprint(os.Stderr, authUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	if len(args) != 1 {
+		return fmt.Errorf("%s", authUsageText(filepath.Base(os.Args[0])))
+	}
+	switch args[0] {
+	case "login":
+		fmt.Fprint(os.Stderr, loginUsageText(filepath.Base(os.Args[0])))
+	case "logout":
+		fmt.Fprint(os.Stderr, logoutUsageText(filepath.Base(os.Args[0])))
+	case "status":
+		fmt.Fprint(os.Stderr, authStatusUsageText(filepath.Base(os.Args[0])))
+	case "help":
+		fmt.Fprint(os.Stderr, authUsageText(filepath.Base(os.Args[0])))
+	default:
+		return fmt.Errorf("unknown auth command %q\n\n%s", args[0], authUsageText(filepath.Base(os.Args[0])))
+	}
+	return nil
+}
+
+// cmdLogin connects the CLI to a control plane. Plain `afs auth login` asks
+// whether to use AFS Cloud or a Self-managed control plane before opening any
+// browser flow. Flags and token handoff stay noninteractive for install/script
+// paths.
 //
 // Choice of mode:
 //
@@ -240,11 +277,11 @@ func runSelfHostedLogin(cfg *config, overrideURL string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "connected to self-managed control plane"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "connected to self-managed control plane"), []outputRow{
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" setup") + clr(ansiDim, "   (pick a workspace)")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach <workspace> <directory>")},
 	})
 	return nil
 }
@@ -298,14 +335,21 @@ func runCloudLogin(cfg *config, overrideURL, overrideToken, workspace string) er
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "cloud login complete"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "cloud login complete"), []outputRow{
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "workspace", Value: cfg.CurrentWorkspace},
-		{Label: "database", Value: cfg.DatabaseID},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" up")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
 	})
 	return nil
+}
+
+func workspaceHint(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "<workspace>"
+	}
+	return workspace
 }
 
 func cmdAuthLogout(args []string) error {
@@ -320,7 +364,7 @@ func cmdAuthLogout(args []string) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("no configuration found\nRun '%s login' first", filepath.Base(os.Args[0]))
+			return fmt.Errorf("no configuration found\nRun '%s auth login' first", filepath.Base(os.Args[0]))
 		}
 		return err
 	}
@@ -340,59 +384,91 @@ func cmdAuthLogout(args []string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "cloud login cleared"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "cloud login cleared"), []outputRow{
 		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		{Label: "connection", Value: productModeDisplayLabel(productModeLocal)},
 	})
 	return nil
 }
 
+func cmdAuthStatus(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, authStatusUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	if len(args) != 0 {
+		return fmt.Errorf("%s", authStatusUsageText(filepath.Base(os.Args[0])))
+	}
+	rows, _ := authConnectionInfo(filepath.Base(os.Args[0]))
+	printSection(clr(ansiBold, "Authentication"), rows)
+	return nil
+}
+
 // authConnectionInfo summarises the current cloud-login state in a form that
 // can be rendered as rows in `afs status`. Returns (rows, hasCloudConnection).
-func authConnectionInfo(bin string) ([]boxRow, bool) {
+func authConnectionInfo(bin string) ([]outputRow, bool) {
 	cfg, hasSavedConfig, err := loadConfigWithPresence()
 	if err != nil {
-		return []boxRow{{Label: "connection", Value: "error: " + err.Error()}}, false
+		return []outputRow{{Label: "connection", Value: "error: " + err.Error()}}, false
 	}
 	if !hasSavedConfig {
-		return []boxRow{
+		return []outputRow{
 			{Label: "connection", Value: "not signed in"},
-			{Label: "hint", Value: clr(ansiDim, "Run '"+bin+" login'")},
+			{Label: "hint", Value: clr(ansiDim, "Run '"+bin+" auth login'")},
 		}, false
 	}
 	if err := prepareConfigForSave(&cfg); err != nil {
-		return []boxRow{{Label: "connection", Value: "error: " + err.Error()}}, false
+		return []outputRow{{Label: "connection", Value: "error: " + err.Error()}}, false
 	}
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
-		return []boxRow{{Label: "connection", Value: "error: " + err.Error()}}, false
+		return []outputRow{{Label: "connection", Value: "error: " + err.Error()}}, false
 	}
 	if productMode == productModeLocal {
-		return []boxRow{{Label: "connection", Value: productModeDisplayLabel(productMode)}}, false
+		return []outputRow{{Label: "connection", Value: productModeDisplayLabel(productMode)}}, false
 	}
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "connection", Value: productModeDisplayLabel(productMode)},
 		{Label: "control plane", Value: cfg.URL},
 	}
 	if productMode == productModeCloud && strings.TrimSpace(cfg.AuthToken) == "" {
-		rows = append(rows, boxRow{Label: "signed in", Value: "needs refresh"})
-		rows = append(rows, boxRow{Label: "hint", Value: clr(ansiDim, "Run '"+bin+" login' again to finish browser sign-in.")})
+		rows = append(rows, outputRow{Label: "signed in", Value: "needs refresh"})
+		rows = append(rows, outputRow{Label: "hint", Value: clr(ansiDim, "Run '"+bin+" auth login' again to finish browser sign-in.")})
 		return rows, false
 	}
 	if productMode == productModeCloud {
-		rows = append(rows, boxRow{Label: "signed in", Value: "yes"})
+		rows = append(rows, outputRow{Label: "signed in", Value: "yes"})
+		if account := strings.TrimSpace(cfg.Account); account != "" {
+			rows = append(rows, outputRow{Label: "account", Value: account})
+		}
 	}
 	if db := strings.TrimSpace(cfg.DatabaseID); db != "" {
-		rows = append(rows, boxRow{Label: "database", Value: db})
+		rows = append(rows, outputRow{Label: "database", Value: db})
 	}
 	return rows, true
 }
 
+func authUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage: %s auth [options] [command]
+
+Manage authentication
+
+Options:
+  -h, --help        Display help for command
+
+Commands:
+  help [command]    display help for command
+  login [options]   Connect to afs control plane
+  logout            Log out from afs control plane
+  status [options]  Show authentication status
+`, bin)
+}
+
 func loginUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s login [--cloud] [--url <cloud-url>]
-  %s login --self-hosted [--url <url>]
-  %s login --control-plane-url <url> --token <token>
+  %s auth login [--cloud] [--url <cloud-url>]
+  %s auth login --self-hosted [--url <url>]
+  %s auth login --control-plane-url <url> --token <token>
 
 Flags:
   --cloud                   Force cloud mode (browser OAuth)
@@ -403,18 +479,26 @@ Flags:
   --workspace <name|id>     Preferred workspace for cloud login
 
 Examples:
-  %s login
-  %s login --self-hosted
-  %s login --self-hosted --url http://my-host:8091
-  %s login --cloud
+  %s auth login
+  %s auth login --self-hosted
+  %s auth login --self-hosted --url http://my-host:8091
+  %s auth login --cloud
 `, bin, bin, bin, defaultSelfHostedControlPlaneURL, bin, bin, bin, bin)
 }
 
 func logoutUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s logout
+  %s auth logout
 
 Clears any cached cloud login from this machine and switches product mode
 back to local-only. Safe to re-run when not signed in.
+`, bin)
+}
+
+func authStatusUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s auth status
+
+Show authentication status for this machine.
 `, bin)
 }

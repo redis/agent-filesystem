@@ -128,19 +128,24 @@ function ConnectCLIPage() {
   }
 
   if (search.connected) {
+    const connectedWorkspaceName = search.workspace_name?.trim();
+    const connectedAttachCommand = connectedWorkspaceName
+      ? `afs ws attach ${canonicalWorkspaceName(connectedWorkspaceName)} ~/afs/${canonicalWorkspaceName(connectedWorkspaceName)}`
+      : "afs ws attach";
+
     return (
       <PageShell>
         <ConnectCard>
           <Eyebrow>AFS Cloud</Eyebrow>
           <Title>CLI connected</Title>
           <Description>
-            {search.workspace_name?.trim()
-              ? `Your terminal is now linked to ${displayWorkspaceName(search.workspace_name)}. Return to the terminal and run afs up to sync it locally.`
-              : "Your terminal is now linked. Return to the terminal and run afs up to sync the workspace locally."}
+            {connectedWorkspaceName
+              ? `Your terminal is now linked to ${displayWorkspaceName(connectedWorkspaceName)}. Return to the terminal and run ${connectedAttachCommand} to attach it locally.`
+              : "Your terminal is now linked. Return to the terminal and run afs ws attach to attach a workspace locally."}
           </Description>
           <SuccessPanel>
-            <SuccessCode>afs up</SuccessCode>
-            <SuccessHint>You can close this tab after the terminal finishes starting the workspace.</SuccessHint>
+            <SuccessCode>{connectedAttachCommand}</SuccessCode>
+            <SuccessHint>You can close this tab after the workspace is attached.</SuccessHint>
           </SuccessPanel>
         </ConnectCard>
       </PageShell>

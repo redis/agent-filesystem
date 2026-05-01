@@ -69,6 +69,59 @@ path_line_for_shell() {
   esac
 }
 
+shell_integration_for_shell() {
+  case "$1" in
+    zsh|bash)
+      cat <<EOF
+afs() {
+  local _afs_bin="$INSTALL_DIR/$BIN_NAME"
+  if [ "\$#" -ge 2 ] && [ "\$1" = "ws" ] && [ "\$2" = "attach" ]; then
+    local _afs_cd_file
+    _afs_cd_file="\$(mktemp)"
+    AFS_ATTACH_CD_FILE="\$_afs_cd_file" "\$_afs_bin" "\$@"
+    local _afs_status
+    _afs_status=\$?
+    if [ "\$_afs_status" -eq 0 ] && [ -s "\$_afs_cd_file" ]; then
+      local _afs_target
+      _afs_target="\$(cat "\$_afs_cd_file")"
+      rm -f "\$_afs_cd_file"
+      cd "\$_afs_target"
+    else
+      rm -f "\$_afs_cd_file"
+    fi
+    return "\$_afs_status"
+  fi
+  "\$_afs_bin" "\$@"
+}
+EOF
+      ;;
+    fish)
+      cat <<EOF
+function afs
+  set -l _afs_bin "$INSTALL_DIR/$BIN_NAME"
+  if test (count \$argv) -ge 2; and test "\$argv[1]" = "ws"; and test "\$argv[2]" = "attach"
+    set -l _afs_cd_file (mktemp)
+    env AFS_ATTACH_CD_FILE="\$_afs_cd_file" "\$_afs_bin" \$argv
+    set -l _afs_status \$status
+    if test \$_afs_status -eq 0; and test -s "\$_afs_cd_file"
+      set -l _afs_target (string trim < "\$_afs_cd_file")
+      rm -f "\$_afs_cd_file"
+      cd "\$_afs_target"
+    else
+      rm -f "\$_afs_cd_file"
+    end
+    return \$_afs_status
+  end
+  "\$_afs_bin" \$argv
+end
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 profile_file_for_shell() {
   case "$1" in
     zsh)
@@ -106,21 +159,35 @@ configure_shell_path() {
 
   profile_file=$(profile_file_for_shell "$shell_name") || return 1
   path_line=$(path_line_for_shell "$shell_name")
+  integration=$(shell_integration_for_shell "$shell_name") || return 1
+  integration_marker="# Added by Agent Filesystem installer: shell integration"
 
   mkdir -p "$(dirname "$profile_file")"
 
   if [ -f "$profile_file" ] && grep -Fqx "$path_line" "$profile_file"; then
     info "$INSTALL_DIR is already configured in $profile_file"
+  else
+    {
+      printf '\n'
+      printf '# Added by Agent Filesystem installer\n'
+      printf '%s\n' "$path_line"
+    } >> "$profile_file"
+
+    info "Added $INSTALL_DIR to PATH in $profile_file"
+  fi
+
+  if [ -f "$profile_file" ] && grep -Fqx "$integration_marker" "$profile_file"; then
+    info "AFS shell integration is already configured in $profile_file"
     return 0
   fi
 
   {
     printf '\n'
-    printf '# Added by Agent Filesystem installer\n'
-    printf '%s\n' "$path_line"
+    printf '%s\n' "$integration_marker"
+    printf '%s\n' "$integration"
   } >> "$profile_file"
 
-  info "Added $INSTALL_DIR to PATH in $profile_file"
+  info "Added AFS shell integration to $profile_file"
 }
 
 info "Downloading from ${CONTROL_PLANE}/v1/cli"
@@ -163,19 +230,18 @@ esac
 {{if eq .ProductMode "cloud"}}info "Installation complete."
 echo
 echo "Next:"
-echo "    $CLI_CMD login       # sign in and link this CLI to your account"
-echo "    $CLI_CMD up          # start syncing your current workspace"
+echo "    $CLI_CMD auth login  # sign in and link this CLI to your account"
+echo "    $CLI_CMD ws attach   # choose a workspace and local folder"
 {{else}}info "Pointing CLI at ${CONTROL_PLANE}"
-if ! "$target" login --self-hosted --url "$CONTROL_PLANE" >/dev/null 2>&1; then
+if ! "$target" auth login --self-hosted --url "$CONTROL_PLANE" >/dev/null 2>&1; then
   warn "Could not configure the CLI automatically. Run this later:"
-  echo "    $CLI_CMD login --self-hosted --url $CONTROL_PLANE"
+  echo "    $CLI_CMD auth login --self-hosted --url $CONTROL_PLANE"
 fi
 
 info "Installation complete."
 echo
 echo "Next:"
-echo "    $CLI_CMD setup       # pick a workspace and local path"
-echo "    $CLI_CMD up          # start syncing your current workspace"
+echo "    $CLI_CMD ws attach   # choose a workspace and local folder"
 {{end}}`
 
 type installScriptData struct {

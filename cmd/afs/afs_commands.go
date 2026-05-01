@@ -76,7 +76,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 	if len(parsed.positionals) != 2 {
-		return fmt.Errorf("usage: %s import [--force] [--database <database-id|database-name>] <workspace> <directory>", filepath.Base(os.Args[0]))
+		return fmt.Errorf("usage: %s import [--force] [--attach-at-source] [--database <database-id|database-name>] <workspace> <directory>", filepath.Base(os.Args[0]))
 	}
 
 	workspace := parsed.positionals[0]
@@ -111,16 +111,16 @@ func cmdImport(args []string) error {
 		if strings.TrimSpace(parsed.database) != "" {
 			return fmt.Errorf("--database is only supported in control plane mode")
 		}
-		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force)
+		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force, parsed.attachAtSource)
 	case productModeSelfHosted:
-		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database)
+		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database, parsed.attachAtSource)
 	default:
 		_, _, _, err := openAFSControlPlaneForConfig(ctx, cfg)
 		return err
 	}
 }
 
-func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool) error {
+func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting, attachAtSource bool) error {
 	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
@@ -266,7 +266,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		return err
 	}
 	rootDuration := step.elapsed()
-	step.succeed("ready for afs up")
+	step.succeed("ready to attach")
 
 	// Drop the blob cache now that sync has consumed it.
 	sink.Drop()
@@ -281,10 +281,9 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace imported"), []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: initialSavepoint},
-		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
 		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
@@ -292,8 +291,14 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
 		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
-	})
+	}
+	if !attachAtSource {
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + workspace + " " + shellQuote(sourceDir)})
+	}
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
+	if attachAtSource {
+		return attachWorkspace(attachOptions{workspace: workspace, directory: sourceDir})
+	}
 	return nil
 }
 
@@ -305,7 +310,7 @@ func newCLIWorkspaceID() (string, error) {
 	return "ws_" + hex.EncodeToString(raw[:]), nil
 }
 
-func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string) error {
+func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string, attachAtSource bool) error {
 	client, _, err := newHTTPControlPlaneClient(ctx, cfg)
 	if err != nil {
 		return err
@@ -393,10 +398,9 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	uploadDuration := step.elapsed()
 	step.succeed(response.Workspace.HeadCheckpointID)
 
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace imported"), []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: response.Workspace.HeadCheckpointID},
-		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
 		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
 		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
@@ -404,13 +408,19 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
 		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + uploadDuration)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " up " + workspace + " " + sourceDir},
-	})
+	}
+	if !attachAtSource {
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + workspace + " " + shellQuote(sourceDir)})
+	}
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
+	if attachAtSource {
+		return attachWorkspace(attachOptions{workspace: workspace, directory: sourceDir})
+	}
 	return nil
 }
 
 // resolveImportWorkers mirrors the logic used inside worktree.BuildManifest so
-// the summary box reports the actual worker count.
+// the summary reports the actual worker count.
 func resolveImportWorkers() int {
 	if raw := strings.TrimSpace(os.Getenv("AFS_IMPORT_WORKERS")); raw != "" {
 		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
@@ -452,26 +462,25 @@ func prepareAFSImport(sourceDir, workspace string, cfg config, replaceExisting b
 		}
 
 		estimate := estimateAFSImportDuration(total)
-		rows := []boxRow{
+		rows := []outputRow{
 			{Label: "source", Value: sourceDir},
 			{Label: "workspace", Value: workspace},
-			{Label: "database", Value: configRemoteLabel(cfg)},
 			{Label: "scan", Value: formatAFSImportSummary(total)},
 			{Label: "estimate", Value: "~" + formatStepDuration(estimate)},
 		}
 		if ignorer != nil {
-			rows = append(rows, boxRow{Label: "ignore", Value: ignorer.path})
+			rows = append(rows, outputRow{Label: "ignore", Value: ignorer.path})
 		} else {
-			rows = append(rows, boxRow{Label: "ignore", Value: clr(ansiDim, "none")})
+			rows = append(rows, outputRow{Label: "ignore", Value: clr(ansiDim, "none")})
 		}
 		if replaceExisting {
-			rows = append(rows, boxRow{Label: "replace", Value: "existing workspace state will be removed"})
+			rows = append(rows, outputRow{Label: "replace", Value: "existing workspace state will be removed"})
 		}
 		rows = append(rows,
-			boxRow{},
-			boxRow{Value: clr(ansiDim, "Tip: use .afsignore to skip caches, dependencies, logs, or build output before import.")},
+			outputRow{},
+			outputRow{Value: clr(ansiDim, "Tip: use .afsignore to skip caches, dependencies, logs, or build output before import.")},
 		)
-		printBox(clr(ansiBold, "Import plan"), rows)
+		printSection(clr(ansiBold, "Import plan"), rows)
 
 		editLabel := "  Create or edit .afsignore before importing?"
 		if ignorer != nil {
@@ -646,9 +655,16 @@ func currentWorkspaceName(ctx context.Context, cfg config, store *afsStore) (str
 		if exists {
 			return workspace, nil
 		}
-		return "", fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", workspace, filepath.Base(os.Args[0]))
+		return "", fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", workspace)
 	}
-	return "", fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
+	workspaces, err := store.listWorkspaces(ctx)
+	if err != nil {
+		return "", err
+	}
+	if len(workspaces) == 1 {
+		return workspaces[0].Name, nil
+	}
+	return "", errors.New("workspace is required; pass a workspace explicitly")
 }
 
 type workspaceSelection struct {
@@ -694,7 +710,11 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 		}
 	}
 	if ref == "" {
-		return workspaceSelection{}, fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
+		if len(workspaces.Items) == 1 {
+			only := workspaces.Items[0]
+			return workspaceSelection{ID: only.ID, Name: only.Name}, nil
+		}
+		return workspaceSelection{}, errors.New("workspace is required; pass a workspace explicitly")
 	}
 
 	// When the user supplied an explicit workspace, we do NOT fall back to
@@ -706,9 +726,9 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 			if configDisplayName != "" {
 				label = configDisplayName
 			}
-			return workspaceSelection{}, fmt.Errorf("current workspace %q is ambiguous: %w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", label, err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+			return workspaceSelection{}, fmt.Errorf("workspace %q is ambiguous: %w\nRun '%s ws list' and pass the workspace id explicitly", label, err, filepath.Base(os.Args[0]))
 		}
-		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s ws list' and pass the workspace id explicitly", err, filepath.Base(os.Args[0]))
 	} else if ok {
 		return match, nil
 	}
@@ -718,7 +738,7 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 		if configDisplayName != "" {
 			label = configDisplayName
 		}
-		return workspaceSelection{}, fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", label, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", label)
 	}
 	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", ref)
 }
@@ -934,6 +954,7 @@ func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHe
 		DirCount:              stats.DirCount,
 		TotalBytes:            stats.TotalBytes,
 		SkipWorkspaceRootSync: !syncWorkspaceRoot,
+		AllowUnchanged:        metadata.AllowUnchanged,
 	})
 	if errors.Is(err, controlplane.ErrWorkspaceConflict) || err == redis.TxFailedErr {
 		return false, errAFSWorkspaceConflict
@@ -942,10 +963,11 @@ func saveAFSManifest(ctx context.Context, store *afsStore, workspace, expectedHe
 }
 
 type afsParsedArgs struct {
-	positionals []string
-	force       bool
-	readonly    bool
-	database    string
+	positionals    []string
+	force          bool
+	readonly       bool
+	database       string
+	attachAtSource bool
 }
 
 func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs, error) {
@@ -968,6 +990,8 @@ func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs,
 				return parsed, fmt.Errorf("unknown flag %q", args[i])
 			}
 			parsed.readonly = true
+		case "--attach-at-source":
+			parsed.attachAtSource = true
 		default:
 			if strings.HasPrefix(args[i], "--database=") {
 				parsed.database = strings.TrimSpace(strings.TrimPrefix(args[i], "--database="))

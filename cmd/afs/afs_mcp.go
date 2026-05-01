@@ -207,22 +207,6 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
 		},
 		{
-			Name:        "workspace_current",
-			Description: "Show the current workspace selection from the local AFS config",
-			InputSchema: map[string]any{"type": "object", "properties": map[string]any{}},
-		},
-		{
-			Name:        "workspace_use",
-			Description: "Set the current workspace in the local AFS config",
-			InputSchema: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
-				},
-				"required": []string{"workspace"},
-			},
-		},
-		{
 			Name:        "workspace_create",
 			Description: "Create a new empty workspace",
 			InputSchema: map[string]any{
@@ -230,7 +214,6 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 				"properties": map[string]any{
 					"workspace":   map[string]string{"type": "string", "description": "Workspace name"},
 					"description": map[string]string{"type": "string", "description": "Optional description"},
-					"set_current": map[string]string{"type": "boolean", "description": "Also set it as the current workspace"},
 				},
 				"required": []string{"workspace"},
 			},
@@ -253,28 +236,28 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 				},
 			},
 		},
 		{
 			Name:        "checkpoint_create",
-			Description: "Create a new checkpoint from the active workspace state",
+			Description: "Create a new checkpoint from workspace state",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace":  map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace":  map[string]string{"type": "string", "description": "Workspace name"},
 					"checkpoint": map[string]string{"type": "string", "description": "Optional checkpoint name"},
 				},
 			},
 		},
 		{
 			Name:        "checkpoint_restore",
-			Description: "Restore the active workspace state to a checkpoint",
+			Description: "Restore workspace state to a checkpoint",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace":  map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace":  map[string]string{"type": "string", "description": "Workspace name"},
 					"checkpoint": map[string]string{"type": "string", "description": "Checkpoint name"},
 				},
 				"required": []string{"checkpoint"},
@@ -286,7 +269,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace path to a file or symlink, for example /src/main.go"},
 				},
 				"required": []string{"path"},
@@ -298,7 +281,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace path to a text file, for example /src/main.go"},
 					"start":     map[string]string{"type": "integer", "description": "Start line, 1-indexed"},
 					"end":       map[string]string{"type": "integer", "description": "End line, inclusive. Use -1 to read through EOF"},
@@ -312,7 +295,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace directory path, for example / or /src", "default": "/"},
 					"depth":     map[string]string{"type": "integer", "description": "Depth relative to the requested path. Use 1 for immediate children", "default": "1"},
 				},
@@ -324,7 +307,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace directory path to search within, for example / or /src", "default": "/"},
 					"pattern":   map[string]string{"type": "string", "description": "Basename glob pattern, for example *.go or [Mm]akefile"},
 					"kind":      map[string]string{"type": "string", "description": "Optional kind filter: file, dir, symlink, or any", "default": "file"},
@@ -335,11 +318,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_write",
-			Description: "Write a full file in a workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, or file_delete_lines for that. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called. Paths must be absolute inside the workspace, for example /src/main.go.",
+			Description: "Write a full file in a workspace, creating parent directories as needed. Use this for new files or full overwrites. Do not use it for small localized edits; prefer file_replace, file_insert, or file_delete_lines for that. File edits update the workspace immediately and leave it dirty until checkpoint_create is called. Paths must be absolute inside the workspace, for example /src/main.go.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
 					"content":   map[string]string{"type": "string", "description": "Complete file contents to write"},
 				},
@@ -352,7 +335,7 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute file path"},
 					"content":   map[string]string{"type": "string", "description": "File contents to write on creation"},
 				},
@@ -361,11 +344,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_replace",
-			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, callers should be explicit about whether all occurrences are intended. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Replace text in a file. Use this for small exact substitutions after you have inspected the file. Do not use it for full rewrites; use file_write instead. If the target text may occur more than once, callers should be explicit about whether all occurrences are intended. File edits update the workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace":            map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace":            map[string]string{"type": "string", "description": "Workspace name"},
 					"path":                 map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
 					"old":                  map[string]string{"type": "string", "description": "Exact text to find"},
 					"new":                  map[string]string{"type": "string", "description": "Replacement text"},
@@ -380,11 +363,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_insert",
-			Description: "Insert content at a line boundary in a text file. Use this for additive edits where an exact insertion point is known. Do not use it for broad rewrites or ambiguous structural edits. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Insert content at a line boundary in a text file. Use this for additive edits where an exact insertion point is known. Do not use it for broad rewrites or ambiguous structural edits. File edits update the workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
 					"line":      map[string]string{"type": "integer", "description": "Insert after this line. Use 0 for the beginning of the file and -1 for the end"},
 					"content":   map[string]string{"type": "string", "description": "Content to insert"},
@@ -394,11 +377,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_delete_lines",
-			Description: "Delete a line range from a text file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Delete a line range from a text file. Use this for precise removals when line numbers are known. Do not use it for semantic search-and-replace; use file_replace instead. File edits update the workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace": map[string]string{"type": "string", "description": "Workspace name"},
 					"path":      map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
 					"start":     map[string]string{"type": "integer", "description": "Start line to delete, 1-indexed"},
 					"end":       map[string]string{"type": "integer", "description": "End line to delete, inclusive"},
@@ -408,11 +391,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_patch",
-			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters. This tool supports replace, insert, and delete operations with optional line anchors, surrounding context checks, and a file hash precondition. File edits update the active workspace immediately and leave it dirty until checkpoint_create is called.",
+			Description: "Apply one or more structured text patches to a file. Use this for precise multi-step edits where exact context matters. This tool supports replace, insert, and delete operations with optional line anchors, surrounding context checks, and a file hash precondition. File edits update the workspace immediately and leave it dirty until checkpoint_create is called.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace":       map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace":       map[string]string{"type": "string", "description": "Workspace name"},
 					"path":            map[string]string{"type": "string", "description": "Absolute workspace file path, for example /src/main.go"},
 					"expected_sha256": map[string]string{"type": "string", "description": "Optional SHA-256 hash of the file before patching; fail if the file changed"},
 					"patches": map[string]any{
@@ -438,11 +421,11 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 		},
 		{
 			Name:        "file_grep",
-			Description: "Search file contents in a workspace using the same engine as afs grep. Use this for content search across one file or many files. Do not use it for directory discovery or filename-only matching. The search path must be absolute inside the workspace, for example / or /src. Choose only one search mode among glob, fixed_strings, or regexp.",
+			Description: "Search file contents in a workspace using the same engine as afs fs grep. Use this for content search across one file or many files. Do not use it for directory discovery or filename-only matching. The search path must be absolute inside the workspace, for example / or /src. Choose only one search mode among glob, fixed_strings, or regexp.",
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"workspace":          map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"workspace":          map[string]string{"type": "string", "description": "Workspace name"},
 					"path":               map[string]string{"type": "string", "description": "Absolute workspace path to search within, for example / or /src", "default": "/"},
 					"pattern":            map[string]string{"type": "string", "description": "Pattern to search for"},
 					"ignore_case":        map[string]string{"type": "boolean", "description": "Case-insensitive search"},
@@ -489,10 +472,6 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value, err = s.toolAFSStatus()
 	case "workspace_list":
 		value, err = s.toolWorkspaceList(ctx)
-	case "workspace_current":
-		value, err = s.toolWorkspaceCurrent(ctx)
-	case "workspace_use":
-		value, err = s.toolWorkspaceUse(ctx, args)
 	case "workspace_create":
 		value, err = s.toolWorkspaceCreate(ctx, args)
 	case "workspace_fork":
@@ -626,11 +605,6 @@ func (s *afsMCPServer) toolWorkspaceCreate(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	setCurrent, err := mcpBool(args, "set_current", false)
-	if err != nil {
-		return nil, err
-	}
-
 	detail, err := s.service.CreateWorkspace(ctx, controlplane.CreateWorkspaceRequest{
 		Name:        workspace,
 		Description: description,
@@ -641,18 +615,8 @@ func (s *afsMCPServer) toolWorkspaceCreate(ctx context.Context, args map[string]
 	if err != nil {
 		return nil, err
 	}
-	if setCurrent {
-		s.cfg.CurrentWorkspace = workspace
-		if err := prepareConfigForSave(&s.cfg); err != nil {
-			return nil, err
-		}
-		if err := saveConfig(s.cfg); err != nil {
-			return nil, err
-		}
-	}
 	return map[string]any{
-		"workspace":   detail,
-		"set_current": setCurrent,
+		"workspace": detail,
 	}, nil
 }
 
@@ -1469,10 +1433,10 @@ func (s *afsMCPServer) resolveWorkspaceArg(ctx context.Context, args map[string]
 	if err != nil {
 		return "", err
 	}
-	workspace, err := resolveWorkspaceName(ctx, s.cfg, s.store, requested)
-	if err != nil {
-		return "", err
+	if strings.TrimSpace(requested) == "" {
+		return "", errors.New("workspace is required")
 	}
+	workspace := requested
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return "", err
 	}

@@ -50,12 +50,12 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
                 <TerminalTitle>terminal</TerminalTitle>
               </TerminalHeader>
               <TerminalBody>
-                <TerminalComment>// Create a new workspace && mount it</TerminalComment>
-                <TerminalLine>&gt; afs create myworkspace</TerminalLine>
-                <TerminalLine>&gt; afs up myworkspace ~/myworkspace</TerminalLine>
+                <TerminalComment>// Create a new workspace and attach it</TerminalComment>
+                <TerminalLine>&gt; afs ws create myworkspace</TerminalLine>
+                <TerminalLine>&gt; afs ws attach myworkspace ~/myworkspace</TerminalLine>
                 <TerminalGap />
                 <TerminalComment>// Create a checkpoint</TerminalComment>
-                <TerminalLine>&gt; afs checkpoint create myworkspace</TerminalLine>
+                <TerminalLine>&gt; afs cp create myworkspace initial</TerminalLine>
               </TerminalBody>
             </TerminalWindow>
             <BenchmarkPanel>

@@ -40,12 +40,12 @@ same file. Append-only shared docs mean edits compose instead of overwriting.
 
 ```bash
 # Workspace owner (once):
-afs workspace create team-prd
-# Seed /prd.md, /CONVENTIONS.md, /questions.md via the web UI or `afs up`
+afs ws create team-prd
+# Seed /prd.md, /CONVENTIONS.md, /questions.md via the web UI or `afs ws attach`
 # Create a workspace-rw MCP token, share with the team
 
 # Each developer:
-afs login
+afs auth login
 claude plugin install ./examples/plugins/afs-team-prd
 ```
 

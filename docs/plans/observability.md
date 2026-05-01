@@ -20,7 +20,7 @@ next step is the Redis-stream merge described in `event-history-merge.md`.
 **Ship this before anything else.** It's the highest-value observability signal AFS can offer and it's unique to this system: every other observability concern (HTTP RED, Redis, auth) you can get from any server. Per-agent-session diffs are the thing operators and users can't get anywhere else.
 
 ### Goal
-For every agent session, capture every file **added / modified / deleted / renamed / chmod'd / symlinked** with enough metadata to reconstruct "what did this agent do?" Surface that in the UI as a session-scoped timeline and in the CLI as `afs session log <id>`.
+For every agent session, capture every file **added / modified / deleted / renamed / chmod'd / symlinked** with enough metadata to reconstruct "what did this agent do?" Surface that in the UI as a session-scoped timeline and in the CLI as `afs log <id>`.
 
 ### Data model
 **Store the changelog in Redis**, not SQLite. The workspace is the unit of portability — its history must travel with it across forks, imports, and control planes. Redis is already the source of truth for manifests and blobs; the changelog belongs in the same place, reachable identically from cloud and local-dev modes.
@@ -90,9 +90,9 @@ client path instead of reviving the retired Redis module.
 4. **Agent runs list** — for a given user, list their sessions with summary line "touched 47 files, +2.3 MB" so you can scan "what did each agent do today."
 
 ### CLI surface
-- `afs session log [<session-id>]` — default current session, tail-follows while session is live
-- `afs session summary <id>` — totals + top-N paths by delta bytes
-- `afs workspace log --since 1h` — workspace-wide feed
+- `afs log [<session-id>]` — default current session, tail-follows while session is live
+- `afs log summary <id>` — totals + top-N paths by delta bytes
+- `afs ws log --since 1h` — workspace-wide feed
 
 ### Exposing to the agent itself
 Agents benefit from reading their own change log mid-run (e.g. "what have I done so far in this session?"). Expose via:
@@ -117,7 +117,7 @@ thresholds configurable per workspace.
 2. Emit from the server-side apply path (sync receive + checkpoint save + restore + import)
 3. `GET /v1/sessions/{id}/changes` and `GET /v1/workspaces/{id}/changes` endpoints (backed by `XRANGE`/`XREVRANGE`)
 4. UI: Session detail → Changes tab
-5. CLI: `afs session log`
+5. CLI: `afs log`
 6. Workspace activity enrichment
 7. "Last writer per path" view (from `path:last`)
 8. Retention: `MAXLEN ~` at write + periodic `XTRIM MINID` sweep
@@ -184,7 +184,7 @@ Three Redis writes per FS op (stream append, summary hash, last-writer hash). Ac
 ### Session identity (minimal)
 Keep existing machine-derived fields (hostname, OS, agent version). Add two things:
 
-- **Label** — optional user-supplied string, set at `afs up --label "<string>"` and editable via `afs session rename <id> "<string>"`. Display field only, not an identity key. Session ID remains the opaque primary key.
+- **Label** — optional user-supplied string, set at `afs ws attach --label "<string>"` and editable via `afs log rename <id> "<string>"`. Display field only, not an identity key. Session ID remains the opaque primary key.
 - **Authenticated user** — when the request carries a Clerk token, record the user on the session row. In local/CLI-token mode, leave null or record the token owner, whichever is already present.
 
 No agent-kind auto-detect, no run-vs-session split. Revisit if users ask.

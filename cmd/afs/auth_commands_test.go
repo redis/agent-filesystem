@@ -106,6 +106,42 @@ func TestResolveLoginModeInfersSelfHostedFromUnknownURL(t *testing.T) {
 	}
 }
 
+func TestAuthUsageShowsNestedCommandFamily(t *testing.T) {
+	t.Helper()
+
+	out := stripAnsi(authUsageText("afs"))
+	for _, want := range []string{
+		"Usage: afs auth [options] [command]",
+		"Manage authentication",
+		"login [options]   Connect to afs control plane",
+		"logout            Log out from afs control plane",
+		"status [options]  Show authentication status",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("authUsageText() = %q, want substring %q", out, want)
+		}
+	}
+}
+
+func TestTopLevelUsageSurfacesAuthInsteadOfLoginLogout(t *testing.T) {
+	t.Helper()
+
+	out, err := captureStderr(t, func() error {
+		printUsage()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("printUsage() returned error: %v", err)
+	}
+	out = stripAnsi(out)
+	if !strings.Contains(out, "auth") || !strings.Contains(out, "Login, logout, and inspect authentication") {
+		t.Fatalf("printUsage() = %q, want auth command", out)
+	}
+	if strings.Contains(out, "\n  login") || strings.Contains(out, "\n  logout") {
+		t.Fatalf("printUsage() = %q, should not surface top-level login/logout commands", out)
+	}
+}
+
 func TestCmdLoginPersistsCloudConfig(t *testing.T) {
 	t.Helper()
 
@@ -163,7 +199,7 @@ func TestCmdLoginPersistsCloudConfig(t *testing.T) {
 	}
 }
 
-func TestCmdLogoutClearsCloudConfig(t *testing.T) {
+func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
@@ -175,8 +211,8 @@ func TestCmdLogoutClearsCloudConfig(t *testing.T) {
 	cfg.CurrentWorkspaceID = "ws_demo"
 	saveTempConfig(t, cfg)
 
-	if err := cmdLogout(nil); err != nil {
-		t.Fatalf("cmdLogout() returned error: %v", err)
+	if err := cmdAuth([]string{"auth", "logout"}); err != nil {
+		t.Fatalf("cmdAuth(logout) returned error: %v", err)
 	}
 
 	saved, err := loadConfig()
@@ -188,6 +224,30 @@ func TestCmdLogoutClearsCloudConfig(t *testing.T) {
 	}
 	if saved.URL != "" || saved.DatabaseID != "" || saved.AuthToken != "" || saved.CurrentWorkspace != "" || saved.CurrentWorkspaceID != "" {
 		t.Fatalf("logout should clear cloud config, got %#v", saved)
+	}
+}
+
+func TestCmdAuthStatusShowsSignedInCloudState(t *testing.T) {
+	t.Helper()
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeCloud
+	cfg.URL = "https://afs.example.com"
+	cfg.DatabaseID = "afs-cloud"
+	cfg.AuthToken = "afs_cli_demo"
+	cfg.Account = "alice@example.com"
+	saveTempConfig(t, cfg)
+
+	out, err := captureStdout(t, func() error {
+		return cmdAuth([]string{"auth", "status"})
+	})
+	if err != nil {
+		t.Fatalf("cmdAuth(status) returned error: %v", err)
+	}
+	for _, want := range []string{"Authentication", "Cloud", "signed in", "yes", "account", "alice@example.com", "database", "afs-cloud"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("auth status output = %q, want substring %q", out, want)
+		}
 	}
 }
 

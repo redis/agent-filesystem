@@ -86,11 +86,11 @@ func (e *syncTestEnv) startDaemon(t *testing.T, opts ...func(*syncDaemonConfig))
 	t.Helper()
 	daemonClient := client.New(e.rdb, e.mountKey)
 	cfg := syncDaemonConfig{
-		Workspace:      e.workspace,
-		LocalRoot:      e.localRoot,
-		FS:             daemonClient,
-		Store:          e.store,
-		MaxFileBytes:   16 * 1024 * 1024,
+		Workspace:       e.workspace,
+		LocalRoot:       e.localRoot,
+		FS:              daemonClient,
+		Store:           e.store,
+		MaxFileBytes:    16 * 1024 * 1024,
 		WatcherDebounce: 20 * time.Millisecond,
 	}
 	for _, o := range opts {

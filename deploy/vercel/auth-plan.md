@@ -11,7 +11,7 @@ not yet have a real website account system.
 Today, the browser flow is doing two things:
 
 - creating or reusing the default `getting-started` workspace
-- handing the CLI a short-lived onboarding token so `afs up` can work
+- handing the CLI a short-lived onboarding token so `afs ws attach` can work
 
 That is good enough to prove the hosted runtime, but it is not the final
 product shape.
@@ -31,7 +31,7 @@ The website needs:
 The sync path also needs a second credential type:
 
 - scoped machine tokens for developers, CI, and agents
-- no admin browser login required for routine `afs up` / sync activity
+- no admin browser login required for routine `afs ws attach` / sync activity
 - revocable, auditable, and limited to the org/database/workspace permissions we grant
 
 ## Auth boundary first
@@ -109,9 +109,9 @@ It is not the best primary auth layer for v1 because:
 
 ### Phase 3: CLI handoff
 
-- use `afs login` as the CLI entrypoint
+- use `afs auth login` as the CLI entrypoint
 - if the browser is not signed in, the user signs in first
-- after sign-in, the browser attaches the CLI to the selected workspace
+- after sign-in, the browser completes CLI auth for the chosen workspace context
 - exchange the one-time handoff into durable local CLI config
 
 ### Phase 3.5: Sync tokens

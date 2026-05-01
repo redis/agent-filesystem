@@ -27,12 +27,12 @@ teammate's Claude Code sees the new version on the next tool call.
 
 ```bash
 # From the team-rules AFS workspace owner, once:
-#   1. Create workspace: afs workspace create team-rules
+#   1. Create workspace: afs ws create team-rules
 #   2. Upload rule files to /rules/*.md
 #   3. Create a workspace-ro MCP token and share with the team
 
 # On each developer's machine:
-afs login   # enter the shared team token if prompted
+afs auth login   # enter the shared team token if prompted
 
 # Add this plugin to Claude Code (from repo root):
 claude plugin install ./examples/plugins/afs-team-rules

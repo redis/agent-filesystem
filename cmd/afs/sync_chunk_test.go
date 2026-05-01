@@ -158,7 +158,7 @@ func TestStreamAndReadRoundTrip(t *testing.T) {
 	chunkSize := 64
 	data := make([]byte, chunkSize*3+17)
 	for i := range data {
-		data[i] = byte((i * 7 + 3) % 256)
+		data[i] = byte((i*7 + 3) % 256)
 	}
 	path := filepath.Join(dir, "test.bin")
 	if err := os.WriteFile(path, data, 0o644); err != nil {

@@ -29,7 +29,7 @@ When connected via MCP, you have access to:
 
 | Category | Operations |
 |----------|-----------|
-| Workspace management | Create, list, select, fork, delete workspaces |
+| Workspace management | Create, list, attach, fork, delete workspaces |
 | File operations | Read, write, edit, delete, copy, move files |
 | Navigation | List directories, tree view, find by pattern, stat |
 | Search | Grep across workspace files directly in Redis |
@@ -43,14 +43,13 @@ Create checkpoints explicitly when you want a durable restore point.
 ### 1. Create a workspace
 
 ```bash
-./afs workspace create my-project
+./afs ws create my-project
 ```
 
-### 2. Start syncing (optional — only if you want a local directory)
+### 2. Attach a local directory (optional)
 
 ```bash
-./afs workspace use my-project
-./afs up
+./afs ws attach my-project ~/afs/my-project
 # Workspace is now at ~/afs/my-project/
 ```
 
@@ -71,19 +70,19 @@ echo "# My Project" > ~/afs/my-project/README.md
 Always checkpoint before risky changes:
 
 ```bash
-./afs checkpoint create before-refactor
+./afs cp create my-project before-refactor
 ```
 
 To restore:
 
 ```bash
-./afs checkpoint restore before-refactor
+./afs cp restore my-project before-refactor
 ```
 
 ### 5. Import an existing directory
 
 ```bash
-./afs workspace import my-project /path/to/existing/directory
+./afs ws import --attach-at-source my-project /path/to/existing/directory
 ```
 
 Add a `.afsignore` file (same syntax as `.gitignore`) to exclude `node_modules/`, `.venv/`, build artifacts, etc.
@@ -91,7 +90,7 @@ Add a `.afsignore` file (same syntax as `.gitignore`) to exclude `node_modules/`
 ### 6. Fork for parallel work
 
 ```bash
-./afs workspace fork my-project my-project-experiment
+./afs ws fork my-project my-project-experiment
 ```
 
 ### 7. Search workspace contents
@@ -99,8 +98,8 @@ Add a `.afsignore` file (same syntax as `.gitignore`) to exclude `node_modules/`
 Search directly in Redis without needing a local mount:
 
 ```bash
-./afs grep "TODO" --workspace my-project
-./afs grep --workspace my-project --path /src -E "function|class"
+./afs fs grep --workspace my-project "TODO"
+./afs fs grep --workspace my-project --path /src -E "function|class"
 ```
 
 ## Configuration
@@ -137,36 +136,34 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
 
 | Command | Description |
 |---------|-------------|
-| `afs setup` | Interactive first-time configuration |
-| `afs up` | Start syncing/mounting workspaces |
-| `afs down` | Stop services and unmount |
-| `afs status` | Show current status |
+| `afs setup` | Interactive connection configuration |
+| `afs status` | Show daemon status and workspace attachments |
 
 ### Workspaces
 
 | Command | Description |
 |---------|-------------|
-| `afs workspace create <name>` | Create a new workspace |
-| `afs workspace list` | List all workspaces |
-| `afs workspace use <name>` | Set the current workspace |
-| `afs workspace import <name> <dir>` | Import directory as workspace |
-| `afs workspace clone <name> <dir>` | Export workspace to local dir |
-| `afs workspace fork <name> <new>` | Fork for parallel work |
-| `afs workspace delete <name>` | Remove a workspace |
+| `afs ws create <name>` | Create a new workspace |
+| `afs ws list` | List all workspaces |
+| `afs ws attach <name> <dir>` | Attach a workspace to a local folder |
+| `afs ws detach <name-or-dir>` | Detach a workspace and preserve local files |
+| `afs ws import --attach-at-source <name> <dir>` | Import and attach a local directory |
+| `afs ws fork <name> <new>` | Fork for parallel work |
+| `afs ws delete <name>` | Remove a workspace |
 
 ### Checkpoints
 
 | Command | Description |
 |---------|-------------|
-| `afs checkpoint create <name>` | Save current state |
-| `afs checkpoint list` | List all checkpoints |
-| `afs checkpoint restore <name>` | Restore to a checkpoint |
+| `afs cp create [workspace] [name]` | Save workspace state |
+| `afs cp list [workspace]` | List checkpoints |
+| `afs cp restore [workspace] <name>` | Restore to a checkpoint |
 
 ### Search
 
 | Command | Description |
 |---------|-------------|
-| `afs grep <pattern>` | Search workspace files in Redis |
+| `afs fs grep <pattern>` | Search workspace files in Redis |
 
 ### MCP
 

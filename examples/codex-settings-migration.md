@@ -48,7 +48,7 @@ cd /path/to/agent-filesystem
 make
 ```
 
-Run setup and point AFS at your shared Redis instance.
+Connect AFS to your shared Redis instance.
 
 Important setup choices:
 
@@ -71,19 +71,16 @@ logs/
 EOF
 ```
 
-Import the existing directory into the `.codex` workspace and mount it in place:
+Import the existing directory into the `.codex` workspace and attach it in place:
 
 ```bash
-./afs workspace import --mount-at-source .codex ~/.codex
-./afs workspace use .codex
+./afs ws import --attach-at-source .codex ~/.codex
 ```
 
 What that does:
 
 - imports `~/.codex` into the workspace `.codex`
-- moves your original directory to `~/.codex.pre-afs`
-- mounts the imported workspace at `~/.codex`
-- keeps `.codex` selected for future `./afs up` runs
+- attaches the imported workspace at `~/.codex`
 
 Verify:
 
@@ -97,10 +94,9 @@ ls -la ~/.codex
 On each additional computer:
 
 1. Build `agent-filesystem`.
-2. Run `./afs setup`.
-3. Point it at the same shared Redis instance.
-4. Choose current workspace `.codex`.
-5. Choose mountpoint `~/.codex`.
+2. Connect it to the same control plane or Redis instance.
+3. Choose sync or mount mode.
+4. Attach workspace `.codex` at `~/.codex`.
 
 Back up any existing local Codex directory first:
 
@@ -112,7 +108,7 @@ mkdir -p ~/.codex
 Then mount the shared workspace:
 
 ```bash
-./afs up
+./afs ws attach .codex ~/.codex
 ./afs status
 ls -la ~/.codex
 ```
@@ -125,8 +121,8 @@ If you want an agent to perform this, the agent should:
 2. Recommend creating `~/.codex/.afsignore` before import.
 3. Suggest excluding `worktrees/` by default, unless the user explicitly wants local checkout state shared.
 4. Build `agent-filesystem` with `make`.
-5. On the first machine, run `./afs setup`, then `./afs workspace import --mount-at-source .codex ~/.codex`, then `./afs workspace use .codex`.
-6. On later machines, back up any existing `~/.codex`, run `./afs setup` with workspace `.codex` and mountpoint `~/.codex`, then run `./afs up`.
+5. On the first machine, connect AFS, then run `./afs ws import --attach-at-source .codex ~/.codex`.
+6. On later machines, back up any existing `~/.codex`, connect AFS, then run `./afs ws attach .codex ~/.codex`.
 7. Verify that the same Codex files appear on every machine.
 
 ## Rollback
@@ -134,15 +130,13 @@ If you want an agent to perform this, the agent should:
 Undo on the first computer:
 
 ```bash
-./afs down
-rm -rf ~/.codex
-mv ~/.codex.pre-afs ~/.codex
+./afs ws detach ~/.codex
 ```
 
 Undo on a later computer:
 
 ```bash
-./afs down
+./afs ws detach ~/.codex
 rm -rf ~/.codex
 mv ~/.codex.local-backup ~/.codex
 ```

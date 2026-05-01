@@ -270,8 +270,8 @@ func parseGrepArgs(args []string) (grepOptions, error) {
 
 func grepUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s grep [flags] <pattern>
-  %s grep [flags] -e <pattern>
+  %s fs grep [flags] <pattern>
+  %s fs grep [flags] -e <pattern>
 
 Search the live Redis-backed AFS namespace for a workspace.
 Literal substring matching remains the default for compatibility. Use -E/-G
@@ -279,7 +279,7 @@ for regex mode, -F for explicit fixed-string mode, or --glob for AFS glob
 matching semantics (*, ?, [a-z], [!x], \ escaping).
 
 Options:
-  --workspace <name>  Search a specific workspace (defaults to current)
+  --workspace <name>  Search a specific workspace
   --path <path>       Limit the search to a file or directory inside the workspace
   -i, --ignore-case   Case-insensitive matching
   -F                  Treat patterns as fixed strings
@@ -296,11 +296,11 @@ Options:
   --glob              Treat patterns as AFS globs instead of literals
 
 Examples:
-  %s grep "hello"
-  %s grep -E "error|warning"
-  %s grep -w --path /logs token
-  %s grep -l -i --workspace repo "disk full"
-  %s grep --glob --path /src "*TODO*"
+  %s fs grep "hello"
+  %s fs grep -E "error|warning"
+  %s fs grep -w --path /logs token
+  %s fs grep -l -i --workspace repo "disk full"
+  %s fs grep --glob --path /src "*TODO*"
 `, bin, bin, bin, bin, bin, bin, bin)
 }
 

@@ -32,8 +32,8 @@ export function ConnectAgentBanner({
   const displayName = workspaceLabel?.trim() || displayWorkspaceName(workspaceName);
   const mountPath = `~/afs/${canonicalWorkspaceName(workspaceName)}`;
   const downloadCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
-  const loginCmd = `afs login`;
-  const syncCmd = `afs up`;
+  const loginCmd = `afs auth login`;
+  const attachCmd = `afs ws attach ${canonicalWorkspaceName(workspaceName)} ${mountPath}`;
   const mcpLocalConfig = JSON.stringify(
     {
       mcpServers: {
@@ -153,18 +153,18 @@ export function ConnectAgentBanner({
 
                 <SubStepDivider />
 
-                <SubStepLabel>3 &mdash; Sync the workspace</SubStepLabel>
+                <SubStepLabel>3 &mdash; Attach the workspace</SubStepLabel>
                 <StepDescription>
-                  Mounts the workspace at <code>{mountPath}/</code> so any
+                  Attaches the workspace at <code>{mountPath}/</code> so any
                   agent on this machine can read and write files.
                 </StepDescription>
                 <CodeContainer>
-                  <CodePre>{syncCmd}</CodePre>
+                  <CodePre>{attachCmd}</CodePre>
                   <CopyButton
                     type="button"
-                    onClick={() => copyToClipboard(syncCmd, "sync")}
+                    onClick={() => copyToClipboard(attachCmd, "attach")}
                   >
-                    {copied === "sync" ? "Copied!" : "Copy"}
+                    {copied === "attach" ? "Copied!" : "Copy"}
                   </CopyButton>
                 </CodeContainer>
               </>
@@ -174,7 +174,7 @@ export function ConnectAgentBanner({
                 <StepDescription>
                   Prefer an MCP-native agent (Claude Desktop, Cursor,
                   Windsurf)? Add this to your agent's MCP config. You still
-                  need to install the CLI and run <code>afs login</code>{" "}
+                  need to install the CLI and run <code>afs auth login</code>{" "}
                   first.
                 </StepDescription>
                 <CodeContainer>

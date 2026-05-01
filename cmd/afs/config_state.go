@@ -44,11 +44,66 @@ func compactDisplayPath(p string) string {
 }
 
 func saveConfig(cfg config) error {
-	b, err := json.MarshalIndent(cfg, "", "  ")
+	b, err := json.MarshalIndent(persistedConfigFromRuntime(cfg), "", "  ")
 	if err != nil {
 		return err
 	}
+	b = append(b, '\n')
 	return os.WriteFile(configPath(), b, 0o644)
+}
+
+type persistedConfig struct {
+	Redis        redisConfig          `json:"redis"`
+	ControlPlane controlPlaneSettings `json:"controlPlane,omitempty"`
+	Agent        agentSettings        `json:"agent,omitempty"`
+	ProductMode  string               `json:"productMode,omitempty"`
+	Mode         string               `json:"mode,omitempty"`
+	Sync         *syncSettings        `json:"sync,omitempty"`
+}
+
+func persistedConfigFromRuntime(cfg config) persistedConfig {
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		productMode = strings.TrimSpace(cfg.ProductMode)
+	}
+	out := persistedConfig{
+		Redis: redisConfig{
+			RedisAddr:     strings.TrimSpace(cfg.RedisAddr),
+			RedisUsername: strings.TrimSpace(cfg.RedisUsername),
+			RedisPassword: cfg.RedisPassword,
+			RedisDB:       cfg.RedisDB,
+			RedisTLS:      cfg.RedisTLS,
+		},
+		ProductMode: productMode,
+		Mode:        persistedMode(cfg),
+		Agent: agentSettings{
+			ID:   strings.TrimSpace(cfg.ID),
+			Name: strings.TrimSpace(cfg.Name),
+		},
+	}
+	if productMode != productModeLocal {
+		out.ControlPlane = controlPlaneSettings{
+			URL:        strings.TrimSpace(cfg.URL),
+			DatabaseID: strings.TrimSpace(cfg.DatabaseID),
+			AuthToken:  strings.TrimSpace(cfg.AuthToken),
+			Account:    strings.TrimSpace(cfg.Account),
+		}
+	}
+	if cfg.SyncFileSizeCapMB > 0 && cfg.SyncFileSizeCapMB != defaultSyncFileSizeCapMB {
+		out.Sync = &syncSettings{SyncFileSizeCapMB: cfg.SyncFileSizeCapMB}
+	}
+	return out
+}
+
+func persistedMode(cfg config) string {
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return strings.TrimSpace(cfg.Mode)
+	}
+	if mode == modeSync {
+		return ""
+	}
+	return mode
 }
 
 func loadConfig() (config, error) {

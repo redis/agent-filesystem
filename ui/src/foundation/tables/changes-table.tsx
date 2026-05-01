@@ -2,8 +2,10 @@ import { Select, Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
+import styled from "styled-components";
 import { shortDateTime } from "../time-format";
 import type { AFSChangelogEntry } from "../types/afs";
+import { truncateMiddlePath } from "./changes-table-utils";
 import * as S from "./workspace-table.styles";
 
 type ChangesSortField = "occurredAt" | "op" | "path" | "sessionId" | "deltaBytes";
@@ -209,7 +211,9 @@ export function ChangesTable({
         {
           accessorKey: "path",
           header: detailHeader,
-          size: 240,
+          size: 280,
+          minSize: 220,
+          maxSize: 320,
           enableSorting: true,
           cell: ({ row }) => <HistoryDetailCell row={row.original} />,
         },
@@ -364,28 +368,31 @@ function HistoryDetailCell({ row }: { row: HistoryTableRow }) {
     const detail = lifecycleDetail(row);
     const secondary = lifecycleSecondary(row, detail);
     return (
-      <S.Stack>
-        <S.SingleLineText title={detail}>{detail}</S.SingleLineText>
+      <HistoryDetailStack>
+        <HistoryDetailText title={detail}>{detail}</HistoryDetailText>
         {secondary ? (
-          <Typography.Body color="secondary" component="span">
+          <HistoryDetailSecondary title={secondary}>
             {secondary}
-          </Typography.Body>
+          </HistoryDetailSecondary>
         ) : null}
-      </S.Stack>
+      </HistoryDetailStack>
     );
   }
 
+  const path = row.path ?? "";
+  const displayPath = path ? truncateMiddlePath(path) : "—";
+  const previousPath = row.prevPath ?? "";
+  const displayPreviousPath = previousPath ? truncateMiddlePath(previousPath) : "";
+
   return (
-    <S.Stack>
-      <S.SingleLineText title={row.path ?? ""}>
-        {row.path || "—"}
-      </S.SingleLineText>
-      {row.prevPath ? (
-        <Typography.Body color="secondary" component="span">
-          from {row.prevPath}
-        </Typography.Body>
+    <HistoryDetailStack>
+      <HistoryDetailText title={path}>{displayPath}</HistoryDetailText>
+      {previousPath ? (
+        <HistoryDetailSecondary title={previousPath}>
+          from {displayPreviousPath}
+        </HistoryDetailSecondary>
       ) : null}
-    </S.Stack>
+    </HistoryDetailStack>
   );
 }
 
@@ -432,3 +439,25 @@ function formatToken(value?: string) {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
+
+const HistoryDetailStack = styled(S.Stack)`
+  width: clamp(220px, 28vw, 320px);
+  max-width: 320px;
+  min-width: 0;
+`;
+
+const HistoryDetailText = styled(S.SingleLineText)`
+  max-width: 100%;
+`;
+
+const HistoryDetailSecondary = styled.span`
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;

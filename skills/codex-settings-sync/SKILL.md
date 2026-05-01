@@ -22,68 +22,38 @@ Open the bundled starter ignore file at [assets/.afsignore](assets/.afsignore) a
 2. Ensure `agent-filesystem` is built with `make`.
 3. Configure `afs` to point at the shared Redis instance.
 4. Create or update `~/.codex/.afsignore` before migration.
-5. On the source machine, run `./afs workspace import --mount-at-source .codex ~/.codex`, then `./afs workspace use .codex`.
-6. Explain that the original directory becomes `~/.codex.pre-afs`, the imported workspace is mounted at `~/.codex`, and the workspace name is `.codex`.
-7. On each additional machine, move aside any existing `~/.codex`, configure the current workspace as `.codex`, set `localPath` to that machine's `~/.codex`, choose mount mode if you want a live mount there, then run `./afs up`.
+5. On the source machine, run `./afs ws import --attach-at-source .codex ~/.codex`.
+6. Explain that the imported workspace is attached at `~/.codex`, and the workspace name is `.codex`.
+7. On each additional machine, move aside any existing `~/.codex`, choose mount mode with `./afs config set --mode mount` if you want a live mount there, then run `./afs ws attach .codex ~/.codex`.
 8. Verify with `./afs status` and `ls -la ~/.codex`.
 
 ## Secondary machine config
 
-Use a config like:
-
-```json
-{
-  "redis": {
-    "addr": "YOUR_SHARED_REDIS_HOST:6379",
-    "password": "",
-    "db": 0
-  },
-  "mode": "mount",
-  "currentWorkspace": ".codex",
-  "localPath": "/Users/YOUR_USER/.codex",
-  "mount": {
-    "backend": "nfs",
-    "readOnly": false,
-    "allowOther": false,
-    "mountBin": "",
-    "nfsBin": "",
-    "nfsHost": "127.0.0.1",
-    "nfsPort": 20490
-  },
-  "logs": {
-    "mount": "/tmp/afs-mount.log",
-    "sync": "/tmp/afs-sync.log"
-  },
-  "sync": {
-    "fileSizeCapMB": 2048
-  }
-}
-```
-
-For sync mode instead, keep `"mode": "sync"` and set `"mount": { "backend": "none" }`.
+Point the CLI at the same control plane or Redis database. Then run
+`./afs config set --mode mount` for live mount mode, or
+`./afs config set --mode sync` for sync mode, before attaching `.codex` at
+that machine's `~/.codex`.
 
 ## Notes to surface
 
-- `afs workspace import` honors `~/.codex/.afsignore` if present.
+- `afs ws import` honors `~/.codex/.afsignore` if present.
 - `.afsignore` uses `.gitignore`-style pattern syntax.
 - Excluding a directory like `worktrees/` is usually safer than syncing it.
 - Avoid using the same shared `~/.codex` from multiple active computers at the same time.
-- Keep `~/.codex.pre-afs` and any `.local-backup` directories until the setup is stable.
+- Keep any `.local-backup` directories until the setup is stable.
 
 ## Rollback
 
 Source machine rollback:
 
 ```bash
-./afs down
-rm -rf ~/.codex
-mv ~/.codex.pre-afs ~/.codex
+./afs ws detach ~/.codex
 ```
 
 Secondary machine rollback:
 
 ```bash
-./afs down
+./afs ws detach ~/.codex
 rm -rf ~/.codex
 mv ~/.codex.local-backup ~/.codex
 ```

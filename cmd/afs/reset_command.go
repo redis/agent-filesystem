@@ -9,7 +9,7 @@ import (
 func cmdReset() error {
 	if st, err := loadState(); err == nil {
 		if st.MountPID > 0 || st.SyncPID > 0 {
-			if err := cmdDown(); err != nil {
+			if err := detachAllActive(false); err != nil {
 				return err
 			}
 		}
@@ -32,11 +32,11 @@ func cmdReset() error {
 		removedState = true
 	}
 
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "config", Value: ternaryString(removedConfig, compactDisplayPath(configPath()), "already clear")},
 		{Label: "state", Value: ternaryString(removedState, filepath.Base(stateDir()), "already clear")},
 		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" setup")},
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "local state reset"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "local state reset"), rows)
 	return nil
 }

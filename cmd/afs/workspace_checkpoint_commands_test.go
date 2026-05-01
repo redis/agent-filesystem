@@ -117,7 +117,7 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 		t.Fatalf("copy id column = %q, want opaque workspace id\nheader: %q\nrow: %q", got, headerLine, copyLine)
 	}
 
-	if err := cmdWorkspace([]string{"workspace", "delete", "repo-copy"}); err != nil {
+	if err := cmdWorkspace([]string{"workspace", "delete", "--no-confirmation", "repo-copy"}); err != nil {
 		t.Fatalf("cmdWorkspace(delete) returned error: %v", err)
 	}
 
@@ -127,6 +127,88 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	}
 	if exists {
 		t.Fatal("expected forked workspace to be deleted")
+	}
+}
+
+func TestParseWorkspaceDeleteArgsSupportsConfirmationBypass(t *testing.T) {
+	t.Helper()
+
+	opts, err := parseWorkspaceDeleteArgs([]string{"--no-confirmation", "repo-copy"})
+	if err != nil {
+		t.Fatalf("parseWorkspaceDeleteArgs() returned error: %v", err)
+	}
+	if !opts.noConfirmation {
+		t.Fatal("noConfirmation = false, want true")
+	}
+	if len(opts.names) != 1 || opts.names[0] != "repo-copy" {
+		t.Fatalf("names = %#v, want repo-copy", opts.names)
+	}
+}
+
+func TestConfirmWorkspaceDeleteDefaultsNo(t *testing.T) {
+	t.Helper()
+
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() returned error: %v", err)
+	}
+	if _, err := input.WriteString("\n"); err != nil {
+		t.Fatalf("WriteString() returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	out, err := captureStdout(t, func() error {
+		ok, err := confirmWorkspaceDelete([]string{"repo-copy"})
+		if err != nil {
+			return err
+		}
+		if ok {
+			t.Fatal("confirmWorkspaceDelete() = true, want false for default answer")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("confirmWorkspaceDelete() returned error: %v", err)
+	}
+	if !strings.Contains(out, "Are you sure you want to delete repo-copy? [y/N]") {
+		t.Fatalf("output missing confirmation prompt:\n%s", out)
+	}
+}
+
+func TestConfirmWorkspaceDeleteAcceptsYes(t *testing.T) {
+	t.Helper()
+
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() returned error: %v", err)
+	}
+	if _, err := input.WriteString("y\n"); err != nil {
+		t.Fatalf("WriteString() returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	ok, err := confirmWorkspaceDelete([]string{"repo-copy"})
+	if err != nil {
+		t.Fatalf("confirmWorkspaceDelete() returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("confirmWorkspaceDelete() = false, want true for y")
 	}
 }
 
@@ -159,6 +241,47 @@ func TestWorkspaceListSelfHostedAggregatesAcrossDatabasesWithoutConfiguredDataba
 	}
 	if !strings.Contains(stripAnsi(listOutput), "Workspace") || !strings.Contains(stripAnsi(listOutput), "ID") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want workspace list headers", listOutput)
+	}
+}
+
+func TestWorkspaceListShowsAttachedFolder(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.WorkRoot = filepath.Join(homeDir, ".afs", "workspaces")
+	saveTempConfig(t, cfg)
+
+	if err := cmdWorkspace([]string{"ws", "create", "repo"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+	localPath := filepath.Join(homeDir, "repo")
+	if err := saveAttachmentRegistry(attachmentRegistry{Attachments: []attachmentRecord{
+		{
+			ID:        "att_repo",
+			Workspace: "repo",
+			LocalPath: localPath,
+			Mode:      modeSync,
+			StartedAt: time.Now().UTC(),
+		},
+	}}); err != nil {
+		t.Fatalf("saveAttachmentRegistry() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "list"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
+	}
+	stripped := stripAnsi(out)
+	for _, want := range []string{"Attached", "repo", "~/repo"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("cmdWorkspace(list) output = %q, want %q", out, want)
+		}
 	}
 }
 
@@ -584,7 +707,7 @@ func TestCheckpointCreatePrefersMountedLiveWorkspaceOverLocalTree(t *testing.T) 
 	}
 }
 
-func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
+func TestCheckpointCommandsPromptForWorkspaceWhenOmitted(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -603,7 +726,7 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	cfg.MountBackend = "nfs"
 	cfg.NFSBin = "/usr/bin/true"
 	cfg.WorkRoot = t.TempDir()
-	cfg.CurrentWorkspace = "repo"
+	cfg.CurrentWorkspace = "ignored-default"
 	saveTempConfig(t, cfg)
 
 	sourceDir := t.TempDir()
@@ -627,26 +750,35 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 		t.Fatalf("Echo(/current-only.txt) returned error: %v", err)
 	}
 
-	st := state{
-		StartedAt:            time.Now().UTC(),
-		RedisAddr:            cfg.RedisAddr,
-		RedisDB:              cfg.RedisDB,
-		CurrentWorkspace:     "repo",
-		CurrentWorkspaceID:   rootKey,
-		MountedHeadSavepoint: "initial",
-		MountBackend:         mountBackendNFS,
-		LocalPath:            filepath.Join(t.TempDir(), "mount"),
-		RedisKey:             rootKey,
-	}
-	if err := saveState(st); err != nil {
-		t.Fatalf("saveState() returned error: %v", err)
+	withStdin := func(lines string) func() {
+		input, err := os.CreateTemp(t.TempDir(), "stdin")
+		if err != nil {
+			t.Fatalf("CreateTemp() returned error: %v", err)
+		}
+		if _, err := input.WriteString(lines); err != nil {
+			t.Fatalf("WriteString() returned error: %v", err)
+		}
+		if _, err := input.Seek(0, 0); err != nil {
+			t.Fatalf("Seek() returned error: %v", err)
+		}
+		origStdin := os.Stdin
+		os.Stdin = input
+		return func() {
+			os.Stdin = origStdin
+			_ = input.Close()
+		}
 	}
 
+	restoreStdin := withStdin("1\n")
 	if err := cmdCheckpoint([]string{"checkpoint", "create", "current-save"}); err != nil {
+		restoreStdin()
 		t.Fatalf("cmdCheckpoint(create current-save) returned error: %v", err)
 	}
+	restoreStdin()
 
 	listOutput, err := captureStdout(t, func() error {
+		restoreStdin := withStdin("1\n")
+		defer restoreStdin()
 		return cmdCheckpoint([]string{"checkpoint", "list"})
 	})
 	if err != nil {
@@ -656,9 +788,12 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 		t.Fatalf("cmdCheckpoint(list) output = %q, want current-save", listOutput)
 	}
 
+	restoreStdin = withStdin("1\n")
 	if err := cmdCheckpoint([]string{"checkpoint", "restore", "initial"}); err != nil {
+		restoreStdin()
 		t.Fatalf("cmdCheckpoint(restore initial) returned error: %v", err)
 	}
+	restoreStdin()
 
 	workspaceMeta, err := store.getWorkspaceMeta(context.Background(), "repo")
 	if err != nil {
@@ -666,6 +801,53 @@ func TestCheckpointCommandsUseCurrentWorkspaceWhenOmitted(t *testing.T) {
 	}
 	if workspaceMeta.HeadSavepoint != "initial" {
 		t.Fatalf("HeadSavepoint = %q, want %q", workspaceMeta.HeadSavepoint, "initial")
+	}
+}
+
+func TestCheckpointCreateSavesEvenWhenUnchanged(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdWorkspace([]string{"workspace", "import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdWorkspace(import) returned error: %v", err)
+	}
+
+	_, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	out, err := captureStdout(t, func() error {
+		return cmdCheckpoint([]string{"checkpoint", "create", "repo", "unchanged-snapshot"})
+	})
+	if err != nil {
+		t.Fatalf("cmdCheckpoint(create unchanged) returned error: %v", err)
+	}
+	if strings.Contains(out, "checkpoint unchanged") || strings.Contains(out, "no changes") {
+		t.Fatalf("cmdCheckpoint(create unchanged) output = %q, want checkpoint created", out)
+	}
+	if !strings.Contains(out, "checkpoint created") {
+		t.Fatalf("cmdCheckpoint(create unchanged) output = %q, want created message", out)
+	}
+
+	meta, err := store.getSavepointMeta(context.Background(), "repo", "unchanged-snapshot")
+	if err != nil {
+		t.Fatalf("getSavepointMeta(unchanged-snapshot) returned error: %v", err)
+	}
+	if meta.ParentSavepoint != "initial" {
+		t.Fatalf("ParentSavepoint = %q, want initial", meta.ParentSavepoint)
 	}
 }
 
@@ -999,39 +1181,25 @@ func TestWorkspaceImportRejectsRemovedCloneAtSourceFlag(t *testing.T) {
 	if err == nil {
 		t.Fatal("cmdWorkspace(import) returned nil error, want removed flag rejection")
 	}
-	if !strings.Contains(err.Error(), "--mount-at-source") {
-		t.Fatalf("cmdWorkspace(import) error = %q, want replacement flag guidance", err)
+	if !strings.Contains(err.Error(), `unknown flag "--clone-at-source"`) {
+		t.Fatalf("cmdWorkspace(import) error = %q, want unknown flag", err)
 	}
 }
 
-func TestLoadStateForMountAtSourceRejectsExistingMountedState(t *testing.T) {
+func TestParseAFSArgsSupportsAttachAtSource(t *testing.T) {
 	t.Helper()
 
-	homeDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("Setenv(HOME) returned error: %v", err)
+	parsed, err := parseAFSArgs([]string{"--attach-at-source", "--force", "repo", "/tmp/repo"}, true, false)
+	if err != nil {
+		t.Fatalf("parseAFSArgs() returned error: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", origHome)
-	})
-
-	st := state{
-		StartedAt:        time.Now().UTC(),
-		CurrentWorkspace: "repo",
-		MountBackend:     mountBackendNFS,
-		LocalPath:        filepath.Join(t.TempDir(), "mount"),
-		ArchivePath:      filepath.Join(t.TempDir(), "mount.pre-afs"),
+	if !parsed.attachAtSource {
+		t.Fatal("attachAtSource = false, want true")
 	}
-	if err := saveState(st); err != nil {
-		t.Fatalf("saveState() returned error: %v", err)
+	if !parsed.force {
+		t.Fatal("force = false, want true")
 	}
-
-	_, err := loadStateForMountAtSource()
-	if err == nil {
-		t.Fatal("loadStateForMountAtSource() returned nil error, want running mount rejection")
-	}
-	if !strings.Contains(err.Error(), "run '") || !strings.Contains(err.Error(), "down' first") {
-		t.Fatalf("loadStateForMountAtSource() error = %q, want afs down guidance", err)
+	if len(parsed.positionals) != 2 || parsed.positionals[0] != "repo" || parsed.positionals[1] != "/tmp/repo" {
+		t.Fatalf("positionals = %#v, want repo and /tmp/repo", parsed.positionals)
 	}
 }

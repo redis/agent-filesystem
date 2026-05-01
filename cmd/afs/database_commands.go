@@ -49,17 +49,18 @@ func cmdDatabaseList(args []string) error {
 		return err
 	}
 
-	rows := make([]boxRow, 0, len(response.Items)+1)
+	fmt.Println()
+	fmt.Println("databases on " + configRemoteLabel(cfg))
+	fmt.Println()
 	if len(response.Items) == 0 {
-		rows = append(rows, boxRow{Value: clr(ansiDim, "No databases found")})
+		fmt.Println("No databases found")
 	} else {
-		layout := newDatabaseListLayout(response.Items)
-		rows = append(rows, boxRow{Value: layout.header()})
-		for _, item := range response.Items {
-			rows = append(rows, boxRow{Value: layout.row(item, strings.TrimSpace(cfg.DatabaseID) == item.ID)})
-		}
+		printPlainTable(
+			[]string{"", "Name", "ID", "Endpoint", "Workspaces", "Role"},
+			databaseTableRows(cfg, response.Items),
+		)
 	}
-	printBox(clr(ansiBold, "databases on "+configRemoteLabel(cfg)), rows)
+	fmt.Println()
 	return nil
 }
 
@@ -91,7 +92,7 @@ func cmdDatabaseUse(args []string) error {
 		if err := saveConfig(cfg); err != nil {
 			return err
 		}
-		printBox(markerSuccess+" "+clr(ansiBold, "database selection cleared"), []boxRow{
+		printSection(markerSuccess+" "+clr(ansiBold, "database selection cleared"), []outputRow{
 			{Label: "database", Value: "auto"},
 			{Label: "config", Value: configPathLabel()},
 		})
@@ -116,7 +117,7 @@ func cmdDatabaseUse(args []string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "database selected"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "database selected"), []outputRow{
 		{Label: "database", Value: database.Name},
 		{Label: "id", Value: database.ID},
 		{Label: "config", Value: configPathLabel()},
@@ -267,70 +268,19 @@ func resolveDatabaseReference(ref string, items []controlplane.DatabaseRecord) (
 	}
 }
 
-const databaseListColumnSep = "  "
-
-type databaseListLayout struct {
-	markerWidth     int
-	nameWidth       int
-	idWidth         int
-	endpointWidth   int
-	workspacesWidth int
-	roleWidth       int
-}
-
-func newDatabaseListLayout(items []controlplane.DatabaseRecord) databaseListLayout {
-	layout := databaseListLayout{
-		markerWidth:     1,
-		nameWidth:       runeWidth("Name"),
-		idWidth:         runeWidth("ID"),
-		endpointWidth:   runeWidth("Endpoint"),
-		workspacesWidth: runeWidth("Workspaces"),
-		roleWidth:       runeWidth("Role"),
-	}
+func databaseTableRows(cfg config, items []controlplane.DatabaseRecord) [][]string {
+	rows := make([][]string, 0, len(items))
 	for _, item := range items {
-		layout.nameWidth = maxInt(layout.nameWidth, runeWidth(item.Name))
-		layout.idWidth = maxInt(layout.idWidth, runeWidth(item.ID))
-		layout.endpointWidth = maxInt(layout.endpointWidth, runeWidth(item.RedisAddr))
-		layout.workspacesWidth = maxInt(layout.workspacesWidth, runeWidth(strconv.Itoa(item.WorkspaceCount)))
-		layout.roleWidth = maxInt(layout.roleWidth, runeWidth(databaseListRole(item)))
+		rows = append(rows, []string{
+			workspaceListMarker(strings.TrimSpace(cfg.DatabaseID) == item.ID),
+			item.Name,
+			item.ID,
+			item.RedisAddr,
+			strconv.Itoa(item.WorkspaceCount),
+			databaseListRole(item),
+		})
 	}
-
-	maxContentWidth := maxBoxText - 5*runeWidth(databaseListColumnSep) - layout.markerWidth
-	for layout.nameWidth+layout.idWidth+layout.endpointWidth+layout.workspacesWidth+layout.roleWidth > maxContentWidth {
-		switch {
-		case layout.endpointWidth > runeWidth("Endpoint"):
-			layout.endpointWidth--
-		case layout.nameWidth > runeWidth("Name"):
-			layout.nameWidth--
-		case layout.idWidth > runeWidth("ID"):
-			layout.idWidth--
-		default:
-			return layout
-		}
-	}
-	return layout
-}
-
-func (l databaseListLayout) header() string {
-	return strings.Join([]string{
-		clr(ansiDim, padVisibleText("", l.markerWidth)),
-		clr(ansiDim, padVisibleText("Name", l.nameWidth)),
-		clr(ansiDim, padVisibleText("ID", l.idWidth)),
-		clr(ansiDim, padVisibleText("Endpoint", l.endpointWidth)),
-		clr(ansiDim, padVisibleText("Workspaces", l.workspacesWidth)),
-		clr(ansiDim, padVisibleText("Role", l.roleWidth)),
-	}, databaseListColumnSep)
-}
-
-func (l databaseListLayout) row(item controlplane.DatabaseRecord, selected bool) string {
-	return strings.Join([]string{
-		padVisibleText(workspaceListMarker(selected), l.markerWidth),
-		padVisibleText(fitDisplayText(item.Name, l.nameWidth), l.nameWidth),
-		padVisibleText(fitDisplayText(item.ID, l.idWidth), l.idWidth),
-		padVisibleText(fitDisplayText(item.RedisAddr, l.endpointWidth), l.endpointWidth),
-		padVisibleText(strconv.Itoa(item.WorkspaceCount), l.workspacesWidth),
-		padVisibleText(databaseListRole(item), l.roleWidth),
-	}, databaseListColumnSep)
+	return rows
 }
 
 func databaseListRole(item controlplane.DatabaseRecord) string {

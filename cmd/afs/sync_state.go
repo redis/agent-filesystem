@@ -135,8 +135,8 @@ func saveSyncState(st *SyncState) error {
 	return os.Rename(tmpName, target)
 }
 
-// removeSyncState deletes the persisted state file. Used by `afs down` for a
-// clean shutdown.
+// removeSyncState deletes the persisted state file for explicit detach/delete
+// cleanup.
 func removeSyncState(workspace string) error {
 	err := os.Remove(syncStatePath(workspace))
 	if err != nil && !errors.Is(err, os.ErrNotExist) {

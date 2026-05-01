@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -528,19 +529,22 @@ func (f *fullReconciler) buildPlan(ctx context.Context, local, remote map[string
 				f.refreshStateMeta(path, l, r)
 				continue
 			}
-			// Possible conflict: both sides diverged from stored state?
-			conflict := false
-			if hasStored && stored.LocalHash != "" {
-				// We can't determine conflict purely from metadata — the
-				// actual content hashes are needed. Mark as conflict candidate
-				// only if local metadata also changed from stored.
-				localChanged := l.size != stored.Size || l.mtimeMs != stored.LocalMtimeMs
-				remoteChanged := r.size != stored.Size || r.mtimeMs != stored.RemoteMtimeMs
-				if localChanged && remoteChanged {
-					conflict = true
+			if hasStored && !stored.Deleted {
+				localChanged := observedChangedFromStored(l, stored, true)
+				remoteChanged := observedChangedFromStored(r, stored, false)
+				switch {
+				case localChanged && !remoteChanged:
+					plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
+				case !localChanged && remoteChanged:
+					plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
+				case localChanged && remoteChanged:
+					plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, true))
+				default:
+					f.refreshStateMeta(path, l, r)
 				}
+				continue
 			}
-			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, conflict))
+			plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, true))
 		}
 	}
 	return plan
@@ -607,16 +611,29 @@ func metaMatch(l, r observedMeta, stored SyncEntry, hasStored bool) bool {
 
 // executePlan runs the planned actions with a bounded worker pool.
 func (f *fullReconciler) executePlan(ctx context.Context, plan []syncAction, onProgress ProgressFunc) error {
-	// Separate directory creations from file ops. Dirs must happen first
-	// (serially) so parent directories exist before child file writes.
-	var dirActions, fileActions []syncAction
+	// Separate actions whose ordering matters from the parallel file ops.
+	// Dirs must happen first so parent directories exist before child writes.
+	// Deletes run deepest-path-first so non-empty remote directories are
+	// emptied before their parent directory is removed.
+	var dirActions, deleteActions, fileActions []syncAction
 	for _, a := range plan {
-		if a.kind == "mkdir-local" || a.kind == "mkdir-remote" {
+		switch a.kind {
+		case "mkdir-local", "mkdir-remote":
 			dirActions = append(dirActions, a)
-		} else {
+		case "delete-local", "delete-remote":
+			deleteActions = append(deleteActions, a)
+		default:
 			fileActions = append(fileActions, a)
 		}
 	}
+	sort.SliceStable(deleteActions, func(i, j int) bool {
+		leftDepth := strings.Count(deleteActions[i].path, "/")
+		rightDepth := strings.Count(deleteActions[j].path, "/")
+		if leftDepth != rightDepth {
+			return leftDepth > rightDepth
+		}
+		return deleteActions[i].path > deleteActions[j].path
+	})
 
 	total := int64(len(plan))
 	var done atomic.Int64
@@ -632,12 +649,26 @@ func (f *fullReconciler) executePlan(ctx context.Context, plan []syncAction, onP
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		f.executeAction(ctx, a)
+		if err := f.executeAction(ctx, a); err != nil {
+			return err
+		}
 		done.Add(1)
 		report()
 	}
 
-	// Phase 2: files + symlinks (parallel).
+	// Phase 2: ordered deletes (serial, dependency-sensitive).
+	for _, a := range deleteActions {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := f.executeAction(ctx, a); err != nil {
+			return err
+		}
+		done.Add(1)
+		report()
+	}
+
+	// Phase 3: files + symlinks (parallel).
 	sem := make(chan struct{}, defaultParallelWorkers)
 	var mu sync.Mutex
 	var firstErr error

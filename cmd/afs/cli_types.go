@@ -89,7 +89,7 @@ type state struct {
 	MountBin             string    `json:"mount_bin"`
 	ArchivePath          string    `json:"archive_path,omitempty"`
 
-	// Sync daemon mode fields. Populated when `afs up` ran with mode=sync.
+	// Sync daemon mode fields. Populated by an active sync attachment.
 	Mode    string `json:"mode,omitempty"`
 	SyncPID int    `json:"sync_pid,omitempty"`
 	SyncLog string `json:"sync_log,omitempty"`

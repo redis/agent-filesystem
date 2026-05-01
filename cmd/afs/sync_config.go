@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Mode constants determine what `afs up` actually starts.
+// Mode constants determine the local runtime kind.
 const (
 	modeMount = "mount"
 	modeSync  = "sync"

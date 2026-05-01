@@ -64,16 +64,10 @@ type configOverrides struct {
 	connection           optionalString
 	controlPlaneURL      optionalString
 	controlPlaneDatabase optionalString
+	mode                 optionalString
 	mountBackend         optionalString
 	mountpoint           optionalString
 	readonly             optionalBool
-}
-
-type upOptions struct {
-	foreground  bool
-	mode        optionalString
-	overrides   configOverrides
-	positionals []string
 }
 
 func cmdConfig(args []string) error {
@@ -96,6 +90,8 @@ func cmdConfig(args []string) error {
 		return cmdConfigList(args[2:])
 	case "unset":
 		return cmdConfigUnset(args[2:])
+	case "reset":
+		return cmdConfigReset(args[2:])
 	default:
 		return fmt.Errorf("unknown config subcommand %q\n\n%s", args[1], configUsageText(filepath.Base(os.Args[0])))
 	}
@@ -115,7 +111,7 @@ func cmdConfigSet(args []string) error {
 		if err := setConfigKey(&cfg, args[0], args[1]); err != nil {
 			return err
 		}
-		return persistConfigAndReport(cfg, []boxRow{
+		return persistConfigAndReport(cfg, []outputRow{
 			{Label: "key", Value: normalizeConfigKey(args[0])},
 		})
 	}
@@ -166,7 +162,7 @@ func cmdConfigGet(args []string) error {
 		enc := json.NewEncoder(os.Stdout)
 		return enc.Encode(map[string]string{normalizeConfigKey(key): stripAnsi(value)})
 	}
-	printBox(clr(ansiBold, "config"), []boxRow{
+	printSection(clr(ansiBold, "config"), []outputRow{
 		{Label: "key", Value: normalizeConfigKey(key)},
 		{Label: "value", Value: value},
 		{Label: "config", Value: configPathLabel()},
@@ -201,7 +197,7 @@ func cmdConfigShow(args []string) error {
 	if jsonOut.set && jsonOut.value {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+		return enc.Encode(persistedConfigFromRuntime(cfg))
 	}
 
 	source := "defaults (not yet saved)"
@@ -209,8 +205,8 @@ func cmdConfigShow(args []string) error {
 		source = "saved"
 	}
 	rows := configSummaryRows(cfg, source)
-	rows = append(rows, boxRow{Label: "config file", Value: configPathLabel()})
-	printBox(clr(ansiBold, "config"), rows)
+	rows = append(rows, outputRow{Label: "config file", Value: configPathLabel()})
+	printSection(clr(ansiBold, "config"), rows)
 	return nil
 }
 
@@ -248,16 +244,16 @@ func cmdConfigList(args []string) error {
 	if hasSavedConfig {
 		source = "saved"
 	}
-	rows := []boxRow{{Label: "source", Value: source}}
+	rows := []outputRow{{Label: "source", Value: source}}
 	for _, entry := range configKeys() {
 		value, err := getConfigKey(cfg, entry)
 		if err != nil {
 			return err
 		}
-		rows = append(rows, boxRow{Label: entry, Value: value})
+		rows = append(rows, outputRow{Label: entry, Value: value})
 	}
-	rows = append(rows, boxRow{Label: "config file", Value: configPathLabel()})
-	printBox(clr(ansiBold, "config"), rows)
+	rows = append(rows, outputRow{Label: "config file", Value: configPathLabel()})
+	printSection(clr(ansiBold, "config"), rows)
 	return nil
 }
 
@@ -277,9 +273,20 @@ func cmdConfigUnset(args []string) error {
 	if err := unsetConfigKey(&cfg, args[0]); err != nil {
 		return err
 	}
-	return persistConfigAndReport(cfg, []boxRow{
+	return persistConfigAndReport(cfg, []outputRow{
 		{Label: "key", Value: normalizeConfigKey(args[0])},
 	})
+}
+
+func cmdConfigReset(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, configResetUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	if len(args) != 0 {
+		return fmt.Errorf("%s", configResetUsageText(filepath.Base(os.Args[0])))
+	}
+	return cmdReset()
 }
 
 func loadConfigForUp(args []string) (config, error) {
@@ -352,7 +359,7 @@ func loadConfigForUpWithIOAndOverridesAndMode(args []string, overrides configOve
 		}
 		changed = true
 	default:
-		return cfg, fmt.Errorf("%s", upUsageText(filepath.Base(os.Args[0])))
+		return cfg, fmt.Errorf("expected at most <workspace> <directory>\nUse '%s ws attach <workspace> <directory>'", filepath.Base(os.Args[0]))
 	}
 
 	if err := validateUpModeSelection(cfg); err != nil {
@@ -412,7 +419,7 @@ func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) er
 		return err
 	}
 	if mode == modeNone {
-		return fmt.Errorf("mode is set to none\nRun '%s up --mode sync', '%s up --mode mount', or update config first", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+		return fmt.Errorf("mode is set to none; update config first")
 	}
 	if mode == modeMount {
 		backendName, err := normalizeMountBackend(cfg.MountBackend)
@@ -502,6 +509,7 @@ func hasConfigOverrides(overrides configOverrides) bool {
 		overrides.connection.set ||
 		overrides.controlPlaneURL.set ||
 		overrides.controlPlaneDatabase.set ||
+		overrides.mode.set ||
 		overrides.mountBackend.set ||
 		overrides.mountpoint.set ||
 		overrides.readonly.set
@@ -541,8 +549,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, nil
 	}
 	if missingWorkspace {
-		bin := filepath.Base(os.Args[0])
-		return false, fmt.Errorf("no current workspace is selected for 'up'\nRun '%s workspace use <workspace>' or '%s up <workspace> <mountpoint>'", bin, bin)
+		return false, fmt.Errorf("workspace is required\nRun '%s ws attach <workspace> <directory>'", filepath.Base(os.Args[0]))
 	}
 	if !allowPrompt {
 		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and local path", filepath.Base(os.Args[0]))
@@ -692,6 +699,7 @@ func registerConfigOverrideFlags(fs *flag.FlagSet, overrides *configOverrides) {
 	fs.Var(&overrides.connection, "product-mode", "alias for --config-source")
 	fs.Var(&overrides.controlPlaneURL, "control-plane-url", "http:// or https:// control plane URL")
 	fs.Var(&overrides.controlPlaneDatabase, "control-plane-database", "database id for self-managed control plane mode")
+	fs.Var(&overrides.mode, "mode", "sync|mount")
 	fs.Var(&overrides.mountBackend, "mount-backend", "auto|none|fuse|nfs")
 	fs.Var(&overrides.mountpoint, "mountpoint", "local mountpoint")
 	fs.Var(&overrides.readonly, "readonly", "start readonly")
@@ -700,116 +708,11 @@ func registerConfigOverrideFlags(fs *flag.FlagSet, overrides *configOverrides) {
 func configUsageError(command string) error {
 	bin := filepath.Base(os.Args[0])
 	switch command {
-	case "up":
-		return fmt.Errorf("%s", upUsageText(bin))
 	case "config set":
 		return fmt.Errorf("%s", configSetUsageText(bin))
 	default:
 		return fmt.Errorf("usage: %s %s", bin, command)
 	}
-}
-
-func parseUpOptions(args []string) (upOptions, error) {
-	var opts upOptions
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--interactive" || arg == "-i":
-			opts.foreground = true
-		case arg == "--mode":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.mode.value = strings.TrimSpace(args[i])
-			opts.mode.set = true
-		case strings.HasPrefix(arg, "--mode="):
-			opts.mode.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
-			opts.mode.set = true
-		case arg == "--redis-url":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.redisURL.value = strings.TrimSpace(args[i])
-			opts.overrides.redisURL.set = true
-		case strings.HasPrefix(arg, "--redis-url="):
-			opts.overrides.redisURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--redis-url="))
-			opts.overrides.redisURL.set = true
-		case arg == "--config-source" || arg == "--control" || arg == "--connection" || arg == "--product-mode":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.connection.value = strings.TrimSpace(args[i])
-			opts.overrides.connection.set = true
-		case strings.HasPrefix(arg, "--config-source="):
-			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--config-source="))
-			opts.overrides.connection.set = true
-		case strings.HasPrefix(arg, "--control="):
-			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control="))
-			opts.overrides.connection.set = true
-		case strings.HasPrefix(arg, "--connection="):
-			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--connection="))
-			opts.overrides.connection.set = true
-		case strings.HasPrefix(arg, "--product-mode="):
-			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--product-mode="))
-			opts.overrides.connection.set = true
-		case arg == "--control-plane-url":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.controlPlaneURL.value = strings.TrimSpace(args[i])
-			opts.overrides.controlPlaneURL.set = true
-		case strings.HasPrefix(arg, "--control-plane-url="):
-			opts.overrides.controlPlaneURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-url="))
-			opts.overrides.controlPlaneURL.set = true
-		case arg == "--control-plane-database":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(args[i])
-			opts.overrides.controlPlaneDatabase.set = true
-		case strings.HasPrefix(arg, "--control-plane-database="):
-			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-database="))
-			opts.overrides.controlPlaneDatabase.set = true
-		case arg == "--mount-backend":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.mountBackend.value = strings.TrimSpace(args[i])
-			opts.overrides.mountBackend.set = true
-		case strings.HasPrefix(arg, "--mount-backend="):
-			opts.overrides.mountBackend.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mount-backend="))
-			opts.overrides.mountBackend.set = true
-		case arg == "--mountpoint":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.overrides.mountpoint.value = args[i]
-			opts.overrides.mountpoint.set = true
-		case strings.HasPrefix(arg, "--mountpoint="):
-			opts.overrides.mountpoint.value = strings.TrimPrefix(arg, "--mountpoint=")
-			opts.overrides.mountpoint.set = true
-		case arg == "--readonly":
-			opts.overrides.readonly.value = true
-			opts.overrides.readonly.set = true
-		case strings.HasPrefix(arg, "--readonly="):
-			opts.overrides.readonly.set = true
-			if err := opts.overrides.readonly.Set(strings.TrimPrefix(arg, "--readonly=")); err != nil {
-				return opts, configUsageError("up")
-			}
-		case strings.HasPrefix(arg, "-"):
-			return opts, configUsageError("up")
-		default:
-			opts.positionals = append(opts.positionals, arg)
-		}
-	}
-	return opts, nil
 }
 
 func isHelpArg(v string) bool {
@@ -835,35 +738,28 @@ Subcommands:
   set <key> <value>       Persist a config value
   list [--json]           List known config values
   unset <key>             Reset a config value to its default
+  reset                   Reset local config and runtime state
 
 Common keys:
   config.source
+  agent.name
   controlPlane.url
   controlPlane.database
+  mode
   redis.url
-  mount.backend
-  mount.path
-  mount.readonly
-  workspace.current
-
-Legacy shortcuts:
-  Redis connection: --redis-url
-  Configuration source: --config-source
-  Mount backend: --mount-backend
-  Mountpoint: --mountpoint
-
-Workspace selection:
-  Use '%s workspace use <workspace>' and related workspace commands.
+  sync.fileSizeCapMB
 
 Examples:
   %s config get redis.url
   %s config show --json
   %s config set config.source self-managed
-  %s config set --config-source self-hosted --control-plane-url http://127.0.0.1:8091
-  %s config set mount.path ~/demo
+  %s config set mode mount
+  %s config set controlPlane.url http://127.0.0.1:8091
+  %s config set agent.name "Claude Code"
   %s config unset controlPlane.database
+  %s config reset
   %s config list
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configGetUsageText(bin string) string {
@@ -901,25 +797,26 @@ Flags:
   --config-source local|self-hosted|cloud
   --control-plane-url <http://...|https://...>
   --control-plane-database <id>
+  --mode sync|mount
   --mount-backend auto|none|fuse|nfs
   --mountpoint <path>
-  --readonly[=true|false]
+  --readonly
 
 Examples:
   %s config set redis.url rediss://user:pass@redis.example:6379/4
   %s config set config.source self-managed
+  %s config set mode mount
   %s config set agent.name "Claude Code"
-  %s config set --redis-url rediss://user:pass@redis.example:6379/4 --mount-backend nfs --mountpoint ~/demo
+  %s config set sync.fileSizeCapMB 4096
   %s config set controlPlane.url http://127.0.0.1:8091
-  %s config set mount.backend nfs
-  %s config set mount.readonly true
 
 Notes:
   Keys are case-insensitive.
   Use "self-managed" for the control-plane-backed mode.
-  Current workspace is not configured here; use '%s workspace use <workspace>'.
-  Existing runtime paths stay available in afs.config.json.
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+  Workspace attachments are runtime state; use '%s ws attach <workspace> <directory>'.
+  Current workspace is not configured here.
+  Mode and other runtime paths stay available in afs.config.json.
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configUnsetUsageText(bin string) string {
@@ -930,47 +827,13 @@ Reset a config value to its default or empty state.
 `, bin)
 }
 
-func upUsageText(bin string) string {
+func configResetUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s up [flags]
-  %s up <workspace> [<mountpoint>]
+  %s config reset
 
-Start AFS using the saved config.
-If <workspace> is provided, AFS saves it and starts. The mountpoint defaults
-to ~/afs/<workspace> when omitted. Both are persisted so future runs reuse them.
-
-Flags:
-  --mode <sync|mount>
-                      Persist a mode override before starting.
-  --control-plane-url <http://...|https://...>
-                      One-shot self-managed control plane URL override.
-  --control-plane-database <database-id>
-                      One-shot database override for self-managed mode.
-  --redis-url <redis://...|rediss://...>
-                      One-shot Redis override for local mode.
-  --mount-backend <auto|none|fuse|nfs>
-  --mountpoint <path>
-  --readonly[=true|false]
-                      One-shot local surface overrides for this run.
-  --interactive, -i   Run the sync daemon in the foreground with live logs.
-                      Ctrl-C stops the daemon. Useful for debugging.
-
-Notes:
-  Saved config is the default, but explicit 'up' flags override it for this run.
-  Redis connection, mount backend, and readonly mode come from config unless
-  you override them on the command line.
-  Current workspace must already be selected with '%s workspace use <workspace>'
-  unless you pass <workspace> positionally.
-  If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.
-  Use '%s config set ...' to change Redis or mount settings persistently.
-
-Examples:
-  %s up
-  %s up --mode sync
-  %s up --control-plane-url http://127.0.0.1:8091 getting-started
-  %s up --interactive
-  %s up claude-code ~/.claude
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+Reset local config and runtime state, while keeping the CLI installed.
+If AFS is running, this command stops it first.
+`, bin)
 }
 
 func applyConfigOverrides(cfg *config, overrides configOverrides) error {
@@ -1004,6 +867,13 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 	if overrides.controlPlaneDatabase.set {
 		cfg.DatabaseID = strings.TrimSpace(overrides.controlPlaneDatabase.value)
 		cfg.CurrentWorkspaceID = ""
+	}
+	if overrides.mode.set {
+		mode, err := parseConfigMode(overrides.mode.value)
+		if err != nil {
+			return err
+		}
+		cfg.Mode = mode
 	}
 
 	if overrides.mountBackend.set {
@@ -1058,24 +928,20 @@ func applyRedisURL(cfg *config, raw string) error {
 	return nil
 }
 
-func configSummaryRows(cfg config, source string) []boxRow {
-	mountValue := "none"
-	if cfg.MountBackend != mountBackendNone {
-		mountValue = fmt.Sprintf("%s at %s", userModeLabel(cfg.MountBackend), cfg.LocalPath)
-	}
-
+func configSummaryRows(cfg config, source string) []outputRow {
 	productMode, _ := effectiveProductMode(cfg)
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "source", Value: source},
-		{Label: "config source", Value: userFacingConfigSource(cfg)},
+		{Label: "connection", Value: userFacingConfigSource(cfg)},
+		{Label: "mode", Value: configModeLabel(cfg)},
 		{Label: "database", Value: publicRedisURL(cfg)},
 		{Label: "agent", Value: agentConfigLabel(cfg)},
-		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
-		{Label: "mount", Value: mountValue},
-		{Label: "readonly", Value: strconv.FormatBool(cfg.ReadOnly)},
 	}
 	if productMode != productModeLocal {
-		rows[2] = boxRow{Label: "control plane", Value: configRemoteLabel(cfg)}
+		rows[3] = outputRow{Label: "control plane", Value: configRemoteLabel(cfg)}
+	}
+	if cfg.SyncFileSizeCapMB > 0 && cfg.SyncFileSizeCapMB != defaultSyncFileSizeCapMB {
+		rows = append(rows, outputRow{Label: "sync file cap", Value: strconv.Itoa(cfg.SyncFileSizeCapMB) + " MB"})
 	}
 	return rows
 }
@@ -1098,11 +964,9 @@ func configKeys() []string {
 		"agent.name",
 		"controlPlane.url",
 		"controlPlane.database",
+		"mode",
 		"redis.url",
-		"mount.backend",
-		"mount.path",
-		"mount.readonly",
-		"workspace.current",
+		"sync.fileSizeCapMB",
 	}
 }
 
@@ -1118,7 +982,7 @@ func configListMap(cfg config) map[string]string {
 	return out
 }
 
-func persistConfigAndReport(cfg config, prefixRows []boxRow) error {
+func persistConfigAndReport(cfg config, prefixRows []outputRow) error {
 	if err := prepareConfigForSave(&cfg); err != nil {
 		return err
 	}
@@ -1129,18 +993,18 @@ func persistConfigAndReport(cfg config, prefixRows []boxRow) error {
 		return err
 	}
 
-	rows := append([]boxRow{}, prefixRows...)
+	rows := append([]outputRow{}, prefixRows...)
 	if len(prefixRows) == 1 && prefixRows[0].Label == "key" {
 		value, err := getConfigKey(cfg, prefixRows[0].Value)
 		if err != nil {
 			return err
 		}
-		rows = append(rows, boxRow{Label: "value", Value: value})
+		rows = append(rows, outputRow{Label: "value", Value: value})
 	} else {
 		rows = append(rows, configSummaryRows(cfg, "saved")...)
 	}
-	rows = append(rows, boxRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
-	printBox(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
+	rows = append(rows, outputRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
+	printSection(markerSuccess+" "+clr(ansiBold, "config updated"), rows)
 	return nil
 }
 
@@ -1158,16 +1022,12 @@ func normalizeConfigKey(key string) string {
 		return "controlPlane.url"
 	case "controlplane.database", "controlplanedatabase", "controlplane.databaseid", "controlplanedatabaseid":
 		return "controlPlane.database"
+	case "mode", "mountmode", "localmode", "runtime.mode", "runtimemode":
+		return "mode"
 	case "redis.url", "redisurl":
 		return "redis.url"
-	case "mount.backend", "mountbackend":
-		return "mount.backend"
-	case "mount.path", "mountpoint", "localpath", "mountpath":
-		return "mount.path"
-	case "mount.readonly", "readonly", "mountreadonly":
-		return "mount.readonly"
-	case "workspace.current", "currentworkspace", "workspace":
-		return "workspace.current"
+	case "sync.filesizecapmb", "sync.file.size.cap.mb", "syncfilecap", "syncfilesizecapmb":
+		return "sync.fileSizeCapMB"
 	default:
 		return strings.TrimSpace(key)
 	}
@@ -1192,22 +1052,16 @@ func getConfigKey(cfg config, key string) (string, error) {
 			return clr(ansiDim, "auto"), nil
 		}
 		return cfg.DatabaseID, nil
+	case "mode":
+		return configModeLabel(cfg), nil
 	case "redis.url":
 		return publicRedisURL(cfg), nil
-	case "mount.backend":
-		if strings.TrimSpace(cfg.MountBackend) == "" {
-			return mountBackendNone, nil
+	case "sync.fileSizeCapMB":
+		mb := cfg.SyncFileSizeCapMB
+		if mb <= 0 {
+			mb = defaultSyncFileSizeCapMB
 		}
-		return cfg.MountBackend, nil
-	case "mount.path":
-		if strings.TrimSpace(cfg.LocalPath) == "" {
-			return clr(ansiDim, "unset"), nil
-		}
-		return cfg.LocalPath, nil
-	case "mount.readonly":
-		return strconv.FormatBool(cfg.ReadOnly), nil
-	case "workspace.current":
-		return currentWorkspaceLabel(selectedWorkspaceName(cfg)), nil
+		return strconv.Itoa(mb), nil
 	default:
 		return "", fmt.Errorf("unknown config key %q", key)
 	}
@@ -1238,23 +1092,22 @@ func setConfigKey(cfg *config, key, value string) error {
 		cfg.Name = strings.TrimSpace(value)
 	case "controlPlane.database":
 		cfg.DatabaseID = strings.TrimSpace(value)
+	case "mode":
+		mode, err := parseConfigMode(value)
+		if err != nil {
+			return err
+		}
+		cfg.Mode = mode
 	case "redis.url":
 		if err := applyRedisURL(cfg, strings.TrimSpace(value)); err != nil {
 			return err
 		}
-	case "mount.backend":
-		cfg.MountBackend = strings.TrimSpace(value)
-	case "mount.path":
-		cfg.LocalPath = strings.TrimSpace(value)
-	case "mount.readonly":
-		b, err := strconv.ParseBool(strings.TrimSpace(value))
-		if err != nil {
-			return fmt.Errorf("mount.readonly must be true or false")
+	case "sync.fileSizeCapMB":
+		mb, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || mb < 0 {
+			return fmt.Errorf("sync.fileSizeCapMB must be a non-negative integer")
 		}
-		cfg.ReadOnly = b
-	case "workspace.current":
-		cfg.CurrentWorkspace = strings.TrimSpace(value)
-		cfg.CurrentWorkspaceID = ""
+		cfg.SyncFileSizeCapMB = mb
 	default:
 		return fmt.Errorf("unknown config key %q", key)
 	}
@@ -1278,25 +1131,39 @@ func unsetConfigKey(cfg *config, key string) error {
 		cfg.Name = ""
 	case "controlPlane.database":
 		cfg.DatabaseID = ""
+	case "mode":
+		cfg.Mode = def.Mode
 	case "redis.url":
 		cfg.RedisAddr = def.RedisAddr
 		cfg.RedisUsername = ""
 		cfg.RedisPassword = ""
 		cfg.RedisDB = def.RedisDB
 		cfg.RedisTLS = false
-	case "mount.backend":
-		cfg.MountBackend = def.MountBackend
-	case "mount.path":
-		cfg.LocalPath = def.LocalPath
-	case "mount.readonly":
-		cfg.ReadOnly = false
-	case "workspace.current":
-		cfg.CurrentWorkspace = ""
-		cfg.CurrentWorkspaceID = ""
+	case "sync.fileSizeCapMB":
+		cfg.SyncFileSizeCapMB = def.SyncFileSizeCapMB
 	default:
 		return fmt.Errorf("unknown config key %q", key)
 	}
 	return nil
+}
+
+func configModeLabel(cfg config) string {
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return strings.TrimSpace(cfg.Mode)
+	}
+	return mode
+}
+
+func parseConfigMode(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case modeSync, "":
+		return modeSync, nil
+	case modeMount:
+		return modeMount, nil
+	default:
+		return "", fmt.Errorf("mode must be one of: sync, mount")
+	}
 }
 
 func userFacingConfigSource(cfg config) string {

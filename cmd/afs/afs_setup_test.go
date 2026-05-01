@@ -48,6 +48,44 @@ func TestResolveConfigPathsFilesystemOnlySkipsMountResolution(t *testing.T) {
 	}
 }
 
+func TestRunSetupWizardPromptsConfigurationSourceBeforeRedis(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	input := stringsJoinLines(
+		"3",       // configuration source: local
+		mr.Addr(), // redis addr
+		"",        // redis username default
+		"",        // redis password
+		"",        // tls default
+	)
+	reader := bufio.NewReader(bytes.NewBufferString(input))
+	var output bytes.Buffer
+
+	cfg, err := runSetupWizard(reader, &output, defaultConfig(), true)
+	if err != nil {
+		t.Fatalf("runSetupWizard() returned error: %v", err)
+	}
+	if cfg.ProductMode != productModeLocal {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeLocal)
+	}
+	if cfg.RedisAddr != mr.Addr() {
+		t.Fatalf("RedisAddr = %q, want %q", cfg.RedisAddr, mr.Addr())
+	}
+	got := output.String()
+	configIndex := strings.Index(got, "Configuration Source")
+	redisIndex := strings.Index(got, "Redis Connection")
+	if configIndex < 0 {
+		t.Fatalf("setup output = %q, want configuration source prompt", got)
+	}
+	if redisIndex < 0 {
+		t.Fatalf("setup output = %q, want redis connection prompt after local choice", got)
+	}
+	if configIndex > redisIndex {
+		t.Fatalf("setup output = %q, want configuration source before redis connection", got)
+	}
+}
+
 func TestRunSetupWizardAllowsNoMountedFilesystem(t *testing.T) {
 	t.Helper()
 
@@ -291,8 +329,8 @@ func TestRunSetupWizardCreatesFirstWorkspaceAndDefaultsLocalPath(t *testing.T) {
 }
 
 // TestRunSetupWizardSelfHostedPicksExistingWorkspace validates that when the
-// CLI is already logged in to a self-hosted control plane (as after `afs
-// login --self-hosted`), `afs setup` drops straight into workspace picking
+// CLI is already logged in to a self-hosted control plane (as after the
+// self-hosted auth-login flow), `afs setup` drops straight into workspace picking
 // and local path configuration without re-asking for connection mode or URL.
 func TestRunSetupWizardSelfHostedPicksExistingWorkspace(t *testing.T) {
 	t.Helper()

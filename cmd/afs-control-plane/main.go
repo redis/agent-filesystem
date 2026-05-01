@@ -25,7 +25,7 @@ func main() {
 	defer manager.Close()
 
 	// On self-hosted boot, ensure a `getting-started` workspace exists so a
-	// fresh `afs login --self-hosted && afs setup` lands the user on a usable
+	// fresh `afs auth login --self-hosted && afs setup` lands the user on a usable
 	// workspace without any manual create step. Idempotent; cloud deploys opt
 	// out via AFS_SEED_GETTING_STARTED=0 (Vercel entrypoint sets this).
 	if controlplane.ShouldSeedGettingStarted() {

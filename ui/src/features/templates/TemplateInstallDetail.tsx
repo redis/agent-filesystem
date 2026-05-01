@@ -383,7 +383,7 @@ export function TemplateInstallDetail({
             <code>
               afs mcp --workspace {workspace.name} --profile {template.profile}
             </code>{" "}
-            after <code>afs login</code> with the token above.
+            after <code>afs auth login</code> with the token above.
           </HintLine>
         </Section>
       ) : null}

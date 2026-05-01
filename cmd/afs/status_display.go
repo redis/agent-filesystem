@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -15,7 +16,7 @@ import (
 // URL (duplicate of configStatusRow), and the cloud database id (already in
 // the core "database" row). Only actionable rows (e.g. "needs refresh")
 // survive.
-func appendAuthStatusRows(rows []boxRow) []boxRow {
+func appendAuthStatusRows(rows []outputRow) []outputRow {
 	bin := filepath.Base(os.Args[0])
 	info, _ := authConnectionInfo(bin)
 	for _, row := range info {
@@ -77,40 +78,60 @@ func configPathLabel() string {
 
 // appendConfigRows adds user-facing config metadata rows without overloading
 // "config" to mean both the configuration source and the config file path.
-func appendConfigRows(rows []boxRow, cfg config) []boxRow {
+func appendConfigRows(rows []outputRow, cfg config) []outputRow {
 	if row := configSourceStatusRow(cfg); row.Label != "" {
 		rows = append(rows, row)
 	}
-	return append(rows, boxRow{Label: "config file", Value: configPathLabel()})
+	return append(rows, outputRow{Label: "config file", Value: configPathLabel()})
 }
 
-func configSourceStatusRow(cfg config) boxRow {
+func configSourceStatusRow(cfg config) outputRow {
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
-		return boxRow{}
+		return outputRow{}
 	}
 
 	if productMode == productModeLocal {
-		return boxRow{Label: "config source", Value: productModeDisplayLabel(productMode)}
+		return outputRow{Label: "config source", Value: productModeDisplayLabel(productMode)}
 	}
 
 	value := strings.TrimSpace(cfg.URL)
 	if value == "" {
 		value = "<control plane url not configured>"
 	}
-	return boxRow{Label: "config source", Value: productModeDisplayLabel(productMode) + ": " + value}
+	return outputRow{Label: "control plane", Value: value}
 }
 
-func commandContextRows(cfg config, workspace string) []boxRow {
-	rows := make([]boxRow, 0, 2)
-	if strings.TrimSpace(workspace) != "" {
-		rows = append(rows, boxRow{Label: "workspace", Value: workspace})
+func statusDisplayRows(cfg config, rows []outputRow) []outputRow {
+	ordered := make([]outputRow, 0, len(rows)+2)
+	if row := configSourceStatusRow(cfg); row.Label != "" {
+		ordered = append(ordered, row)
 	}
-	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
+
+	var databaseRows []outputRow
+	for _, row := range rows {
+		if row.Label == "database" {
+			databaseRows = append(databaseRows, row)
+			continue
+		}
+		ordered = append(ordered, row)
+	}
+	ordered = append(ordered, outputRow{Label: "config file", Value: configPathLabel()})
+	ordered = append(ordered, databaseRows...)
+	return ordered
+}
+
+func commandContextRows(cfg config, workspace string) []outputRow {
+	rows := make([]outputRow, 0, 2)
+	if strings.TrimSpace(workspace) != "" {
+		rows = append(rows, outputRow{Label: "workspace", Value: workspace})
+	}
+	rows = append(rows, outputRow{Label: "database", Value: configRemoteLabel(cfg)})
 	return rows
 }
 
 func statusTitle(prefix string, pid int) string {
+
 	if pid > 0 {
 		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (pid %d)", pid))
 	}
@@ -121,26 +142,29 @@ func localSurfacePath(cfg config) string {
 	return cfg.LocalPath
 }
 
-// statusRows returns the consistent core rows: workspace, local, database,
-// and mode. Mount backend is included only for FUSE/NFS. In cloud mode the
-// database row shows the cloud database id instead of the local Redis
-// endpoint so users see the database they're actually talking to.
-func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr string, redisDB int) []boxRow {
-	var rows []boxRow
-	if ws := strings.TrimSpace(workspace); ws != "" {
-		rows = append(rows, boxRow{Label: "workspace", Value: ws})
+// statusRows returns the consistent core rows. Sync mode no longer reports
+// saved workspace/local values because attachments are the source of truth.
+// Mount backend is included only for FUSE/NFS. In cloud mode the database row
+// shows the cloud database id instead of the local Redis endpoint so users see
+// the database they're actually talking to.
+func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr string, redisDB int) []outputRow {
+	var rows []outputRow
+	if mode != modeSync {
+		if ws := strings.TrimSpace(workspace); ws != "" {
+			rows = append(rows, outputRow{Label: "workspace", Value: ws})
+		}
+		if localPath != "" {
+			rows = append(rows, outputRow{Label: "local", Value: localPath})
+		}
 	}
-	if localPath != "" {
-		rows = append(rows, boxRow{Label: "local", Value: localPath})
-	}
-	rows = append(rows, boxRow{Label: "database", Value: databaseStatusLabel(cfg, redisAddr, redisDB)})
-	rows = append(rows, boxRow{Label: "mode", Value: mode})
+	rows = append(rows, outputRow{Label: "database", Value: databaseStatusLabel(cfg, redisAddr, redisDB)})
+	rows = append(rows, outputRow{Label: "mode", Value: mode})
 	if backendName != "" && backendName != mountBackendNone {
-		rows = append(rows, boxRow{Label: "mount backend", Value: userModeLabel(backendName)})
+		rows = append(rows, outputRow{Label: "mount backend", Value: userModeLabel(backendName)})
 	}
 	if account := strings.TrimSpace(cfg.Account); account != "" {
 		if productMode, _ := effectiveProductMode(cfg); productMode == productModeCloud {
-			rows = append(rows, boxRow{Label: "account", Value: account})
+			rows = append(rows, outputRow{Label: "account", Value: account})
 		}
 	}
 	return rows
@@ -169,20 +193,20 @@ func statusTitleForAlive(alive bool, pid int) string {
 }
 
 // appendUptimeRows appends the uptime row and, if set, the readonly row.
-func appendUptimeRows(rows []boxRow, st state) []boxRow {
-	rows = append(rows, boxRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
+func appendUptimeRows(rows []outputRow, st state) []outputRow {
+	rows = append(rows, outputRow{Label: "uptime", Value: formatDuration(time.Since(st.StartedAt))})
 	if st.ReadOnly {
-		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
+		rows = append(rows, outputRow{Label: "readonly", Value: "yes"})
 	}
 	return rows
 }
 
-func appendConnectedAgentRows(rows []boxRow, cfg config, st state) []boxRow {
+func appendConnectedAgentRows(rows []outputRow, cfg config, st state) []outputRow {
 	if strings.TrimSpace(st.SessionID) == "" {
 		return rows
 	}
 	if id := strings.TrimSpace(cfg.ID); id != "" {
-		rows = append(rows, boxRow{Label: "agent id", Value: id})
+		rows = append(rows, outputRow{Label: "agent id", Value: id})
 	}
 	return rows
 }
@@ -207,26 +231,158 @@ func currentWorkspaceLabel(workspace string) string {
 	return workspace
 }
 
-// cmdStatus dispatches to one of three status renderers:
-//   - cmdStatusNotRunning: no state file exists (afs is stopped)
-//   - cmdStatusSync:       running in sync mode
-//   - cmdStatusMount:      running in mount mode
+// cmdStatus dispatches to the status renderer for the current local runtime:
+// no state, sync attachment, or live mount.
+type statusOptions struct {
+	verbose bool
+}
+
+func cmdStatusArgs(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, statusUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	opts, err := parseStatusOptions(args)
+	if err != nil {
+		return err
+	}
+	return cmdStatusWithOptions(opts)
+}
+
+func parseStatusOptions(args []string) (statusOptions, error) {
+	var opts statusOptions
+	for _, arg := range args {
+		switch arg {
+		case "--verbose", "-v":
+			opts.verbose = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, statusUsageText(filepath.Base(os.Args[0])))
+			}
+			return opts, fmt.Errorf("%s", statusUsageText(filepath.Base(os.Args[0])))
+		}
+	}
+	return opts, nil
+}
+
 func cmdStatus() error {
+	return cmdStatusWithOptions(statusOptions{})
+}
+
+func cmdStatusWithOptions(opts statusOptions) error {
+	reg, regErr := loadAttachmentRegistry()
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return cmdStatusNotRunning()
+			if err := cmdStatusNotRunning(); err != nil {
+				return err
+			}
+		} else {
+			return err
 		}
+	} else if strings.TrimSpace(st.Mode) == modeSync {
+		cmdStatusSync(st)
+	} else if err := cmdStatusMount(st); err != nil {
 		return err
 	}
-	if strings.TrimSpace(st.Mode) == modeSync {
-		cmdStatusSync(st)
-		return nil
+
+	if regErr == nil && len(reg.Attachments) > 0 {
+		printAttachmentStatus(reg, opts.verbose)
 	}
-	return cmdStatusMount(st)
+	return nil
 }
 
-// cmdStatusNotRunning renders the status box when no state file exists.
+func printAttachmentStatus(reg attachmentRegistry, verbose bool) {
+	if len(reg.Attachments) == 0 {
+		fmt.Println()
+		fmt.Println("not attached")
+		fmt.Println()
+		return
+	}
+	attachments := sortedAttachmentRecords(reg.Attachments)
+	fmt.Println()
+	fmt.Println("Attached workspaces")
+	fmt.Println()
+	printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, attachmentSummaryRows(attachments))
+	if !verbose {
+		fmt.Println()
+		return
+	}
+	for _, rec := range attachments {
+		fmt.Println()
+		printAttachmentVerbose(rec)
+	}
+	fmt.Println()
+}
+
+func sortedAttachmentRecords(records []attachmentRecord) []attachmentRecord {
+	attachments := append([]attachmentRecord(nil), records...)
+	sort.SliceStable(attachments, func(i, j int) bool {
+		left := strings.ToLower(attachments[i].Workspace)
+		right := strings.ToLower(attachments[j].Workspace)
+		if left == right {
+			return attachments[i].LocalPath < attachments[j].LocalPath
+		}
+		return left < right
+	})
+	return attachments
+}
+
+func attachmentSummaryRows(attachments []attachmentRecord) [][]string {
+	rows := make([][]string, 0, len(attachments))
+	for _, rec := range attachments {
+		mode := strings.TrimSpace(rec.Mode)
+		if mode == "" {
+			mode = "unknown"
+		}
+		rows = append(rows, []string{rec.Workspace, attachmentStatus(rec), mode, rec.LocalPath})
+	}
+	return rows
+}
+
+func printAttachmentVerbose(rec attachmentRecord) {
+	rows := []outputRow{
+		{Label: "workspace", Value: rec.Workspace},
+		{Label: "status", Value: attachmentStatus(rec)},
+		{Label: "mode", Value: fallbackString(rec.Mode, "unknown")},
+		{Label: "path", Value: rec.LocalPath},
+	}
+	if rec.PID > 0 {
+		rows = append(rows, outputRow{Label: "pid", Value: fmt.Sprintf("%d", rec.PID)})
+	}
+	productMode := strings.TrimSpace(rec.ProductMode)
+	if productMode != "" {
+		rows = append(rows, outputRow{Label: "config source", Value: productModeDisplayLabel(productMode)})
+	}
+	if controlPlaneURL := strings.TrimSpace(rec.ControlPlaneURL); controlPlaneURL != "" {
+		rows = append(rows, outputRow{Label: "control plane", Value: controlPlaneURL})
+		if db := strings.TrimSpace(rec.ControlPlaneDatabase); db != "" {
+			rows = append(rows, outputRow{Label: "database", Value: db})
+		}
+	} else if redisAddr := strings.TrimSpace(rec.RedisAddr); redisAddr != "" {
+		rows = append(rows, outputRow{Label: "redis", Value: redisDatabaseLabel(redisAddr, rec.RedisDB, false)})
+	}
+	if sessionID := strings.TrimSpace(rec.SessionID); sessionID != "" {
+		rows = append(rows, outputRow{Label: "session", Value: sessionID})
+	}
+	if attachmentID := strings.TrimSpace(rec.ID); attachmentID != "" {
+		rows = append(rows, outputRow{Label: "attachment", Value: attachmentID})
+	}
+	if !rec.StartedAt.IsZero() {
+		rows = append(rows, outputRow{Label: "started", Value: formatDisplayTimestamp(rec.StartedAt.UTC().Format(time.RFC3339))})
+	}
+	printSection(rec.Workspace, rows)
+}
+
+func fallbackString(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+// cmdStatusNotRunning renders status when no state file exists.
 func cmdStatusNotRunning() error {
 	cfg := loadConfigOrDefault()
 	if err := resolveConfigPaths(&cfg); err != nil {
@@ -238,40 +394,35 @@ func cmdStatusNotRunning() error {
 	}
 	mode, _ := effectiveMode(cfg)
 
-	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
-	rows := statusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB)
-	rows = appendConfigRows(rows, cfg)
+	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Daemon Not Running")
+	rows := statusDisplayRows(cfg, statusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB))
 	rows = appendAuthStatusRows(rows)
-	rows = append(rows, boxRow{Label: "start", Value: clr(ansiOrange, "afs up")})
-	printBox(title, rows)
+	printSection(title, rows)
 	return nil
 }
 
-// cmdStatusSync renders the status box for a running sync daemon.
+// cmdStatusSync renders status for a running sync daemon.
 func cmdStatusSync(st state) {
-	workspace := strings.TrimSpace(st.CurrentWorkspace)
 	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
 	cfg := loadConfigOrDefault()
 	if err := resolveConfigPaths(&cfg); err != nil {
 		cfg.WorkRoot = defaultWorkRoot()
 	}
-
 	title := statusTitleForAlive(alive, st.SyncPID)
-	rows := statusRows(cfg, workspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB)
-	rows = appendConfigRows(rows, cfg)
+	rows := statusDisplayRows(cfg, statusRows(cfg, st.CurrentWorkspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB))
 	rows = appendAuthStatusRows(rows)
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
-	if snap := loadSyncStateForStatus(workspace); snap != nil {
-		rows = append(rows, boxRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
+	if snap := loadSyncStateForStatus(st.CurrentWorkspace); snap != nil {
+		rows = append(rows, outputRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
 		if !snap.UpdatedAt.IsZero() {
-			rows = append(rows, boxRow{Label: "last sync", Value: relativeTime(snap.UpdatedAt)})
+			rows = append(rows, outputRow{Label: "last sync", Value: relativeTime(snap.UpdatedAt)})
 		}
 	}
-	printBox(title, rows)
+	printSection(title, rows)
 }
 
-// cmdStatusMount renders the status box for mount mode (running).
+// cmdStatusMount renders status for mount mode.
 func cmdStatusMount(st state) error {
 	backend, backendName, err := backendForState(st)
 	if err != nil {
@@ -297,15 +448,14 @@ func cmdStatusMount(st state) error {
 	}
 	title := statusTitleForAlive(alive, st.MountPID)
 
-	rows := statusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB)
-	rows = appendConfigRows(rows, cfg)
+	rows := statusDisplayRows(cfg, statusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB))
 	rows = appendAuthStatusRows(rows)
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
-		rows = append(rows, boxRow{Label: "archive", Value: st.ArchivePath})
+		rows = append(rows, outputRow{Label: "archive", Value: st.ArchivePath})
 	}
-	printBox(title, rows)
+	printSection(title, rows)
 	return nil
 }
 
@@ -335,6 +485,9 @@ func printReadyBox(cfg config, backendName, _ string) {
 	localPath := localSurfacePath(cfg)
 	mode, _ := effectiveMode(cfg)
 	mounted := backendName != mountBackendNone
+	if mounted {
+		mode = modeMount
+	}
 	title := statusTitle(markerSuccess, 0)
 	if !mounted {
 		title = statusTitle(clr(ansiYellow, "○"), 0)
@@ -342,17 +495,17 @@ func printReadyBox(cfg config, backendName, _ string) {
 	rows := statusRows(cfg, cfg.CurrentWorkspace, localPath, mode, backendName, cfg.RedisAddr, cfg.RedisDB)
 
 	if cfg.ReadOnly {
-		rows = append(rows, boxRow{Label: "readonly", Value: "yes"})
+		rows = append(rows, outputRow{Label: "readonly", Value: "yes"})
 	}
 	if backendName == mountBackendNone {
-		rows = append(rows, boxRow{})
-		rows = append(rows, boxRow{Label: "create", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace create <workspace>")})
-		rows = append(rows, boxRow{Label: "import", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace import <workspace> <directory>")})
-		printBox(title, rows)
+		rows = append(rows, outputRow{})
+		rows = append(rows, outputRow{Label: "create", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace create <workspace>")})
+		rows = append(rows, outputRow{Label: "import", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace import <workspace> <directory>")})
+		printSection(title, rows)
 		return
 	}
-	rows = append(rows, boxRow{})
-	rows = append(rows, boxRow{Label: "try", Value: clr(ansiOrange, "ls "+cfg.LocalPath)})
-	rows = append(rows, boxRow{Label: "stop", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" down")})
-	printBox(title, rows)
+	rows = append(rows, outputRow{})
+	rows = append(rows, outputRow{Label: "try", Value: clr(ansiOrange, "ls "+shellQuote(localPath))})
+	rows = append(rows, outputRow{Label: "detach", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws detach "+shellQuote(localPath))})
+	printSection(title, rows)
 }

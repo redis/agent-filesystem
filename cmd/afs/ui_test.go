@@ -1,21 +1,25 @@
 package main
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 // TestCellWidthEmojis locks down the width accounting for the emoji and
-// marker glyphs we actually render. Box layout depends on these being
+// marker glyphs we actually render. Plain table layout depends on these being
 // correct — ✅ takes two cells in a terminal even though it's one rune, and
 // ✓ / ✗ render single-width in every monospaced font we've tested.
 func TestCellWidthEmojis(t *testing.T) {
 	cases := map[rune]int{
 		'✅': 2,
 		'❌': 2,
-		'✓':  1,
-		'✗':  1,
-		'●':  1,
-		'○':  1,
-		'A':  1,
-		' ':  1,
+		'✓': 1,
+		'✗': 1,
+		'●': 1,
+		'○': 1,
+		'A': 1,
+		' ': 1,
 	}
 	for r, want := range cases {
 		if got := cellWidth(r); got != want {
@@ -47,5 +51,38 @@ func TestRuneWidthHandlesEmoji(t *testing.T) {
 func TestMarkerSuccessConstant(t *testing.T) {
 	if markerSuccess != "✅" {
 		t.Errorf("markerSuccess = %q, want %q", markerSuccess, "✅")
+	}
+}
+
+func TestFormatCLIErrorUsesPlainSectionFormat(t *testing.T) {
+	t.Helper()
+
+	got := formatCLIError(errors.New(`attach blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty
+Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first`))
+
+	want := `
+Error
+
+Attach blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty.
+
+Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first.
+
+`
+	if got != want {
+		t.Fatalf("formatCLIError() = %q, want %q", got, want)
+	}
+}
+
+func TestFormatCLIErrorPreservesUsageBlocks(t *testing.T) {
+	t.Helper()
+
+	got := formatCLIError(errors.New("unknown flag \"--wat\"\n\nUsage:\n  afs ws attach [<workspace> <directory>]"))
+	for _, want := range []string{
+		"\nError\n\nUnknown flag \"--wat\".\n\nUsage:\n  afs ws attach [<workspace> <directory>]\n\n",
+		"Usage:\n  afs ws attach",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatCLIError() = %q, want substring %q", got, want)
+		}
 	}
 }

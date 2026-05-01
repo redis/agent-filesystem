@@ -32,7 +32,7 @@ func mountRedisKeyForWorkspace(workspace string) string {
 func ensureMountWorkspace(ctx context.Context, cfg config, store *afsStore) (string, error) {
 	workspace := strings.TrimSpace(cfg.CurrentWorkspace)
 	if workspace == "" {
-		return "", errors.New("no current workspace is selected")
+		return "", errors.New("workspace is required")
 	}
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return "", err

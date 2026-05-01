@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -34,7 +35,7 @@ func cloneManifest(source manifest) manifest {
 
 func cmdWorkspace(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, workspaceUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, workspaceUsageTextFor(filepath.Base(os.Args[0]), args[0]))
 		return nil
 	}
 
@@ -43,12 +44,12 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceCreate(args)
 	case "list":
 		return cmdWorkspaceList(args)
-	case "current":
-		return cmdWorkspaceCurrent(args)
-	case "use":
-		return cmdWorkspaceUse(args)
-	case "clone":
-		return cmdWorkspaceClone(args)
+	case "info":
+		return cmdWorkspaceInfo(args)
+	case "attach":
+		return cmdAttachArgs(args[2:])
+	case "detach":
+		return cmdDetachArgs(args[2:])
 	case "fork":
 		return cmdWorkspaceFork(args)
 	case "delete":
@@ -56,13 +57,17 @@ func cmdWorkspace(args []string) error {
 	case "import":
 		return cmdWorkspaceImport(args)
 	default:
-		return fmt.Errorf("unknown workspace subcommand %q\n\n%s", args[1], workspaceUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("unknown workspace subcommand %q\n\n%s", args[1], workspaceUsageTextFor(filepath.Base(os.Args[0]), args[0]))
 	}
 }
 
 func cmdCheckpoint(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, checkpointUsageText(filepath.Base(os.Args[0])))
+		group := "cp"
+		if len(args) > 0 {
+			group = args[0]
+		}
+		fmt.Fprint(os.Stderr, checkpointUsageTextFor(filepath.Base(os.Args[0]), group))
 		return nil
 	}
 
@@ -78,7 +83,7 @@ func cmdCheckpoint(args []string) error {
 	case "restore":
 		return cmdCheckpointRestore(args)
 	default:
-		return fmt.Errorf("unknown checkpoint subcommand %q\n\n%s", args[1], checkpointUsageText(filepath.Base(os.Args[0])))
+		return fmt.Errorf("unknown checkpoint subcommand %q\n\n%s", args[1], checkpointUsageTextFor(filepath.Base(os.Args[0]), args[0]))
 	}
 }
 
@@ -139,15 +144,14 @@ func cmdWorkspaceCreate(args []string) error {
 		return err
 	}
 
-	next := filepath.Base(os.Args[0]) + " up " + workspace + " <folder>"
+	next := filepath.Base(os.Args[0]) + " ws attach " + workspace + " <directory>"
 	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
-		next = filepath.Base(os.Args[0]) + " workspace use " + workspace
+		next = filepath.Base(os.Args[0]) + " ws attach " + workspace + " <directory>"
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace created"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace created"), []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: afsInitialCheckpointName},
-		{Label: "database", Value: configRemoteLabel(cfg)},
 		{Label: "next", Value: next},
 	})
 	return nil
@@ -212,21 +216,75 @@ func cmdWorkspaceList(args []string) error {
 		return err
 	}
 
-	rows := make([]boxRow, 0, len(workspaces.Items)+1)
+	fmt.Println()
+	fmt.Println("Workspaces")
+	fmt.Println()
 	if len(workspaces.Items) == 0 {
-		rows = append(rows, boxRow{Value: clr(ansiDim, "No workspaces found")})
+		fmt.Println("No workspaces found")
 	} else {
-		layout := newWorkspaceListLayout(cfg, workspaces.Items)
-		rows = append(rows, boxRow{Value: layout.header()})
-		for _, meta := range workspaces.Items {
-			rows = append(rows, boxRow{Value: layout.row(meta, workspaceListSelected(cfg, meta))})
-		}
+		printPlainTable(
+			[]string{"Workspace", "Database", "ID", "Updated", "Attached"},
+			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListAttachments()),
+		)
 	}
-	printBox(clr(ansiBold, "workspaces on "+configRemoteLabel(cfg)), rows)
+	fmt.Println()
 	return nil
 }
 
-const workspaceListColumnSep = "  "
+func cmdWorkspaceInfo(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceInfoUsageText(filepath.Base(os.Args[0]), args[0]))
+		return nil
+	}
+	if len(args) != 3 {
+		fmt.Fprint(os.Stderr, workspaceInfoUsageText(filepath.Base(os.Args[0]), args[0]))
+		return nil
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, args[2])
+	if err != nil {
+		return err
+	}
+	detail, err := service.GetWorkspace(context.Background(), selection.ID)
+	if err != nil {
+		return err
+	}
+	rows := []outputRow{
+		{Label: "workspace", Value: detail.Name},
+		{Label: "id", Value: detail.ID},
+		{Label: "files", Value: strconv.Itoa(detail.FileCount)},
+		{Label: "folders", Value: strconv.Itoa(detail.FolderCount)},
+		{Label: "checkpoints", Value: strconv.Itoa(detail.CheckpointCount)},
+	}
+	if strings.TrimSpace(detail.HeadCheckpointID) != "" {
+		rows = append(rows, outputRow{Label: "head", Value: detail.HeadCheckpointID})
+	}
+	if strings.TrimSpace(detail.DraftState) != "" {
+		rows = append(rows, outputRow{Label: "state", Value: detail.DraftState})
+	}
+	printSection("Workspace", rows)
+	return nil
+}
+
+func workspaceSummaryTableRows(cfg config, items []workspaceSummary, attachments map[string]string) [][]string {
+	rows := make([][]string, 0, len(items))
+	for _, item := range items {
+		rows = append(rows, []string{
+			workspaceListName(item.Name),
+			workspaceListDatabase(item),
+			workspaceListID(item),
+			workspaceListUpdated(item),
+			workspaceListAttached(item, attachments),
+		})
+	}
+	return rows
+}
 
 func workspaceListName(name string) string {
 	return clr(ansiBold+ansiWhite, name)
@@ -237,92 +295,6 @@ func workspaceListMarker(selected bool) string {
 		return clr(ansiBGreen, "✓")
 	}
 	return " "
-}
-
-type workspaceListLayout struct {
-	markerWidth   int
-	nameWidth     int
-	databaseWidth int
-	idWidth       int
-	updatedWidth  int
-}
-
-func newWorkspaceListLayout(cfg config, items []workspaceSummary) workspaceListLayout {
-	markerHeader := " "
-	nameHeader := "Workspace"
-	databaseHeader := "Database"
-	idHeader := "ID"
-	updatedHeader := "Updated"
-
-	layout := workspaceListLayout{
-		markerWidth:   runeWidth(markerHeader),
-		nameWidth:     runeWidth(nameHeader),
-		databaseWidth: runeWidth(databaseHeader),
-		idWidth:       runeWidth(idHeader),
-		updatedWidth:  runeWidth(updatedHeader),
-	}
-	for _, item := range items {
-		layout.markerWidth = maxInt(layout.markerWidth, runeWidth(workspaceListMarker(workspaceListSelected(cfg, item))))
-		layout.nameWidth = maxInt(layout.nameWidth, runeWidth(workspaceListName(item.Name)))
-		layout.databaseWidth = maxInt(layout.databaseWidth, runeWidth(workspaceListDatabase(item)))
-		layout.idWidth = maxInt(layout.idWidth, runeWidth(workspaceListID(item)))
-		layout.updatedWidth = maxInt(layout.updatedWidth, runeWidth(workspaceListUpdated(item)))
-	}
-
-	maxContentWidth := maxBoxText - 4*runeWidth(workspaceListColumnSep) - layout.markerWidth
-	layout.nameWidth, layout.databaseWidth, layout.idWidth, layout.updatedWidth =
-		shrinkWorkspaceListColumns(
-			maxContentWidth,
-			layout.nameWidth,
-			layout.databaseWidth,
-			layout.idWidth,
-			layout.updatedWidth,
-			runeWidth(nameHeader),
-			runeWidth(databaseHeader),
-			runeWidth(idHeader),
-			runeWidth(updatedHeader),
-		)
-	return layout
-}
-
-func shrinkWorkspaceListColumns(maxTotal, nameWidth, databaseWidth, idWidth, updatedWidth, minName, minDatabase, minID, minUpdated int) (int, int, int, int) {
-	for nameWidth+databaseWidth+idWidth+updatedWidth > maxTotal {
-		switch {
-		case nameWidth > minName && nameWidth >= databaseWidth:
-			nameWidth--
-		case databaseWidth > minDatabase:
-			databaseWidth--
-		case nameWidth > minName:
-			nameWidth--
-		case updatedWidth > minUpdated:
-			updatedWidth--
-		case idWidth > minID:
-			idWidth--
-		default:
-			return nameWidth, databaseWidth, idWidth, updatedWidth
-		}
-	}
-	return nameWidth, databaseWidth, idWidth, updatedWidth
-}
-
-func (l workspaceListLayout) header() string {
-	return strings.Join([]string{
-		clr(ansiDim, padVisibleText("", l.markerWidth)),
-		clr(ansiDim, padVisibleText("Workspace", l.nameWidth)),
-		clr(ansiDim, padVisibleText("Database", l.databaseWidth)),
-		clr(ansiDim, padVisibleText("ID", l.idWidth)),
-		clr(ansiDim, padVisibleText("Updated", l.updatedWidth)),
-	}, workspaceListColumnSep)
-}
-
-func (l workspaceListLayout) row(summary workspaceSummary, selected bool) string {
-	return strings.Join([]string{
-		padVisibleText(workspaceListMarker(selected), l.markerWidth),
-		padVisibleText(fitDisplayText(workspaceListName(summary.Name), l.nameWidth), l.nameWidth),
-		padVisibleText(fitDisplayText(workspaceListDatabase(summary), l.databaseWidth), l.databaseWidth),
-		padVisibleText(fitDisplayText(workspaceListID(summary), l.idWidth), l.idWidth),
-		padVisibleText(fitDisplayText(workspaceListUpdated(summary), l.updatedWidth), l.updatedWidth),
-	}, workspaceListColumnSep)
 }
 
 func workspaceListDatabase(summary workspaceSummary) string {
@@ -352,115 +324,66 @@ func workspaceListUpdated(summary workspaceSummary) string {
 	return parsed.Local().Format("2006-01-02 15:04")
 }
 
-func cmdWorkspaceCurrent(args []string) error {
-	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceCurrentUsageText(filepath.Base(os.Args[0])))
+func workspaceListAttachments() map[string]string {
+	reg, err := loadAttachmentRegistry()
+	if err != nil || len(reg.Attachments) == 0 {
 		return nil
 	}
-	if len(args) != 2 {
-		return fmt.Errorf("%s", workspaceCurrentUsageText(filepath.Base(os.Args[0])))
-	}
-
-	cfg, _, err := loadConfigWithPresence()
-	if err != nil {
-		return err
-	}
-	if err := prepareConfigForSave(&cfg); err != nil {
-		return err
-	}
-
-	printBox(clr(ansiBold, "current workspace on "+configRemoteLabel(cfg)), []boxRow{
-		{Label: "workspace", Value: currentWorkspaceLabel(selectedWorkspaceName(cfg))},
-		{Label: "config", Value: configPathLabel()},
-	})
-	return nil
-}
-
-func cmdWorkspaceUse(args []string) error {
-	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceUseUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-	if len(args) != 3 {
-		return fmt.Errorf("%s", workspaceUseUsageText(filepath.Base(os.Args[0])))
-	}
-
-	workspace := strings.TrimSpace(args[2])
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
-
-	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
-	if err != nil {
-		return err
-	}
-	if active, err := activeMountedWorkspaceState(cfg); err != nil {
-		return err
-	} else if active.workspace != "" && active.workspace != selection.Name {
-		if active.mountpoint != "" {
-			return fmt.Errorf("active workspace %q mounted at %s\nRun '%s down' before selecting %q", active.workspace, active.mountpoint, filepath.Base(os.Args[0]), selection.Name)
+	paths := make(map[string][]string)
+	for _, rec := range sortedAttachmentRecords(reg.Attachments) {
+		path := strings.TrimSpace(rec.LocalPath)
+		if path == "" {
+			continue
 		}
-		return fmt.Errorf("active workspace %q mounted\nRun '%s down' before selecting %q", active.workspace, filepath.Base(os.Args[0]), selection.Name)
-	}
-
-	if err := applyWorkspaceSelection(&cfg, selection); err != nil {
-		return err
-	}
-	if err := prepareConfigForSave(&cfg); err != nil {
-		return err
-	}
-	if err := saveConfig(cfg); err != nil {
-		return err
-	}
-
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace selected"), []boxRow{
-		{Label: "workspace", Value: selection.Name},
-		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "config", Value: configPathLabel()},
-	})
-	return nil
-}
-
-type mountedWorkspaceState struct {
-	workspace  string
-	mountpoint string
-}
-
-func activeMountedWorkspaceState(cfg config) (mountedWorkspaceState, error) {
-	st, err := loadState()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return mountedWorkspaceState{}, nil
+		display := workspaceListAttachedPath(path)
+		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
+			paths["id:"+id] = append(paths["id:"+id], display)
 		}
-		return mountedWorkspaceState{}, err
+		if name := strings.TrimSpace(rec.Workspace); name != "" {
+			paths["name:"+name] = append(paths["name:"+name], display)
+		}
 	}
+	out := make(map[string]string, len(paths))
+	for key, values := range paths {
+		out[key] = strings.Join(values, ", ")
+	}
+	return out
+}
 
-	backendName := strings.TrimSpace(st.MountBackend)
-	if backendName == "" {
-		backendName = mountBackendNone
+func workspaceListAttached(summary workspaceSummary, attachments map[string]string) string {
+	if len(attachments) == 0 {
+		return "-"
 	}
-	workspace := strings.TrimSpace(st.CurrentWorkspace)
-	if backendName == mountBackendNone || workspace == "" || !runtimeStateMatchesConfig(cfg, st) {
-		return mountedWorkspaceState{}, nil
+	if id := strings.TrimSpace(summary.ID); id != "" {
+		if path := strings.TrimSpace(attachments["id:"+id]); path != "" {
+			return path
+		}
 	}
-	if st.MountPID > 0 && processAlive(st.MountPID) {
-		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.LocalPath)}, nil
+	if name := strings.TrimSpace(summary.Name); name != "" {
+		if path := strings.TrimSpace(attachments["name:"+name]); path != "" {
+			return path
+		}
 	}
+	return "-"
+}
 
-	backend, _, err := backendForState(st)
-	if err != nil {
-		return mountedWorkspaceState{}, err
+func workspaceListAttachedPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "-"
 	}
-	if strings.TrimSpace(st.LocalPath) != "" && backend.IsMounted(st.LocalPath) {
-		return mountedWorkspaceState{workspace: workspace, mountpoint: strings.TrimSpace(st.LocalPath)}, nil
+	home, err := os.UserHomeDir()
+	if err == nil {
+		home = filepath.Clean(home)
+		clean := filepath.Clean(path)
+		if clean == home {
+			return "~"
+		}
+		if rel, err := filepath.Rel(home, clean); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
+			return filepath.Join("~", rel)
+		}
 	}
-	return mountedWorkspaceState{}, nil
+	return path
 }
 
 func cmdWorkspaceDelete(args []string) error {
@@ -468,10 +391,26 @@ func cmdWorkspaceDelete(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceDeleteUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) < 3 {
+	opts, err := parseWorkspaceDeleteArgs(args[2:])
+	if err != nil {
+		return err
+	}
+	if len(opts.names) == 0 {
 		return fmt.Errorf("%s", workspaceDeleteUsageText(filepath.Base(os.Args[0])))
 	}
-	names := args[2:]
+	names := opts.names
+	if !opts.noConfirmation {
+		ok, err := confirmWorkspaceDelete(names)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println()
+			fmt.Println("Delete cancelled.")
+			fmt.Println()
+			return nil
+		}
+	}
 
 	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
@@ -503,90 +442,56 @@ func cmdWorkspaceDelete(args []string) error {
 		deleted = append(deleted, name)
 	}
 
-	rows := make([]boxRow, 0, len(deleted)+1)
-	rows = append(rows, boxRow{Label: "deleted", Value: strconv.Itoa(len(deleted))})
-	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
-	rows = append(rows, boxRow{})
+	rows := make([]outputRow, 0, len(deleted)+1)
+	rows = append(rows, outputRow{Label: "deleted", Value: strconv.Itoa(len(deleted))})
+	rows = append(rows, outputRow{})
 	for _, name := range deleted {
-		rows = append(rows, boxRow{Value: name})
+		rows = append(rows, outputRow{Value: name})
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "workspaces deleted"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "workspaces deleted"), rows)
 	return nil
 }
 
-func cmdWorkspaceClone(args []string) error {
-	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceCloneUsageText(filepath.Base(os.Args[0])))
-		return nil
-	}
-	if len(args) != 3 && len(args) != 4 {
-		return fmt.Errorf("%s", workspaceCloneUsageText(filepath.Base(os.Args[0])))
-	}
-
-	cfg, store, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspace := ""
-	targetDir := ""
-	if len(args) == 4 {
-		workspace = args[2]
-		targetDir = args[3]
-	} else {
-		targetDir = args[2]
-	}
-	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
-	if err != nil {
-		return err
-	}
-	if err := validateAFSName("workspace", workspace); err != nil {
-		return err
-	}
-
-	clonedPath, err := prepareWorkspaceCloneTarget(targetDir)
-	if err != nil {
-		return err
-	}
-
-	if err := materializeWorkspaceToPath(context.Background(), cfg, workspace, clonedPath); err != nil {
-		return err
-	}
-
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace cloned"), []boxRow{
-		{Label: "workspace", Value: workspace},
-		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "path", Value: clonedPath},
-		{Label: "next", Value: "cd " + clonedPath},
-	})
-	return nil
+type workspaceDeleteOptions struct {
+	names          []string
+	noConfirmation bool
 }
 
-func prepareWorkspaceCloneTarget(targetDir string) (string, error) {
-	clonedPath, err := expandPath(targetDir)
-	if err != nil {
-		return "", err
-	}
-
-	info, err := os.Stat(clonedPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return clonedPath, nil
+func parseWorkspaceDeleteArgs(args []string) (workspaceDeleteOptions, error) {
+	var opts workspaceDeleteOptions
+	for _, arg := range args {
+		switch arg {
+		case "--no-confirmation", "--yes", "-y":
+			opts.noConfirmation = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, workspaceDeleteUsageText(filepath.Base(os.Args[0])))
+			}
+			opts.names = append(opts.names, arg)
 		}
-		return "", err
 	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("destination path %s already exists and is not a directory", clonedPath)
+	return opts, nil
+}
+
+func confirmWorkspaceDelete(names []string) (bool, error) {
+	if len(names) == 0 {
+		return false, nil
 	}
-	entries, err := os.ReadDir(clonedPath)
-	if err != nil {
-		return "", err
+	target := names[0]
+	if len(names) > 1 {
+		target = strings.Join(names, ", ")
 	}
-	if len(entries) > 0 {
-		return "", fmt.Errorf("destination path %s already exists and is not an empty directory", clonedPath)
+	fmt.Println()
+	fmt.Printf("Are you sure you want to delete %s? [y/N] ", target)
+	reader := bufio.NewReader(os.Stdin)
+	raw, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(raw) == "" {
+		fmt.Println()
+		return false, nil
 	}
-	return clonedPath, nil
+	fmt.Println()
+	answer := strings.ToLower(strings.TrimSpace(raw))
+	return answer == "y" || answer == "yes", nil
 }
 
 func cmdWorkspaceFork(args []string) error {
@@ -625,11 +530,10 @@ func cmdWorkspaceFork(args []string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace forked"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace forked"), []outputRow{
 		{Label: "workspace", Value: newWorkspace},
 		{Label: "source", Value: sourceSelection.Name},
-		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " workspace use " + newWorkspace},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + newWorkspace + " <directory>"},
 	})
 	return nil
 }
@@ -639,211 +543,18 @@ func cmdWorkspaceImport(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceImportUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	mountAtSource := false
 	importArgs := []string{"import"}
 	for _, arg := range args[2:] {
-		if arg == "--clone-at-source" {
-			return fmt.Errorf(`unknown flag "--clone-at-source"; use "--mount-at-source" instead`)
-		}
-		if arg == "--mount-at-source" {
-			mountAtSource = true
-			continue
-		}
 		importArgs = append(importArgs, arg)
 	}
 	if len(importArgs) < 3 {
 		return fmt.Errorf("%s", workspaceImportUsageText(filepath.Base(os.Args[0])))
 	}
 
-	sourceDir := importArgs[len(importArgs)-1]
 	if err := cmdImport(importArgs); err != nil {
 		return err
 	}
-	if !mountAtSource {
-		return nil
-	}
-
-	workspace := importArgs[len(importArgs)-2]
-	return mountWorkspaceAtSource(workspace, sourceDir)
-}
-
-func mountWorkspaceAtSource(workspace, sourceDir string) (err error) {
-	ctx := context.Background()
-
-	cfg, store, closeStore, err := openAFSStore(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	targetDir, err := expandPath(sourceDir)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(targetDir)
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("%s is not a directory", targetDir)
-	}
-	if entry, mounted := mountTableEntry(targetDir); mounted {
-		return fmt.Errorf("mountpoint %s is already mounted by another filesystem\n  mount entry: %s", targetDir, entry)
-	}
-
-	if _, err := loadStateForMountAtSource(); err != nil {
-		return err
-	}
-
-	mountCfg, err := prepareMountedConfig(cfg, workspace, targetDir)
-	if err != nil {
-		return err
-	}
-	backend, backendName, err := backendForConfig(mountCfg)
-	if err != nil {
-		return err
-	}
-
-	backupDir := targetDir + ".pre-afs"
-	if _, err := os.Stat(backupDir); err == nil {
-		return fmt.Errorf("backup path %s already exists; move it aside before mounting at source", backupDir)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
-	if err := store.checkImportLock(ctx, workspace); err != nil {
-		return fmt.Errorf("cannot mount workspace %q at source: %w", workspace, err)
-	}
-
-	prepareStep := startStep("Opening live workspace")
-	mountKey, mountedHeadSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
-	if err != nil {
-		prepareStep.fail(err.Error())
-		return err
-	}
-	if initialized {
-		prepareStep.succeed(workspace + " (initialized)")
-	} else {
-		prepareStep.succeed(workspace)
-	}
-
-	rollbackArchive := false
-	cleanupMountpoint := false
-	var started mountStartResult
-	defer func() {
-		if err == nil {
-			return
-		}
-		if started.PID > 0 && processAlive(started.PID) {
-			_ = terminatePID(started.PID, 2*time.Second)
-		}
-		if backend != nil {
-			_ = backend.Unmount(targetDir)
-		}
-		if cleanupMountpoint {
-			_ = os.RemoveAll(targetDir)
-			_ = os.Remove(targetDir)
-		}
-		if rollbackArchive {
-			_ = os.Rename(backupDir, targetDir)
-		}
-	}()
-
-	archiveStep := startStep("Archiving source directory")
-	if err := os.Rename(targetDir, backupDir); err != nil {
-		archiveStep.fail(err.Error())
-		return err
-	}
-	rollbackArchive = true
-	cleanupMountpoint = true
-	archiveStep.succeed(backupDir)
-
-	mountStep := startStep("Mounting workspace at source")
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		mountStep.fail(err.Error())
-		return err
-	}
-	mountCfg, err = prepareRuntimeMountConfig(mountCfg, backendName)
-	if err != nil {
-		mountStep.fail(err.Error())
-		return err
-	}
-	started, err = backend.Start(mountCfg)
-	if err != nil {
-		mountStep.fail(err.Error())
-		return err
-	}
-	if err := backend.WaitForMount(mountCfg, started, 8*time.Second); err != nil {
-		mountStep.fail("timeout")
-		return fmt.Errorf("mount did not become ready: %w", err)
-	}
-	mountStep.succeed(targetDir)
-
-	st := state{
-		StartedAt:            time.Now().UTC(),
-		RedisAddr:            mountCfg.RedisAddr,
-		RedisDB:              mountCfg.RedisDB,
-		CurrentWorkspace:     workspace,
-		MountedHeadSavepoint: mountedHeadSavepoint,
-		MountPID:             started.PID,
-		MountBackend:         backendName,
-		ReadOnly:             mountCfg.ReadOnly,
-		MountEndpoint:        started.Endpoint,
-		LocalPath:            mountCfg.LocalPath,
-		RedisKey:             mountKey,
-		MountLog:             mountCfg.MountLog,
-		MountBin:             mountCfg.MountBin,
-		ArchivePath:          backupDir,
-	}
-	if err := saveState(st); err != nil {
-		return err
-	}
-
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace mounted at source"), []boxRow{
-		{Label: "workspace", Value: workspace},
-		{Label: "database", Value: configRemoteLabel(cfg)},
-		{Label: "path", Value: targetDir},
-		{Label: "backup", Value: backupDir},
-		{Label: "stop", Value: filepath.Base(os.Args[0]) + " down"},
-	})
 	return nil
-}
-
-func loadStateForMountAtSource() (state, error) {
-	st, err := loadState()
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return state{}, nil
-		}
-		return state{}, err
-	}
-
-	backendName := strings.TrimSpace(st.MountBackend)
-	if backendName == "" {
-		backendName = mountBackendNone
-	}
-	if backendName != mountBackendNone || strings.TrimSpace(st.ArchivePath) != "" {
-		return state{}, fmt.Errorf("AFS already has an active mounted filesystem state; run '%s down' first", filepath.Base(os.Args[0]))
-	}
-	return st, nil
-}
-
-func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
-	_, store, closeStore, err := openAFSStore(ctx)
-	if err != nil {
-		return err
-	}
-	defer closeStore()
-
-	workspaceMeta, err := store.getWorkspaceMeta(ctx, workspace)
-	if err != nil {
-		return err
-	}
-	m, err := store.getManifest(ctx, workspace, workspaceMeta.HeadSavepoint)
-	if err != nil {
-		return err
-	}
-	return materializeManifestToPath(ctx, store, workspace, m, targetDir)
 }
 
 func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
@@ -876,7 +587,7 @@ func cmdCheckpointList(args []string) error {
 	if len(args) == 3 {
 		workspace = args[2]
 	}
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
+	selection, err := resolveCheckpointWorkspaceSelection(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
@@ -893,78 +604,88 @@ func cmdCheckpointList(args []string) error {
 	if detail.DraftState != "dirty" {
 		activeCheckpointID = detail.HeadCheckpointID
 	}
-	rows := make([]boxRow, 0, len(checkpoints))
+	fmt.Println()
+	fmt.Println("checkpoints in workspace: " + selection.Name)
+	fmt.Println()
 	if len(checkpoints) == 0 {
-		rows = append(rows, boxRow{Value: clr(ansiDim, "No checkpoints found")})
+		fmt.Println("No checkpoints found")
 	} else {
-		layout := newCheckpointListLayout(checkpoints, activeCheckpointID)
-		rows = append(rows, boxRow{Value: layout.header()})
-		for _, meta := range checkpoints {
-			rows = append(rows, boxRow{Value: layout.row(meta, activeCheckpointID)})
-		}
+		printPlainTable(
+			[]string{"Checkpoint", "Active", "Created", "Size"},
+			checkpointTableRows(checkpoints, activeCheckpointID),
+		)
 	}
-	printBox(clr(ansiBold, "checkpoints in workspace: "+selection.Name), rows)
+	fmt.Println()
 	return nil
 }
 
-const checkpointListColumnSep = "  "
-
-type checkpointListLayout struct {
-	nameWidth    int
-	activeWidth  int
-	createdWidth int
-	sizeWidth    int
+func resolveCheckpointWorkspaceSelection(ctx context.Context, cfg config, service afsControlPlane, workspace string) (workspaceSelection, error) {
+	if strings.TrimSpace(workspace) != "" {
+		return resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
+	}
+	return promptCheckpointWorkspaceSelection(ctx, service)
 }
 
-func newCheckpointListLayout(items []controlplane.CheckpointSummary, activeCheckpointID string) checkpointListLayout {
-	nameHeader := "Checkpoint"
-	activeHeader := "Active"
-	createdHeader := "Created"
-	sizeHeader := "Size"
-
-	layout := checkpointListLayout{
-		nameWidth:    runeWidth(nameHeader),
-		activeWidth:  runeWidth(activeHeader),
-		createdWidth: runeWidth(createdHeader),
-		sizeWidth:    runeWidth(sizeHeader),
+func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlPlane) (workspaceSelection, error) {
+	workspaces, err := service.ListWorkspaceSummaries(ctx)
+	if err != nil {
+		return workspaceSelection{}, err
 	}
+	if len(workspaces.Items) == 0 {
+		return workspaceSelection{}, fmt.Errorf("no workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
+	}
+
+	fmt.Println()
+	fmt.Println("Select workspace")
+	fmt.Println()
+	printPlainTable([]string{"#", "Workspace", "Updated", "Attached"}, checkpointWorkspacePromptRows(workspaces.Items, workspaceListAttachments()))
+	fmt.Println()
+	fmt.Print("Workspace: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	raw, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(raw) == "" {
+		fmt.Println()
+		return workspaceSelection{}, errors.New("workspace selection cancelled")
+	}
+	choiceText := strings.TrimSpace(raw)
+	if choiceText == "" {
+		fmt.Println()
+		return workspaceSelection{}, errors.New("workspace selection cancelled")
+	}
+	idx, err := strconv.Atoi(choiceText)
+	if err != nil || idx < 1 || idx > len(workspaces.Items) {
+		return workspaceSelection{}, fmt.Errorf("invalid selection %q", choiceText)
+	}
+	fmt.Println()
+	selected := workspaces.Items[idx-1]
+	return workspaceSelection{ID: selected.ID, Name: selected.Name}, nil
+}
+
+func checkpointWorkspacePromptRows(workspaces []workspaceSummary, attachments map[string]string) [][]string {
+	rows := make([][]string, 0, len(workspaces))
+	for i, workspace := range workspaces {
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1),
+			workspace.Name,
+			workspaceListUpdated(workspace),
+			workspaceListAttached(workspace, attachments),
+		})
+	}
+	return rows
+}
+
+func checkpointTableRows(items []controlplane.CheckpointSummary, activeCheckpointID string) [][]string {
+	rows := make([][]string, 0, len(items))
 	for _, item := range items {
-		layout.nameWidth = maxInt(layout.nameWidth, runeWidth(checkpointListName(item)))
-		layout.activeWidth = maxInt(layout.activeWidth, runeWidth(checkpointListActive(item, activeCheckpointID)))
-		layout.createdWidth = maxInt(layout.createdWidth, runeWidth(checkpointListCreated(item)))
-		layout.sizeWidth = maxInt(layout.sizeWidth, runeWidth(checkpointListSize(item)))
+		rows = append(rows, []string{
+			checkpointListName(item),
+			checkpointListActive(item, activeCheckpointID),
+			checkpointListCreated(item),
+			checkpointListSize(item),
+		})
 	}
-
-	maxContentWidth := maxBoxText - 3*runeWidth(checkpointListColumnSep)
-	for layout.nameWidth+layout.activeWidth+layout.createdWidth+layout.sizeWidth > maxContentWidth {
-		switch {
-		case layout.nameWidth > runeWidth(nameHeader):
-			layout.nameWidth--
-		case layout.createdWidth > runeWidth(createdHeader):
-			layout.createdWidth--
-		default:
-			return layout
-		}
-	}
-	return layout
-}
-
-func (l checkpointListLayout) header() string {
-	return strings.Join([]string{
-		clr(ansiDim, padVisibleText("Checkpoint", l.nameWidth)),
-		clr(ansiDim, padVisibleText("Active", l.activeWidth)),
-		clr(ansiDim, padVisibleText("Created", l.createdWidth)),
-		clr(ansiDim, padVisibleText("Size", l.sizeWidth)),
-	}, checkpointListColumnSep)
-}
-
-func (l checkpointListLayout) row(item controlplane.CheckpointSummary, activeCheckpointID string) string {
-	return strings.Join([]string{
-		padVisibleText(fitDisplayText(checkpointListName(item), l.nameWidth), l.nameWidth),
-		padVisibleText(checkpointListActive(item, activeCheckpointID), l.activeWidth),
-		padVisibleText(fitDisplayText(checkpointListCreated(item), l.createdWidth), l.createdWidth),
-		padVisibleText(checkpointListSize(item), l.sizeWidth),
-	}, checkpointListColumnSep)
+	return rows
 }
 
 func checkpointListName(item controlplane.CheckpointSummary) string {
@@ -1013,7 +734,7 @@ func cmdCheckpointShow(args []string) error {
 	}
 	defer closeStore()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, parsed.workspace)
+	selection, err := resolveCheckpointWorkspaceSelection(context.Background(), cfg, service, parsed.workspace)
 	if err != nil {
 		return err
 	}
@@ -1069,7 +790,7 @@ func parseCheckpointShowArgs(args []string) (checkpointShowArgs, error) {
 }
 
 func printCheckpointShow(workspace string, detail controlplane.CheckpointDetail, activeCheckpointID string) {
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: detail.ID},
 		{Label: "active", Value: yesNo(detail.ID != "" && detail.ID == activeCheckpointID)},
@@ -1077,33 +798,33 @@ func printCheckpointShow(workspace string, detail controlplane.CheckpointDetail,
 		{Label: "author", Value: checkpointDisplayDefault(detail.Author, "afs")},
 	}
 	if strings.TrimSpace(detail.Description) != "" {
-		rows = append(rows, boxRow{Label: "description", Value: detail.Description})
+		rows = append(rows, outputRow{Label: "description", Value: detail.Description})
 	}
 	if strings.TrimSpace(detail.Kind) != "" {
-		rows = append(rows, boxRow{Label: "kind", Value: detail.Kind})
+		rows = append(rows, outputRow{Label: "kind", Value: detail.Kind})
 	}
 	if strings.TrimSpace(detail.Source) != "" {
-		rows = append(rows, boxRow{Label: "source", Value: detail.Source})
+		rows = append(rows, outputRow{Label: "source", Value: detail.Source})
 	}
 	if actor := checkpointDetailActor(detail); actor != "" {
-		rows = append(rows, boxRow{Label: "actor", Value: actor})
+		rows = append(rows, outputRow{Label: "actor", Value: actor})
 	}
 	if strings.TrimSpace(detail.SessionID) != "" {
-		rows = append(rows, boxRow{Label: "session", Value: detail.SessionID})
+		rows = append(rows, outputRow{Label: "session", Value: detail.SessionID})
 	}
 	if strings.TrimSpace(detail.ParentCheckpointID) != "" {
-		rows = append(rows, boxRow{Label: "parent", Value: detail.ParentCheckpointID})
+		rows = append(rows, outputRow{Label: "parent", Value: detail.ParentCheckpointID})
 	}
 	rows = append(rows,
-		boxRow{Label: "files", Value: strconv.Itoa(detail.FileCount)},
-		boxRow{Label: "folders", Value: strconv.Itoa(detail.FolderCount)},
-		boxRow{Label: "size", Value: formatBytes(detail.TotalBytes)},
-		boxRow{Label: "changes", Value: checkpointDiffSummary(detail.ChangeSummary)},
+		outputRow{Label: "files", Value: strconv.Itoa(detail.FileCount)},
+		outputRow{Label: "folders", Value: strconv.Itoa(detail.FolderCount)},
+		outputRow{Label: "size", Value: formatBytes(detail.TotalBytes)},
+		outputRow{Label: "changes", Value: checkpointDiffSummary(detail.ChangeSummary)},
 	)
 	if strings.TrimSpace(detail.ManifestHash) != "" {
-		rows = append(rows, boxRow{Label: "manifest", Value: detail.ManifestHash})
+		rows = append(rows, outputRow{Label: "manifest", Value: detail.ManifestHash})
 	}
-	printBox(clr(ansiBold, "checkpoint"), rows)
+	printSection(clr(ansiBold, "checkpoint"), rows)
 }
 
 func checkpointDetailActor(detail controlplane.CheckpointDetail) string {
@@ -1160,7 +881,7 @@ func cmdCheckpointDiff(args []string) error {
 	}
 	defer closeStore()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, parsed.workspace)
+	selection, err := resolveCheckpointWorkspaceSelection(context.Background(), cfg, service, parsed.workspace)
 	if err != nil {
 		return err
 	}
@@ -1256,33 +977,33 @@ func checkpointDiffView(raw string) (string, error) {
 
 func printCheckpointDiff(workspace string, diff controlplane.WorkspaceDiffResponse) {
 	summary := diff.Summary
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "base", Value: checkpointDiffDisplayView(diff.Base)},
 		{Label: "target", Value: checkpointDiffDisplayView(diff.Head)},
 		{Label: "changes", Value: checkpointDiffSummary(summary)},
 	}
 	if len(diff.Entries) == 0 {
-		rows = append(rows, boxRow{})
-		rows = append(rows, boxRow{Value: clr(ansiDim, "No changes")})
-		printBox(clr(ansiBold, "checkpoint diff"), rows)
+		rows = append(rows, outputRow{})
+		rows = append(rows, outputRow{Value: clr(ansiDim, "No changes")})
+		printSection(clr(ansiBold, "checkpoint diff"), rows)
 		return
 	}
-	rows = append(rows, boxRow{})
+	rows = append(rows, outputRow{})
 	limit := len(diff.Entries)
 	if limit > 100 {
 		limit = 100
 	}
 	for _, entry := range diff.Entries[:limit] {
-		rows = append(rows, boxRow{
+		rows = append(rows, outputRow{
 			Label: checkpointDiffOpLabel(entry.Op),
 			Value: checkpointDiffEntryValue(entry),
 		})
 	}
 	if extra := len(diff.Entries) - limit; extra > 0 {
-		rows = append(rows, boxRow{Value: fmt.Sprintf("%d more changes not shown", extra)})
+		rows = append(rows, outputRow{Value: fmt.Sprintf("%d more changes not shown", extra)})
 	}
-	printBox(clr(ansiBold, "checkpoint diff"), rows)
+	printSection(clr(ansiBold, "checkpoint diff"), rows)
 	printCheckpointDiffText(diff)
 }
 
@@ -1291,7 +1012,7 @@ func checkpointDiffDisplayView(state controlplane.DiffState) string {
 		return state.CheckpointID
 	}
 	if state.View == "working-copy" || state.View == "head" {
-		return "active workspace"
+		return "workspace"
 	}
 	return state.View
 }
@@ -1462,13 +1183,9 @@ func cmdCheckpointCreate(args []string) error {
 		workspace = parsed.positionals[0]
 		checkpointID = parsed.positionals[1]
 	case 1:
-		if hasCurrentWorkspaceSelection(cfg) {
-			checkpointID = parsed.positionals[0]
-		} else {
-			workspace = parsed.positionals[0]
-		}
+		checkpointID = parsed.positionals[0]
 	}
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
+	selection, err := resolveCheckpointWorkspaceSelection(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
@@ -1477,33 +1194,24 @@ func cmdCheckpointCreate(args []string) error {
 	}
 
 	step := startStep("Saving checkpoint")
-	saved, err := saveCheckpointFromLiveWithOptions(context.Background(), service, selection.Name, checkpointID, controlplane.SaveCheckpointFromLiveOptions{
-		Description: parsed.description,
+	_, err = saveCheckpointFromLiveWithOptions(context.Background(), service, selection.Name, checkpointID, controlplane.SaveCheckpointFromLiveOptions{
+		Description:    parsed.description,
+		AllowUnchanged: true,
 	})
 	if err != nil {
 		step.fail(err.Error())
 		return err
 	}
-	if !saved {
-		step.succeed("no changes")
-		printBox(clr(ansiBold, "checkpoint unchanged"), []boxRow{
-			{Label: "workspace", Value: selection.Name},
-			{Label: "database", Value: configRemoteLabel(cfg)},
-			{Label: "result", Value: "no changes"},
-		})
-		return nil
-	}
 	step.succeed(checkpointID)
 
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "checkpoint", Value: checkpointID},
 	}
 	if parsed.description != "" {
-		rows = append(rows, boxRow{Label: "description", Value: parsed.description})
+		rows = append(rows, outputRow{Label: "description", Value: parsed.description})
 	}
-	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
-	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint created"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "checkpoint created"), rows)
 	return nil
 }
 
@@ -1579,7 +1287,7 @@ func cmdCheckpointRestore(args []string) error {
 	} else {
 		checkpointID = args[2]
 	}
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
+	selection, err := resolveCheckpointWorkspaceSelection(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
@@ -1624,15 +1332,14 @@ func restoreCheckpoint(ctx context.Context, workspace, checkpointID string) erro
 		}
 	}
 
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "checkpoint", Value: checkpointID},
 	}
 	if result.SafetyCheckpointCreated {
-		rows = append(rows, boxRow{Label: "safety checkpoint", Value: result.SafetyCheckpointID})
+		rows = append(rows, outputRow{Label: "safety checkpoint", Value: result.SafetyCheckpointID})
 	}
-	rows = append(rows, boxRow{Label: "database", Value: configRemoteLabel(cfg)})
-	printBox(markerSuccess+" "+clr(ansiBold, "checkpoint restored"), rows)
+	printSection(markerSuccess+" "+clr(ansiBold, "checkpoint restored"), rows)
 	return nil
 }
 
@@ -1791,33 +1498,41 @@ func workspaceListSelected(cfg config, summary workspaceSummary) bool {
 }
 
 func workspaceUsageText(bin string) string {
+	return workspaceUsageTextFor(bin, "ws")
+}
+
+func workspaceUsageTextFor(bin, group string) string {
+	if strings.TrimSpace(group) == "" {
+		group = "workspace"
+	}
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace <subcommand>
+  %s %s <subcommand>
 
 Subcommands:
+  attach [<workspace> [directory]]             Attach a workspace to a local folder
+  detach [--delete] [<workspace|directory>]    Detach a workspace
   create <workspace>                           Create an empty workspace
-  list                                         List workspaces in Redis
-  current                                      Show the current workspace
-  use <workspace>                              Set the current workspace
-  clone [workspace] <directory>                Clone a workspace into a local directory
+  list                                         List workspaces
+  info <workspace>                             Show workspace details
+  import [--force] [--attach-at-source] <workspace> <directory>
+                                                Import a local directory into a workspace
   fork [source-workspace] <new-workspace>      Fork a workspace from its current checkpoint
-  delete <workspace>...                       Delete workspaces and local materialized state
-  import [--force] [--mount-at-source] <workspace> <directory>
-                                               Import a local directory into a workspace
+  delete [--no-confirmation] <workspace>...    Delete workspaces and local materialized state
 
 Examples:
-  %s workspace create demo
-  %s workspace use demo
-  %s workspace clone demo ~/src/demo
-  %s workspace fork demo demo-copy
+  %s %s attach demo ~/demo
+  %s %s detach demo
+  %s %s create demo
+  %s %s list
+  %s %s import demo ~/src/demo
 
-Run '%s workspace <subcommand> --help' for details.
-`, bin, bin, bin, bin, bin, bin)
+Run '%s %s <subcommand> --help' for details.
+`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
 }
 
 func workspaceCreateUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace create [--database <database-id|database-name>] <workspace>
+  %s ws create [--database <database-id|database-name>] <workspace>
 
 Create an empty workspace with an initial checkpoint named "initial".
 `, bin)
@@ -1825,108 +1540,101 @@ Create an empty workspace with an initial checkpoint named "initial".
 
 func workspaceListUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace list
+  %s ws list
 
 List workspaces stored in Redis, along with checkpoint counts and creation time.
 `, bin)
 }
 
-func workspaceCurrentUsageText(bin string) string {
+func workspaceInfoUsageText(bin, group string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace current
+  %s %s info <workspace>
 
-Show the current workspace selection AFS will use when a workspace argument is omitted.
-`, bin)
-}
-
-func workspaceUseUsageText(bin string) string {
-	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace use <workspace-name-or-id>
-
-Set the current workspace AFS will use when a workspace argument is omitted.
-When names collide across databases, use the workspace ID from '%s workspace list'.
-`, bin, bin)
-}
-
-func workspaceCloneUsageText(bin string) string {
-	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace clone [workspace] <directory>
-
-Clone a workspace into a local directory at its current checkpoint.
-The destination must not already contain files.
-
-If [workspace] is omitted, AFS uses the current workspace.
-`, bin)
+Show workspace metadata without attaching it locally.
+`, bin, group)
 }
 
 func workspaceForkUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace fork [source-workspace] <new-workspace>
+  %s ws fork [source-workspace] <new-workspace>
 
 Create a new workspace from the source workspace's current checkpoint.
 
-If [source-workspace] is omitted, AFS uses the current workspace.
+If [source-workspace] is omitted, AFS uses the attached workspace when one is
+unambiguous.
 `, bin)
 }
 
 func workspaceDeleteUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace delete <workspace>...
+  %s ws delete [--no-confirmation] <workspace>...
 
 Delete one or more workspaces from Redis and remove their local materialized state.
+By default, asks for confirmation before deleting.
 `, bin)
 }
 
 func workspaceImportUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s workspace import [--force] [--database <database-id|database-name>] [--mount-at-source] <workspace> <directory>
+  %s ws import [--force] [--attach-at-source] [--database <database-id|database-name>] <workspace> <directory>
 
 Import a local directory into a workspace.
 
 Options:
-  --force            Replace an existing workspace
-  --database         Override the control-plane database for this import
-  --mount-at-source  Archive the source directory to <directory>.pre-afs and
-                     mount the imported workspace at the original path
+  --force             Replace an existing workspace
+  --attach-at-source  Attach the source directory after import
+  --database          Override the control-plane database for this import
 `, bin)
 }
 
 func checkpointUsageText(bin string) string {
+	return checkpointUsageTextFor(bin, "cp")
+}
+
+func checkpointUsageTextFor(bin, group string) string {
+	if strings.TrimSpace(group) == "" {
+		group = "cp"
+	}
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint <subcommand>
+  %s %s <subcommand>
 
-	Subcommands:
-	  list [workspace]                     List checkpoints for a workspace
-	  create [workspace] [checkpoint]     Create a checkpoint from the current workspace state
-	  show [workspace] <checkpoint>       Show checkpoint metadata
-	  diff [workspace] <base> <target>    Compare two checkpoints
-	  restore [workspace] <checkpoint>    Restore a workspace to a checkpoint
+Subcommands:
+  list [workspace]                     List checkpoints for a workspace
+  create [workspace] [checkpoint]      Create a checkpoint
+  show [workspace] <checkpoint>        Show checkpoint metadata
+  diff [workspace] <base> <target>     Compare two checkpoints
+  restore [workspace] <checkpoint>     Restore a workspace to a checkpoint
 
-	Examples:
-	  %s checkpoint list demo
-	  %s checkpoint create demo before-refactor
-	  %s checkpoint show demo before-refactor
-	  %s checkpoint diff demo initial before-refactor
-	  %s checkpoint restore demo initial
+If workspace is omitted, AFS prompts for one.
 
-	Run '%s checkpoint <subcommand> --help' for details.
-	`, bin, bin, bin, bin, bin, bin, bin)
+Examples:
+  %s %s list demo
+  %s %s create demo before-refactor
+  %s %s show demo before-refactor
+  %s %s diff demo initial before-refactor
+  %s %s restore demo initial
+
+Run '%s %s <subcommand> --help' for details.
+`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
 }
 
 func checkpointListUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint list [workspace]
+  %s cp list [workspace]
 
 List checkpoints for a workspace, newest first.
+If workspace is omitted, AFS prompts for one.
 `, bin)
 }
 
 func checkpointCreateUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint create [workspace] [checkpoint] [--description <text>]
+  %s cp create [workspace] [checkpoint] [--description <text>]
 
 Create a checkpoint from the workspace's active state.
 If [checkpoint] is omitted, AFS generates a timestamped name.
+If workspace is omitted, AFS prompts for one. With one positional argument,
+AFS treats it as the checkpoint name.
 
 Options:
   --description <text>  Human-readable checkpoint description
@@ -1935,9 +1643,10 @@ Options:
 
 func checkpointShowUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint show [workspace] <checkpoint> [--json]
+  %s cp show [workspace] <checkpoint> [--json]
 
 Show checkpoint metadata and the change summary from its parent checkpoint.
+If workspace is omitted, AFS prompts for one.
 
 Options:
   --json  Emit structured JSON
@@ -1946,11 +1655,12 @@ Options:
 
 func checkpointDiffUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint diff [workspace] <base-checkpoint> <target-checkpoint> [--json]
-  %s checkpoint diff [workspace] <checkpoint> --active [--json]
+  %s cp diff [workspace] <base-checkpoint> <target-checkpoint> [--json]
+  %s cp diff [workspace] <checkpoint> --active [--json]
 
-Compare saved filesystem states. Use --active to compare a checkpoint to the
-active workspace state.
+Compare saved filesystem states. Use --active to compare a checkpoint to
+workspace state.
+If workspace is omitted, AFS prompts for one.
 
 Options:
   --json  Emit structured JSON, including text diff hunks when available
@@ -1959,8 +1669,9 @@ Options:
 
 func checkpointRestoreUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s checkpoint restore [workspace] <checkpoint>
+  %s cp restore [workspace] <checkpoint>
 
-Restore the active workspace state to the selected checkpoint.
+Restore workspace state to the selected checkpoint.
+If workspace is omitted, AFS prompts for one.
 `, bin)
 }

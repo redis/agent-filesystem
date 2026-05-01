@@ -353,14 +353,16 @@ type SaveCheckpointRequest struct {
 	DirCount              int
 	TotalBytes            int64
 	SkipWorkspaceRootSync bool
+	AllowUnchanged        bool
 }
 
 type SaveCheckpointFromLiveOptions struct {
-	Description string
-	Kind        string
-	Source      string
-	Author      string
-	CreatedBy   string
+	Description    string
+	Kind           string
+	Source         string
+	Author         string
+	CreatedBy      string
+	AllowUnchanged bool
 }
 
 type workspaceUsageStats struct {
@@ -491,7 +493,7 @@ func (s *Service) saveCheckpointFromLive(ctx context.Context, workspace, checkpo
 	// Check dirty state — if the workspace root is known-clean, skip.
 	if dirty, known, err := WorkspaceRootDirtyState(ctx, s.store, storageID); err != nil {
 		return false, fmt.Errorf("save-from-live dirty state: %w", err)
-	} else if known && !dirty {
+	} else if known && !dirty && !options.AllowUnchanged {
 		return false, nil
 	}
 
@@ -521,6 +523,7 @@ func (s *Service) saveCheckpointFromLive(ctx context.Context, workspace, checkpo
 		DirCount:              dirCount,
 		TotalBytes:            totalBytes,
 		SkipWorkspaceRootSync: true,
+		AllowUnchanged:        options.AllowUnchanged,
 	})
 	if err != nil {
 		return false, fmt.Errorf("save-from-live save checkpoint: %w", err)
@@ -1422,7 +1425,7 @@ func (s *Service) saveCheckpoint(ctx context.Context, input SaveCheckpointReques
 	if err != nil {
 		return false, err
 	}
-	if manifestEquivalent(headManifest, input.Manifest) {
+	if manifestEquivalent(headManifest, input.Manifest) && !input.AllowUnchanged {
 		return false, nil
 	}
 

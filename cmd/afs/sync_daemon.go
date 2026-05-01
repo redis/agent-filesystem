@@ -27,6 +27,9 @@ type syncDaemonConfig struct {
 	WatcherDebounce time.Duration
 	Readonly        bool
 	Interactive     bool // when true, log every file event to stderr
+	// ApprovedInitialAttachMerge is set by the attach preflight after it has
+	// shown the local/remote plan and confirmed the safe union with the user.
+	ApprovedInitialAttachMerge bool
 	// Chunk-level delta sync knobs. Zero values use defaults.
 	ChunkSize      int // bytes per chunk (default 256 KB)
 	ChunkThreshold int // minimum file size to enable chunked sync (default 1 MB)
@@ -293,7 +296,7 @@ func (d *syncDaemon) Snapshot() *SyncState {
 }
 
 // Run is a blocking helper that starts the daemon and waits for ctx to be
-// cancelled. Used by `afs up` foreground mode and tests.
+// cancelled. Used by foreground sync mode and tests.
 func (d *syncDaemon) Run(ctx context.Context) error {
 	if err := d.Start(ctx); err != nil {
 		return err
@@ -330,12 +333,69 @@ func (d *syncDaemon) validateInitialSyncSafety(ctx context.Context) error {
 		return nil
 	}
 
+	if d.cfg.ApprovedInitialAttachMerge {
+		return nil
+	}
+
+	equivalent, err := d.localRemoteTreesEquivalent(ctx)
+	if err != nil {
+		return fmt.Errorf("compare local and remote workspace: %w", err)
+	}
+	if equivalent {
+		return nil
+	}
+
 	return fmt.Errorf(
-		"refusing first sync for workspace %q: local path %q is already populated and the remote workspace is not empty\nUse an empty directory for `afs up`, or use `afs workspace clone %s <directory>` to download the existing workspace first",
+		"Attach blocked for workspace %q: local path %q is already populated and the remote workspace is not empty.\nUse an empty directory, import the local directory into a new workspace, or move conflicting files aside first.",
 		d.cfg.Workspace,
 		d.cfg.LocalRoot,
-		d.cfg.Workspace,
 	)
+}
+
+func (d *syncDaemon) localRemoteTreesEquivalent(ctx context.Context) (bool, error) {
+	local, err := d.full.scanLocalMeta()
+	if err != nil {
+		return false, err
+	}
+	remote, err := d.full.scanRemoteMeta(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	if len(local) != len(remote) {
+		return false, nil
+	}
+	for path, localMeta := range local {
+		remoteMeta, ok := remote[path]
+		if !ok || localMeta.kind != remoteMeta.kind {
+			return false, nil
+		}
+		switch localMeta.kind {
+		case "dir":
+			continue
+		case "symlink":
+			if localMeta.target != remoteMeta.target {
+				return false, nil
+			}
+		case "file":
+			if localMeta.size != remoteMeta.size {
+				return false, nil
+			}
+			localData, err := os.ReadFile(filepath.Join(d.cfg.LocalRoot, filepath.FromSlash(path)))
+			if err != nil {
+				return false, err
+			}
+			remoteData, err := d.cfg.FS.Cat(ctx, absoluteRemotePath(path))
+			if err != nil {
+				return false, err
+			}
+			if sha256Hex(localData) != sha256Hex(remoteData) {
+				return false, nil
+			}
+		default:
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 func (d *syncDaemon) hasSyncableLocalEntries() (bool, error) {

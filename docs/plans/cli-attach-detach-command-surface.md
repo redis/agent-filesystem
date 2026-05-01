@@ -8,17 +8,17 @@ Status: draft for review.
 AFS should make the local lifecycle feel like attaching a durable remote
 workspace to a normal local directory, then detaching it when work is done.
 
-The current `afs up` and `afs down` vocabulary is lifecycle-oriented and maps
-to the implementation, but the user-facing model should be:
+The accepted vocabulary is `afs ws attach` and `afs ws detach`. The
+user-facing model is:
 
 - A workspace is a durable remote filesystem tree.
 - An attached directory is the local working surface for that workspace.
 - Detach stops AFS from managing the local surface.
 - Deleting local files is an explicit opt-in, not the default detach behavior.
 
-This plan focuses first on the CLI command surface and the transition from
-`up`/`down` to `attach`/`detach`. Remote filesystem inspection, tags, richer
-logs, and multi-attach support are follow-up surfaces.
+This plan focuses first on the CLI command surface and the transition to
+attach/detach language. Remote filesystem inspection, tags, richer logs, and
+multi-attach support are follow-up surfaces.
 
 ## Product Principles
 
@@ -35,65 +35,43 @@ logs, and multi-attach support are follow-up surfaces.
 
 ## Current State
 
-The current CLI surface has:
+The target CLI surface has:
 
 ```bash
-afs up [flags]
-afs down
-afs workspace import [--force] [--database <database>] [--mount-at-source] <workspace> <directory>
-afs workspace clone [workspace] <directory>
-afs workspace use <workspace>
+afs ws attach [workspace] [directory]
+afs ws detach
+afs ws import [--force] [--attach-at-source] [--database <database>] <workspace> <directory>
 afs status
-afs session log
-afs grep
+afs log
+afs fs grep
 ```
 
 Important current behavior:
 
-- `afs up` starts the configured local surface for the current workspace.
-- `afs down` stops the active runtime state.
-- Sync-mode shutdown currently removes the local sync folder.
-- Mount-at-source import archives the original directory, mounts at the source
-  path, and restores the archive on shutdown.
-- The runtime state model currently assumes one active local surface per CLI
-  config.
+- `afs ws attach` starts the local surface for an explicit workspace.
+- `afs ws detach` stops managing the attached local folder.
+- Sync-mode detach preserves local files by default.
+- Import with `--attach-at-source` attaches the source directory after import.
+- The attachment registry supports multiple workspace/folder attachments.
 
 ## Target Command Shape
 
 Recommended canonical commands:
 
 ```bash
-afs workspace list
-afs workspace create <workspace>
-afs workspace delete <workspace>
-afs workspace attach <workspace> <directory> [--verbose]
-afs workspace detach <directory> [--delete]
-```
-
-Short-form option for review:
-
-```bash
 afs ws list
+afs ws create <workspace>
+afs ws delete <workspace>
 afs ws attach <workspace> <directory> [--verbose]
 afs ws detach <directory> [--delete]
 ```
 
-Decision needed: either make `ws` a first-class documented command group, or do
-not add it. Avoid a hidden alias.
-
-Top-level lifecycle convenience:
-
-```bash
-afs attach <workspace> <directory> [--verbose]
-afs detach <directory> [--delete]
-```
-
-Recommendation: add top-level `attach`/`detach` because they match the primary
-local lifecycle. Keep `workspace attach`/`workspace detach` as the grouped form.
+`ws` is the documented workspace command group. Root-level workspace shortcuts
+may exist for compatibility, but they are not documented.
 
 ## Attach Semantics
 
-`afs attach <workspace> <directory>` should:
+`afs ws attach <workspace> <directory>` should:
 
 1. Resolve the workspace by stable workspace identity.
 2. Resolve the target directory to an absolute path.
@@ -101,7 +79,7 @@ local lifecycle. Keep `workspace attach`/`workspace detach` as the grouped form.
 4. Start the local AFS runtime for that workspace and path.
 5. Reconcile local and remote state.
 6. Print a concise operation summary.
-7. Persist runtime state so `afs status` and `afs detach` can describe the
+7. Persist runtime state so `afs status` and `afs ws detach` can describe the
    attachment.
 
 For the first slice, attach should target sync mode. Mount mode can remain an
@@ -116,7 +94,7 @@ path    /Users/example/agent-1-memories
 mode    sync
 files   42 scanned, 12 uploaded, 8 downloaded, 1 skipped
 
-Detach with: afs detach /Users/example/agent-1-memories
+Detach with: afs ws detach /Users/example/agent-1-memories
 ```
 
 `--verbose` should print a stable operation table:
@@ -139,7 +117,7 @@ Operation codes for attach/sync output:
 
 ## Detach Semantics
 
-`afs detach <directory>` should:
+`afs ws detach <directory>` should:
 
 1. Find the active runtime state for the directory.
 2. Stop the daemon or unmount the mounted surface.
@@ -196,18 +174,17 @@ solve the whole remote-filesystem UX at once.
 
 Tasks:
 
-1. Add top-level routing for `afs attach` and `afs detach`.
-2. Add grouped routing for `afs workspace attach` and `afs workspace detach`.
-3. Decide whether `afs ws` is canonical enough to document. If yes, add it to
-   routing and help. If no, omit it entirely.
+1. Add routing for `afs ws attach` and `afs ws detach`.
+2. Keep `afs ws` as the canonical documented workspace command group.
+3. Keep root-level shortcuts hidden from help/docs.
 4. Implement `cmdAttachArgs` as the new lifecycle wrapper.
 5. Implement `cmdDetachArgs` around a shared detach function with
    `deleteLocal=false` by default.
 6. Change sync shutdown to preserve the local directory unless `deleteLocal` is
    true.
 7. Change mount shutdown to preserve mountpoints unless `deleteLocal` is true,
-   while still restoring archived source directories for mount-at-source flows.
-8. Update status and ready output from "up/down" language to
+   while still restoring archived source directories for attach-at-source flows.
+8. Update status and ready output from lifecycle language to
    "attached/detach" language.
 9. Update root help, workspace help, setup next steps, installer next steps,
    UI connect-agent copy, and CLI reference docs.
@@ -276,13 +253,9 @@ Multi-attach:
 
 ## Open Questions
 
-1. Should `afs attach` be top-level only, or should `workspace attach` be the
-   primary documented form?
-2. Is `afs ws` worth making first-class, or does it add another command family
-   too early?
-3. Should `attach` always default to sync mode, with mount mode reserved for
+1. Should `attach` always default to sync mode, with mount mode reserved for
    explicit configuration?
-4. Should `detach --delete` require an interactive confirmation on TTY, or is
+2. Should `detach --delete` require an interactive confirmation on TTY, or is
    the flag explicit enough?
 5. Should `up` and `down` be removed after one release, or kept indefinitely as
    compatibility commands with attach/detach wording?

@@ -106,7 +106,7 @@ Supporting areas:
 
 ### `tests/`
 
-- `tests/bench_afs_grep.py`: benchmark comparing `afs grep` against mounted GNU `grep`.
+- `tests/bench_afs_grep.py`: benchmark comparing `afs fs grep` against mounted GNU `grep`.
 - `tests/create-test-memories`: shell helper that generates realistic markdown-memory trees.
 - `tests/bench/` and `tests/bench_md_workloads/`: synthetic workload and benchmark programs.
 

@@ -40,13 +40,11 @@ make web-build      # build the Vite UI
 make web-dev        # run the control plane and UI together
 
 # CLI lifecycle helpers
-./afs setup
-./afs up
-./afs down
 ./afs status
-./afs workspace import <workspace> <directory>
-./afs workspace clone <workspace> <directory>
-./afs checkpoint list <workspace>
+./afs ws attach <workspace> <directory>
+./afs ws detach <workspace-or-directory>
+./afs ws import <workspace> <directory>
+./afs cp list <workspace>
 
 # UI-only commands
 cd ui && npm run dev

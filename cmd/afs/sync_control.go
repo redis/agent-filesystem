@@ -41,18 +41,68 @@ type syncControlResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
-func cmdFile(args []string) error {
+func cmdFS(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
-		fmt.Fprint(os.Stderr, fileUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
 
-	switch args[1] {
-	case "create-exclusive":
-		return cmdFileCreateExclusive(args[2:])
-	default:
-		return fmt.Errorf("unknown file subcommand %q\n\n%s", args[1], fileUsageText(filepath.Base(os.Args[0])))
+	parsed, err := parseFSDispatchArgs(args[1:])
+	if err != nil {
+		return err
 	}
+	if parsed.subcommand == "" || isHelpArg(parsed.subcommand) {
+		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+
+	switch parsed.subcommand {
+	case "ls":
+		return cmdFSList(parsed.workspace, parsed.args)
+	case "cat":
+		return cmdFSCat(parsed.workspace, parsed.args)
+	case "find":
+		return cmdFSFind(parsed.workspace, parsed.args)
+	case "create-exclusive":
+		if strings.TrimSpace(parsed.workspace) != "" {
+			return errors.New("--workspace is not supported with fs create-exclusive; use the attached sync workspace")
+		}
+		return cmdFileCreateExclusive(parsed.args)
+	case "grep":
+		return cmdFSGrep(parsed.workspace, parsed.args)
+	default:
+		return fmt.Errorf("unknown filesystem subcommand %q\n\n%s", parsed.subcommand, fsUsageText(filepath.Base(os.Args[0])))
+	}
+}
+
+type fsDispatchArgs struct {
+	workspace  string
+	subcommand string
+	args       []string
+}
+
+func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
+	var parsed fsDispatchArgs
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--workspace" || arg == "-w":
+			if i+1 >= len(args) {
+				return parsed, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			parsed.workspace = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--workspace="):
+			parsed.workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
+		case strings.HasPrefix(arg, "-"):
+			return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", arg, fsUsageText(filepath.Base(os.Args[0])))
+		default:
+			parsed.subcommand = arg
+			parsed.args = args[i+1:]
+			return parsed, nil
+		}
+	}
+	return parsed, nil
 }
 
 func cmdFileCreateExclusive(args []string) error {
@@ -61,7 +111,7 @@ func cmdFileCreateExclusive(args []string) error {
 		return nil
 	}
 
-	fs := flag.NewFlagSet("file create-exclusive", flag.ContinueOnError)
+	fs := flag.NewFlagSet("fs create-exclusive", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var content optionalString
 	var contentFile string
@@ -85,13 +135,13 @@ func cmdFileCreateExclusive(args []string) error {
 	}
 	st, err := loadState()
 	if err != nil {
-		return fmt.Errorf("AFS is not running in sync mode: %w\nRun '%s up --mode sync' first", err, filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not attached in sync mode: %w\nRun '%s ws attach <workspace> <directory>' first", err, filepath.Base(os.Args[0]))
 	}
 	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
-		return fmt.Errorf("AFS is not running in sync mode\nRun '%s up --mode sync' first", filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not attached in sync mode\nRun '%s ws attach <workspace> <directory>' first", filepath.Base(os.Args[0]))
 	}
 	if !runtimeStateMatchesConfig(cfg, st) {
-		return fmt.Errorf("running AFS sync process does not match the current config\nRun '%s up --mode sync' again", filepath.Base(os.Args[0]))
+		return fmt.Errorf("running AFS sync process does not match the current config\nDetach and attach the workspace again")
 	}
 
 	localRoot := strings.TrimSpace(st.LocalPath)
@@ -143,11 +193,11 @@ func cmdFileCreateExclusive(args []string) error {
 			}
 			if !result.Success {
 				if strings.TrimSpace(result.Error) == "" {
-					return errors.New("file create-exclusive failed")
+					return errors.New("fs create-exclusive failed")
 				}
 				return errors.New(result.Error)
 			}
-			printBox(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []boxRow{
+			printSection(markerSuccess+" "+clr(ansiBold, "fs create-exclusive"), []outputRow{
 				{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
 				{Label: "path", Value: result.Path},
 				{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
@@ -158,33 +208,46 @@ func cmdFileCreateExclusive(args []string) error {
 			return err
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for file create-exclusive result for %s", normalizedPath)
+			return fmt.Errorf("timed out waiting for fs create-exclusive result for %s", normalizedPath)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func fileUsageText(bin string) string {
+func fsUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s file <subcommand>
+  %s fs <subcommand>
 
-Workspace file operations.
+Read, search, and safely write workspace files.
+
+Options:
+  -w, --workspace <workspace>   Select the workspace for remote inspection
 
 Subcommands:
+  ls                 List workspace files
+  cat                Print a workspace file
+  find               Find workspace paths by name
+  grep               Search workspace files
   create-exclusive   Create a workspace file only if it does not already exist
-`, bin)
+
+Examples:
+  %s fs -w demo ls
+  %s fs -w demo cat README.md
+  %s fs -w demo find . -name '*.md' -print
+  %s fs -w demo grep Redis
+`, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s file create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
+  %s fs create-exclusive [--content <text> | --content-file <path>] [--timeout <duration>] <path>
 
 Create <path> only if it does not already exist in the workspace. The create is
 atomic across connected AFS clients. Requires AFS to be running in sync mode on
 this machine. The path must be absolute inside the workspace, for example:
 
-  %s file create-exclusive /tasks/001.claim
-  %s file create-exclusive --content "agent-a\n" /tasks/001.claim
+  %s fs create-exclusive /tasks/001.claim
+  %s fs create-exclusive --content "agent-a\n" /tasks/001.claim
 `, bin, bin, bin)
 }
 

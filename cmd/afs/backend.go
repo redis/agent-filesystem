@@ -127,6 +127,8 @@ type afsControlPlane interface {
 	CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error)
 	GetCheckpoint(ctx context.Context, workspace, checkpointID string) (controlplane.CheckpointDetail, error)
+	GetTree(ctx context.Context, workspace, view, path string, depth int) (controlplane.TreeResponse, error)
+	GetFileContent(ctx context.Context, workspace, view, path string) (controlplane.FileContentResponse, error)
 	DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)
@@ -161,7 +163,7 @@ func (directBackend) OpenSession(ctx context.Context, cfg config) (*afsBackendSe
 	}
 	if err := rdb.Ping(ctx).Err(); err != nil {
 		closeFn()
-		return nil, fmt.Errorf("cannot connect to Redis at %s: %w\nRun '%s up' first or point AFS at an existing Redis server",
+		return nil, fmt.Errorf("cannot connect to Redis at %s: %w\nRun '%s ws attach <workspace> <directory>' first or point AFS at an existing Redis server",
 			cfg.RedisAddr, err, filepath.Base(os.Args[0]))
 	}
 

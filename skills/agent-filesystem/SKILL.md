@@ -15,7 +15,7 @@ explicit checkpoints and easy movement between MCP, sync mode, and live mounts.
 - Persistent agent workspaces
 - Code or docs that should live in a normal directory
 - Shared notes/config/state that benefit from checkpoints and forks
-- Searchable workspaces where `afs grep` or MCP file tools are useful
+- Searchable workspaces where `afs fs grep` or MCP file tools are useful
 
 **Avoid for:**
 - Large build output, media, or disposable artifacts
@@ -32,46 +32,44 @@ directory.
 Use sync mode when the agent or user wants a real local directory:
 
 ```bash
-./afs workspace use my-project
-./afs up --mode sync
-cd ~/afs
+./afs ws attach my-project ~/my-project
+cd ~/my-project
 ```
 
 ### 3. Live mount mode
-Use `./afs up --mode mount` when you need the workspace exposed directly as a
-mount rather than through the sync daemon.
+Use `./afs config set --mode mount` before attaching when you need the
+workspace exposed directly as a mount rather than through the sync daemon.
 
 ## Common Flows
 
 ### Create or import a workspace
 ```bash
-./afs workspace create my-project
-./afs workspace import my-project ./existing-dir
-./afs workspace use my-project
+./afs ws create my-project
+./afs ws import my-project ./existing-dir
 ```
 
 ### Start working locally
 ```bash
-./afs up --mode sync
-cd ~/afs
+./afs ws attach my-project ~/my-project
+cd ~/my-project
 ```
 
 ### Search a workspace
 ```bash
-./afs grep --workspace my-project "TODO auth"
-./afs grep --workspace my-project --path /src -E "timeout|retry"
+./afs fs grep --workspace my-project "TODO auth"
+./afs fs grep --workspace my-project --path /src -E "timeout|retry"
 ```
 
 ### Save and restore stable points
 ```bash
-./afs checkpoint create my-project before-refactor
-./afs checkpoint list my-project
-./afs checkpoint restore my-project before-refactor
+./afs cp create my-project before-refactor
+./afs cp list my-project
+./afs cp restore my-project before-refactor
 ```
 
 ### Fork work for a second line of effort
 ```bash
-./afs workspace fork my-project my-project-experiment
+./afs ws fork my-project my-project-experiment
 ```
 
 ## Key Points

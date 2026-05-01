@@ -284,16 +284,16 @@ const cliTopic: DocsTopic = {
   eyebrow: "CLI Docs",
   title: "AFS CLI Workflow",
   summary:
-    "Install, sign in, create or import a workspace, start the local surface, and use the daily commands.",
+    "Install, sign in, create or import a workspace, attach it locally, and use the daily commands.",
   sections: [
     {
       heading: "Fresh Setup",
       body: (
         <>
           <DocProse>
-            Start with the CLI. It is the primary way to authenticate, select a
-            workspace, start sync or mount mode, create checkpoints, and launch
-            the MCP server.
+            Start with the CLI. It is the primary way to authenticate, attach a
+            workspace, configure sync or mount mode, create checkpoints, and
+            launch the MCP server.
           </DocProse>
           <DocProse>
             <ReferenceDocLink href={referenceDocHref.cli} rel="noreferrer" target="_blank">
@@ -301,15 +301,13 @@ const cliTopic: DocsTopic = {
             </ReferenceDocLink>
           </DocProse>
           <CodeBlock>
-            <code>{`afs login
-afs setup
-afs up`}</code>
+            <code>{`afs auth login
+afs ws attach getting-started ~/getting-started`}</code>
           </CodeBlock>
           <DocProse>
-            <InlineCode>afs login</InlineCode> connects the CLI to AFS Cloud or
-            a control plane. <InlineCode>afs setup</InlineCode> walks through
-            workspace and local path setup. <InlineCode>afs up</InlineCode>{" "}
-            starts the saved workspace using the saved mode.
+            <InlineCode>afs auth login</InlineCode> connects the CLI to AFS Cloud or
+            a control plane. <InlineCode>afs ws attach</InlineCode> attaches a
+            workspace to a local folder and prompts when you omit values.
           </DocProse>
         </>
       ),
@@ -319,23 +317,24 @@ afs up`}</code>
       body: (
         <>
           <Step n={1} title="Sign in">
-            <InlineCode>afs login</InlineCode> connects your local CLI to AFS
+            <InlineCode>afs auth login</InlineCode> connects your local CLI to AFS
             Cloud or a control plane. The CLI keeps the token locally so future
-            commands can create and mount workspaces without another browser
+            commands can create and attach workspaces without another browser
             step.
           </Step>
           <Step n={2} title="Create a workspace">
-            <InlineCode>afs workspace create myworkspace</InlineCode> creates an
+            <InlineCode>afs ws create myworkspace</InlineCode> creates an
             empty workspace with an initial checkpoint. This workspace is the
             shared state agents and tools will work against.
           </Step>
-          <Step n={3} title="Expose it locally">
-            <InlineCode>afs up myworkspace ~/afs</InlineCode> starts the local
-            AFS runtime and exposes the workspace at <InlineCode>~/afs</InlineCode>.
+          <Step n={3} title="Attach it locally">
+            <InlineCode>afs ws attach myworkspace ~/afs/myworkspace</InlineCode>{" "}
+            starts the local AFS runtime and exposes the workspace at{" "}
+            <InlineCode>~/afs/myworkspace</InlineCode>.
             Use your editor, shell, and agents there like any other directory.
           </Step>
           <Step n={4} title="Checkpoint the good state">
-            <InlineCode>afs checkpoint create myworkspace before-refactor</InlineCode>{" "}
+            <InlineCode>afs cp create myworkspace before-refactor</InlineCode>{" "}
             saves a named restore point. Live edits are immediate, while
             checkpoints are deliberate moments in the workspace timeline.
           </Step>
@@ -353,18 +352,16 @@ afs up`}</code>
           </DocProse>
           <CodeBlock>
             <code>{`# New workspace
-afs workspace create demo
-afs workspace use demo
-afs up
+afs ws create demo
+afs ws attach demo ~/demo
 
 # Existing directory
-afs workspace import demo ~/src/demo
-afs up demo ~/src/demo`}</code>
+afs ws import --attach-at-source demo ~/src/demo`}</code>
           </CodeBlock>
           <DocProse>
-            When a workspace is passed positionally to{" "}
-            <InlineCode>afs up</InlineCode>, AFS saves that workspace and local
-            path so future <InlineCode>afs up</InlineCode> runs can reuse them.
+            <InlineCode>afs ws attach</InlineCode> creates the local connection.
+            <InlineCode> --attach-at-source</InlineCode> imports an existing
+            directory and attaches it in one step.
           </DocProse>
         </>
       ),
@@ -382,27 +379,27 @@ afs up demo ~/src/demo`}</code>
           <tbody>
             <tr>
               <td><InlineCode>afs status</InlineCode></td>
-              <td>Check login, selected workspace, local path, and runtime state.</td>
+              <td>Check daemon status, configuration, and local attachments.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs workspace list</InlineCode></td>
+              <td><InlineCode>afs ws list</InlineCode></td>
               <td>See available workspaces.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs workspace current</InlineCode></td>
-              <td>Print the workspace used when commands omit one.</td>
+              <td><InlineCode>afs ws attach</InlineCode></td>
+              <td>Attach a workspace to a local folder.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs checkpoint create</InlineCode></td>
+              <td><InlineCode>afs cp create</InlineCode></td>
               <td>Save the current live workspace as a restore point.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs grep TODO</InlineCode></td>
+              <td><InlineCode>afs fs grep --workspace demo TODO</InlineCode></td>
               <td>Search workspace files directly through AFS.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs down</InlineCode></td>
-              <td>Stop the local runtime when you are done.</td>
+              <td><InlineCode>afs ws detach</InlineCode></td>
+              <td>Detach a workspace while preserving local files by default.</td>
             </tr>
           </tbody>
         </CmdTable>
@@ -420,7 +417,7 @@ afs up demo ~/src/demo`}</code>
             <code>{`afs config get redis.url
 afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs config set mount.path ~/afs/demo
+afs config set mode sync
 afs config list`}</code>
           </CodeBlock>
         </>
@@ -436,7 +433,7 @@ const workspacesTopic: DocsTopic = {
   eyebrow: "State management",
   title: "Workspaces And Checkpoints",
   summary:
-    "How to create, import, select, fork, clone, checkpoint, and restore AFS workspaces.",
+    "How to create, import, attach, fork, checkpoint, and restore AFS workspaces.",
   sections: [
     {
       heading: "Workspace Lifecycle",
@@ -444,21 +441,20 @@ const workspacesTopic: DocsTopic = {
         <>
           <DocProse>
             Workspaces are the durable unit of collaboration in AFS. You create
-            one for a project, import one from an existing folder, select it for
-            daily commands, and optionally fork it for parallel work.
+            one for a project, import one from an existing folder, attach it for
+            local work, and optionally fork it for parallel work.
           </DocProse>
           <CodeBlock>
-            <code>{`afs workspace create demo
-afs workspace import demo ~/src/demo
-afs workspace list
-afs workspace use demo
-afs workspace fork demo demo-experiment
-afs workspace clone demo ~/exports/demo`}</code>
+            <code>{`afs ws create demo
+afs ws import --attach-at-source demo ~/src/demo
+afs ws list
+afs ws fork demo demo-experiment`}</code>
           </CodeBlock>
           <DocProse>
-            <InlineCode>clone</InlineCode> exports a workspace to a normal local
-            directory. <InlineCode>fork</InlineCode> creates another AFS
-            workspace, preserving the source workspace as its own line of work.
+            <InlineCode>--attach-at-source</InlineCode> keeps the imported
+            directory attached after import. <InlineCode>fork</InlineCode>{" "}
+            creates another AFS workspace, preserving the source workspace as
+            its own line of work.
           </DocProse>
         </>
       ),
@@ -473,9 +469,9 @@ afs workspace clone demo ~/exports/demo`}</code>
             They become a durable named point when you create a checkpoint.
           </DocProse>
           <CodeBlock>
-            <code>{`afs checkpoint create demo before-refactor
-afs checkpoint list demo
-afs checkpoint restore demo before-refactor`}</code>
+            <code>{`afs cp create demo before-refactor
+afs cp list demo
+afs cp restore demo before-refactor`}</code>
           </CodeBlock>
           <CalloutBox $tone="warn">
             <DocProse>
@@ -531,13 +527,13 @@ const localFilesTopic: DocsTopic = {
             language servers, test runners, and shell tools can operate normally.
           </DocProse>
           <CodeBlock>
-            <code>{`afs workspace use demo
-afs up --mode sync
+            <code>{`afs ws attach demo ~/afs/demo
 cd ~/afs/demo`}</code>
           </CodeBlock>
           <DocProse>
-            Stopping the daemon with <InlineCode>afs down</InlineCode> stops the
-            local runtime; it does not delete the workspace from Redis.
+            Detaching with <InlineCode>afs ws detach demo</InlineCode> stops
+            managing the local folder; it does not delete the workspace from
+            Redis.
           </DocProse>
         </>
       ),
@@ -552,9 +548,9 @@ cd ~/afs/demo`}</code>
             view instead of a synchronized folder.
           </DocProse>
           <CodeBlock>
-            <code>{`afs config set mount.backend nfs
-afs up demo ~/afs/demo --mode mount
-afs down`}</code>
+            <code>{`afs config set --mode mount --mount-backend nfs
+afs ws attach demo ~/afs/demo
+afs ws detach demo`}</code>
           </CodeBlock>
           <DocProse>
             On macOS AFS uses NFS; on Linux it uses FUSE. Sync mode is usually
@@ -695,8 +691,8 @@ const mcpAgentsTopic: DocsTopic = {
             live workspace state just like sync and mount writes.
           </DocProse>
           <CodeBlock>
-            <code>{`afs workspace create demo
-afs checkpoint create demo before-agent
+            <code>{`afs ws create demo
+afs cp create demo before-agent
 afs mcp --workspace demo --profile workspace-rw-checkpoint`}</code>
           </CodeBlock>
           <CalloutBox $tone="tip">
@@ -1057,7 +1053,7 @@ const selfManagedTopic: DocsTopic = {
           <CodeBlock>
             <code>{`afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs up --control-plane-url http://127.0.0.1:8091 getting-started`}</code>
+afs ws attach getting-started ~/getting-started`}</code>
           </CodeBlock>
           <DocProse>
             For standalone mode, configure Redis directly with{" "}
@@ -1118,9 +1114,9 @@ const performanceTopic: DocsTopic = {
             workspace, <InlineCode>rg</InlineCode> remains the right tool.
           </DocProse>
           <CodeBlock>
-            <code>{`afs grep "TODO" --workspace demo
-afs grep -l -i --workspace demo "disk full"
-afs grep -E "error|warning" --workspace demo`}</code>
+            <code>{`afs fs grep --workspace demo "TODO"
+afs fs grep -l -i --workspace demo "disk full"
+afs fs grep --workspace demo -E "error|warning"`}</code>
           </CodeBlock>
         </>
       ),
@@ -1149,8 +1145,8 @@ const faqTopic: DocsTopic = {
               Today, the clean path is to bring that data into a local
               directory first, then import or sync it with AFS. For Git
               upstreams, clone or check out the Git project the way you already
-              do, then run <InlineCode>afs workspace import</InlineCode> or{" "}
-              <InlineCode>afs up --mode sync</InlineCode>. For non-Git systems
+              do, then run <InlineCode>afs ws import --attach-at-source</InlineCode>{" "}
+              or <InlineCode>afs ws attach</InlineCode>. For non-Git systems
               like S3 or Google Drive, use their API or CLI in a small script
               and let AFS own the workspace state after the files land locally.
             </DocProse>
@@ -1230,7 +1226,7 @@ const faqTopic: DocsTopic = {
             <FAQQuestion>How fast is AFS?</FAQQuestion>
             <DocProse>
               For the current Redis Search benchmark, indexed literal{" "}
-              <InlineCode>afs grep</InlineCode> runs in tens of milliseconds:
+              <InlineCode>afs fs grep</InlineCode> runs in tens of milliseconds:
               17.35 ms for a rare literal and 42.56 ms for a common literal on
               a 4,000-file markdown corpus. Sync mode keeps a real local
               directory on disk for editors and tools, while live mount and MCP
@@ -1245,7 +1241,7 @@ const faqTopic: DocsTopic = {
               changes, and checkpoint the result without cloning or
               materializing everything up front. For regex-heavy searches, use{" "}
               <InlineCode>rg</InlineCode> on a synced or mounted workspace; for
-              ordinary literal search, <InlineCode>afs grep</InlineCode> uses
+              ordinary literal search, <InlineCode>afs fs grep</InlineCode> uses
               the indexed fast path when Redis Search is available.
             </DocProse>
           </FAQItem>

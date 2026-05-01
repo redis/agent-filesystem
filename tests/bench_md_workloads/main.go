@@ -590,11 +590,11 @@ func writeConfig(path, redisAddr, workspace, localPath string) error {
 }
 
 func importWorkspace(afsBin, configPath, workspace, source string) error {
-	cmd := exec.Command(afsBin, "--config", configPath, "workspace", "import", workspace, source)
+	cmd := exec.Command(afsBin, "--config", configPath, "ws", "import", workspace, source)
 	cmd.Dir = repoRoot()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("afs workspace import failed: %w\n%s", err, string(out))
+		return fmt.Errorf("afs ws import failed: %w\n%s", err, string(out))
 	}
 	return nil
 }
