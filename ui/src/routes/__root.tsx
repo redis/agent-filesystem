@@ -7,6 +7,8 @@ import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
 import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
+import { isPublicMarketingPath } from "../layout/public-routes";
+import { PublicShell } from "../layout/public-shell";
 import { BgFx } from "../layout/situation-room-chrome";
 import { adminNavigationItem, bottomNavigationItems, navigationItems } from "../layout/navigation-items";
 import {
@@ -58,11 +60,13 @@ function RootLayout() {
 
   const onAuthRoute = isAuthPath(location.pathname);
   const isPublicAppPath = PUBLIC_APP_PATHS.has(location.pathname);
+  const isMarketingPath = isPublicMarketingPath(location.pathname);
 
   useEffect(() => {
     if (auth.isLoading) return;
     if (onAuthRoute) return;
     if (isPublicAppPath) return;
+    if (isMarketingPath) return;
     if (!auth.isSignedOut) return;
     const target = location.pathname + location.searchStr;
     void navigate({
@@ -70,13 +74,24 @@ function RootLayout() {
       search: target && target !== "/" ? { redirect: target } : undefined,
       replace: true,
     });
-  }, [auth.isLoading, auth.isSignedOut, isPublicAppPath, location.pathname, location.searchStr, navigate, onAuthRoute]);
+  }, [auth.isLoading, auth.isSignedOut, isMarketingPath, isPublicAppPath, location.pathname, location.searchStr, navigate, onAuthRoute]);
 
   if (onAuthRoute) {
     return (
       <BackgroundPatternProvider>
         <BgFx />
         <Outlet />
+      </BackgroundPatternProvider>
+    );
+  }
+
+  if (isMarketingPath && (auth.isLoading || auth.isSignedOut)) {
+    return (
+      <BackgroundPatternProvider>
+        <BgFx />
+        <PublicShell>
+          <Outlet />
+        </PublicShell>
       </BackgroundPatternProvider>
     );
   }

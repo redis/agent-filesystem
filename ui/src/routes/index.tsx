@@ -2,6 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 import styled from "styled-components";
 import {
   PageStack,
@@ -16,13 +17,15 @@ import {
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
 import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
 import { LiveTopologyCard } from "../components/live-topology-card";
+import { PublicLandingPage } from "../features/landing/PublicLandingPage";
 import {
   cliGettingStartedSample,
   mcpGettingStartedSample,
   pythonSdkSample,
   typescriptSdkSample,
 } from "../features/docs/afs-samples";
-import { formatBytes } from "../foundation/api/afs";
+import { afsApi, formatBytes } from "../foundation/api/afs";
+import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import {
@@ -73,6 +76,11 @@ type GettingStartedLanguage = (typeof gettingStartedSamples)[number]["language"]
 
 export const Route = createFileRoute("/")({
   loader: async () => {
+    const authConfig = await afsApi.getAuthConfig().catch(() => null);
+    if (authConfig == null || (authConfig.signInRequired && !authConfig.authenticated)) {
+      return;
+    }
+
     await Promise.all([
       queryClient.ensureQueryData({ ...databasesQueryOptions(), revalidateIfStale: true }),
       queryClient.ensureQueryData({
@@ -82,8 +90,18 @@ export const Route = createFileRoute("/")({
       queryClient.ensureQueryData({ ...agentsQueryOptions(null), revalidateIfStale: true }),
     ]);
   },
-  component: OverviewPage,
+  component: HomeRoute,
 });
+
+function HomeRoute() {
+  const auth = useAuthSession();
+
+  if (auth.isLoading || auth.isSignedOut) {
+    return <PublicLandingPage />;
+  }
+
+  return <OverviewPage />;
+}
 
 function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
@@ -212,15 +230,12 @@ function CliQuickstartCard() {
   const activeHint = gettingStartedSamples[activeHintIndex];
 
   function copySnippet(key: string, value: string) {
-    if (typeof navigator === "undefined" || !navigator.clipboard) {
-      return;
-    }
     void navigator.clipboard.writeText(value).then(() => {
       setCopiedKey(key);
       window.setTimeout(() => {
         setCopiedKey((current) => (current === key ? null : current));
       }, 1600);
-    });
+    }).catch(() => undefined);
   }
 
   return (
@@ -674,11 +689,11 @@ function highlightCode(code: string, language: GettingStartedLanguage) {
 
 function highlightLine(line: string, language: GettingStartedLanguage, lineIndex: number) {
   const pattern = highlightPattern(language);
-  const parts: React.ReactNode[] = [];
+  const parts: ReactNode[] = [];
   let cursor = 0;
   for (const match of line.matchAll(pattern)) {
     const value = match[0];
-    const index = match.index ?? 0;
+    const index = match.index;
     if (index > cursor) {
       parts.push(line.slice(cursor, index));
     }

@@ -53,6 +53,9 @@ future agents should not have to rediscover.
 
 ## UI Semantics
 
+- Signed-out public routes must not use route loaders that prefetch protected
+  workspace, database, or agent APIs. Keep the public landing/docs path
+  renderable before auth, then enter the authenticated app shell after sign-in.
 - In the workspace browser, use "Active workspace" for the server-side live
   filesystem state. Keep `head` and `working-copy` as internal/API view names:
   when active state is dirty, active resolves to `working-copy` and checkpoints

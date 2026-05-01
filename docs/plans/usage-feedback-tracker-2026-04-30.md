@@ -152,7 +152,7 @@ Goal: reduce setup friction and support larger local setups.
 
 | ID | Priority | Area | Feedback | Triage | Suggested plan | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| F001 | P2 | Pre-login web | A landing page before login would be welcome. | Good product ask. Current signed-out app mostly routes to auth and protected app chrome. | Add a public signed-out landing/getting-started page at `/`, with no protected workspace queries before auth. Keep post-login getting-started flow. | Planned |
+| F001 | P2 | Pre-login web | A landing page before login would be welcome. | Good product ask. Current signed-out app mostly routes to auth and protected app chrome. | Add a public signed-out landing/getting-started page at `/`, with no protected workspace queries before auth. Keep post-login getting-started flow. | Done |
 | F002 | P1 | Login | Validation code did not work, then multiple new codes arrived. Auth service felt flaky. | Needs repro with exact hosted auth flow and provider logs. | Instrument browser login/code exchange. Improve expired/invalid code handling. Prevent confusing multiple pending codes where possible. Show exact retry state. | Needs repro |
 | F003 | P2 | Onboarding | Getting-started experience after login is very good. | Preserve this. | Keep the successful post-login flow intact while changing pre-login and CLI command copy. Add regression coverage for starter workspace naming. | Planned |
 | F004 | P2 | Installer | Copy/paste curl installer is good. User manually read shell first. | Keep simple curl installer, make it readable and auditable. | Keep script concise. Consider checksum/signature copy once binary release path is stable. | Planned |
