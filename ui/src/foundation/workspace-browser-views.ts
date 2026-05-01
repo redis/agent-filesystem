@@ -40,3 +40,12 @@ export function getWorkspaceBrowserViewOptions(workspace: AFSWorkspaceDetail): W
 export function getDefaultWorkspaceBrowserView(workspace: AFSWorkspaceDetail): AFSWorkspaceView {
   return getWorkspaceBrowserViewOptions(workspace)[0]?.value ?? getActiveWorkspaceView(workspace);
 }
+
+export function resolveWorkspaceBrowserView(
+  workspace: AFSWorkspaceDetail,
+  requestedView: AFSWorkspaceView,
+): AFSWorkspaceView {
+  return getWorkspaceBrowserViewOptions(workspace).some((option) => option.value === requestedView)
+    ? requestedView
+    : getDefaultWorkspaceBrowserView(workspace);
+}

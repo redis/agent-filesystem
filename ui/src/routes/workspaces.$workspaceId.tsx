@@ -31,7 +31,7 @@ import {
 } from "../foundation/hooks/use-afs";
 import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
-import { getDefaultWorkspaceBrowserView } from "../foundation/workspace-browser-views";
+import { resolveWorkspaceBrowserView } from "../foundation/workspace-browser-views";
 import { displayWorkspaceName } from "../foundation/workspace-display";
 import { normalizeStudioTab, studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
@@ -99,7 +99,7 @@ function WorkspaceStudioPage() {
       return;
     }
 
-    setBrowserView(getDefaultWorkspaceBrowserView(workspace));
+    setBrowserView((currentView) => resolveWorkspaceBrowserView(workspace, currentView));
   }, [workspace]);
 
   function setStudioTab(nextTab: StudioTab) {

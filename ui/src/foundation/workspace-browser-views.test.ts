@@ -4,6 +4,7 @@ import {
   getActiveWorkspaceView,
   getDefaultWorkspaceBrowserView,
   getWorkspaceBrowserViewOptions,
+  resolveWorkspaceBrowserView,
 } from "./workspace-browser-views";
 
 describe("workspace browser views", () => {
@@ -29,5 +30,21 @@ describe("workspace browser views", () => {
     ]);
     expect(getActiveWorkspaceView(workspace!)).toBe("working-copy");
     expect(getDefaultWorkspaceBrowserView(workspace!)).toBe("working-copy");
+  });
+
+  test("preserves a selected checkpoint view across workspace refreshes", () => {
+    const workspace = cloneInitialAFSState().workspaces.find((item) => item.id === "payments-portal");
+    expect(workspace).toBeDefined();
+
+    expect(resolveWorkspaceBrowserView(workspace!, "checkpoint:sp-payments-baseline-ui")).toBe(
+      "checkpoint:sp-payments-baseline-ui",
+    );
+  });
+
+  test("falls back to the default view when a selected checkpoint is no longer available", () => {
+    const workspace = cloneInitialAFSState().workspaces.find((item) => item.id === "payments-portal");
+    expect(workspace).toBeDefined();
+
+    expect(resolveWorkspaceBrowserView(workspace!, "checkpoint:missing")).toBe("working-copy");
   });
 });
