@@ -290,7 +290,7 @@ type statusOptions struct {
 	verbose bool
 }
 
-var statusSyncDaemonPIDs = syncDaemonPIDs
+var statusSyncDaemonPIDs = currentConfigSyncDaemonPIDs
 
 func cmdStatusArgs(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
@@ -344,7 +344,7 @@ func cmdStatusWithOptions(opts statusOptions) error {
 		} else {
 			return err
 		}
-	} else if strings.TrimSpace(st.Mode) == modeSync {
+	} else if strings.TrimSpace(st.Mode) == modeSync || (strings.TrimSpace(st.Mode) == "" && st.SyncPID > 0) {
 		cmdStatusSync(st, processPIDs)
 	} else if err := cmdStatusMount(st); err != nil {
 		return err
@@ -388,6 +388,9 @@ func cmdStatusFromSyncDaemons(pids []int) error {
 	}
 	title := statusTitleForPIDs(pids)
 	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), modeSync, "", cfg.RedisAddr, cfg.RedisDB, len(pids) > 0))
+	if ws := strings.TrimSpace(cfg.CurrentWorkspace); ws != "" {
+		rows = append([]outputRow{{Label: "workspace", Value: ws}}, rows...)
+	}
 	rows = append(rows, outputRow{Label: "daemon", Value: daemonStatusSummary(pids)})
 	rows = append(rows, outputRow{Label: "unmanaged daemons", Value: pidsLabel(pids)})
 	rows = appendAuthStatusRows(rows)
@@ -408,6 +411,11 @@ func printMountStatus(reg mountRegistry, verbose bool) {
 		fmt.Println("Mounted workspaces")
 		fmt.Println()
 		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(running))
+	} else if verbose && len(stopped) > 0 {
+		fmt.Println()
+		fmt.Println("Mounted workspaces")
+		fmt.Println()
+		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(stopped))
 	} else {
 		fmt.Println()
 		fmt.Println("No mounted workspaces.")
@@ -478,7 +486,19 @@ func syncDaemonPIDs() ([]int, error) {
 	return parseSyncDaemonPIDs(string(out)), nil
 }
 
+func currentConfigSyncDaemonPIDs() ([]int, error) {
+	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseSyncDaemonPIDsForConfig(string(out), configPath()), nil
+}
+
 func parseSyncDaemonPIDs(psOutput string) []int {
+	return parseSyncDaemonPIDsForConfig(psOutput, "")
+}
+
+func parseSyncDaemonPIDsForConfig(psOutput, configFile string) []int {
 	var pids []int
 	for _, rawLine := range strings.Split(psOutput, "\n") {
 		line := strings.TrimSpace(rawLine)
@@ -500,9 +520,31 @@ func parseSyncDaemonPIDs(psOutput string) []int {
 		if !strings.Contains(command, "_sync-daemon") {
 			continue
 		}
+		if configFile != "" {
+			daemonConfig := syncDaemonConfigPath(strings.Fields(command))
+			if daemonConfig != "" && daemonConfig != configFile {
+				continue
+			}
+		}
 		pids = append(pids, pid)
 	}
 	return uniqueSortedPIDs(pids)
+}
+
+func syncDaemonConfigPath(args []string) string {
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 < len(args) {
+				return args[i+1]
+			}
+		default:
+			if strings.HasPrefix(args[i], "--config=") {
+				return strings.TrimPrefix(args[i], "--config=")
+			}
+		}
+	}
+	return ""
 }
 
 func unmanagedSyncDaemonPIDs(processPIDs, managedPIDs []int) []int {
@@ -614,7 +656,37 @@ func printMountVerbose(rec mountRecord) {
 	if !rec.StartedAt.IsZero() {
 		rows = append(rows, outputRow{Label: "started", Value: formatDisplayTimestamp(rec.StartedAt.UTC().Format(time.RFC3339))})
 	}
-	printSection(rec.Workspace, rows)
+
+	fmt.Printf("\n")
+	title := plainOutputTitle(rec.Workspace)
+	if title != "" {
+		fmt.Println(title)
+	}
+	fmt.Printf("\n")
+
+	maxLabel := 0
+	for _, r := range rows {
+		if r.Label == "mount" {
+			continue
+		}
+		if w := runeWidth(stripAnsi(r.Label)); w > maxLabel {
+			maxLabel = w
+		}
+	}
+	if maxLabel == 0 {
+		maxLabel = runeWidth("mount")
+	}
+
+	for _, r := range rows {
+		label := stripAnsi(strings.TrimSpace(r.Label))
+		value := stripAnsi(strings.TrimSpace(r.Value))
+		width := maxLabel
+		if label == "mount" {
+			width = len("database")
+		}
+		fmt.Printf("%s  %s\n", padVisibleText(label, width), fitDisplayText(value, maxCLIWidth-width-2))
+	}
+	fmt.Printf("\n")
 }
 
 func fallbackString(value, fallback string) string {
@@ -653,6 +725,9 @@ func cmdStatusSync(st state, processPIDs []int) {
 	}
 	title := statusTitleForAlive(alive, st.SyncPID)
 	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, st.CurrentWorkspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB, alive))
+	if ws := strings.TrimSpace(st.CurrentWorkspace); ws != "" {
+		rows = append([]outputRow{{Label: "workspace", Value: ws}}, rows...)
+	}
 	managedPIDs := []int{}
 	if alive {
 		managedPIDs = append(managedPIDs, st.SyncPID)

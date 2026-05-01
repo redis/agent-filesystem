@@ -55,7 +55,7 @@ func cmdVersioningGet(args []string) error {
 		return err
 	}
 
-	rows := []boxRow{
+	rows := []outputRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "mode", Value: displayPolicyMode(policy.Mode)},
 		{Label: "include globs", Value: displayGlobList(policy.IncludeGlobs)},
@@ -65,7 +65,7 @@ func cmdVersioningGet(args []string) error {
 		{Label: "max total bytes", Value: displayOptionalInt64(policy.MaxTotalBytes)},
 		{Label: "large file cutoff", Value: displayOptionalInt64(policy.LargeFileCutoffBytes)},
 	}
-	printBox(clr(ansiBold, "workspace versioning"), rows)
+	printSection(clr(ansiBold, "workspace versioning"), rows)
 	return nil
 }
 
@@ -136,7 +136,7 @@ func cmdVersioningSet(args []string) error {
 		return err
 	}
 
-	printBox(markerSuccess+" "+clr(ansiBold, "workspace versioning updated"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace versioning updated"), []outputRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "mode", Value: updated.Mode},
 		{Label: "include globs", Value: displayGlobList(updated.IncludeGlobs)},

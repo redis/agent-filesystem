@@ -59,6 +59,15 @@ type persistedConfig struct {
 	ProductMode  string               `json:"productMode,omitempty"`
 	Mode         string               `json:"mode,omitempty"`
 	Sync         *syncSettings        `json:"sync,omitempty"`
+	Runtime      *persistedRuntime    `json:"runtime,omitempty"`
+}
+
+type persistedRuntime struct {
+	CurrentWorkspace   string        `json:"currentWorkspace,omitempty"`
+	CurrentWorkspaceID string        `json:"currentWorkspaceID,omitempty"`
+	LocalPath          string        `json:"localPath,omitempty"`
+	Mount              mountSettings `json:"mount,omitempty"`
+	Logs               logSettings   `json:"logs,omitempty"`
 }
 
 func persistedConfigFromRuntime(cfg config) persistedConfig {
@@ -92,6 +101,13 @@ func persistedConfigFromRuntime(cfg config) persistedConfig {
 	if cfg.SyncFileSizeCapMB > 0 && cfg.SyncFileSizeCapMB != defaultSyncFileSizeCapMB {
 		out.Sync = &syncSettings{SyncFileSizeCapMB: cfg.SyncFileSizeCapMB}
 	}
+	out.Runtime = &persistedRuntime{
+		CurrentWorkspace:   strings.TrimSpace(cfg.CurrentWorkspace),
+		CurrentWorkspaceID: strings.TrimSpace(cfg.CurrentWorkspaceID),
+		LocalPath:          strings.TrimSpace(cfg.LocalPath),
+		Mount:              cfg.mountSettings,
+		Logs:               cfg.logSettings,
+	}
 	return out
 }
 
@@ -112,8 +128,36 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return cfg, err
 	}
-	if err := json.Unmarshal(b, &cfg); err != nil {
+	var raw persistedConfig
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return cfg, err
+	}
+	var legacy config
+	if err := json.Unmarshal(b, &legacy); err != nil {
+		return cfg, err
+	}
+	cfg.redisConfig = raw.Redis
+	cfg.controlPlaneSettings = raw.ControlPlane
+	cfg.agentSettings = raw.Agent
+	cfg.ProductMode = raw.ProductMode
+	cfg.Mode = raw.Mode
+	if raw.Sync != nil {
+		cfg.syncSettings = *raw.Sync
+	} else if legacy.SyncFileSizeCapMB != 0 {
+		cfg.syncSettings = legacy.syncSettings
+	}
+	if raw.Runtime != nil {
+		cfg.CurrentWorkspace = raw.Runtime.CurrentWorkspace
+		cfg.CurrentWorkspaceID = raw.Runtime.CurrentWorkspaceID
+		cfg.LocalPath = raw.Runtime.LocalPath
+		cfg.mountSettings = raw.Runtime.Mount
+		cfg.logSettings = raw.Runtime.Logs
+	} else {
+		cfg.CurrentWorkspace = legacy.CurrentWorkspace
+		cfg.CurrentWorkspaceID = legacy.CurrentWorkspaceID
+		cfg.LocalPath = legacy.LocalPath
+		cfg.mountSettings = legacy.mountSettings
+		cfg.logSettings = legacy.logSettings
 	}
 	cfg.WorkRoot = defaultWorkRoot()
 	return cfg, nil

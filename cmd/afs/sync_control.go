@@ -47,6 +47,70 @@ type syncControlResult struct {
 	Error     string `json:"error,omitempty"`
 }
 
+func cmdFS(args []string) error {
+	if len(args) < 2 || isHelpArg(args[1]) {
+		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+
+	parsed, err := parseFSDispatchArgs(args[1:])
+	if err != nil {
+		return err
+	}
+	if parsed.subcommand == "" || isHelpArg(parsed.subcommand) {
+		fmt.Fprint(os.Stderr, fsUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+
+	switch parsed.subcommand {
+	case "ls":
+		return cmdFSList(parsed.workspace, parsed.args)
+	case "cat":
+		return cmdFSCat(parsed.workspace, parsed.args)
+	case "find":
+		return cmdFSFind(parsed.workspace, parsed.args)
+	case "create-exclusive":
+		if strings.TrimSpace(parsed.workspace) != "" {
+			return errors.New("--workspace is not supported with fs create-exclusive; use the mounted sync workspace")
+		}
+		return cmdFileCreateExclusive(parsed.args)
+	case "grep":
+		return cmdFSGrep(parsed.workspace, parsed.args)
+	default:
+		return fmt.Errorf("unknown filesystem subcommand %q\n\n%s", parsed.subcommand, fsUsageText(filepath.Base(os.Args[0])))
+	}
+}
+
+type fsDispatchArgs struct {
+	workspace  string
+	subcommand string
+	args       []string
+}
+
+func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
+	var parsed fsDispatchArgs
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--workspace" || arg == "-w":
+			if i+1 >= len(args) {
+				return parsed, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			parsed.workspace = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--workspace="):
+			parsed.workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
+		case strings.HasPrefix(arg, "-"):
+			return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", arg, fsUsageText(filepath.Base(os.Args[0])))
+		default:
+			parsed.subcommand = arg
+			parsed.args = args[i+1:]
+			return parsed, nil
+		}
+	}
+	return parsed, nil
+}
+
 func cmdSync(args []string) error {
 	if len(args) < 2 || isHelpArg(args[1]) {
 		fmt.Fprint(os.Stderr, syncUsageText(filepath.Base(os.Args[0])))
@@ -132,7 +196,7 @@ func cmdFileCreateExclusive(args []string) error {
 	if err != nil {
 		return err
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "file create-exclusive"), []outputRow{
 		{Label: "workspace", Value: currentWorkspaceLabel(st.CurrentWorkspace)},
 		{Label: "path", Value: result.Path},
 		{Label: "bytes", Value: fmt.Sprintf("%d", result.Bytes)},
@@ -149,6 +213,30 @@ Sync-mode control operations.
 Subcommands:
   create-exclusive   Create a workspace file only if it does not already exist
 `, bin)
+}
+
+func fsUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s fs <subcommand>
+
+Read, search, and safely write workspace files.
+
+Options:
+  -w, --workspace <workspace>   Select the workspace for remote inspection
+
+Subcommands:
+  ls                 List workspace files
+  cat                Print a workspace file
+  find               Find workspace paths by name
+  grep               Search workspace files
+  create-exclusive   Create a workspace file only if it does not already exist
+
+Examples:
+  %s fs -w demo ls
+  %s fs -w demo cat README.md
+  %s fs -w demo find . -name '*.md' -print
+  %s fs -w demo grep Redis
+`, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {

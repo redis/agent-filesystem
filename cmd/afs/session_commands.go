@@ -31,6 +31,22 @@ func cmdLog(args []string) error {
 	}
 }
 
+func cmdSession(args []string) error {
+	if len(args) < 2 || isHelpArg(args[1]) {
+		fmt.Fprint(os.Stderr, sessionUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+
+	switch args[1] {
+	case "log":
+		return cmdSessionLog(args[2:])
+	case "summary":
+		return cmdSessionSummary(args[2:])
+	default:
+		return fmt.Errorf("unknown session subcommand %q\n\n%s", args[1], sessionUsageText(filepath.Base(os.Args[0])))
+	}
+}
+
 type sessionLogFlags struct {
 	workspace       string
 	sessionID       string
@@ -458,6 +474,18 @@ Examples:
   %s log <session-id>
   %s log summary <session-id>
 `, bin, bin, bin, bin, bin, bin)
+}
+
+func sessionUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s session <subcommand>
+
+Subcommands:
+  log [session-id] [flags]     Show file-change history for a session
+  summary [session-id] [flags] Show per-session totals
+
+Run '%s session <subcommand> --help' for details.
+`, bin, bin)
 }
 
 func sessionLogUsageText(bin string) string {

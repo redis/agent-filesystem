@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+type upOptions struct {
+	foreground  bool
+	mode        optionalString
+	overrides   configOverrides
+	positionals []string
+}
+
 type mountBootstrap struct {
 	cfg             config
 	workspace       string
@@ -23,6 +31,218 @@ type mountBootstrap struct {
 	initializedRoot bool
 	sessionID       string
 	heartbeatEvery  time.Duration
+}
+
+func cmdUp() error {
+	return cmdUpArgs(nil)
+}
+
+func cmdUpArgs(args []string) error {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Fprint(os.Stderr, upUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+
+	opts, err := parseUpOptions(args)
+	if err != nil {
+		return err
+	}
+
+	if st, err := loadState(); err == nil {
+		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
+			return cmdStatus()
+		}
+	}
+
+	cfg, err := loadConfigForUpWithOverridesAndMode(opts.positionals, opts.overrides, opts.mode)
+	if err != nil {
+		return err
+	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return err
+	}
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return err
+	}
+	switch productMode {
+	case productModeLocal:
+	case productModeSelfHosted, productModeCloud:
+		if mode == modeSync {
+			return startSyncServices(cfg, opts.foreground)
+		}
+		if mode == modeMount {
+			if err := cleanupStaleMount(cfg); err != nil {
+				return err
+			}
+			return startServices(cfg)
+		}
+		return fmt.Errorf("'afs up' in %s mode currently supports sync or mount only\nRun '%s up --mode sync', '%s up --mode mount', or update config first", productMode, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+	default:
+		return fmt.Errorf("'afs up' is not supported yet in %s mode\nUse workspace/checkpoint commands through the control plane for now", productMode)
+	}
+	if mode == modeSync {
+		return startSyncServices(cfg, opts.foreground)
+	}
+	if mode == modeNone {
+		cfg.MountBackend = mountBackendNone
+		return startServices(cfg)
+	}
+	if err := cleanupStaleMount(cfg); err != nil {
+		return err
+	}
+	return startServices(cfg)
+}
+
+func cmdDown() error {
+	return unmountAllActive(false)
+}
+
+func parseUpOptions(args []string) (upOptions, error) {
+	var opts upOptions
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--interactive" || arg == "-i":
+			opts.foreground = true
+		case arg == "--mode":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.mode.value = strings.TrimSpace(args[i])
+			opts.mode.set = true
+		case strings.HasPrefix(arg, "--mode="):
+			opts.mode.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mode="))
+			opts.mode.set = true
+		case arg == "--redis-url":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.redisURL.value = strings.TrimSpace(args[i])
+			opts.overrides.redisURL.set = true
+		case strings.HasPrefix(arg, "--redis-url="):
+			opts.overrides.redisURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--redis-url="))
+			opts.overrides.redisURL.set = true
+		case arg == "--config-source" || arg == "--control" || arg == "--connection" || arg == "--product-mode":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.connection.value = strings.TrimSpace(args[i])
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--config-source="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--config-source="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--control="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--connection="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--connection="))
+			opts.overrides.connection.set = true
+		case strings.HasPrefix(arg, "--product-mode="):
+			opts.overrides.connection.value = strings.TrimSpace(strings.TrimPrefix(arg, "--product-mode="))
+			opts.overrides.connection.set = true
+		case arg == "--control-plane-url":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.controlPlaneURL.value = strings.TrimSpace(args[i])
+			opts.overrides.controlPlaneURL.set = true
+		case strings.HasPrefix(arg, "--control-plane-url="):
+			opts.overrides.controlPlaneURL.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-url="))
+			opts.overrides.controlPlaneURL.set = true
+		case arg == "--control-plane-database":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(args[i])
+			opts.overrides.controlPlaneDatabase.set = true
+		case strings.HasPrefix(arg, "--control-plane-database="):
+			opts.overrides.controlPlaneDatabase.value = strings.TrimSpace(strings.TrimPrefix(arg, "--control-plane-database="))
+			opts.overrides.controlPlaneDatabase.set = true
+		case arg == "--mount-backend":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.mountBackend.value = strings.TrimSpace(args[i])
+			opts.overrides.mountBackend.set = true
+		case strings.HasPrefix(arg, "--mount-backend="):
+			opts.overrides.mountBackend.value = strings.TrimSpace(strings.TrimPrefix(arg, "--mount-backend="))
+			opts.overrides.mountBackend.set = true
+		case arg == "--mountpoint":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for %q", arg)
+			}
+			i++
+			opts.overrides.mountpoint.value = args[i]
+			opts.overrides.mountpoint.set = true
+		case strings.HasPrefix(arg, "--mountpoint="):
+			opts.overrides.mountpoint.value = strings.TrimPrefix(arg, "--mountpoint=")
+			opts.overrides.mountpoint.set = true
+		case arg == "--readonly":
+			opts.overrides.readonly.value = true
+			opts.overrides.readonly.set = true
+		case strings.HasPrefix(arg, "--readonly="):
+			opts.overrides.readonly.set = true
+			if err := opts.overrides.readonly.Set(strings.TrimPrefix(arg, "--readonly=")); err != nil {
+				return opts, fmt.Errorf("%s", upUsageText(filepath.Base(os.Args[0])))
+			}
+		case strings.HasPrefix(arg, "-"):
+			return opts, fmt.Errorf("%s", upUsageText(filepath.Base(os.Args[0])))
+		default:
+			opts.positionals = append(opts.positionals, arg)
+		}
+	}
+	return opts, nil
+}
+
+func upUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s up [flags]
+  %s up <workspace> [<mountpoint>]
+
+Start AFS using the saved config.
+If <workspace> is provided, AFS saves it and starts. The mountpoint defaults
+to ~/afs/<workspace> when omitted. Both are persisted so future runs reuse them.
+
+Flags:
+  --mode <sync|mount>
+                      Persist a mode override before starting.
+  --control-plane-url <http://...|https://...>
+                      One-shot self-managed control plane URL override.
+  --control-plane-database <database-id>
+                      One-shot database override for self-managed mode.
+  --redis-url <redis://...|rediss://...>
+                      One-shot Redis override for local mode.
+  --mount-backend <auto|none|fuse|nfs>
+  --mountpoint <path>
+  --readonly[=true|false]
+                      One-shot local surface overrides for this run.
+  --interactive, -i   Run the sync daemon in the foreground with live logs.
+                      Ctrl-C stops the daemon. Useful for debugging.
+
+Notes:
+  Saved config is the default, but explicit 'up' flags override it for this run.
+  Redis connection, mount backend, and readonly mode come from config unless
+  you override them on the command line.
+  Current workspace must already be selected with '%s workspace use <workspace>'
+  unless you pass <workspace> positionally.
+  If Redis DB or mountpoint are missing, AFS prompts for them in the terminal.
+  Use '%s config set ...' to change Redis or mount settings persistently.
+
+Examples:
+  %s up
+  %s up --mode sync
+  %s up --control-plane-url http://127.0.0.1:8091 getting-started
+  %s up --interactive
+  %s up claude-code ~/.claude
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func cleanupStaleMount(cfg config) error {

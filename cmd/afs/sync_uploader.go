@@ -84,10 +84,10 @@ func newUploader(fs client.Client, results chan<- uploadResult, maxFileBytes int
 	return &uploader{fs: fs, results: results, maxFileBytes: maxFileBytes, readonly: readonly, log: log}
 }
 
-// mountChangelog wires the uploader to emit one controlplane ChangeEntry per
+// attachChangelog wires the uploader to emit one controlplane ChangeEntry per
 // successful upload op. Session + workspace storage identity is baked in at
 // start so each entry is attributable without extra plumbing per-op.
-func (u *uploader) mountChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
+func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
 	u.rdb = rdb
 	u.storageID = storageID
 	u.sessionID = sessionID
@@ -95,6 +95,10 @@ func (u *uploader) mountChangelog(rdb *redis.Client, storageID, sessionID, user,
 	u.agentID = agentID
 	u.label = label
 	u.agentVersion = agentVersion
+}
+
+func (u *uploader) mountChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
+	u.attachChangelog(rdb, storageID, sessionID, user, agentID, label, agentVersion)
 }
 
 // emitChange writes one changelog row for op `result`. Called only when the

@@ -73,15 +73,15 @@ func cmdFileHistory(args []string) error {
 		return err
 	}
 
-	rows := make([]boxRow, 0, 2+len(history.Lineages)*4)
-	rows = append(rows, boxRow{Label: "workspace", Value: selection.Name})
-	rows = append(rows, boxRow{Label: "order", Value: history.Order})
+	rows := make([]outputRow, 0, 2+len(history.Lineages)*4)
+	rows = append(rows, outputRow{Label: "workspace", Value: selection.Name})
+	rows = append(rows, outputRow{Label: "order", Value: history.Order})
 	for _, lineage := range history.Lineages {
 		currentPath := lineage.CurrentPath
 		if strings.TrimSpace(currentPath) == "" {
 			currentPath = "<deleted>"
 		}
-		rows = append(rows, boxRow{
+		rows = append(rows, outputRow{
 			Label: lineage.FileID,
 			Value: fmt.Sprintf("%s · current %s", lineage.State, currentPath),
 		})
@@ -91,13 +91,13 @@ func cmdFileHistory(args []string) error {
 				value += " <- " + version.PrevPath
 			}
 			value += " · " + formatDisplayTimestamp(version.CreatedAt.Format(time.RFC3339))
-			rows = append(rows, boxRow{
+			rows = append(rows, outputRow{
 				Label: "  " + version.VersionID,
 				Value: value,
 			})
 		}
 	}
-	printBox(clr(ansiBold, "file history: "+history.Path), rows)
+	printSection(clr(ansiBold, "file history: "+history.Path), rows)
 	if history.NextCursor != "" {
 		fmt.Fprintf(os.Stdout, "\nnext cursor: %s\n", history.NextCursor)
 	}
@@ -255,7 +255,7 @@ func cmdFileShow(args []string) error {
 
 	switch {
 	case version.Binary:
-		printBox(clr(ansiBold, "binary history entry"), []boxRow{
+		printSection(clr(ansiBold, "binary history entry"), []outputRow{
 			{Label: "workspace", Value: selection.Name},
 			{Label: "version", Value: version.VersionID},
 			{Label: "path", Value: version.Path},
@@ -371,7 +371,7 @@ func cmdFileDiff(args []string) error {
 		return err
 	}
 	if diff.Binary {
-		printBox(clr(ansiBold, "binary file diff"), []boxRow{
+		printSection(clr(ansiBold, "binary file diff"), []outputRow{
 			{Label: "workspace", Value: selection.Name},
 			{Label: "path", Value: diff.Path},
 			{Label: "from", Value: diff.From},
@@ -415,7 +415,7 @@ func cmdFileRestore(args []string) error {
 	if err != nil {
 		return err
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "file restored from history"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "file restored from history"), []outputRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "path", Value: response.Path},
 		{Label: "restored from", Value: response.RestoredFromVersionID},
@@ -479,7 +479,7 @@ func cmdFileUndelete(args []string) error {
 			return err
 		}
 	}
-	printBox(markerSuccess+" "+clr(ansiBold, "file undeleted from history"), []boxRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "file undeleted from history"), []outputRow{
 		{Label: "workspace", Value: selection.Name},
 		{Label: "path", Value: response.Path},
 		{Label: "undeleted from", Value: response.UndeletedFromVersionID},

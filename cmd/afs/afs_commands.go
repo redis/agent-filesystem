@@ -691,16 +691,9 @@ func currentWorkspaceName(ctx context.Context, cfg config, store *afsStore) (str
 		if exists {
 			return workspace, nil
 		}
-		return "", fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", workspace)
+		return "", fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", workspace, filepath.Base(os.Args[0]))
 	}
-	workspaces, err := store.listWorkspaces(ctx)
-	if err != nil {
-		return "", err
-	}
-	if len(workspaces) == 1 {
-		return workspaces[0].Name, nil
-	}
-	return "", errors.New("workspace is required; pass a workspace explicitly")
+	return "", fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 }
 
 type workspaceSelection struct {
@@ -746,11 +739,7 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 		}
 	}
 	if ref == "" {
-		if len(workspaces.Items) == 1 {
-			only := workspaces.Items[0]
-			return workspaceSelection{ID: only.ID, Name: only.Name}, nil
-		}
-		return workspaceSelection{}, errors.New("workspace is required; pass a workspace explicitly")
+		return workspaceSelection{}, fmt.Errorf("workspace is required; no current workspace is selected\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 	}
 
 	// When the user supplied an explicit workspace, we do NOT fall back to
@@ -762,9 +751,9 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 			if configDisplayName != "" {
 				label = configDisplayName
 			}
-			return workspaceSelection{}, fmt.Errorf("workspace %q is ambiguous: %w\nRun '%s ws list' and pass the workspace id explicitly", label, err, filepath.Base(os.Args[0]))
+			return workspaceSelection{}, fmt.Errorf("current workspace %q is ambiguous: %w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", label, err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 		}
-		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s ws list' and pass the workspace id explicitly", err, filepath.Base(os.Args[0]))
+		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s workspace list' and then '%s workspace use <workspace-id>'", err, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 	} else if ok {
 		return match, nil
 	}
@@ -774,7 +763,7 @@ func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, 
 		if configDisplayName != "" {
 			label = configDisplayName
 		}
-		return workspaceSelection{}, fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", label)
+		return workspaceSelection{}, fmt.Errorf("current workspace %q does not exist; run '%s workspace use <workspace>' or pass a workspace explicitly", label, filepath.Base(os.Args[0]))
 	}
 	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", ref)
 }

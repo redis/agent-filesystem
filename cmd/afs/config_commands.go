@@ -197,7 +197,7 @@ func cmdConfigShow(args []string) error {
 	if jsonOut.set && jsonOut.value {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(persistedConfigFromRuntime(cfg))
+		return enc.Encode(cfg)
 	}
 
 	source := "defaults (not yet saved)"
@@ -479,7 +479,8 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 		}
 		return cfg, presence, err
 	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
+	cfg, err = loadConfig()
+	if err != nil {
 		return cfg, presence, err
 	}
 
@@ -496,7 +497,15 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 		}
 		_, presence.redisDBPresent = redisFields["db"]
 	}
-	_, presence.localPathPresent = fields["localPath"]
+	if _, ok := fields["localPath"]; ok {
+		presence.localPathPresent = true
+	} else if rawRuntime, ok := fields["runtime"]; ok {
+		var runtimeFields map[string]json.RawMessage
+		if err := json.Unmarshal(rawRuntime, &runtimeFields); err != nil {
+			return cfg, presence, err
+		}
+		_, presence.localPathPresent = runtimeFields["localPath"]
+	}
 	return cfg, presence, nil
 }
 
@@ -549,7 +558,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, nil
 	}
 	if missingWorkspace {
-		return false, fmt.Errorf("workspace is required\nRun '%s ws mount <workspace> <directory>'", filepath.Base(os.Args[0]))
+		return false, fmt.Errorf("no current workspace is selected for 'up'\nRun '%s workspace use <workspace>' or pass a workspace explicitly", filepath.Base(os.Args[0]))
 	}
 	if !allowPrompt {
 		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and local path", filepath.Base(os.Args[0]))
