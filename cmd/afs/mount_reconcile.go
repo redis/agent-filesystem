@@ -7,13 +7,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
-type attachReconcilePlan struct {
+type mountReconcilePlan struct {
 	LocalCount        int
 	RemoteCount       int
 	StateCount        int
+	StateLiveCount    int
+	StateDeletedCount int
 	SameCount         int
 	ImportCount       int
 	UploadCount       int
@@ -22,30 +25,54 @@ type attachReconcilePlan struct {
 	DeleteRemoteCount int
 	ConflictCount     int
 	SkippedCount      int
-	Operations        []attachReconcileOperation
+	Operations        []mountReconcileOperation
 	Baseline          map[string]SyncEntry
 }
 
-type attachReconcileOperation struct {
+type mountReconcileOperation struct {
 	Code    string
 	Path    string
+	Kind    string
 	Details string
 }
 
-func buildAttachReconcilePlan(ctx context.Context, d *syncDaemon) (attachReconcilePlan, error) {
+type mountLocalSnapshot struct {
+	Exists     bool
+	EntryCount int
+}
+
+func inspectMountLocalRoot(root string) (mountLocalSnapshot, error) {
+	info, err := os.Stat(root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return mountLocalSnapshot{}, nil
+		}
+		return mountLocalSnapshot{}, err
+	}
+	if !info.IsDir() {
+		return mountLocalSnapshot{}, fmt.Errorf("%s is not a directory", root)
+	}
+	count, err := countMountableLocalEntries(root)
+	if err != nil {
+		return mountLocalSnapshot{}, err
+	}
+	return mountLocalSnapshot{Exists: true, EntryCount: count}, nil
+}
+
+func buildMountReconcilePlan(ctx context.Context, d *syncDaemon) (mountReconcilePlan, error) {
 	if d == nil || d.full == nil {
-		return attachReconcilePlan{}, errors.New("attach reconcile: nil daemon")
+		return mountReconcilePlan{}, errors.New("mount reconcile: nil daemon")
 	}
 	local, err := d.full.scanLocalMeta()
 	if err != nil {
-		return attachReconcilePlan{}, fmt.Errorf("scan local attach path: %w", err)
+		return mountReconcilePlan{}, fmt.Errorf("scan local mount path: %w", err)
 	}
 	remote, err := d.full.scanRemoteMeta(ctx, nil)
 	if err != nil {
-		return attachReconcilePlan{}, fmt.Errorf("scan remote workspace: %w", err)
+		return mountReconcilePlan{}, fmt.Errorf("scan remote workspace: %w", err)
 	}
 
-	plan := attachReconcilePlan{
+	plan := mountReconcilePlan{
 		LocalCount:  len(local),
 		RemoteCount: len(remote),
 		Baseline:    make(map[string]SyncEntry),
@@ -53,12 +80,13 @@ func buildAttachReconcilePlan(ctx context.Context, d *syncDaemon) (attachReconci
 	if d.stateWriter != nil {
 		if snap := d.stateWriter.snapshot(); snap != nil {
 			plan.StateCount = len(snap.Entries)
+			plan.StateLiveCount, plan.StateDeletedCount = syncStateEntryCounts(snap)
 			if len(snap.Entries) > 0 {
-				return buildKnownAttachReconcilePlan(ctx, d, local, remote, snap, plan)
+				return buildKnownMountReconcilePlan(ctx, d, local, remote, snap, plan)
 			}
 		}
 	}
-	paths := sortedAttachReconcilePaths(local, remote)
+	paths := sortedMountReconcilePaths(local, remote)
 	now := time.Now().UTC()
 	for _, path := range paths {
 		l, lok := local[path]
@@ -68,15 +96,16 @@ func buildAttachReconcilePlan(ctx context.Context, d *syncDaemon) (attachReconci
 			plan.addLocalOnly(path, l, d.cfg.MaxFileBytes)
 		case !lok && rok:
 			plan.DownloadCount++
-			plan.Operations = append(plan.Operations, attachReconcileOperation{
+			plan.Operations = append(plan.Operations, mountReconcileOperation{
 				Code:    "D",
 				Path:    path,
+				Kind:    r.kind,
 				Details: "remote only; download to local folder",
 			})
 		case lok && rok:
-			entry, same, detail, err := attachBaselineEntry(ctx, d, path, l, r, now)
+			entry, same, detail, err := mountBaselineEntry(ctx, d, path, l, r, now)
 			if err != nil {
-				return attachReconcilePlan{}, err
+				return mountReconcilePlan{}, err
 			}
 			if same {
 				plan.SameCount++
@@ -84,9 +113,10 @@ func buildAttachReconcilePlan(ctx context.Context, d *syncDaemon) (attachReconci
 				continue
 			}
 			plan.ConflictCount++
-			plan.Operations = append(plan.Operations, attachReconcileOperation{
+			plan.Operations = append(plan.Operations, mountReconcileOperation{
 				Code:    "C",
 				Path:    path,
+				Kind:    l.kind,
 				Details: detail,
 			})
 		}
@@ -94,11 +124,11 @@ func buildAttachReconcilePlan(ctx context.Context, d *syncDaemon) (attachReconci
 	return plan, nil
 }
 
-func (p attachReconcilePlan) hasReportableChanges() bool {
+func (p mountReconcilePlan) hasReportableChanges() bool {
 	return p.ImportCount > 0 || p.UploadCount > 0 || p.DownloadCount > 0 || p.DeleteLocalCount > 0 || p.DeleteRemoteCount > 0 || p.ConflictCount > 0 || p.SkippedCount > 0
 }
 
-func (p attachReconcilePlan) requiresConfirmation() bool {
+func (p mountReconcilePlan) requiresConfirmation() bool {
 	if p.StateCount > 0 {
 		return p.hasReportableChanges()
 	}
@@ -108,71 +138,83 @@ func (p attachReconcilePlan) requiresConfirmation() bool {
 	return p.ImportCount > 0 || p.UploadCount > 0 || p.DownloadCount > 0 || p.SkippedCount > 0
 }
 
-func (p *attachReconcilePlan) addLocalOnly(path string, meta observedMeta, maxFileBytes int64) {
+func (p *mountReconcilePlan) addLocalOnly(path string, meta observedMeta, maxFileBytes int64) {
 	if meta.kind == "file" && maxFileBytes > 0 && meta.size > maxFileBytes {
 		p.SkippedCount++
-		p.Operations = append(p.Operations, attachReconcileOperation{
+		p.Operations = append(p.Operations, mountReconcileOperation{
 			Code:    "S",
 			Path:    path,
+			Kind:    meta.kind,
 			Details: fmt.Sprintf("local file is %s; exceeds sync cap %s", formatBytes(meta.size), formatBytes(maxFileBytes)),
 		})
 		return
 	}
 	p.ImportCount++
-	p.Operations = append(p.Operations, attachReconcileOperation{
+	p.Operations = append(p.Operations, mountReconcileOperation{
 		Code:    "I",
 		Path:    path,
+		Kind:    meta.kind,
 		Details: "local only; upload to workspace",
 	})
 }
 
-func buildKnownAttachReconcilePlan(ctx context.Context, d *syncDaemon, local, remote map[string]observedMeta, st *SyncState, plan attachReconcilePlan) (attachReconcilePlan, error) {
-	paths := sortedKnownAttachReconcilePaths(local, remote, st.Entries)
+func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, remote map[string]observedMeta, st *SyncState, plan mountReconcilePlan) (mountReconcilePlan, error) {
+	paths := sortedKnownMountReconcilePaths(local, remote, st.Entries)
 	now := time.Now().UTC()
 	for _, path := range paths {
 		stored, hasStored := st.Entries[path]
-		if hasStored && stored.Deleted {
-			hasStored = false
-		}
 		l, lok := local[path]
 		r, rok := remote[path]
 		switch {
 		case lok && !rok:
-			if hasStored {
+			if hasStored && !stored.Deleted {
 				plan.DeleteLocalCount++
-				plan.Operations = append(plan.Operations, attachReconcileOperation{
+				plan.Operations = append(plan.Operations, mountReconcileOperation{
 					Code:    "DL",
 					Path:    path,
-					Details: "remote deleted while detached; remove local copy",
+					Kind:    l.kind,
+					Details: "remote deleted while unmounted; remove local copy",
 				})
 				continue
 			}
 			plan.addKnownUpload(path, l, d.cfg.MaxFileBytes)
 		case !lok && rok:
+			if hasStored && stored.Deleted {
+				plan.DeleteRemoteCount++
+				plan.Operations = append(plan.Operations, mountReconcileOperation{
+					Code:    "DR",
+					Path:    path,
+					Kind:    r.kind,
+					Details: "local deletion pending; remove from workspace",
+				})
+				continue
+			}
 			if hasStored {
 				if observedChangedFromStored(r, stored, false) {
 					plan.addConflict(path, "local deleted while remote changed")
 					continue
 				}
 				plan.DeleteRemoteCount++
-				plan.Operations = append(plan.Operations, attachReconcileOperation{
+				plan.Operations = append(plan.Operations, mountReconcileOperation{
 					Code:    "DR",
 					Path:    path,
-					Details: "local deleted while detached; remove from workspace",
+					Kind:    r.kind,
+					Details: "local deleted while unmounted; remove from workspace",
 				})
 				continue
 			}
 			plan.DownloadCount++
-			plan.Operations = append(plan.Operations, attachReconcileOperation{
+			plan.Operations = append(plan.Operations, mountReconcileOperation{
 				Code:    "D",
 				Path:    path,
-				Details: "remote created while detached; download to local folder",
+				Kind:    r.kind,
+				Details: "remote created while unmounted; download to local folder",
 			})
 		case lok && rok:
 			if !hasStored {
-				entry, same, detail, err := attachBaselineEntry(ctx, d, path, l, r, now)
+				entry, same, detail, err := mountBaselineEntry(ctx, d, path, l, r, now)
 				if err != nil {
-					return attachReconcilePlan{}, err
+					return mountReconcilePlan{}, err
 				}
 				if same {
 					plan.SameCount++
@@ -191,53 +233,74 @@ func buildKnownAttachReconcilePlan(ctx context.Context, d *syncDaemon, local, re
 				plan.addKnownUpload(path, l, d.cfg.MaxFileBytes)
 			case !localChanged && remoteChanged:
 				plan.DownloadCount++
-				plan.Operations = append(plan.Operations, attachReconcileOperation{
+				plan.Operations = append(plan.Operations, mountReconcileOperation{
 					Code:    "D",
 					Path:    path,
-					Details: "remote changed while detached; download to local folder",
+					Kind:    r.kind,
+					Details: "remote changed while unmounted; download to local folder",
 				})
 			default:
-				entry, same, _, err := attachBaselineEntry(ctx, d, path, l, r, now)
+				entry, same, _, err := mountBaselineEntry(ctx, d, path, l, r, now)
 				if err != nil {
-					return attachReconcilePlan{}, err
+					return mountReconcilePlan{}, err
 				}
 				if same {
 					plan.SameCount++
 					plan.Baseline[path] = entry
 					continue
 				}
-				plan.addConflict(path, "local and remote both changed while detached")
+				plan.addConflict(path, "local and remote both changed while unmounted")
 			}
 		}
 	}
 	return plan, nil
 }
 
-func (p *attachReconcilePlan) addKnownUpload(path string, meta observedMeta, maxFileBytes int64) {
+func (p *mountReconcilePlan) addKnownUpload(path string, meta observedMeta, maxFileBytes int64) {
 	if meta.kind == "file" && maxFileBytes > 0 && meta.size > maxFileBytes {
 		p.SkippedCount++
-		p.Operations = append(p.Operations, attachReconcileOperation{
+		p.Operations = append(p.Operations, mountReconcileOperation{
 			Code:    "S",
 			Path:    path,
+			Kind:    meta.kind,
 			Details: fmt.Sprintf("local file is %s; exceeds sync cap %s", formatBytes(meta.size), formatBytes(maxFileBytes)),
 		})
 		return
 	}
 	p.UploadCount++
-	p.Operations = append(p.Operations, attachReconcileOperation{
+	p.Operations = append(p.Operations, mountReconcileOperation{
 		Code:    "U",
 		Path:    path,
-		Details: "local changed while detached; upload to workspace",
+		Kind:    meta.kind,
+		Details: "local changed while unmounted; upload to workspace",
 	})
 }
 
-func (p *attachReconcilePlan) addConflict(path, details string) {
+func (p *mountReconcilePlan) addConflict(path, details string) {
 	p.ConflictCount++
-	p.Operations = append(p.Operations, attachReconcileOperation{
+	p.Operations = append(p.Operations, mountReconcileOperation{
 		Code:    "C",
 		Path:    path,
 		Details: details,
 	})
+}
+
+func mountPlanDeletesRemoteFromEmptyLocal(plan mountReconcilePlan, local mountLocalSnapshot) bool {
+	return local.EntryCount == 0 &&
+		plan.LocalCount == 0 &&
+		plan.RemoteCount > 0 &&
+		plan.StateLiveCount > 0 &&
+		plan.DeleteRemoteCount > 0
+}
+
+func resetMountSyncState(d *syncDaemon) {
+	if d == nil || d.stateWriter == nil {
+		return
+	}
+	d.stateWriter.mu.Lock()
+	d.stateWriter.state = newSyncState(d.cfg.Workspace, d.cfg.LocalRoot)
+	d.stateWriter.dirty = true
+	d.stateWriter.mu.Unlock()
 }
 
 func observedChangedFromStored(meta observedMeta, stored SyncEntry, localSide bool) bool {
@@ -262,7 +325,7 @@ func observedChangedFromStored(meta observedMeta, stored SyncEntry, localSide bo
 	}
 }
 
-func attachBaselineEntry(ctx context.Context, d *syncDaemon, path string, local, remote observedMeta, now time.Time) (SyncEntry, bool, string, error) {
+func mountBaselineEntry(ctx context.Context, d *syncDaemon, path string, local, remote observedMeta, now time.Time) (SyncEntry, bool, string, error) {
 	if local.kind != remote.kind {
 		return SyncEntry{}, false, fmt.Sprintf("type differs: local %s, remote %s", local.kind, remote.kind), nil
 	}
@@ -321,11 +384,11 @@ func attachBaselineEntry(ctx context.Context, d *syncDaemon, path string, local,
 	}
 }
 
-func approveAttachReconcilePlan(d *syncDaemon, plan attachReconcilePlan) {
+func approveMountReconcilePlan(d *syncDaemon, plan mountReconcilePlan) {
 	if d == nil || d.stateWriter == nil {
 		return
 	}
-	d.cfg.ApprovedInitialAttachMerge = true
+	d.cfg.ApprovedInitialMountMerge = true
 	if len(plan.Baseline) == 0 {
 		return
 	}
@@ -342,13 +405,13 @@ func approveAttachReconcilePlan(d *syncDaemon, plan attachReconcilePlan) {
 	}
 }
 
-func printAttachReconcilePlan(title, workspace, localRoot string, plan attachReconcilePlan, showOperations bool) {
+func printMountReconcilePlan(title, workspace, localRoot string, plan mountReconcilePlan, showOperations bool) {
 	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
 		{Label: "path", Value: compactDisplayPath(localRoot)},
 		{Label: "local entries", Value: fmt.Sprintf("%d", plan.LocalCount)},
 		{Label: "remote entries", Value: fmt.Sprintf("%d", plan.RemoteCount)},
-		{Label: "sync state", Value: fmt.Sprintf("%d", plan.StateCount)},
+		{Label: "sync state", Value: mountSyncStateDisplay(plan)},
 		{Label: "same", Value: fmt.Sprintf("%d", plan.SameCount)},
 		{Label: "import", Value: fmt.Sprintf("%d", plan.ImportCount)},
 		{Label: "upload", Value: fmt.Sprintf("%d", plan.UploadCount)},
@@ -362,15 +425,51 @@ func printAttachReconcilePlan(title, workspace, localRoot string, plan attachRec
 	if !showOperations || len(plan.Operations) == 0 {
 		return
 	}
+	printMountOperationLegend()
 	tableRows := make([][]string, 0, len(plan.Operations))
 	for _, op := range plan.Operations {
-		tableRows = append(tableRows, []string{op.Code, op.Path, op.Details})
+		tableRows = append(tableRows, []string{op.Code, mountOperationPathDisplay(op)})
 	}
-	printPlainTable([]string{"OP", "PATH", "DETAILS"}, tableRows)
+	printPlainTable([]string{"OP", "PATH"}, tableRows)
 	fmt.Println()
 }
 
-func sortedAttachReconcilePaths(local, remote map[string]observedMeta) []string {
+func mountSyncStateDisplay(plan mountReconcilePlan) string {
+	if plan.StateDeletedCount == 0 {
+		return fmt.Sprintf("%d", plan.StateCount)
+	}
+	return fmt.Sprintf("%d live, %d deleted", plan.StateLiveCount, plan.StateDeletedCount)
+}
+
+func printMountOperationLegend() {
+	fmt.Println("# OPs: I=Import, D=Download, U=Upload, DL=Delete local, DR=Delete remote,")
+	fmt.Println("#      C=Conflict, S=Skipped")
+}
+
+func mountOperationPathDisplay(op mountReconcileOperation) string {
+	path := strings.TrimSpace(op.Path)
+	if path == "" {
+		path = "."
+	}
+	if op.Kind == "dir" && !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	if detail := mountOperationInlineDetail(op); detail != "" {
+		path += " (" + detail + ")"
+	}
+	return path
+}
+
+func mountOperationInlineDetail(op mountReconcileOperation) string {
+	switch op.Code {
+	case "C", "DC", "UC", "S":
+		return strings.TrimSpace(op.Details)
+	default:
+		return ""
+	}
+}
+
+func sortedMountReconcilePaths(local, remote map[string]observedMeta) []string {
 	seen := make(map[string]struct{}, len(local)+len(remote))
 	for path := range local {
 		seen[path] = struct{}{}
@@ -386,7 +485,7 @@ func sortedAttachReconcilePaths(local, remote map[string]observedMeta) []string 
 	return paths
 }
 
-func sortedKnownAttachReconcilePaths(local, remote map[string]observedMeta, entries map[string]SyncEntry) []string {
+func sortedKnownMountReconcilePaths(local, remote map[string]observedMeta, entries map[string]SyncEntry) []string {
 	seen := make(map[string]struct{}, len(local)+len(remote)+len(entries))
 	for path := range local {
 		seen[path] = struct{}{}

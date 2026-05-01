@@ -10,15 +10,15 @@ import (
 	"time"
 )
 
-const attachmentRegistryVersion = 1
+const mountRegistryVersion = 1
 
-type attachmentRegistry struct {
+type mountRegistry struct {
 	Version     int                `json:"version"`
 	UpdatedAt   time.Time          `json:"updated_at"`
-	Attachments []attachmentRecord `json:"attachments"`
+	Mounts []mountRecord `json:"mounts"`
 }
 
-type attachmentRecord struct {
+type mountRecord struct {
 	ID                   string    `json:"id"`
 	Workspace            string    `json:"workspace"`
 	WorkspaceID          string    `json:"workspace_id,omitempty"`
@@ -37,13 +37,13 @@ type attachmentRecord struct {
 	StartedAt            time.Time `json:"started_at"`
 }
 
-func attachmentRegistryPath() string {
-	return filepath.Join(stateDir(), "attachments.json")
+func mountRegistryPath() string {
+	return filepath.Join(stateDir(), "mounts.json")
 }
 
-func loadAttachmentRegistry() (attachmentRegistry, error) {
-	reg := attachmentRegistry{Version: attachmentRegistryVersion}
-	raw, err := os.ReadFile(attachmentRegistryPath())
+func loadMountRegistry() (mountRegistry, error) {
+	reg := mountRegistry{Version: mountRegistryVersion}
+	raw, err := os.ReadFile(mountRegistryPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return reg, nil
@@ -51,29 +51,29 @@ func loadAttachmentRegistry() (attachmentRegistry, error) {
 		return reg, err
 	}
 	if err := json.Unmarshal(raw, &reg); err != nil {
-		return reg, fmt.Errorf("parse attachment registry: %w", err)
+		return reg, fmt.Errorf("parse mount registry: %w", err)
 	}
 	if reg.Version == 0 {
-		reg.Version = attachmentRegistryVersion
+		reg.Version = mountRegistryVersion
 	}
-	if reg.Attachments == nil {
-		reg.Attachments = []attachmentRecord{}
+	if reg.Mounts == nil {
+		reg.Mounts = []mountRecord{}
 	}
 	return reg, nil
 }
 
-func saveAttachmentRegistry(reg attachmentRegistry) error {
+func saveMountRegistry(reg mountRegistry) error {
 	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		return err
 	}
-	reg.Version = attachmentRegistryVersion
+	reg.Version = mountRegistryVersion
 	reg.UpdatedAt = time.Now().UTC()
 	raw, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {
 		return err
 	}
 	raw = append(raw, '\n')
-	tmp, err := os.CreateTemp(stateDir(), ".attachments-*.json")
+	tmp, err := os.CreateTemp(stateDir(), ".mounts-*.json")
 	if err != nil {
 		return err
 	}
@@ -92,10 +92,10 @@ func saveAttachmentRegistry(reg attachmentRegistry) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, attachmentRegistryPath())
+	return os.Rename(tmpName, mountRegistryPath())
 }
 
-func normalizeAttachmentPath(raw string) (string, error) {
+func normalizeMountPath(raw string) (string, error) {
 	path, err := expandPath(raw)
 	if err != nil {
 		return "", err
@@ -110,90 +110,90 @@ func normalizeAttachmentPath(raw string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-func attachmentByPath(reg attachmentRegistry, localPath string) (attachmentRecord, bool) {
+func mountByPath(reg mountRegistry, localPath string) (mountRecord, bool) {
 	target := filepath.Clean(localPath)
-	for _, rec := range reg.Attachments {
+	for _, rec := range reg.Mounts {
 		if filepath.Clean(rec.LocalPath) == target {
 			return rec, true
 		}
 	}
-	return attachmentRecord{}, false
+	return mountRecord{}, false
 }
 
-func removeAttachmentByPath(reg *attachmentRegistry, localPath string) (attachmentRecord, bool) {
+func removeMountByPath(reg *mountRegistry, localPath string) (mountRecord, bool) {
 	if reg == nil {
-		return attachmentRecord{}, false
+		return mountRecord{}, false
 	}
 	target := filepath.Clean(localPath)
-	for i, rec := range reg.Attachments {
+	for i, rec := range reg.Mounts {
 		if filepath.Clean(rec.LocalPath) == target {
-			reg.Attachments = append(reg.Attachments[:i], reg.Attachments[i+1:]...)
+			reg.Mounts = append(reg.Mounts[:i], reg.Mounts[i+1:]...)
 			return rec, true
 		}
 	}
-	return attachmentRecord{}, false
+	return mountRecord{}, false
 }
 
-func removeAttachmentByWorkspaceRef(reg *attachmentRegistry, ref string) (attachmentRecord, bool, error) {
+func removeMountByWorkspaceRef(reg *mountRegistry, ref string) (mountRecord, bool, error) {
 	if reg == nil {
-		return attachmentRecord{}, false, nil
+		return mountRecord{}, false, nil
 	}
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return attachmentRecord{}, false, nil
+		return mountRecord{}, false, nil
 	}
 	matches := make([]int, 0, 1)
-	for i, rec := range reg.Attachments {
+	for i, rec := range reg.Mounts {
 		if strings.TrimSpace(rec.Workspace) == ref || strings.TrimSpace(rec.WorkspaceID) == ref {
 			matches = append(matches, i)
 		}
 	}
 	switch len(matches) {
 	case 0:
-		return attachmentRecord{}, false, nil
+		return mountRecord{}, false, nil
 	case 1:
 		i := matches[0]
-		rec := reg.Attachments[i]
-		reg.Attachments = append(reg.Attachments[:i], reg.Attachments[i+1:]...)
+		rec := reg.Mounts[i]
+		reg.Mounts = append(reg.Mounts[:i], reg.Mounts[i+1:]...)
 		return rec, true, nil
 	default:
 		paths := make([]string, 0, len(matches))
 		for _, i := range matches {
-			paths = append(paths, reg.Attachments[i].LocalPath)
+			paths = append(paths, reg.Mounts[i].LocalPath)
 		}
-		return attachmentRecord{}, false, fmt.Errorf("workspace %s matches multiple attachments: %s", ref, strings.Join(paths, ", "))
+		return mountRecord{}, false, fmt.Errorf("workspace %s matches multiple mounts: %s", ref, strings.Join(paths, ", "))
 	}
 }
 
-func upsertAttachment(reg *attachmentRegistry, rec attachmentRecord) {
+func upsertMount(reg *mountRegistry, rec mountRecord) {
 	if reg == nil {
 		return
 	}
 	rec.LocalPath = filepath.Clean(rec.LocalPath)
-	for i, existing := range reg.Attachments {
+	for i, existing := range reg.Mounts {
 		if filepath.Clean(existing.LocalPath) == rec.LocalPath {
-			reg.Attachments[i] = rec
+			reg.Mounts[i] = rec
 			return
 		}
 	}
-	reg.Attachments = append(reg.Attachments, rec)
+	reg.Mounts = append(reg.Mounts, rec)
 }
 
-func attachmentPathConflict(reg attachmentRegistry, localPath string) (attachmentRecord, bool) {
+func mountPathConflict(reg mountRegistry, localPath string) (mountRecord, bool) {
 	target := filepath.Clean(localPath)
-	for _, rec := range reg.Attachments {
+	for _, rec := range reg.Mounts {
 		existing := filepath.Clean(rec.LocalPath)
 		if existing == target || pathContains(existing, target) || pathContains(target, existing) {
 			return rec, true
 		}
 	}
-	return attachmentRecord{}, false
+	return mountRecord{}, false
 }
 
-func attachmentWorkspaceConflict(reg attachmentRegistry, workspaceID, workspaceName string) (attachmentRecord, bool) {
+func mountWorkspaceConflict(reg mountRegistry, workspaceID, workspaceName string) (mountRecord, bool) {
 	workspaceID = strings.TrimSpace(workspaceID)
 	workspaceName = strings.TrimSpace(workspaceName)
-	for _, rec := range reg.Attachments {
+	for _, rec := range reg.Mounts {
 		if workspaceID != "" && strings.TrimSpace(rec.WorkspaceID) == workspaceID {
 			return rec, true
 		}
@@ -201,7 +201,7 @@ func attachmentWorkspaceConflict(reg attachmentRegistry, workspaceID, workspaceN
 			return rec, true
 		}
 	}
-	return attachmentRecord{}, false
+	return mountRecord{}, false
 }
 
 func pathContains(parent, child string) bool {
@@ -214,7 +214,7 @@ func pathContains(parent, child string) bool {
 	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
-func attachmentStatus(rec attachmentRecord) string {
+func mountStatus(rec mountRecord) string {
 	if rec.PID > 0 && processAlive(rec.PID) {
 		return "running"
 	}

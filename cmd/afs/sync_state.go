@@ -66,6 +66,20 @@ func newSyncState(workspace, localPath string) *SyncState {
 	}
 }
 
+func syncStateEntryCounts(st *SyncState) (live, deleted int) {
+	if st == nil {
+		return 0, 0
+	}
+	for _, entry := range st.Entries {
+		if entry.Deleted {
+			deleted++
+			continue
+		}
+		live++
+	}
+	return live, deleted
+}
+
 // syncStateDir returns the directory holding sync state files for the current
 // process (one JSON file per workspace).
 func syncStateDir() string {
@@ -135,7 +149,7 @@ func saveSyncState(st *SyncState) error {
 	return os.Rename(tmpName, target)
 }
 
-// removeSyncState deletes the persisted state file for explicit detach/delete
+// removeSyncState deletes the persisted state file for explicit unmount/delete
 // cleanup.
 func removeSyncState(workspace string) error {
 	err := os.Remove(syncStatePath(workspace))

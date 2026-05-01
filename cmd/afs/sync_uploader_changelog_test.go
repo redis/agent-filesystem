@@ -18,7 +18,7 @@ func TestUploaderEmitsChangelogEntryPerOp(t *testing.T) {
 	t.Cleanup(func() { _ = rdb.Close() })
 
 	u := newUploader(nil, nil, 0, false, nil)
-	u.attachChangelog(rdb, "ws-123", "sess-abc", "user-1", "agt-sync", "feature/auth", "dev")
+	u.mountChangelog(rdb, "ws-123", "sess-abc", "user-1", "agt-sync", "feature/auth", "dev")
 
 	ctx := context.Background()
 
@@ -116,13 +116,13 @@ func TestUploaderEmitsChangelogEntryPerOp(t *testing.T) {
 	}
 }
 
-func TestUploaderChangelogDisabledWhenUnattached(t *testing.T) {
+func TestUploaderChangelogDisabledWhenUnmounted(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
 
 	u := newUploader(nil, nil, 0, false, nil)
-	// No attachChangelog call.
+	// No mountChangelog call.
 
 	u.emitChange(context.Background(), uploadResult{
 		Op: uploadOp{Kind: opUploadFile, Path: "x", Content: []byte("a"), LocalHash: "h"},
@@ -134,6 +134,6 @@ func TestUploaderChangelogDisabledWhenUnattached(t *testing.T) {
 		t.Fatalf("XRange: %v", err)
 	}
 	if len(entries) != 0 {
-		t.Fatalf("expected 0 entries when unattached, got %d", len(entries))
+		t.Fatalf("expected 0 entries when unmounted, got %d", len(entries))
 	}
 }

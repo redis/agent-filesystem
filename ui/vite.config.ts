@@ -11,4 +11,24 @@ export default defineConfig({
     }),
     react(),
   ],
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "react-runtime",
+              test: /node_modules[\\/](?:react|react-dom)[\\/]/,
+              priority: 40,
+            },
+            {
+              name: "tanstack",
+              test: /node_modules[\\/]@tanstack[\\/]/,
+              priority: 30,
+            },
+          ],
+        },
+      },
+    },
+  },
 });

@@ -57,13 +57,13 @@ func TestMarkerSuccessConstant(t *testing.T) {
 func TestFormatCLIErrorUsesPlainSectionFormat(t *testing.T) {
 	t.Helper()
 
-	got := formatCLIError(errors.New(`attach blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty
+	got := formatCLIError(errors.New(`mount blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty
 Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first`))
 
 	want := `
 Error
 
-Attach blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty.
+Mount blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty.
 
 Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first.
 
@@ -76,10 +76,10 @@ Use an empty directory, import the local directory into a new workspace, or move
 func TestFormatCLIErrorPreservesUsageBlocks(t *testing.T) {
 	t.Helper()
 
-	got := formatCLIError(errors.New("unknown flag \"--wat\"\n\nUsage:\n  afs ws attach [<workspace> <directory>]"))
+	got := formatCLIError(errors.New("unknown flag \"--wat\"\n\nUsage:\n  afs ws mount [<workspace> <directory>]"))
 	for _, want := range []string{
-		"\nError\n\nUnknown flag \"--wat\".\n\nUsage:\n  afs ws attach [<workspace> <directory>]\n\n",
-		"Usage:\n  afs ws attach",
+		"\nError\n\nUnknown flag \"--wat\".\n\nUsage:\n  afs ws mount [<workspace> <directory>]\n\n",
+		"Usage:\n  afs ws mount",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatCLIError() = %q, want substring %q", got, want)

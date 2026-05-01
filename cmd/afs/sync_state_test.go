@@ -52,6 +52,19 @@ func TestSyncStateRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSyncStateEntryCountsSeparateLiveAndDeleted(t *testing.T) {
+	t.Helper()
+
+	st := newSyncState("repo", "/tmp/repo")
+	st.Entries["live.txt"] = SyncEntry{Type: "file"}
+	st.Entries["deleted.txt"] = SyncEntry{Type: "file", Deleted: true}
+
+	live, deleted := syncStateEntryCounts(st)
+	if live != 1 || deleted != 1 {
+		t.Fatalf("syncStateEntryCounts() = live:%d deleted:%d, want 1/1", live, deleted)
+	}
+}
+
 func TestSyncStateAtomicWrite(t *testing.T) {
 	t.Helper()
 	withTempHome(t)

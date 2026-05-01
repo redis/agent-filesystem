@@ -1,11 +1,9 @@
 import { createRootRoute, Outlet, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import styled from "styled-components";
-import { Loader } from "@redis-ui/components";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
 import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
 import { BackgroundPatternProvider } from "../foundation/background-pattern";
-import { AppSidebar } from "../layout/sidebar";
 import { AppBar } from "../layout/app-bar";
 import { isPublicMarketingPath } from "../layout/public-routes";
 import { PublicShell } from "../layout/public-shell";
@@ -16,6 +14,8 @@ import {
   FlexColItem,
   MainContainer,
 } from "../layout/layout.styles";
+
+const AppSidebar = lazy(() => import("../layout/sidebar").then((module) => ({ default: module.AppSidebar })));
 
 const AUTH_PATH_PREFIXES = ["/login", "/signup", "/forgot-password", "/sso-callback"];
 const PUBLIC_APP_PATHS = new Set(["/connect-cli"]);
@@ -102,17 +102,19 @@ function RootLayout() {
       <BgFx />
       <RouteWarmup />
       <FlexRow>
-        <AppSidebar />
+        <Suspense fallback={<SidebarPlaceholder aria-hidden="true" />}>
+          <AppSidebar />
+        </Suspense>
         <FlexColItem>
           <AppBar />
           <MainContainer>
             {auth.isLoading && !isPublicAppPath ? (
               <CenteredState>
-                <Loader data-testid="loader--spinner" />
+                <LoadingSpinner data-testid="loader--spinner" />
               </CenteredState>
             ) : auth.isSignedOut && !isPublicAppPath ? (
               <CenteredState>
-                <Loader data-testid="loader--spinner" />
+                <LoadingSpinner data-testid="loader--spinner" />
               </CenteredState>
             ) : (
               <Outlet />
@@ -138,4 +140,30 @@ const CenteredState = styled.div`
   display: grid;
   place-items: center;
   padding: 32px;
+`;
+
+const LoadingSpinner = styled.div`
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--afs-line-strong);
+  border-top-color: var(--afs-accent);
+  border-radius: 999px;
+  animation: afs-spin 0.8s linear infinite;
+
+  @keyframes afs-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`;
+
+const SidebarPlaceholder = styled.aside`
+  flex: 0 0 252px;
+  min-height: 100vh;
+  border-right: 1px solid var(--afs-line);
+  background: var(--afs-bg-1);
+
+  @media (max-width: 1279px) {
+    flex-basis: 72px;
+  }
 `;

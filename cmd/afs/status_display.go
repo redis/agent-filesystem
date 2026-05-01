@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -76,6 +78,31 @@ func configPathLabel() string {
 	return clr(ansiGray, compactDisplayPath(configPath()))
 }
 
+func statusConfigPathLabel() string {
+	path := configPath()
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	return clr(ansiGray, homeRelativeDisplayPath(path))
+}
+
+func homeRelativeDisplayPath(path string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	home = filepath.Clean(home)
+	cleanPath := filepath.Clean(path)
+	if cleanPath == home {
+		return "~"
+	}
+	rel, err := filepath.Rel(home, cleanPath)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
+		return path
+	}
+	return filepath.Join("~", rel)
+}
+
 // appendConfigRows adds user-facing config metadata rows without overloading
 // "config" to mean both the configuration source and the config file path.
 func appendConfigRows(rows []outputRow, cfg config) []outputRow {
@@ -116,7 +143,7 @@ func statusDisplayRows(cfg config, rows []outputRow) []outputRow {
 		}
 		ordered = append(ordered, row)
 	}
-	ordered = append(ordered, outputRow{Label: "config file", Value: configPathLabel()})
+	ordered = append(ordered, outputRow{Label: "config file", Value: statusConfigPathLabel(), NoTruncate: true})
 	ordered = append(ordered, databaseRows...)
 	return ordered
 }
@@ -133,9 +160,13 @@ func commandContextRows(cfg config, workspace string) []outputRow {
 func statusTitle(prefix string, pid int) string {
 
 	if pid > 0 {
-		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (pid %d)", pid))
+		return prefix + " " + clr(ansiBold, fmt.Sprintf("AFS Running (PID: %d)", pid))
 	}
 	return prefix + " " + clr(ansiBold, "AFS Running")
+}
+
+func statusNotRunningTitle() string {
+	return clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Not Running")
 }
 
 func localSurfacePath(cfg config) string {
@@ -143,7 +174,8 @@ func localSurfacePath(cfg config) string {
 }
 
 // statusRows returns the consistent core rows. Sync mode no longer reports
-// saved workspace/local values because attachments are the source of truth.
+// saved workspace/local values because per-workspace mount rows carry the
+// live local paths.
 // Mount backend is included only for FUSE/NFS. In cloud mode the database row
 // shows the cloud database id instead of the local Redis endpoint so users see
 // the database they're actually talking to.
@@ -158,7 +190,9 @@ func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr s
 		}
 	}
 	rows = append(rows, outputRow{Label: "database", Value: databaseStatusLabel(cfg, redisAddr, redisDB)})
-	rows = append(rows, outputRow{Label: "mode", Value: mode})
+	if strings.TrimSpace(mode) != "" {
+		rows = append(rows, outputRow{Label: "mode", Value: mode})
+	}
 	if backendName != "" && backendName != mountBackendNone {
 		rows = append(rows, outputRow{Label: "mount backend", Value: userModeLabel(backendName)})
 	}
@@ -168,6 +202,26 @@ func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr s
 		}
 	}
 	return rows
+}
+
+func runtimeStatusRows(cfg config, workspace, localPath, mode, backendName, redisAddr string, redisDB int, running bool) []outputRow {
+	rows := statusRows(cfg, workspace, localPath, mode, backendName, redisAddr, redisDB)
+	if running {
+		return rows
+	}
+	filtered := make([]outputRow, 0, len(rows)+1)
+	if ws := strings.TrimSpace(workspace); ws != "" {
+		filtered = append(filtered, outputRow{Label: "workspace", Value: ws})
+	}
+	for _, row := range rows {
+		switch row.Label {
+		case "workspace", "local", "mode", "mount backend":
+			continue
+		default:
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 // databaseStatusLabel picks the right label for the "database" row: in cloud
@@ -183,13 +237,12 @@ func databaseStatusLabel(cfg config, redisAddr string, redisDB int) string {
 	return statusRemoteLabel(redisAddr, redisDB)
 }
 
-// statusTitleForAlive returns a green-check or yellow-circle title with an
-// optional daemon PID.
+// statusTitleForAlive returns daemon state with an optional PID.
 func statusTitleForAlive(alive bool, pid int) string {
 	if alive {
 		return statusTitle(markerSuccess, pid)
 	}
-	return statusTitle(clr(ansiYellow, "○"), 0)
+	return statusNotRunningTitle()
 }
 
 // appendUptimeRows appends the uptime row and, if set, the readonly row.
@@ -232,10 +285,12 @@ func currentWorkspaceLabel(workspace string) string {
 }
 
 // cmdStatus dispatches to the status renderer for the current local runtime:
-// no state, sync attachment, or live mount.
+// no state, sync mount, or live mount.
 type statusOptions struct {
 	verbose bool
 }
+
+var statusSyncDaemonPIDs = syncDaemonPIDs
 
 func cmdStatusArgs(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
@@ -270,80 +325,268 @@ func cmdStatus() error {
 }
 
 func cmdStatusWithOptions(opts statusOptions) error {
-	reg, regErr := loadAttachmentRegistry()
+	reg, regErr := loadMountRegistry()
+	processPIDs, _ := statusSyncDaemonPIDs()
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if err := cmdStatusNotRunning(); err != nil {
+			if regErr == nil && len(reg.Mounts) > 0 {
+				if err := cmdStatusFromMountRegistry(reg, processPIDs); err != nil {
+					return err
+				}
+			} else if len(processPIDs) > 0 {
+				if err := cmdStatusFromSyncDaemons(processPIDs); err != nil {
+					return err
+				}
+			} else if err := cmdStatusNotRunning(); err != nil {
 				return err
 			}
 		} else {
 			return err
 		}
 	} else if strings.TrimSpace(st.Mode) == modeSync {
-		cmdStatusSync(st)
+		cmdStatusSync(st, processPIDs)
 	} else if err := cmdStatusMount(st); err != nil {
 		return err
 	}
 
-	if regErr == nil && len(reg.Attachments) > 0 {
-		printAttachmentStatus(reg, opts.verbose)
+	if regErr == nil && len(reg.Mounts) > 0 {
+		printMountStatus(reg, opts.verbose)
 	}
 	return nil
 }
 
-func printAttachmentStatus(reg attachmentRegistry, verbose bool) {
-	if len(reg.Attachments) == 0 {
+func cmdStatusFromMountRegistry(reg mountRegistry, processPIDs []int) error {
+	cfg := loadConfigOrDefault()
+	if err := resolveConfigPaths(&cfg); err != nil {
+		cfg.WorkRoot = defaultWorkRoot()
+	}
+	backendName := cfg.MountBackend
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	mode, _ := effectiveMode(cfg)
+
+	mountPIDs := runningMountPIDs(reg.Mounts)
+	runningPIDs := uniqueSortedPIDs(append(append([]int{}, mountPIDs...), processPIDs...))
+	title := statusTitleForPIDs(runningPIDs)
+
+	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB, len(runningPIDs) > 0))
+	rows = append(rows, outputRow{Label: "daemon", Value: daemonStatusSummary(runningPIDs)})
+	if unmanaged := unmanagedSyncDaemonPIDs(processPIDs, mountPIDs); len(unmanaged) > 0 {
+		rows = append(rows, outputRow{Label: "unmanaged daemons", Value: pidsLabel(unmanaged)})
+	}
+	rows = appendAuthStatusRows(rows)
+	printSection(title, rows)
+	return nil
+}
+
+func cmdStatusFromSyncDaemons(pids []int) error {
+	cfg := loadConfigOrDefault()
+	if err := resolveConfigPaths(&cfg); err != nil {
+		cfg.WorkRoot = defaultWorkRoot()
+	}
+	title := statusTitleForPIDs(pids)
+	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), modeSync, "", cfg.RedisAddr, cfg.RedisDB, len(pids) > 0))
+	rows = append(rows, outputRow{Label: "daemon", Value: daemonStatusSummary(pids)})
+	rows = append(rows, outputRow{Label: "unmanaged daemons", Value: pidsLabel(pids)})
+	rows = appendAuthStatusRows(rows)
+	printSection(title, rows)
+	return nil
+}
+
+func printMountStatus(reg mountRegistry, verbose bool) {
+	if len(reg.Mounts) == 0 {
 		fmt.Println()
-		fmt.Println("not attached")
+		fmt.Println("No mounted workspaces.")
 		fmt.Println()
 		return
 	}
-	attachments := sortedAttachmentRecords(reg.Attachments)
-	fmt.Println()
-	fmt.Println("Attached workspaces")
-	fmt.Println()
-	printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, attachmentSummaryRows(attachments))
+	running, stopped := splitMountRecords(reg.Mounts)
+	if len(running) > 0 {
+		fmt.Println()
+		fmt.Println("Mounted workspaces")
+		fmt.Println()
+		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(running))
+	} else {
+		fmt.Println()
+		fmt.Println("No mounted workspaces.")
+	}
+	if len(stopped) > 0 {
+		fmt.Println()
+		fmt.Println("Stopped workspace records")
+		fmt.Println()
+		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(stopped))
+	}
 	if !verbose {
 		fmt.Println()
 		return
 	}
-	for _, rec := range attachments {
+	for _, rec := range append(running, stopped...) {
 		fmt.Println()
-		printAttachmentVerbose(rec)
+		printMountVerbose(rec)
 	}
 	fmt.Println()
 }
 
-func sortedAttachmentRecords(records []attachmentRecord) []attachmentRecord {
-	attachments := append([]attachmentRecord(nil), records...)
-	sort.SliceStable(attachments, func(i, j int) bool {
-		left := strings.ToLower(attachments[i].Workspace)
-		right := strings.ToLower(attachments[j].Workspace)
+func sortedMountRecords(records []mountRecord) []mountRecord {
+	mounts := append([]mountRecord(nil), records...)
+	sort.SliceStable(mounts, func(i, j int) bool {
+		left := strings.ToLower(mounts[i].Workspace)
+		right := strings.ToLower(mounts[j].Workspace)
 		if left == right {
-			return attachments[i].LocalPath < attachments[j].LocalPath
+			return mounts[i].LocalPath < mounts[j].LocalPath
 		}
 		return left < right
 	})
-	return attachments
+	return mounts
 }
 
-func attachmentSummaryRows(attachments []attachmentRecord) [][]string {
-	rows := make([][]string, 0, len(attachments))
-	for _, rec := range attachments {
+func splitMountRecords(records []mountRecord) (running []mountRecord, stopped []mountRecord) {
+	for _, rec := range sortedMountRecords(records) {
+		if mountStatus(rec) == "running" {
+			running = append(running, rec)
+			continue
+		}
+		stopped = append(stopped, rec)
+	}
+	return running, stopped
+}
+
+func runningMountPIDs(mounts []mountRecord) []int {
+	seen := map[int]struct{}{}
+	var pids []int
+	for _, rec := range mounts {
+		if rec.PID <= 0 || !processAlive(rec.PID) {
+			continue
+		}
+		if _, ok := seen[rec.PID]; ok {
+			continue
+		}
+		seen[rec.PID] = struct{}{}
+		pids = append(pids, rec.PID)
+	}
+	sort.Ints(pids)
+	return pids
+}
+
+func syncDaemonPIDs() ([]int, error) {
+	out, err := exec.Command("ps", "-axo", "pid=,command=").Output()
+	if err != nil {
+		return nil, err
+	}
+	return parseSyncDaemonPIDs(string(out)), nil
+}
+
+func parseSyncDaemonPIDs(psOutput string) []int {
+	var pids []int
+	for _, rawLine := range strings.Split(psOutput, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
+		if err != nil || pid <= 0 {
+			continue
+		}
+		if filepath.Base(fields[1]) != "afs" {
+			continue
+		}
+		command := strings.TrimSpace(strings.TrimPrefix(line, fields[0]))
+		if !strings.Contains(command, "_sync-daemon") {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return uniqueSortedPIDs(pids)
+}
+
+func unmanagedSyncDaemonPIDs(processPIDs, managedPIDs []int) []int {
+	managed := make(map[int]struct{}, len(managedPIDs))
+	for _, pid := range managedPIDs {
+		managed[pid] = struct{}{}
+	}
+	var unmanaged []int
+	for _, pid := range processPIDs {
+		if _, ok := managed[pid]; ok {
+			continue
+		}
+		unmanaged = append(unmanaged, pid)
+	}
+	return uniqueSortedPIDs(unmanaged)
+}
+
+func uniqueSortedPIDs(pids []int) []int {
+	seen := make(map[int]struct{}, len(pids))
+	unique := make([]int, 0, len(pids))
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		if _, ok := seen[pid]; ok {
+			continue
+		}
+		seen[pid] = struct{}{}
+		unique = append(unique, pid)
+	}
+	sort.Ints(unique)
+	return unique
+}
+
+func statusTitleForPIDs(pids []int) string {
+	switch len(pids) {
+	case 0:
+		return statusNotRunningTitle()
+	case 1:
+		return statusTitle(markerSuccess, pids[0])
+	default:
+		parts := make([]string, 0, len(pids))
+		for _, pid := range pids {
+			parts = append(parts, fmt.Sprintf("%d", pid))
+		}
+		return markerSuccess + " " + clr(ansiBold, fmt.Sprintf("AFS Running (PIDs: %s)", strings.Join(parts, ", ")))
+	}
+}
+
+func pidsLabel(pids []int) string {
+	parts := make([]string, 0, len(pids))
+	for _, pid := range pids {
+		parts = append(parts, fmt.Sprintf("%d", pid))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func daemonStatusSummary(pids []int) string {
+	switch len(pids) {
+	case 0:
+		return "not running"
+	case 1:
+		return fmt.Sprintf("running (PID: %d)", pids[0])
+	default:
+		return fmt.Sprintf("running (%d daemons)", len(pids))
+	}
+}
+
+func mountSummaryRows(mounts []mountRecord) [][]string {
+	rows := make([][]string, 0, len(mounts))
+	for _, rec := range mounts {
 		mode := strings.TrimSpace(rec.Mode)
 		if mode == "" {
 			mode = "unknown"
 		}
-		rows = append(rows, []string{rec.Workspace, attachmentStatus(rec), mode, rec.LocalPath})
+		rows = append(rows, []string{rec.Workspace, mountStatus(rec), mode, rec.LocalPath})
 	}
 	return rows
 }
 
-func printAttachmentVerbose(rec attachmentRecord) {
+func printMountVerbose(rec mountRecord) {
 	rows := []outputRow{
 		{Label: "workspace", Value: rec.Workspace},
-		{Label: "status", Value: attachmentStatus(rec)},
+		{Label: "status", Value: mountStatus(rec)},
 		{Label: "mode", Value: fallbackString(rec.Mode, "unknown")},
 		{Label: "path", Value: rec.LocalPath},
 	}
@@ -365,8 +608,8 @@ func printAttachmentVerbose(rec attachmentRecord) {
 	if sessionID := strings.TrimSpace(rec.SessionID); sessionID != "" {
 		rows = append(rows, outputRow{Label: "session", Value: sessionID})
 	}
-	if attachmentID := strings.TrimSpace(rec.ID); attachmentID != "" {
-		rows = append(rows, outputRow{Label: "attachment", Value: attachmentID})
+	if mountID := strings.TrimSpace(rec.ID); mountID != "" {
+		rows = append(rows, outputRow{Label: "mount", Value: mountID})
 	}
 	if !rec.StartedAt.IsZero() {
 		rows = append(rows, outputRow{Label: "started", Value: formatDisplayTimestamp(rec.StartedAt.UTC().Format(time.RFC3339))})
@@ -394,27 +637,39 @@ func cmdStatusNotRunning() error {
 	}
 	mode, _ := effectiveMode(cfg)
 
-	title := clr(ansiDim, "○") + " " + clr(ansiBold, "AFS Daemon Not Running")
-	rows := statusDisplayRows(cfg, statusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB))
+	title := statusNotRunningTitle()
+	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB, false))
 	rows = appendAuthStatusRows(rows)
 	printSection(title, rows)
 	return nil
 }
 
 // cmdStatusSync renders status for a running sync daemon.
-func cmdStatusSync(st state) {
+func cmdStatusSync(st state, processPIDs []int) {
 	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
 	cfg := loadConfigOrDefault()
 	if err := resolveConfigPaths(&cfg); err != nil {
 		cfg.WorkRoot = defaultWorkRoot()
 	}
 	title := statusTitleForAlive(alive, st.SyncPID)
-	rows := statusDisplayRows(cfg, statusRows(cfg, st.CurrentWorkspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB))
+	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, st.CurrentWorkspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB, alive))
+	managedPIDs := []int{}
+	if alive {
+		managedPIDs = append(managedPIDs, st.SyncPID)
+	}
+	if unmanaged := unmanagedSyncDaemonPIDs(processPIDs, managedPIDs); len(unmanaged) > 0 {
+		rows = append(rows, outputRow{Label: "unmanaged daemons", Value: pidsLabel(unmanaged)})
+	}
 	rows = appendAuthStatusRows(rows)
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
 	if snap := loadSyncStateForStatus(st.CurrentWorkspace); snap != nil {
-		rows = append(rows, outputRow{Label: "entries", Value: fmt.Sprintf("%d", len(snap.Entries))})
+		live, deleted := syncStateEntryCounts(snap)
+		value := fmt.Sprintf("%d", live)
+		if deleted > 0 {
+			value = fmt.Sprintf("%d live, %d deleted", live, deleted)
+		}
+		rows = append(rows, outputRow{Label: "entries", Value: value})
 		if !snap.UpdatedAt.IsZero() {
 			rows = append(rows, outputRow{Label: "last sync", Value: relativeTime(snap.UpdatedAt)})
 		}
@@ -448,7 +703,7 @@ func cmdStatusMount(st state) error {
 	}
 	title := statusTitleForAlive(alive, st.MountPID)
 
-	rows := statusDisplayRows(cfg, statusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB))
+	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB, alive))
 	rows = appendAuthStatusRows(rows)
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
@@ -506,6 +761,6 @@ func printReadyBox(cfg config, backendName, _ string) {
 	}
 	rows = append(rows, outputRow{})
 	rows = append(rows, outputRow{Label: "try", Value: clr(ansiOrange, "ls "+shellQuote(localPath))})
-	rows = append(rows, outputRow{Label: "detach", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws detach "+shellQuote(localPath))})
+	rows = append(rows, outputRow{Label: "unmount", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws unmount "+shellQuote(localPath))})
 	printSection(title, rows)
 }

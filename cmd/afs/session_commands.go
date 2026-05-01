@@ -296,7 +296,7 @@ func padLeft(s string, n int) string {
 }
 
 func defaultLogSessionID(selection workspaceSelection) string {
-	if sessionID := attachmentSessionIDForWorkspace(selection); sessionID != "" {
+	if sessionID := mountSessionIDForWorkspace(selection); sessionID != "" {
 		return sessionID
 	}
 	st, err := loadState()
@@ -312,13 +312,13 @@ func defaultLogSessionID(selection workspaceSelection) string {
 	return strings.TrimSpace(st.SessionID)
 }
 
-func attachmentSessionIDForWorkspace(selection workspaceSelection) string {
-	reg, err := loadAttachmentRegistry()
+func mountSessionIDForWorkspace(selection workspaceSelection) string {
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return ""
 	}
 	var matches []string
-	for _, rec := range reg.Attachments {
+	for _, rec := range reg.Mounts {
 		if strings.TrimSpace(rec.SessionID) == "" {
 			continue
 		}
@@ -388,7 +388,7 @@ func cmdSessionSummary(args []string) error {
 		flags.sessionID = defaultLogSessionID(selection)
 	}
 	if flags.sessionID == "" {
-		return fmt.Errorf("no active session; pass a session id explicitly or attach a workspace first")
+		return fmt.Errorf("no active session; pass a session id explicitly or mount a workspace first")
 	}
 
 	resp, err := service.ListChangelog(ctx, selection.Name, controlplane.ChangelogListRequest{
@@ -465,7 +465,7 @@ func sessionLogUsageText(bin string) string {
   %s log [session-id] [flags]
 
 Show file-change history for an AFS session. Defaults to the session for the
-attached workspace on this machine.
+mounted workspace on this machine.
 
 Flags:
   --workspace, -w <name>   Read log entries for a specific workspace
@@ -480,7 +480,7 @@ func sessionSummaryUsageText(bin string) string {
   %s log summary [session-id] [flags]
 
 Show per-session totals (file counts by op, bytes added/removed).
-Defaults to the session for the attached workspace on this machine.
+Defaults to the session for the mounted workspace on this machine.
 
 Flags:
   --workspace, -w <name>   Summarize a specific workspace

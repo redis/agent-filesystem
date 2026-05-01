@@ -76,7 +76,7 @@ func cmdImport(args []string) error {
 		return err
 	}
 	if len(parsed.positionals) != 2 {
-		return fmt.Errorf("usage: %s import [--force] [--attach-at-source] [--database <database-id|database-name>] <workspace> <directory>", filepath.Base(os.Args[0]))
+		return fmt.Errorf("usage: %s import [--force] [--mount-at-source] [--database <database-id|database-name>] <workspace> <directory>", filepath.Base(os.Args[0]))
 	}
 
 	workspace := parsed.positionals[0]
@@ -111,16 +111,16 @@ func cmdImport(args []string) error {
 		if strings.TrimSpace(parsed.database) != "" {
 			return fmt.Errorf("--database is only supported in control plane mode")
 		}
-		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force, parsed.attachAtSource)
+		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force, parsed.mountAtSource)
 	case productModeSelfHosted:
-		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database, parsed.attachAtSource)
+		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database, parsed.mountAtSource)
 	default:
 		_, _, _, err := openAFSControlPlaneForConfig(ctx, cfg)
 		return err
 	}
 }
 
-func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting, attachAtSource bool) error {
+func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting, mountAtSource bool) error {
 	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
 		return err
@@ -266,7 +266,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		return err
 	}
 	rootDuration := step.elapsed()
-	step.succeed("ready to attach")
+	step.succeed("ready to mount")
 
 	// Drop the blob cache now that sync has consumed it.
 	sink.Drop()
@@ -292,12 +292,12 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
 	}
-	if !attachAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + workspace + " " + shellQuote(sourceDir)})
+	if !mountAtSource {
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws mount " + workspace + " " + shellQuote(sourceDir)})
 	}
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
-	if attachAtSource {
-		return attachWorkspace(attachOptions{workspace: workspace, directory: sourceDir})
+	if mountAtSource {
+		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
 	}
 	return nil
 }
@@ -310,7 +310,7 @@ func newCLIWorkspaceID() (string, error) {
 	return "ws_" + hex.EncodeToString(raw[:]), nil
 }
 
-func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string, attachAtSource bool) error {
+func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string, mountAtSource bool) error {
 	client, _, err := newHTTPControlPlaneClient(ctx, cfg)
 	if err != nil {
 		return err
@@ -409,12 +409,12 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
 		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + uploadDuration)},
 	}
-	if !attachAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + workspace + " " + shellQuote(sourceDir)})
+	if !mountAtSource {
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " ws mount " + workspace + " " + shellQuote(sourceDir)})
 	}
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace imported"), rows)
-	if attachAtSource {
-		return attachWorkspace(attachOptions{workspace: workspace, directory: sourceDir})
+	if mountAtSource {
+		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
 	}
 	return nil
 }
@@ -967,7 +967,7 @@ type afsParsedArgs struct {
 	force          bool
 	readonly       bool
 	database       string
-	attachAtSource bool
+	mountAtSource bool
 }
 
 func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs, error) {
@@ -990,8 +990,8 @@ func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs,
 				return parsed, fmt.Errorf("unknown flag %q", args[i])
 			}
 			parsed.readonly = true
-		case "--attach-at-source":
-			parsed.attachAtSource = true
+		case "--mount-at-source":
+			parsed.mountAtSource = true
 		default:
 			if strings.HasPrefix(args[i], "--database=") {
 				parsed.database = strings.TrimSpace(strings.TrimPrefix(args[i], "--database="))

@@ -65,7 +65,7 @@ func cmdFS(args []string) error {
 		return cmdFSFind(parsed.workspace, parsed.args)
 	case "create-exclusive":
 		if strings.TrimSpace(parsed.workspace) != "" {
-			return errors.New("--workspace is not supported with fs create-exclusive; use the attached sync workspace")
+			return errors.New("--workspace is not supported with fs create-exclusive; use the mounted sync workspace")
 		}
 		return cmdFileCreateExclusive(parsed.args)
 	case "grep":
@@ -135,13 +135,13 @@ func cmdFileCreateExclusive(args []string) error {
 	}
 	st, err := loadState()
 	if err != nil {
-		return fmt.Errorf("AFS is not attached in sync mode: %w\nRun '%s ws attach <workspace> <directory>' first", err, filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not mounted in sync mode: %w\nRun '%s ws mount <workspace> <directory>' first", err, filepath.Base(os.Args[0]))
 	}
 	if strings.TrimSpace(st.Mode) != modeSync || st.SyncPID <= 0 || !processAlive(st.SyncPID) {
-		return fmt.Errorf("AFS is not attached in sync mode\nRun '%s ws attach <workspace> <directory>' first", filepath.Base(os.Args[0]))
+		return fmt.Errorf("AFS is not mounted in sync mode\nRun '%s ws mount <workspace> <directory>' first", filepath.Base(os.Args[0]))
 	}
 	if !runtimeStateMatchesConfig(cfg, st) {
-		return fmt.Errorf("running AFS sync process does not match the current config\nDetach and attach the workspace again")
+		return fmt.Errorf("running AFS sync process does not match the current config\nUnmount and mount the workspace again")
 	}
 
 	localRoot := strings.TrimSpace(st.LocalPath)

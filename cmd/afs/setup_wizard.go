@@ -23,11 +23,11 @@ import (
 func cmdSetup() error {
 	if st, err := loadState(); err == nil {
 		if (st.MountPID > 0 && processAlive(st.MountPID)) || (st.SyncPID > 0 && processAlive(st.SyncPID)) {
-			detachCmd := filepath.Base(os.Args[0]) + " down"
+			unmountCmd := filepath.Base(os.Args[0]) + " down"
 			if localPath := strings.TrimSpace(st.LocalPath); localPath != "" {
-				detachCmd = filepath.Base(os.Args[0]) + " ws detach " + shellQuote(localPath)
+				unmountCmd = filepath.Base(os.Args[0]) + " ws unmount " + shellQuote(localPath)
 			}
-			return fmt.Errorf("afs is currently attached\nRun '%s' first", detachCmd)
+			return fmt.Errorf("afs is currently mounted\nRun '%s' first", unmountCmd)
 		}
 	}
 
@@ -69,7 +69,7 @@ func cmdSetup() error {
 		return err
 	}
 	fmt.Printf("  %s Saved to %s\n", clr(ansiDim, "▸"), clr(ansiBold, compactDisplayPath(configPath())))
-	fmt.Printf("  %s Run %s to attach a workspace\n\n", clr(ansiDim, "▸"), clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach"))
+	fmt.Printf("  %s Run %s to mount a workspace\n\n", clr(ansiDim, "▸"), clr(ansiOrange, filepath.Base(os.Args[0])+" ws mount"))
 	return nil
 }
 

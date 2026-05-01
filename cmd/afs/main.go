@@ -107,7 +107,7 @@ func main() {
 
 func isWorkspaceRootShortcut(command string) bool {
 	switch command {
-	case "attach", "detach", "create", "list", "info", "import", "fork", "delete":
+	case "mount", "unmount", "create", "list", "info", "import", "fork", "delete":
 		return true
 	default:
 		return false
@@ -138,9 +138,9 @@ func printUsage() {
 	fmt.Fprintf(w, "  %s-V, --version%s        %sOutput the version number%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sstatus%s             %sShow AFS status and local workspace attachments%s\n\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sstatus%s             %sShow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sws%s (workspace)     %sAttach, detach, create, list, import, fork, delete%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %sMount, unmount, create, list, import, fork, delete%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sRead, search, and safely write workspace files%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %scp%s (checkpoint)    %sCreate, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
@@ -153,13 +153,13 @@ func printUsage() {
 
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %s%s auth login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws attach getting-started ~/getting-started%s\n    Attach a workspace to a local folder.\n", orange, bin, reset)
-	fmt.Fprintf(w, "  %s%s ws detach getting-started%s\n    Stop managing that workspace; keep local files.\n\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s ws mount getting-started ~/getting-started%s\n    Mount a workspace to a local folder.\n", orange, bin, reset)
+	fmt.Fprintf(w, "  %s%s ws unmount getting-started%s\n    Stop managing that workspace; keep local files.\n\n", orange, bin, reset)
 
 	fmt.Fprintf(w, "%sCommon Flows:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s ws attach getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sNew workspace:%s %s%s ws create demo%s → %s%s ws attach demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
-	fmt.Fprintf(w, "  %sImport existing files:%s %s%s ws import --attach-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s ws mount getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sNew workspace:%s %s%s ws create demo%s → %s%s ws mount demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
+	fmt.Fprintf(w, "  %sImport existing files:%s %s%s ws import --mount-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
 
 	fmt.Fprintf(w, "%sConfig:%s %s%s%s\n", bold, reset, dim, compactDisplayPath(configPath()), reset)
 }
@@ -176,7 +176,7 @@ func statusUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s status [--verbose]
 
-Show AFS daemon status, configuration, and attached workspaces.
+Show AFS daemon status, configuration, and mounted workspaces.
 
 Flags:
   --verbose, -v   Include control-plane, session, and process details

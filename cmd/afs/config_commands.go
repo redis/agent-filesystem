@@ -359,7 +359,7 @@ func loadConfigForUpWithIOAndOverridesAndMode(args []string, overrides configOve
 		}
 		changed = true
 	default:
-		return cfg, fmt.Errorf("expected at most <workspace> <directory>\nUse '%s ws attach <workspace> <directory>'", filepath.Base(os.Args[0]))
+		return cfg, fmt.Errorf("expected at most <workspace> <directory>\nUse '%s ws mount <workspace> <directory>'", filepath.Base(os.Args[0]))
 	}
 
 	if err := validateUpModeSelection(cfg); err != nil {
@@ -549,7 +549,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, nil
 	}
 	if missingWorkspace {
-		return false, fmt.Errorf("workspace is required\nRun '%s ws attach <workspace> <directory>'", filepath.Base(os.Args[0]))
+		return false, fmt.Errorf("workspace is required\nRun '%s ws mount <workspace> <directory>'", filepath.Base(os.Args[0]))
 	}
 	if !allowPrompt {
 		return false, fmt.Errorf("config is missing settings required for 'up'\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and local path", filepath.Base(os.Args[0]))
@@ -813,7 +813,7 @@ Examples:
 Notes:
   Keys are case-insensitive.
   Use "self-managed" for the control-plane-backed mode.
-  Workspace attachments are runtime state; use '%s ws attach <workspace> <directory>'.
+  Workspace mounts are runtime state; use '%s ws mount <workspace> <directory>'.
   Current workspace is not configured here.
   Mode and other runtime paths stay available in afs.config.json.
 `, bin, bin, bin, bin, bin, bin, bin, bin, bin)

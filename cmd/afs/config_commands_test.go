@@ -206,7 +206,7 @@ func TestCmdConfigResetRemovesConfigAndState(t *testing.T) {
 	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll(stateDir) returned error: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(stateDir(), "attachments.json"), []byte(`{"attachments":[]}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(stateDir(), "mounts.json"), []byte(`{"mounts":[]}`), 0o600); err != nil {
 		t.Fatalf("WriteFile(state) returned error: %v", err)
 	}
 

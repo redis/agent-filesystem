@@ -281,7 +281,7 @@ func runSelfHostedLogin(cfg *config, overrideURL string) error {
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach <workspace> <directory>")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws mount <workspace> <directory>")},
 	})
 	return nil
 }
@@ -339,7 +339,7 @@ func runCloudLogin(cfg *config, overrideURL, overrideToken, workspace string) er
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "workspace", Value: cfg.CurrentWorkspace},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws attach "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws mount "+workspaceHint(cfg.CurrentWorkspace)+" <directory>")},
 	})
 	return nil
 }

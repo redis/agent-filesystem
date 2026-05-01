@@ -341,7 +341,7 @@ func (f *fullReconciler) detectOfflineDeletes(local map[string]observedMeta) {
 			continue
 		}
 		if _, exists := local[path]; !exists {
-			fmt.Fprintf(os.Stderr, "afs sync: detectOfflineDeletes %s: in state but missing locally → tombstone\n", path)
+			f.r.log.Info(fmt.Sprintf("detectOfflineDeletes %s: in state but missing locally -> tombstone", path))
 			entry.Deleted = true
 			entry.Version = f.r.state.nextVersion()
 			entry.LastSyncedAt = now
@@ -494,32 +494,32 @@ func (f *fullReconciler) buildPlan(ctx context.Context, local, remote map[string
 		switch {
 		case lok && !rok:
 			if hasStored && stored.Deleted {
-				fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: lok && !rok, tombstone → re-upload\n", path)
+				f.r.log.Info(fmt.Sprintf("buildPlan %s: lok && !rok, tombstone -> re-upload", path))
 				plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 			} else if hasStored && !stored.Deleted {
 				// File was synced, now missing from remote. Verify with fresh Stat.
 				stat, statErr := f.r.fs.Stat(ctx, absoluteRemotePath(path))
 				if statErr == nil && stat != nil {
-					fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: lok && !rok, hasStored, Stat found → skip (scan race)\n", path)
+					f.r.log.Info(fmt.Sprintf("buildPlan %s: lok && !rok, hasStored, Stat found -> skip scan race", path))
 					continue // Remote still has it — scan race, skip
 				}
-				fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: lok && !rok, hasStored, Stat nil (err=%v) → delete-local\n", path, statErr)
+				f.r.log.Info(fmt.Sprintf("buildPlan %s: lok && !rok, hasStored, Stat nil (err=%v) -> delete-local", path, statErr))
 				plan = append(plan, syncAction{kind: "delete-local", path: path, absPath: abs})
 			} else {
-				fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: lok && !rok, !hasStored → upload\n", path)
+				f.r.log.Info(fmt.Sprintf("buildPlan %s: lok && !rok, !hasStored -> upload", path))
 				plan = append(plan, f.planUpload(path, abs, l, stored, hasStored)...)
 			}
 		case !lok && rok:
 			if hasStored && stored.Deleted {
 				// Tombstone: user intentionally deleted → propagate to remote.
-				fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: !lok && rok, tombstone → delete-remote\n", path)
+				f.r.log.Info(fmt.Sprintf("buildPlan %s: !lok && rok, tombstone -> delete-remote", path))
 				plan = append(plan, syncAction{kind: "delete-remote", path: path, absPath: abs})
 			} else {
 				// File missing locally (download in-flight, restart, crash, etc.)
 				// but present in remote. Re-download. Only tombstones propagate
 				// deletes — absence without a tombstone is never treated as an
 				// intentional delete.
-				fmt.Fprintf(os.Stderr, "afs sync: buildPlan %s: !lok && rok, no tombstone → download\n", path)
+				f.r.log.Info(fmt.Sprintf("buildPlan %s: !lok && rok, no tombstone -> download", path))
 				plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
 			}
 		case lok && rok:
@@ -824,7 +824,7 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 }
 
 func (f *fullReconciler) execDeleteLocal(ctx context.Context, a syncAction) error {
-	fmt.Fprintf(os.Stderr, "afs sync: execDeleteLocal %s\n", a.path)
+	f.r.log.Info(fmt.Sprintf("execDeleteLocal %s", a.path))
 	info, err := os.Lstat(a.absPath)
 	if err != nil {
 		// Already gone locally — mark tombstone in state.
@@ -856,7 +856,7 @@ func (f *fullReconciler) execDeleteLocal(ctx context.Context, a syncAction) erro
 }
 
 func (f *fullReconciler) execDeleteRemote(ctx context.Context, a syncAction) error {
-	fmt.Fprintf(os.Stderr, "afs sync: execDeleteRemote %s\n", a.path)
+	f.r.log.Info(fmt.Sprintf("execDeleteRemote %s", a.path))
 	remotePath := absoluteRemotePath(a.path)
 	if err := f.r.fs.Rm(ctx, remotePath); err != nil && !isClientNotFound(err) {
 		return fmt.Errorf("rm remote %s: %w", a.path, err)

@@ -244,7 +244,7 @@ func TestWorkspaceListSelfHostedAggregatesAcrossDatabasesWithoutConfiguredDataba
 	}
 }
 
-func TestWorkspaceListShowsAttachedFolder(t *testing.T) {
+func TestWorkspaceListShowsMountedFolder(t *testing.T) {
 	t.Helper()
 
 	homeDir := withTempHome(t)
@@ -259,7 +259,7 @@ func TestWorkspaceListShowsAttachedFolder(t *testing.T) {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
 	localPath := filepath.Join(homeDir, "repo")
-	if err := saveAttachmentRegistry(attachmentRegistry{Attachments: []attachmentRecord{
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{
 		{
 			ID:        "att_repo",
 			Workspace: "repo",
@@ -268,7 +268,7 @@ func TestWorkspaceListShowsAttachedFolder(t *testing.T) {
 			StartedAt: time.Now().UTC(),
 		},
 	}}); err != nil {
-		t.Fatalf("saveAttachmentRegistry() returned error: %v", err)
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
 	}
 
 	out, err := captureStdout(t, func() error {
@@ -278,7 +278,7 @@ func TestWorkspaceListShowsAttachedFolder(t *testing.T) {
 		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
 	}
 	stripped := stripAnsi(out)
-	for _, want := range []string{"Attached", "repo", "~/repo"} {
+	for _, want := range []string{"Mounted", "repo", "~/repo"} {
 		if !strings.Contains(stripped, want) {
 			t.Fatalf("cmdWorkspace(list) output = %q, want %q", out, want)
 		}
@@ -1186,15 +1186,15 @@ func TestWorkspaceImportRejectsRemovedCloneAtSourceFlag(t *testing.T) {
 	}
 }
 
-func TestParseAFSArgsSupportsAttachAtSource(t *testing.T) {
+func TestParseAFSArgsSupportsMountAtSource(t *testing.T) {
 	t.Helper()
 
-	parsed, err := parseAFSArgs([]string{"--attach-at-source", "--force", "repo", "/tmp/repo"}, true, false)
+	parsed, err := parseAFSArgs([]string{"--mount-at-source", "--force", "repo", "/tmp/repo"}, true, false)
 	if err != nil {
 		t.Fatalf("parseAFSArgs() returned error: %v", err)
 	}
-	if !parsed.attachAtSource {
-		t.Fatal("attachAtSource = false, want true")
+	if !parsed.mountAtSource {
+		t.Fatal("mountAtSource = false, want true")
 	}
 	if !parsed.force {
 		t.Fatal("force = false, want true")

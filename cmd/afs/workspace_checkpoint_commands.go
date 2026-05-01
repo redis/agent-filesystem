@@ -46,10 +46,10 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceList(args)
 	case "info":
 		return cmdWorkspaceInfo(args)
-	case "attach":
-		return cmdAttachArgs(args[2:])
-	case "detach":
-		return cmdDetachArgs(args[2:])
+	case "mount":
+		return cmdMountArgs(args[2:])
+	case "unmount":
+		return cmdUnmountArgs(args[2:])
 	case "fork":
 		return cmdWorkspaceFork(args)
 	case "delete":
@@ -144,9 +144,9 @@ func cmdWorkspaceCreate(args []string) error {
 		return err
 	}
 
-	next := filepath.Base(os.Args[0]) + " ws attach " + workspace + " <directory>"
+	next := filepath.Base(os.Args[0]) + " ws mount " + workspace + " <directory>"
 	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
-		next = filepath.Base(os.Args[0]) + " ws attach " + workspace + " <directory>"
+		next = filepath.Base(os.Args[0]) + " ws mount " + workspace + " <directory>"
 	}
 
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace created"), []outputRow{
@@ -223,8 +223,8 @@ func cmdWorkspaceList(args []string) error {
 		fmt.Println("No workspaces found")
 	} else {
 		printPlainTable(
-			[]string{"Workspace", "Database", "ID", "Updated", "Attached"},
-			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListAttachments()),
+			[]string{"Workspace", "Database", "ID", "Updated", "Mounted"},
+			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts()),
 		)
 	}
 	fmt.Println()
@@ -272,7 +272,7 @@ func cmdWorkspaceInfo(args []string) error {
 	return nil
 }
 
-func workspaceSummaryTableRows(cfg config, items []workspaceSummary, attachments map[string]string) [][]string {
+func workspaceSummaryTableRows(cfg config, items []workspaceSummary, mounts map[string]string) [][]string {
 	rows := make([][]string, 0, len(items))
 	for _, item := range items {
 		rows = append(rows, []string{
@@ -280,7 +280,7 @@ func workspaceSummaryTableRows(cfg config, items []workspaceSummary, attachments
 			workspaceListDatabase(item),
 			workspaceListID(item),
 			workspaceListUpdated(item),
-			workspaceListAttached(item, attachments),
+			workspaceListMounted(item, mounts),
 		})
 	}
 	return rows
@@ -324,18 +324,18 @@ func workspaceListUpdated(summary workspaceSummary) string {
 	return parsed.Local().Format("2006-01-02 15:04")
 }
 
-func workspaceListAttachments() map[string]string {
-	reg, err := loadAttachmentRegistry()
-	if err != nil || len(reg.Attachments) == 0 {
+func workspaceListMounts() map[string]string {
+	reg, err := loadMountRegistry()
+	if err != nil || len(reg.Mounts) == 0 {
 		return nil
 	}
 	paths := make(map[string][]string)
-	for _, rec := range sortedAttachmentRecords(reg.Attachments) {
+	for _, rec := range sortedMountRecords(reg.Mounts) {
 		path := strings.TrimSpace(rec.LocalPath)
 		if path == "" {
 			continue
 		}
-		display := workspaceListAttachedPath(path)
+		display := workspaceListMountedPath(path)
 		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
 			paths["id:"+id] = append(paths["id:"+id], display)
 		}
@@ -350,24 +350,24 @@ func workspaceListAttachments() map[string]string {
 	return out
 }
 
-func workspaceListAttached(summary workspaceSummary, attachments map[string]string) string {
-	if len(attachments) == 0 {
+func workspaceListMounted(summary workspaceSummary, mounts map[string]string) string {
+	if len(mounts) == 0 {
 		return "-"
 	}
 	if id := strings.TrimSpace(summary.ID); id != "" {
-		if path := strings.TrimSpace(attachments["id:"+id]); path != "" {
+		if path := strings.TrimSpace(mounts["id:"+id]); path != "" {
 			return path
 		}
 	}
 	if name := strings.TrimSpace(summary.Name); name != "" {
-		if path := strings.TrimSpace(attachments["name:"+name]); path != "" {
+		if path := strings.TrimSpace(mounts["name:"+name]); path != "" {
 			return path
 		}
 	}
 	return "-"
 }
 
-func workspaceListAttachedPath(path string) string {
+func workspaceListMountedPath(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return "-"
@@ -533,7 +533,7 @@ func cmdWorkspaceFork(args []string) error {
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace forked"), []outputRow{
 		{Label: "workspace", Value: newWorkspace},
 		{Label: "source", Value: sourceSelection.Name},
-		{Label: "next", Value: filepath.Base(os.Args[0]) + " ws attach " + newWorkspace + " <directory>"},
+		{Label: "next", Value: filepath.Base(os.Args[0]) + " ws mount " + newWorkspace + " <directory>"},
 	})
 	return nil
 }
@@ -638,7 +638,7 @@ func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlP
 	fmt.Println()
 	fmt.Println("Select workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Updated", "Attached"}, checkpointWorkspacePromptRows(workspaces.Items, workspaceListAttachments()))
+	printPlainTable([]string{"#", "Workspace", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces.Items, workspaceListMounts()))
 	fmt.Println()
 	fmt.Print("Workspace: ")
 
@@ -662,14 +662,14 @@ func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlP
 	return workspaceSelection{ID: selected.ID, Name: selected.Name}, nil
 }
 
-func checkpointWorkspacePromptRows(workspaces []workspaceSummary, attachments map[string]string) [][]string {
+func checkpointWorkspacePromptRows(workspaces []workspaceSummary, mounts map[string]string) [][]string {
 	rows := make([][]string, 0, len(workspaces))
 	for i, workspace := range workspaces {
 		rows = append(rows, []string{
 			strconv.Itoa(i + 1),
 			workspace.Name,
 			workspaceListUpdated(workspace),
-			workspaceListAttached(workspace, attachments),
+			workspaceListMounted(workspace, mounts),
 		})
 	}
 	return rows
@@ -1509,19 +1509,19 @@ func workspaceUsageTextFor(bin, group string) string {
   %s %s <subcommand>
 
 Subcommands:
-  attach [<workspace> [directory]]             Attach a workspace to a local folder
-  detach [--delete] [<workspace|directory>]    Detach a workspace
+  mount [<workspace> [directory]]             Mount a workspace to a local folder
+  unmount [--delete] [<workspace|directory>]    Unmount a workspace
   create <workspace>                           Create an empty workspace
   list                                         List workspaces
   info <workspace>                             Show workspace details
-  import [--force] [--attach-at-source] <workspace> <directory>
+  import [--force] [--mount-at-source] <workspace> <directory>
                                                 Import a local directory into a workspace
   fork [source-workspace] <new-workspace>      Fork a workspace from its current checkpoint
   delete [--no-confirmation] <workspace>...    Delete workspaces and local materialized state
 
 Examples:
-  %s %s attach demo ~/demo
-  %s %s detach demo
+  %s %s mount demo ~/demo
+  %s %s unmount demo
   %s %s create demo
   %s %s list
   %s %s import demo ~/src/demo
@@ -1550,7 +1550,7 @@ func workspaceInfoUsageText(bin, group string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s %s info <workspace>
 
-Show workspace metadata without attaching it locally.
+Show workspace metadata without mounting it locally.
 `, bin, group)
 }
 
@@ -1560,7 +1560,7 @@ func workspaceForkUsageText(bin string) string {
 
 Create a new workspace from the source workspace's current checkpoint.
 
-If [source-workspace] is omitted, AFS uses the attached workspace when one is
+If [source-workspace] is omitted, AFS uses the mounted workspace when one is
 unambiguous.
 `, bin)
 }
@@ -1576,13 +1576,13 @@ By default, asks for confirmation before deleting.
 
 func workspaceImportUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws import [--force] [--attach-at-source] [--database <database-id|database-name>] <workspace> <directory>
+  %s ws import [--force] [--mount-at-source] [--database <database-id|database-name>] <workspace> <directory>
 
 Import a local directory into a workspace.
 
 Options:
   --force             Replace an existing workspace
-  --attach-at-source  Attach the source directory after import
+  --mount-at-source  Mount the source directory after import
   --database          Override the control-plane database for this import
 `, bin)
 }

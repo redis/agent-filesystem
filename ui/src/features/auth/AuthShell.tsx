@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router";
 import styled, { createGlobalStyle } from "styled-components";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
 import { ThemeModeToggle } from "../../components/theme-mode-toggle";
-import { searchBenchmark } from "../../foundation/performance-data";
 
 /**
  * @redis-ui/styles normalizes the root font-size to 62.5% (10px) so that
@@ -34,47 +33,10 @@ export function AuthShell({ title, subtitle, children }: AuthShellProps) {
           </BrandLogo>
 
           <BrandBody>
-            <Pill>Agent Filesystem · Cloud</Pill>
             <Headline>
               a filesystem for <s>humans</s> agents
             </Headline>
-            <TerminalWindow aria-label="CLI quickstart example">
-              <TerminalHeader>
-                <TerminalLights aria-hidden="true">
-                  <span />
-                  <span />
-                  <span />
-                </TerminalLights>
-                <TerminalTitle>terminal</TerminalTitle>
-              </TerminalHeader>
-              <TerminalBody>
-                <TerminalComment>// Create a new workspace and attach it</TerminalComment>
-                <TerminalLine>&gt; afs ws create myworkspace</TerminalLine>
-                <TerminalLine>&gt; afs ws attach myworkspace ~/myworkspace</TerminalLine>
-                <TerminalGap />
-                <TerminalComment>// Create a checkpoint</TerminalComment>
-                <TerminalLine>&gt; afs cp create myworkspace initial</TerminalLine>
-              </TerminalBody>
-            </TerminalWindow>
-            <BenchmarkPanel>
-              <BenchmarkHeader>
-                <BenchmarkEyebrow>Indexed search</BenchmarkEyebrow>
-                <BenchmarkTitle>{searchBenchmark.title}</BenchmarkTitle>
-                <BenchmarkContext>{searchBenchmark.corpus}</BenchmarkContext>
-              </BenchmarkHeader>
-              <BenchmarkGrid>
-                {searchBenchmark.metrics.map((metric) => (
-                  <BenchmarkItem key={metric.name}>
-                    <BenchmarkName>{metric.name}</BenchmarkName>
-                    <BenchmarkValue>{metric.afs}</BenchmarkValue>
-                    <BenchmarkMeta>{metric.summary}</BenchmarkMeta>
-                  </BenchmarkItem>
-                ))}
-              </BenchmarkGrid>
-            </BenchmarkPanel>
           </BrandBody>
-
-          <BrandFooter>Trusted by teams shipping production agents on Redis.</BrandFooter>
         </BrandInner>
       </BrandPanel>
 
@@ -145,8 +107,7 @@ const BrandPanel = styled.aside`
   }
 
   @media (max-width: 880px) {
-    border-right: none;
-    border-bottom: 1px solid var(--afs-line);
+    display: none;
   }
 `;
 
@@ -186,20 +147,6 @@ const BrandBody = styled.div`
   margin-top: auto;
   margin-bottom: auto;
   display: grid;
-  gap: 22px;
-`;
-
-const Pill = styled.div`
-  width: fit-content;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: var(--afs-accent-soft);
-  border: 1px solid var(--afs-line-strong);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--afs-ink);
 `;
 
 const Headline = styled.h1`
@@ -218,154 +165,6 @@ const Headline = styled.h1`
   }
 `;
 
-const TerminalWindow = styled.div`
-  overflow: hidden;
-  border: 1px solid var(--afs-line-strong);
-  border-radius: 16px;
-  background: var(--afs-bg);
-  box-shadow: var(--afs-shadow-2);
-`;
-
-const TerminalHeader = styled.div`
-  height: 38px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--afs-line);
-  background: var(--afs-bg-2);
-`;
-
-const TerminalLights = styled.span`
-  display: inline-flex;
-  gap: 7px;
-
-  span {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: #dc382c;
-  }
-
-  span:nth-child(2) {
-    background: #f5a524;
-  }
-
-  span:nth-child(3) {
-    background: #4ac97a;
-  }
-`;
-
-const TerminalTitle = styled.span`
-  color: var(--afs-muted);
-  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 12px;
-`;
-
-const TerminalBody = styled.div`
-  padding: 18px 20px 20px;
-  display: grid;
-  gap: 7px;
-  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: clamp(13px, 1.15vw, 15px);
-  line-height: 1.5;
-`;
-
-const TerminalLine = styled.div`
-  color: var(--afs-ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-`;
-
-const TerminalComment = styled(TerminalLine)`
-  color: var(--afs-muted);
-`;
-
-const TerminalGap = styled.div`
-  height: 8px;
-`;
-
-const BenchmarkPanel = styled.section`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  padding: 18px;
-  background: var(--afs-panel);
-  display: grid;
-  gap: 16px;
-`;
-
-const BenchmarkHeader = styled.div`
-  display: grid;
-  gap: 4px;
-`;
-
-const BenchmarkEyebrow = styled.span`
-  color: var(--afs-accent);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const BenchmarkTitle = styled.h2`
-  margin: 0;
-  color: var(--afs-ink);
-  font-size: 17px;
-  line-height: 1.25;
-`;
-
-const BenchmarkContext = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 12px;
-  line-height: 1.45;
-`;
-
-const BenchmarkGrid = styled.div`
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-
-  @media (max-width: 1180px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const BenchmarkItem = styled.div`
-  min-width: 0;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  padding: 14px;
-  background: var(--afs-bg-soft);
-  display: grid;
-  gap: 6px;
-`;
-
-const BenchmarkName = styled.span`
-  color: var(--afs-muted);
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-`;
-
-const BenchmarkValue = styled.span`
-  color: var(--afs-ink);
-  font-family: "Redis Mono", "SFMono-Regular", Consolas, monospace;
-  font-size: 24px;
-  line-height: 1;
-`;
-
-const BenchmarkMeta = styled.span`
-  color: var(--afs-muted);
-  font-size: 12px;
-`;
-
-const BrandFooter = styled.p`
-  margin: 0;
-  font-size: 13px;
-  color: var(--afs-muted);
-`;
-
 const FormPanel = styled.section`
   position: relative;
   display: flex;
@@ -374,6 +173,10 @@ const FormPanel = styled.section`
 
   [data-theme="light"] & {
     background: #ffffff;
+  }
+
+  @media (max-width: 880px) {
+    min-height: 100vh;
   }
 `;
 

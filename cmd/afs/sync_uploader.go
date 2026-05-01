@@ -62,7 +62,7 @@ type uploader struct {
 	readonly     bool
 	log          *syncLogger
 
-	// Changelog emission. Zero values disable — see attachChangelog.
+	// Changelog emission. Zero values disable — see mountChangelog.
 	rdb          *redis.Client
 	storageID    string
 	sessionID    string
@@ -79,10 +79,10 @@ func newUploader(fs client.Client, results chan<- uploadResult, maxFileBytes int
 	return &uploader{fs: fs, results: results, maxFileBytes: maxFileBytes, readonly: readonly, log: log}
 }
 
-// attachChangelog wires the uploader to emit one controlplane ChangeEntry per
+// mountChangelog wires the uploader to emit one controlplane ChangeEntry per
 // successful upload op. Session + workspace storage identity is baked in at
 // start so each entry is attributable without extra plumbing per-op.
-func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
+func (u *uploader) mountChangelog(rdb *redis.Client, storageID, sessionID, user, agentID, label, agentVersion string) {
 	u.rdb = rdb
 	u.storageID = storageID
 	u.sessionID = sessionID
@@ -94,7 +94,7 @@ func (u *uploader) attachChangelog(rdb *redis.Client, storageID, sessionID, user
 
 // emitChange writes one changelog row for op `result`. Called only when the
 // upload landed successfully (no error, no conflict). Safe to call with the
-// changelog unattached — it no-ops.
+// changelog unmounted — it no-ops.
 func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
 	if u.rdb == nil || u.storageID == "" || u.sessionID == "" {
 		return
@@ -355,7 +355,7 @@ func (u *uploader) processChmod(ctx context.Context, op uploadOp) {
 func (u *uploader) send(r uploadResult) {
 	// Emit the changelog entry before forwarding the result so that a
 	// blocked reconciler channel doesn't stall the changelog write. The
-	// helper is no-op when changelog wiring is unattached.
+	// helper is no-op when changelog wiring is unmounted.
 	u.emitChange(context.Background(), r)
 	if u.results == nil {
 		return

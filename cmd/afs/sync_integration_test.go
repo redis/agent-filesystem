@@ -81,7 +81,7 @@ func TestSyncStartupRejectsAmbiguousMerge(t *testing.T) {
 	}
 	if err := d.Start(context.Background()); err == nil {
 		t.Fatal("Start() unexpectedly succeeded for ambiguous first sync")
-	} else if !strings.Contains(err.Error(), "Attach blocked for workspace") {
+	} else if !strings.Contains(err.Error(), "Mount blocked for workspace") {
 		t.Fatalf("Start() error = %q, want ambiguous first sync rejection", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestSyncStartupAllowsIdenticalPopulatedTrees(t *testing.T) {
 	}
 }
 
-func TestAttachReconcileAllowsApprovedSafeUnion(t *testing.T) {
+func TestMountReconcileAllowsApprovedSafeUnion(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 	env.writeLocalFile(t, "local-only.txt", "hello")
@@ -137,9 +137,9 @@ func TestAttachReconcileAllowsApprovedSafeUnion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSyncDaemon: %v", err)
 	}
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.ImportCount != 1 || plan.DownloadCount != 1 || plan.ConflictCount != 0 {
 		t.Fatalf("plan counts = import:%d download:%d conflict:%d, want 1/1/0", plan.ImportCount, plan.DownloadCount, plan.ConflictCount)
@@ -147,9 +147,9 @@ func TestAttachReconcileAllowsApprovedSafeUnion(t *testing.T) {
 	if !plan.requiresConfirmation() {
 		t.Fatal("requiresConfirmation() = false, want true for populated local safe union")
 	}
-	approveAttachReconcilePlan(d, plan)
+	approveMountReconcilePlan(d, plan)
 	if err := d.Start(context.Background()); err != nil {
-		t.Fatalf("Start() after approved attach plan: %v", err)
+		t.Fatalf("Start() after approved mount plan: %v", err)
 	}
 	env.daemon = d
 	defer env.stopDaemon()
@@ -168,7 +168,7 @@ func TestAttachReconcileAllowsApprovedSafeUnion(t *testing.T) {
 	}
 }
 
-func TestAttachReconcileReportsOfflineLocalCreate(t *testing.T) {
+func TestMountReconcileReportsOfflineLocalCreate(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 	if err := env.fsClient.Mkdir(context.Background(), "/empty"); err != nil && !isClientAlreadyExists(err) {
@@ -195,9 +195,9 @@ func TestAttachReconcileReportsOfflineLocalCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSyncDaemon: %v", err)
 	}
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.StateCount == 0 {
 		t.Fatal("StateCount = 0, want existing sync baseline")
@@ -209,7 +209,7 @@ func TestAttachReconcileReportsOfflineLocalCreate(t *testing.T) {
 		t.Fatalf("operations = %#v, want one upload for hello.txt", plan.Operations)
 	}
 
-	approveAttachReconcilePlan(d, plan)
+	approveMountReconcilePlan(d, plan)
 	if err := d.Start(context.Background()); err != nil {
 		t.Fatalf("Start() after approved offline local create: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestAttachReconcileReportsOfflineLocalCreate(t *testing.T) {
 	}
 }
 
-func TestAttachReconcileReportsSamePathConflict(t *testing.T) {
+func TestMountReconcileReportsSamePathConflict(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 	env.writeLocalFile(t, "shared.txt", "local")
@@ -243,9 +243,9 @@ func TestAttachReconcileReportsSamePathConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSyncDaemon: %v", err)
 	}
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.ConflictCount != 1 || plan.ImportCount != 0 || plan.DownloadCount != 0 {
 		t.Fatalf("plan counts = conflict:%d import:%d download:%d, want 1/0/0", plan.ConflictCount, plan.ImportCount, plan.DownloadCount)
@@ -255,14 +255,14 @@ func TestAttachReconcileReportsSamePathConflict(t *testing.T) {
 	}
 }
 
-func TestSyncImportAttachDetachReattachLocalChangeMatrix(t *testing.T) {
+func TestSyncImportMountUnmountRemountLocalChangeMatrix(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 
 	sourceDir := t.TempDir()
 	writeTreeFile(t, sourceDir, "docs/readme.md", "readme v1\n")
-	writeTreeFile(t, sourceDir, "docs/remove-while-attached.txt", "attached delete\n")
-	writeTreeFile(t, sourceDir, "keep/remove-while-detached.txt", "detached delete\n")
+	writeTreeFile(t, sourceDir, "docs/remove-while-mounted.txt", "mounted delete\n")
+	writeTreeFile(t, sourceDir, "keep/remove-while-unmounted.txt", "unmounted delete\n")
 	writeTreeFile(t, sourceDir, "tree/remove-me/file.txt", "remove subtree\n")
 	mkdirTreeDir(t, sourceDir, "empty-folder")
 	importDirectoryIntoSyncWorkspace(t, env, sourceDir)
@@ -270,30 +270,30 @@ func TestSyncImportAttachDetachReattachLocalChangeMatrix(t *testing.T) {
 	env.startDaemon(t)
 	assertEventually(t, 3*time.Second, "imported tree to materialize locally", func() bool {
 		return env.localExists("docs/readme.md") &&
-			env.localExists("docs/remove-while-attached.txt") &&
+			env.localExists("docs/remove-while-mounted.txt") &&
 			env.localExists("empty-folder")
 	})
 
-	if err := os.Remove(filepath.Join(env.localRoot, "docs", "remove-while-attached.txt")); err != nil {
-		t.Fatalf("remove attached file: %v", err)
+	if err := os.Remove(filepath.Join(env.localRoot, "docs", "remove-while-mounted.txt")); err != nil {
+		t.Fatalf("remove mounted file: %v", err)
 	}
-	assertEventually(t, 3*time.Second, "attached local delete to remove remote file", func() bool {
-		return !env.remoteExists(t, "docs/remove-while-attached.txt")
+	assertEventually(t, 3*time.Second, "mounted local delete to remove remote file", func() bool {
+		return !env.remoteExists(t, "docs/remove-while-mounted.txt")
 	})
 	env.stopDaemon()
 
-	env.writeLocalFile(t, "detached-added.txt", "added while detached\n")
-	env.writeLocalFile(t, "detached/new-folder/nested.txt", "nested add while detached\n")
+	env.writeLocalFile(t, "unmounted-added.txt", "added while unmounted\n")
+	env.writeLocalFile(t, "unmounted/new-folder/nested.txt", "nested add while unmounted\n")
 	env.writeLocalFile(t, "docs/readme.md", "readme v2\n")
-	removeTreePath(t, env.localRoot, "keep/remove-while-detached.txt")
+	removeTreePath(t, env.localRoot, "keep/remove-while-unmounted.txt")
 	removeTreePath(t, env.localRoot, "tree/remove-me")
 	removeTreePath(t, env.localRoot, "empty-folder")
 	mkdirTreeDir(t, env.localRoot, "new-empty-folder")
 
-	d := newTestAttachDaemon(t, env)
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.StateCount == 0 {
 		t.Fatal("StateCount = 0, want existing sync baseline")
@@ -301,38 +301,38 @@ func TestSyncImportAttachDetachReattachLocalChangeMatrix(t *testing.T) {
 	if plan.ConflictCount != 0 {
 		t.Fatalf("ConflictCount = %d, want 0; operations = %#v", plan.ConflictCount, plan.Operations)
 	}
-	requireAttachOp(t, plan, "U", "detached-added.txt")
-	requireAttachOp(t, plan, "U", "detached")
-	requireAttachOp(t, plan, "U", "detached/new-folder")
-	requireAttachOp(t, plan, "U", "detached/new-folder/nested.txt")
-	requireAttachOp(t, plan, "U", "docs/readme.md")
-	requireAttachOp(t, plan, "U", "new-empty-folder")
-	requireAttachOp(t, plan, "DR", "keep/remove-while-detached.txt")
-	requireAttachOp(t, plan, "DR", "tree/remove-me/file.txt")
-	requireAttachOp(t, plan, "DR", "tree/remove-me")
-	requireAttachOp(t, plan, "DR", "empty-folder")
+	requireMountOp(t, plan, "U", "unmounted-added.txt")
+	requireMountOp(t, plan, "U", "unmounted")
+	requireMountOp(t, plan, "U", "unmounted/new-folder")
+	requireMountOp(t, plan, "U", "unmounted/new-folder/nested.txt")
+	requireMountOp(t, plan, "U", "docs/readme.md")
+	requireMountOp(t, plan, "U", "new-empty-folder")
+	requireMountOp(t, plan, "DR", "keep/remove-while-unmounted.txt")
+	requireMountOp(t, plan, "DR", "tree/remove-me/file.txt")
+	requireMountOp(t, plan, "DR", "tree/remove-me")
+	requireMountOp(t, plan, "DR", "empty-folder")
 
-	approveAttachReconcilePlan(d, plan)
+	approveMountReconcilePlan(d, plan)
 	if err := d.Start(context.Background()); err != nil {
-		t.Fatalf("Start() after approved local detached matrix: %v", err)
+		t.Fatalf("Start() after approved local unmounted matrix: %v", err)
 	}
 	env.daemon = d
 	defer env.stopDaemon()
 
-	assertEventually(t, 3*time.Second, "local detached matrix to converge", func() bool {
+	assertEventually(t, 3*time.Second, "local unmounted matrix to converge", func() bool {
 		return localRemoteTreesEqual(t, env)
 	})
 	assertTreeHasFile(t, env, "docs/readme.md", "readme v2\n")
-	assertTreeHasFile(t, env, "detached-added.txt", "added while detached\n")
-	assertTreeHasFile(t, env, "detached/new-folder/nested.txt", "nested add while detached\n")
+	assertTreeHasFile(t, env, "unmounted-added.txt", "added while unmounted\n")
+	assertTreeHasFile(t, env, "unmounted/new-folder/nested.txt", "nested add while unmounted\n")
 	assertTreeHasDir(t, env, "new-empty-folder")
-	assertTreeMissing(t, env, "docs/remove-while-attached.txt")
-	assertTreeMissing(t, env, "keep/remove-while-detached.txt")
+	assertTreeMissing(t, env, "docs/remove-while-mounted.txt")
+	assertTreeMissing(t, env, "keep/remove-while-unmounted.txt")
 	assertTreeMissing(t, env, "tree/remove-me")
 	assertTreeMissing(t, env, "empty-folder")
 }
 
-func TestSyncImportAttachDetachReattachRemoteChangeMatrix(t *testing.T) {
+func TestSyncImportMountUnmountRemountRemoteChangeMatrix(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 
@@ -360,10 +360,10 @@ func TestSyncImportAttachDetachReattachRemoteChangeMatrix(t *testing.T) {
 	removeRemotePath(t, env, "local/remove-after-remote-delete.txt")
 	removeRemotePath(t, env, "remote-empty/delete-empty")
 
-	d := newTestAttachDaemon(t, env)
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.StateCount == 0 {
 		t.Fatal("StateCount = 0, want existing sync baseline")
@@ -371,23 +371,23 @@ func TestSyncImportAttachDetachReattachRemoteChangeMatrix(t *testing.T) {
 	if plan.ConflictCount != 0 {
 		t.Fatalf("ConflictCount = %d, want 0; operations = %#v", plan.ConflictCount, plan.Operations)
 	}
-	requireAttachOp(t, plan, "D", "remote-added.txt")
-	requireAttachOp(t, plan, "D", "remote")
-	requireAttachOp(t, plan, "D", "remote/new-folder")
-	requireAttachOp(t, plan, "D", "remote/new-folder/nested.txt")
-	requireAttachOp(t, plan, "D", "docs/readme.md")
-	requireAttachOp(t, plan, "D", "remote-new-empty")
-	requireAttachOp(t, plan, "DL", "local/remove-after-remote-delete.txt")
-	requireAttachOp(t, plan, "DL", "remote-empty/delete-empty")
+	requireMountOp(t, plan, "D", "remote-added.txt")
+	requireMountOp(t, plan, "D", "remote")
+	requireMountOp(t, plan, "D", "remote/new-folder")
+	requireMountOp(t, plan, "D", "remote/new-folder/nested.txt")
+	requireMountOp(t, plan, "D", "docs/readme.md")
+	requireMountOp(t, plan, "D", "remote-new-empty")
+	requireMountOp(t, plan, "DL", "local/remove-after-remote-delete.txt")
+	requireMountOp(t, plan, "DL", "remote-empty/delete-empty")
 
-	approveAttachReconcilePlan(d, plan)
+	approveMountReconcilePlan(d, plan)
 	if err := d.Start(context.Background()); err != nil {
-		t.Fatalf("Start() after approved remote detached matrix: %v", err)
+		t.Fatalf("Start() after approved remote unmounted matrix: %v", err)
 	}
 	env.daemon = d
 	defer env.stopDaemon()
 
-	assertEventually(t, 3*time.Second, "remote detached matrix to converge", func() bool {
+	assertEventually(t, 3*time.Second, "remote unmounted matrix to converge", func() bool {
 		return localRemoteTreesEqual(t, env)
 	})
 	assertTreeHasFile(t, env, "docs/readme.md", "readme remote v2\n")
@@ -398,7 +398,7 @@ func TestSyncImportAttachDetachReattachRemoteChangeMatrix(t *testing.T) {
 	assertTreeMissing(t, env, "remote-empty/delete-empty")
 }
 
-func TestSyncReattachReportsDetachedConflictMatrix(t *testing.T) {
+func TestSyncRemountReportsUnmountedConflictMatrix(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)
 
@@ -422,16 +422,122 @@ func TestSyncReattachReportsDetachedConflictMatrix(t *testing.T) {
 		t.Fatalf("remote echo local-delete-remote-change.txt: %v", err)
 	}
 
-	d := newTestAttachDaemon(t, env)
-	plan, err := buildAttachReconcilePlan(context.Background(), d)
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
 	if err != nil {
-		t.Fatalf("buildAttachReconcilePlan: %v", err)
+		t.Fatalf("buildMountReconcilePlan: %v", err)
 	}
 	if plan.ConflictCount != 2 {
 		t.Fatalf("ConflictCount = %d, want 2; operations = %#v", plan.ConflictCount, plan.Operations)
 	}
-	requireAttachOp(t, plan, "C", "both-change.txt")
-	requireAttachOp(t, plan, "C", "local-delete-remote-change.txt")
+	requireMountOp(t, plan, "C", "both-change.txt")
+	requireMountOp(t, plan, "C", "local-delete-remote-change.txt")
+}
+
+func TestMountReconcileCompletesPendingTombstoneDelete(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeRemoteFile(t, "leftover.txt", "remote still present\n")
+
+	st := newSyncState(env.workspace, env.localRoot)
+	st.Entries["leftover.txt"] = SyncEntry{
+		Type:         "file",
+		Size:         int64(len("remote still present\n")),
+		Deleted:      true,
+		LastSyncedAt: time.Now().UTC(),
+	}
+	if err := saveSyncState(st); err != nil {
+		t.Fatalf("saveSyncState() returned error: %v", err)
+	}
+
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if plan.DownloadCount != 0 || plan.DeleteRemoteCount != 1 || plan.ConflictCount != 0 {
+		t.Fatalf("plan counts = download:%d deleteRemote:%d conflict:%d, want 0/1/0; operations = %#v", plan.DownloadCount, plan.DeleteRemoteCount, plan.ConflictCount, plan.Operations)
+	}
+	if plan.StateLiveCount != 0 || plan.StateDeletedCount != 1 {
+		t.Fatalf("state counts = live:%d deleted:%d, want 0/1", plan.StateLiveCount, plan.StateDeletedCount)
+	}
+	requireMountOp(t, plan, "DR", "leftover.txt")
+
+	approveMountReconcilePlan(d, plan)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() after approved pending tombstone delete: %v", err)
+	}
+	env.daemon = d
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "pending tombstone delete to remove remote", func() bool {
+		return !env.remoteExists(t, "leftover.txt")
+	})
+	if env.localExists("leftover.txt") {
+		t.Fatalf("leftover.txt was downloaded locally despite tombstone")
+	}
+}
+
+func TestMountReconcileMissingLocalRootDownloadsInsteadOfRemoteDelete(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeRemoteFile(t, "README.md", "restored\n")
+
+	st := newSyncState(env.workspace, env.localRoot)
+	st.Entries["README.md"] = SyncEntry{
+		Type:         "file",
+		Size:         int64(len("restored\n")),
+		LastSyncedAt: time.Now().UTC(),
+	}
+	if err := saveSyncState(st); err != nil {
+		t.Fatalf("saveSyncState() returned error: %v", err)
+	}
+	if err := os.RemoveAll(env.localRoot); err != nil {
+		t.Fatalf("RemoveAll(localRoot) returned error: %v", err)
+	}
+	localSnapshot, err := inspectMountLocalRoot(env.localRoot)
+	if err != nil {
+		t.Fatalf("inspectMountLocalRoot() returned error: %v", err)
+	}
+	if localSnapshot.Exists || localSnapshot.EntryCount != 0 {
+		t.Fatalf("localSnapshot = %#v, want missing empty root", localSnapshot)
+	}
+
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if !mountPlanDeletesRemoteFromEmptyLocal(plan, localSnapshot) {
+		t.Fatalf("plan should be recognized as empty-local remote delete: %#v", plan)
+	}
+
+	resetMountSyncState(d)
+	plan, err = buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan after reset: %v", err)
+	}
+	if plan.DownloadCount != 1 || plan.DeleteRemoteCount != 0 || plan.ConflictCount != 0 {
+		t.Fatalf("plan counts = download:%d deleteRemote:%d conflict:%d, want 1/0/0; operations = %#v", plan.DownloadCount, plan.DeleteRemoteCount, plan.ConflictCount, plan.Operations)
+	}
+	requireMountOp(t, plan, "D", "README.md")
+
+	approveMountReconcilePlan(d, plan)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() after empty-root mount reset: %v", err)
+	}
+	env.daemon = d
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "README.md to download locally", func() bool {
+		return env.localExists("README.md")
+	})
+	if got := env.readLocalFile(t, "README.md"); got != "restored\n" {
+		t.Fatalf("local README.md = %q, want restored", got)
+	}
+	if got := env.readRemoteFile(t, "README.md"); got != "restored\n" {
+		t.Fatalf("remote README.md = %q, want restored", got)
+	}
 }
 
 // Scenario 9: oversize files are explicitly refused and never reach the
@@ -1023,7 +1129,7 @@ func importDirectoryIntoSyncWorkspace(t *testing.T, env *syncTestEnv, sourceDir 
 	env.fsClient.InvalidateCache()
 }
 
-func newTestAttachDaemon(t *testing.T, env *syncTestEnv) *syncDaemon {
+func newTestMountDaemon(t *testing.T, env *syncTestEnv) *syncDaemon {
 	t.Helper()
 	daemonClient := client.New(env.rdb, env.mountKey)
 	cfg := syncDaemonConfig{
@@ -1074,14 +1180,14 @@ func removeRemotePath(t *testing.T, env *syncTestEnv, rel string) {
 	env.fsClient.InvalidateCache()
 }
 
-func requireAttachOp(t *testing.T, plan attachReconcilePlan, code, path string) {
+func requireMountOp(t *testing.T, plan mountReconcilePlan, code, path string) {
 	t.Helper()
 	for _, op := range plan.Operations {
 		if op.Code == code && op.Path == path {
 			return
 		}
 	}
-	t.Fatalf("missing attach operation %s %s; operations = %#v", code, path, plan.Operations)
+	t.Fatalf("missing mount operation %s %s; operations = %#v", code, path, plan.Operations)
 }
 
 func localRemoteTreesEqual(t *testing.T, env *syncTestEnv) bool {

@@ -17,9 +17,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const attachShellCDFileEnv = "AFS_ATTACH_CD_FILE"
+const mountShellCDFileEnv = "AFS_ATTACH_CD_FILE"
 
-type attachOptions struct {
+type mountOptions struct {
 	workspace string
 	directory string
 	verbose   bool
@@ -27,25 +27,25 @@ type attachOptions struct {
 	yes       bool
 }
 
-type detachOptions struct {
+type unmountOptions struct {
 	target      string
 	deleteLocal bool
 }
 
-func cmdAttachArgs(args []string) error {
+func cmdMountArgs(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, attachUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, mountUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	opts, err := parseAttachOptions(args)
+	opts, err := parseMountOptions(args)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(opts.workspace) == "" {
-		return promptAttachSelection(opts)
+		return promptMountSelection(opts)
 	}
 	if strings.TrimSpace(opts.directory) == "" {
-		directory, ok, err := promptAttachPathForWorkspace(opts.workspace)
+		directory, ok, err := promptMountPathForWorkspace(opts.workspace)
 		if err != nil {
 			return err
 		}
@@ -54,26 +54,26 @@ func cmdAttachArgs(args []string) error {
 		}
 		opts.directory = directory
 	}
-	return attachWorkspace(opts)
+	return mountWorkspace(opts)
 }
 
-func cmdDetachArgs(args []string) error {
+func cmdUnmountArgs(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
-		fmt.Fprint(os.Stderr, detachUsageText(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, unmountUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	opts, err := parseDetachOptions(args, false)
+	opts, err := parseUnmountOptions(args, false)
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(opts.target) == "" {
-		return promptDetachSelection(opts.deleteLocal)
+		return promptUnmountSelection(opts.deleteLocal)
 	}
-	return detachWorkspaceTarget(opts.target, opts.deleteLocal)
+	return unmountWorkspaceTarget(opts.target, opts.deleteLocal)
 }
 
-func parseAttachOptions(args []string) (attachOptions, error) {
-	var opts attachOptions
+func parseMountOptions(args []string) (mountOptions, error) {
+	var opts mountOptions
 	var positionals []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -86,13 +86,13 @@ func parseAttachOptions(args []string) (attachOptions, error) {
 			opts.yes = true
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, attachUsageText(filepath.Base(os.Args[0])))
+				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, mountUsageText(filepath.Base(os.Args[0])))
 			}
 			positionals = append(positionals, arg)
 		}
 	}
 	if len(positionals) > 2 {
-		return opts, fmt.Errorf("%s", attachUsageText(filepath.Base(os.Args[0])))
+		return opts, fmt.Errorf("%s", mountUsageText(filepath.Base(os.Args[0])))
 	}
 	if len(positionals) >= 1 {
 		opts.workspace = positionals[0]
@@ -103,8 +103,8 @@ func parseAttachOptions(args []string) (attachOptions, error) {
 	return opts, nil
 }
 
-func parseDetachOptions(args []string, requirePath bool) (detachOptions, error) {
-	var opts detachOptions
+func parseUnmountOptions(args []string, requirePath bool) (unmountOptions, error) {
+	var opts unmountOptions
 	var positionals []string
 	for _, arg := range args {
 		switch arg {
@@ -112,13 +112,13 @@ func parseDetachOptions(args []string, requirePath bool) (detachOptions, error) 
 			opts.deleteLocal = true
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, detachUsageText(filepath.Base(os.Args[0])))
+				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, unmountUsageText(filepath.Base(os.Args[0])))
 			}
 			positionals = append(positionals, arg)
 		}
 	}
 	if len(positionals) > 1 || (requirePath && len(positionals) != 1) {
-		return opts, fmt.Errorf("%s", detachUsageText(filepath.Base(os.Args[0])))
+		return opts, fmt.Errorf("%s", unmountUsageText(filepath.Base(os.Args[0])))
 	}
 	if len(positionals) == 1 {
 		opts.target = positionals[0]
@@ -126,21 +126,21 @@ func parseDetachOptions(args []string, requirePath bool) (detachOptions, error) 
 	return opts, nil
 }
 
-func attachWorkspace(opts attachOptions) error {
+func mountWorkspace(opts mountOptions) error {
 	if err := validateAFSName("workspace", opts.workspace); err != nil {
 		return err
 	}
-	localPath, err := normalizeAttachmentPath(opts.directory)
+	localPath, err := normalizeMountPath(opts.directory)
 	if err != nil {
 		return err
 	}
 
-	reg, err := loadAttachmentRegistry()
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
-	if conflict, ok := attachmentPathConflict(reg, localPath); ok {
-		return fmt.Errorf("path %s overlaps existing attachment %s at %s", localPath, conflict.Workspace, conflict.LocalPath)
+	if conflict, ok := mountPathConflict(reg, localPath); ok {
+		return fmt.Errorf("path %s overlaps existing mount %s at %s", localPath, conflict.Workspace, conflict.LocalPath)
 	}
 
 	cfg, err := loadAFSConfig()
@@ -164,8 +164,8 @@ func attachWorkspace(opts attachOptions) error {
 	if err != nil {
 		return err
 	}
-	if conflict, ok := attachmentWorkspaceConflict(reg, selection.ID, selection.Name); ok {
-		return fmt.Errorf("workspace %s is already attached at %s", conflict.Workspace, conflict.LocalPath)
+	if conflict, ok := mountWorkspaceConflict(reg, selection.ID, selection.Name); ok {
+		return fmt.Errorf("workspace %s is already mounted at %s", conflict.Workspace, conflict.LocalPath)
 	}
 
 	resolvedCfg.CurrentWorkspace = selection.Name
@@ -173,19 +173,23 @@ func attachWorkspace(opts attachOptions) error {
 	resolvedCfg.LocalPath = localPath
 	resolvedCfg.Mode = modeSync
 	resolvedCfg.MountBackend = mountBackendNone
-	return startSyncAttachment(ctx, resolvedCfg, selection, opts)
+	return startSyncMount(ctx, resolvedCfg, selection, opts)
 }
 
-func startSyncAttachment(ctx context.Context, cfg config, selection workspaceSelection, opts attachOptions) error {
+func startSyncMount(ctx context.Context, cfg config, selection workspaceSelection, opts mountOptions) error {
 	if strings.TrimSpace(cfg.LocalPath) == "" {
-		return errors.New("attach requires a local directory")
+		return errors.New("mount requires a local directory")
 	}
-	localRoot, err := normalizeAttachmentPath(cfg.LocalPath)
+	localRoot, err := normalizeMountPath(cfg.LocalPath)
 	if err != nil {
 		return err
 	}
 	cfg.LocalPath = localRoot
 	if err := validateSyncLocalPath(cfg, localRoot); err != nil {
+		return err
+	}
+	localSnapshot, err := inspectMountLocalRoot(localRoot)
+	if err != nil {
 		return err
 	}
 
@@ -236,39 +240,75 @@ func startSyncAttachment(ctx context.Context, cfg config, selection workspaceSel
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
-	plan, err := buildAttachReconcilePlan(ctx, daemon)
+	plan, err := buildMountReconcilePlan(ctx, daemon)
 	if err != nil {
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
+	if mountPlanDeletesRemoteFromEmptyLocal(plan, localSnapshot) && !localSnapshot.Exists {
+		resetMountSyncState(daemon)
+		plan, err = buildMountReconcilePlan(ctx, daemon)
+		if err != nil {
+			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
+			return err
+		}
+	}
+	emptyLocalRemoteDelete := mountPlanDeletesRemoteFromEmptyLocal(plan, localSnapshot)
 	if opts.dryRun {
-		printAttachReconcilePlan("Would attach workspace", selection.Name, localRoot, plan, true)
+		printMountReconcilePlan("Would mount workspace", selection.Name, localRoot, plan, true)
+		if emptyLocalRemoteDelete {
+			printEmptyLocalDeleteWarning(selection.Name, localRoot, plan)
+		}
 		return nil
 	}
 	if plan.hasReportableChanges() {
-		printAttachReconcilePlan("Attach changes", selection.Name, localRoot, plan, opts.verbose || plan.ConflictCount > 0)
+		printMountReconcilePlan("Mount changes", selection.Name, localRoot, plan, opts.verbose || plan.ConflictCount > 0)
 	}
 	if plan.ConflictCount > 0 {
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
-		return fmt.Errorf("attach has %d conflict(s); resolve them or move conflicting files aside before attaching", plan.ConflictCount)
+		return fmt.Errorf("mount has %d conflict(s); resolve them or move conflicting files aside before mounting", plan.ConflictCount)
 	}
-	if plan.requiresConfirmation() && !opts.yes {
+	emptyLocalDeleteConfirmed := false
+	if emptyLocalRemoteDelete {
+		printEmptyLocalDeleteWarning(selection.Name, localRoot, plan)
 		if !isInteractiveTerminal() {
 			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
-			return errors.New("attach would change an existing local folder; rerun in an interactive terminal, pass --dry-run to inspect the plan, or pass --yes to accept the safe attach plan")
+			return errors.New("mount would delete remote workspace entries because the local folder is empty; rerun in an interactive terminal to confirm that destructive action")
 		}
-		ok, err := promptYesNo(bufio.NewReader(os.Stdin), os.Stdout, "Continue with attach sync plan?", false)
+		ok, err := promptYesNo(
+			bufio.NewReader(os.Stdin),
+			os.Stdout,
+			"Did you intentionally delete every local file and want to delete the remote workspace entries?",
+			false,
+		)
 		if err != nil {
 			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 			return err
 		}
 		if !ok {
-			fmt.Println("Attach cancelled.")
+			fmt.Println("Mount cancelled.")
+			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
+			return nil
+		}
+		emptyLocalDeleteConfirmed = true
+	}
+	if plan.requiresConfirmation() && !opts.yes && !emptyLocalDeleteConfirmed {
+		if !isInteractiveTerminal() {
+			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
+			return errors.New("mount would change an existing local folder; rerun in an interactive terminal, pass --dry-run to inspect the plan, or pass --yes to accept the safe mount plan")
+		}
+		ok, err := promptYesNo(bufio.NewReader(os.Stdin), os.Stdout, "Continue with mount sync plan?", false)
+		if err != nil {
+			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
+			return err
+		}
+		if !ok {
+			fmt.Println("Mount cancelled.")
 			closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 			return nil
 		}
 	}
-	approveAttachReconcilePlan(daemon, plan)
+	approveMountReconcilePlan(daemon, plan)
 	progress := func(done, total int64) {
 		if !opts.verbose {
 			return
@@ -298,7 +338,7 @@ func startSyncAttachment(ctx context.Context, cfg config, selection workspaceSel
 		return err
 	}
 
-	reg, err := loadAttachmentRegistry()
+	reg, err := loadMountRegistry()
 	if err != nil {
 		_ = terminatePID(daemonPID, 5*time.Second)
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
@@ -310,7 +350,7 @@ func startSyncAttachment(ctx context.Context, cfg config, selection workspaceSel
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
-	upsertAttachment(&reg, attachmentRecord{
+	upsertMount(&reg, mountRecord{
 		ID:                   "att_" + id,
 		Workspace:            bootstrap.workspace,
 		WorkspaceID:          runtimeCfg.CurrentWorkspaceID,
@@ -328,47 +368,58 @@ func startSyncAttachment(ctx context.Context, cfg config, selection workspaceSel
 		SyncLog:              runtimeCfg.SyncLog,
 		StartedAt:            time.Now().UTC(),
 	})
-	if err := saveAttachmentRegistry(reg); err != nil {
+	if err := saveMountRegistry(reg); err != nil {
 		_ = terminatePID(daemonPID, 5*time.Second)
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
-	recordAttachShellDirectory(localRoot)
+	recordMountShellDirectory(localRoot)
 
 	entryCount := "synced"
 	if snap, err := loadSyncState(bootstrap.workspace); err == nil && snap != nil {
-		entryCount = strconv.Itoa(len(snap.Entries)) + " entries"
+		live, _ := syncStateEntryCounts(snap)
+		entryCount = strconv.Itoa(live) + " entries"
 	}
 	rows := []outputRow{
 		{Label: "workspace", Value: bootstrap.workspace},
 		{Label: "path", Value: compactDisplayPath(localRoot)},
 		{Label: "mode", Value: "sync"},
 		{Label: "files", Value: entryCount},
-		{Label: "detach", Value: filepath.Base(os.Args[0]) + " ws detach " + shellQuote(bootstrap.workspace)},
+		{Label: "unmount", Value: filepath.Base(os.Args[0]) + " ws unmount " + shellQuote(bootstrap.workspace)},
 	}
 	if opts.verbose && strings.TrimSpace(bootstrap.sessionID) != "" {
 		rows = append(rows, outputRow{Label: "session", Value: strings.TrimSpace(bootstrap.sessionID)})
 	}
-	printSection("Workspace attached", rows)
+	printSection("Workspace mounted", rows)
 	return nil
 }
 
-func recordAttachShellDirectory(localRoot string) {
-	target := strings.TrimSpace(os.Getenv(attachShellCDFileEnv))
+func printEmptyLocalDeleteWarning(workspace, localRoot string, plan mountReconcilePlan) {
+	printSection("Empty local folder", []outputRow{
+		{Label: "workspace", Value: workspace},
+		{Label: "path", Value: compactDisplayPath(localRoot)},
+		{Label: "remote entries", Value: fmt.Sprintf("%d", plan.RemoteCount)},
+		{Label: "would delete", Value: fmt.Sprintf("%d remote entries", plan.DeleteRemoteCount)},
+		{Label: "note", Value: "This only makes sense if you deleted everything while unmounted."},
+	})
+}
+
+func recordMountShellDirectory(localRoot string) {
+	target := strings.TrimSpace(os.Getenv(mountShellCDFileEnv))
 	if target == "" {
 		return
 	}
 	_ = os.WriteFile(target, []byte(localRoot+"\n"), 0o600)
 }
 
-type attachPromptChoice struct {
+type mountPromptChoice struct {
 	Workspace   string
 	WorkspaceID string
 	Path        string
-	Attached    bool
+	Mounted    bool
 }
 
-func promptAttachSelection(opts attachOptions) error {
+func promptMountSelection(opts mountOptions) error {
 	_, service, closeStore, err := openAFSControlPlane(context.Background())
 	if err != nil {
 		return err
@@ -379,15 +430,15 @@ func promptAttachSelection(opts attachOptions) error {
 	if err != nil {
 		return err
 	}
-	reg, err := loadAttachmentRegistry()
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
 
-	choices := attachPromptChoices(reg, workspaces.Items)
+	choices := mountPromptChoices(reg, workspaces.Items)
 	if len(choices) == 0 {
 		fmt.Println()
-		fmt.Println("Attach workspace")
+		fmt.Println("Mount workspace")
 		fmt.Println()
 		fmt.Println("No workspaces found.")
 		fmt.Println("Create one with: " + filepath.Base(os.Args[0]) + " ws create <workspace>")
@@ -396,23 +447,23 @@ func promptAttachSelection(opts attachOptions) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Attach workspace")
+	fmt.Println("Mount workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Status", "Path"}, attachPromptRows(choices))
+	printPlainTable([]string{"#", "Workspace", "Status", "Path"}, mountPromptRows(choices))
 	fmt.Println()
-	fmt.Print("Workspace to attach: ")
+	fmt.Print("Workspace to mount: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()
-		fmt.Println("Attach cancelled.")
+		fmt.Println("Mount cancelled.")
 		fmt.Println()
 		return nil
 	}
 	choiceText := strings.TrimSpace(raw)
 	if choiceText == "" {
-		fmt.Println("Attach cancelled.")
+		fmt.Println("Mount cancelled.")
 		fmt.Println()
 		return nil
 	}
@@ -421,8 +472,8 @@ func promptAttachSelection(opts attachOptions) error {
 		return fmt.Errorf("invalid selection %q", choiceText)
 	}
 	selected := choices[idx-1]
-	if selected.Attached {
-		printSection("Workspace already attached", []outputRow{
+	if selected.Mounted {
+		printSection("Workspace already mounted", []outputRow{
 			{Label: "workspace", Value: selected.Workspace},
 			{Label: "path", Value: compactDisplayPath(selected.Path)},
 		})
@@ -434,7 +485,7 @@ func promptAttachSelection(opts attachOptions) error {
 	rawPath, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(rawPath) == "" {
 		fmt.Println()
-		fmt.Println("Attach cancelled.")
+		fmt.Println("Mount cancelled.")
 		fmt.Println()
 		return nil
 	}
@@ -444,35 +495,35 @@ func promptAttachSelection(opts attachOptions) error {
 	}
 	opts.workspace = selected.Workspace
 	opts.directory = localPath
-	return attachWorkspace(opts)
+	return mountWorkspace(opts)
 }
 
-func attachPromptChoices(reg attachmentRegistry, workspaces []workspaceSummary) []attachPromptChoice {
-	choices := make([]attachPromptChoice, 0, len(reg.Attachments)+len(workspaces))
-	attachedByID := make(map[string]bool, len(reg.Attachments))
-	attachedByName := make(map[string]bool, len(reg.Attachments))
-	for _, rec := range sortedAttachmentRecords(reg.Attachments) {
-		choices = append(choices, attachPromptChoice{
+func mountPromptChoices(reg mountRegistry, workspaces []workspaceSummary) []mountPromptChoice {
+	choices := make([]mountPromptChoice, 0, len(reg.Mounts)+len(workspaces))
+	mountedByID := make(map[string]bool, len(reg.Mounts))
+	mountedByName := make(map[string]bool, len(reg.Mounts))
+	for _, rec := range sortedMountRecords(reg.Mounts) {
+		choices = append(choices, mountPromptChoice{
 			Workspace:   rec.Workspace,
 			WorkspaceID: rec.WorkspaceID,
 			Path:        rec.LocalPath,
-			Attached:    true,
+			Mounted:    true,
 		})
 		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
-			attachedByID[id] = true
+			mountedByID[id] = true
 		}
 		if name := strings.TrimSpace(rec.Workspace); name != "" {
-			attachedByName[name] = true
+			mountedByName[name] = true
 		}
 	}
 	for _, ws := range workspaces {
-		if strings.TrimSpace(ws.ID) != "" && attachedByID[ws.ID] {
+		if strings.TrimSpace(ws.ID) != "" && mountedByID[ws.ID] {
 			continue
 		}
-		if strings.TrimSpace(ws.Name) != "" && attachedByName[ws.Name] {
+		if strings.TrimSpace(ws.Name) != "" && mountedByName[ws.Name] {
 			continue
 		}
-		choices = append(choices, attachPromptChoice{
+		choices = append(choices, mountPromptChoice{
 			Workspace:   ws.Name,
 			WorkspaceID: ws.ID,
 		})
@@ -480,13 +531,13 @@ func attachPromptChoices(reg attachmentRegistry, workspaces []workspaceSummary) 
 	return choices
 }
 
-func attachPromptRows(choices []attachPromptChoice) [][]string {
+func mountPromptRows(choices []mountPromptChoice) [][]string {
 	rows := make([][]string, 0, len(choices))
 	for i, choice := range choices {
 		status := "available"
 		path := ""
-		if choice.Attached {
-			status = "attached"
+		if choice.Mounted {
+			status = "mounted"
 			path = compactDisplayPath(choice.Path)
 		}
 		rows = append(rows, []string{strconv.Itoa(i + 1), choice.Workspace, status, path})
@@ -494,7 +545,7 @@ func attachPromptRows(choices []attachPromptChoice) [][]string {
 	return rows
 }
 
-func promptAttachPathForWorkspace(workspace string) (string, bool, error) {
+func promptMountPathForWorkspace(workspace string) (string, bool, error) {
 	if err := validateAFSName("workspace", workspace); err != nil {
 		return "", false, err
 	}
@@ -506,7 +557,7 @@ func promptAttachPathForWorkspace(workspace string) (string, bool, error) {
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()
-		fmt.Println("Attach cancelled.")
+		fmt.Println("Mount cancelled.")
 		fmt.Println()
 		return "", false, nil
 	}
@@ -517,87 +568,87 @@ func promptAttachPathForWorkspace(workspace string) (string, bool, error) {
 	return localPath, true, nil
 }
 
-func detachWorkspacePath(rawPath string, deleteLocal bool) error {
-	localPath, err := normalizeAttachmentPath(rawPath)
+func unmountWorkspacePath(rawPath string, deleteLocal bool) error {
+	localPath, err := normalizeMountPath(rawPath)
 	if err != nil {
 		return err
 	}
-	reg, err := loadAttachmentRegistry()
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
-	rec, ok := removeAttachmentByPath(&reg, localPath)
+	rec, ok := removeMountByPath(&reg, localPath)
 	if !ok {
-		return fmt.Errorf("no attachment found at %s", localPath)
+		return fmt.Errorf("no mount found at %s", localPath)
 	}
-	if err := stopAttachment(rec, deleteLocal); err != nil {
+	if err := stopMount(rec, deleteLocal); err != nil {
 		return err
 	}
-	if err := saveAttachmentRegistry(reg); err != nil {
+	if err := saveMountRegistry(reg); err != nil {
 		return err
 	}
-	printDetachResult(rec, deleteLocal)
+	printUnmountResult(rec, deleteLocal)
 	return nil
 }
 
-func detachWorkspaceTarget(rawTarget string, deleteLocal bool) error {
+func unmountWorkspaceTarget(rawTarget string, deleteLocal bool) error {
 	target := strings.TrimSpace(rawTarget)
 	if target == "" {
-		return errors.New("detach requires a workspace or directory")
+		return errors.New("unmount requires a workspace or directory")
 	}
 
-	reg, err := loadAttachmentRegistry()
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
 
-	if detachTargetLooksLikePath(target) {
-		localPath, err := normalizeAttachmentPath(target)
+	if unmountTargetLooksLikePath(target) {
+		localPath, err := normalizeMountPath(target)
 		if err != nil {
 			return err
 		}
-		if rec, ok := removeAttachmentByPath(&reg, localPath); ok {
-			return detachAttachmentRecord(reg, rec, deleteLocal)
+		if rec, ok := removeMountByPath(&reg, localPath); ok {
+			return unmountMountRecord(reg, rec, deleteLocal)
 		}
-		rec, ok, err := removeAttachmentByWorkspaceRef(&reg, target)
+		rec, ok, err := removeMountByWorkspaceRef(&reg, target)
 		if err != nil {
 			return err
 		}
 		if ok {
-			return detachAttachmentRecord(reg, rec, deleteLocal)
+			return unmountMountRecord(reg, rec, deleteLocal)
 		}
-		return fmt.Errorf("no attachment found at %s", localPath)
+		return fmt.Errorf("no mount found at %s", localPath)
 	}
 
-	rec, ok, err := removeAttachmentByWorkspaceRef(&reg, target)
+	rec, ok, err := removeMountByWorkspaceRef(&reg, target)
 	if err != nil {
 		return err
 	}
 	if ok {
-		return detachAttachmentRecord(reg, rec, deleteLocal)
+		return unmountMountRecord(reg, rec, deleteLocal)
 	}
-	localPath, err := normalizeAttachmentPath(target)
+	localPath, err := normalizeMountPath(target)
 	if err != nil {
 		return err
 	}
-	if rec, ok := removeAttachmentByPath(&reg, localPath); ok {
-		return detachAttachmentRecord(reg, rec, deleteLocal)
+	if rec, ok := removeMountByPath(&reg, localPath); ok {
+		return unmountMountRecord(reg, rec, deleteLocal)
 	}
-	return fmt.Errorf("no attachment found for workspace %s", target)
+	return fmt.Errorf("no mount found for workspace %s", target)
 }
 
-func detachAttachmentRecord(reg attachmentRegistry, rec attachmentRecord, deleteLocal bool) error {
-	if err := stopAttachment(rec, deleteLocal); err != nil {
+func unmountMountRecord(reg mountRegistry, rec mountRecord, deleteLocal bool) error {
+	if err := stopMount(rec, deleteLocal); err != nil {
 		return err
 	}
-	if err := saveAttachmentRegistry(reg); err != nil {
+	if err := saveMountRegistry(reg); err != nil {
 		return err
 	}
-	printDetachResult(rec, deleteLocal)
+	printUnmountResult(rec, deleteLocal)
 	return nil
 }
 
-func detachTargetLooksLikePath(target string) bool {
+func unmountTargetLooksLikePath(target string) bool {
 	if filepath.IsAbs(target) {
 		return true
 	}
@@ -607,37 +658,37 @@ func detachTargetLooksLikePath(target string) bool {
 	return strings.ContainsRune(target, os.PathSeparator)
 }
 
-func promptDetachSelection(deleteLocal bool) error {
-	reg, err := loadAttachmentRegistry()
+func promptUnmountSelection(deleteLocal bool) error {
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
-	if len(reg.Attachments) == 0 {
+	if len(reg.Mounts) == 0 {
 		fmt.Println()
-		fmt.Println("No attached workspaces.")
+		fmt.Println("No mounted workspaces.")
 		fmt.Println()
 		return nil
 	}
 
-	records := sortedAttachmentRecords(reg.Attachments)
+	records := sortedMountRecords(reg.Mounts)
 	fmt.Println()
-	fmt.Println("Detach workspace")
+	fmt.Println("Unmount workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Path"}, detachPromptRows(records))
+	printPlainTable([]string{"#", "Workspace", "Path"}, unmountPromptRows(records))
 	fmt.Println()
-	fmt.Print("Workspace to detach: ")
+	fmt.Print("Workspace to unmount: ")
 
 	reader := bufio.NewReader(os.Stdin)
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()
-		fmt.Println("Detach cancelled.")
+		fmt.Println("Unmount cancelled.")
 		fmt.Println()
 		return nil
 	}
 	choice := strings.TrimSpace(raw)
 	if choice == "" {
-		fmt.Println("Detach cancelled.")
+		fmt.Println("Unmount cancelled.")
 		fmt.Println()
 		return nil
 	}
@@ -648,18 +699,18 @@ func promptDetachSelection(deleteLocal bool) error {
 	}
 
 	selected := records[idx-1]
-	reg, err = loadAttachmentRegistry()
+	reg, err = loadMountRegistry()
 	if err != nil {
 		return err
 	}
-	rec, ok := removeAttachmentByPath(&reg, selected.LocalPath)
+	rec, ok := removeMountByPath(&reg, selected.LocalPath)
 	if !ok {
-		return fmt.Errorf("attachment for %s is no longer attached", selected.Workspace)
+		return fmt.Errorf("mount for %s is no longer mounted", selected.Workspace)
 	}
-	return detachAttachmentRecord(reg, rec, deleteLocal)
+	return unmountMountRecord(reg, rec, deleteLocal)
 }
 
-func detachPromptRows(records []attachmentRecord) [][]string {
+func unmountPromptRows(records []mountRecord) [][]string {
 	rows := make([][]string, 0, len(records))
 	for i, rec := range records {
 		rows = append(rows, []string{strconv.Itoa(i + 1), rec.Workspace, compactDisplayPath(rec.LocalPath)})
@@ -667,13 +718,13 @@ func detachPromptRows(records []attachmentRecord) [][]string {
 	return rows
 }
 
-func stopAttachment(rec attachmentRecord, deleteLocal bool) error {
+func stopMount(rec mountRecord, deleteLocal bool) error {
 	if rec.PID > 0 && processAlive(rec.PID) {
 		if err := terminatePID(rec.PID, 5*time.Second); err != nil {
 			return err
 		}
 	}
-	closeManagedWorkspaceSession(configFromAttachment(rec), strings.TrimSpace(rec.Workspace), strings.TrimSpace(rec.SessionID))
+	closeManagedWorkspaceSession(configFromMount(rec), strings.TrimSpace(rec.Workspace), strings.TrimSpace(rec.SessionID))
 	if deleteLocal {
 		if localPath := strings.TrimSpace(rec.LocalPath); localPath != "" {
 			if err := os.RemoveAll(localPath); err != nil {
@@ -684,10 +735,10 @@ func stopAttachment(rec attachmentRecord, deleteLocal bool) error {
 			_ = removeSyncState(workspace)
 		}
 	}
-	return removeLegacyStateForAttachment(rec)
+	return removeLegacyStateForMount(rec)
 }
 
-func removeLegacyStateForAttachment(rec attachmentRecord) error {
+func removeLegacyStateForMount(rec mountRecord) error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -707,7 +758,7 @@ func removeLegacyStateForAttachment(rec attachmentRecord) error {
 	return nil
 }
 
-func configFromAttachment(rec attachmentRecord) config {
+func configFromMount(rec mountRecord) config {
 	cfg := loadConfigOrDefault()
 	cfg.ProductMode = rec.ProductMode
 	cfg.URL = rec.ControlPlaneURL
@@ -722,19 +773,19 @@ func configFromAttachment(rec attachmentRecord) config {
 	return cfg
 }
 
-func printDetachResult(rec attachmentRecord, deleteLocal bool) {
+func printUnmountResult(rec mountRecord, deleteLocal bool) {
 	local := "preserved"
 	if deleteLocal {
 		local = "deleted"
 	}
-	printSection("Workspace detached", []outputRow{
+	printSection("Workspace unmounted", []outputRow{
 		{Label: "workspace", Value: rec.Workspace},
 		{Label: "path", Value: compactDisplayPath(rec.LocalPath)},
 		{Label: "local", Value: local},
 	})
 }
 
-func countAttachableLocalEntries(root string) (int, error) {
+func countMountableLocalEntries(root string) (int, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -766,27 +817,27 @@ func countAttachableLocalEntries(root string) (int, error) {
 	return count, err
 }
 
-func attachUsageText(bin string) string {
+func mountUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws attach [--dry-run] [--yes] [--verbose] [<workspace> [directory]]
+  %s ws mount [--dry-run] [--yes] [--verbose] [<workspace> [directory]]
 
-Attach a workspace to a local directory using sync mode.
+Mount a workspace to a local directory using sync mode.
 With no workspace, lists workspaces and prompts for a selection.
 With no directory, prompts for a local folder.
-When attaching to a populated local folder, AFS shows the safe reconciliation
+When mounting to a populated local folder, AFS shows the safe reconciliation
 plan and asks before uploading or downloading files. Use --yes to accept a
-safe plan non-interactively; conflicts still block attach.
-The directory is preserved on detach unless --delete is used.
+safe plan non-interactively; conflicts still block mount.
+The directory is preserved on unmount unless --delete is used.
 `, bin)
 }
 
-func detachUsageText(bin string) string {
+func unmountUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws detach [--delete] [<workspace|directory>]
+  %s ws unmount [--delete] [<workspace|directory>]
 
-Detach an AFS workspace by workspace name, workspace ID, or local directory.
-With no target, lists attached workspaces and prompts for a selection.
+Unmount an AFS workspace by workspace name, workspace ID, or local directory.
+With no target, lists mounted workspaces and prompts for a selection.
 By default, local files are preserved. Use --delete only when you want to
-remove the attached local directory after the daemon stops.
+remove the mounted local directory after the daemon stops.
 `, bin)
 }

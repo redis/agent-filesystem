@@ -56,30 +56,30 @@ func isAFSMountEntry(entry string) bool {
 	return strings.Contains(v, "fuse.agent-filesystem") || strings.Contains(v, "agent-filesystem on ") || strings.Contains(v, " agent-filesystem ")
 }
 
-func detachAllActive(deleteLocal bool) error {
-	reg, err := loadAttachmentRegistry()
+func unmountAllActive(deleteLocal bool) error {
+	reg, err := loadMountRegistry()
 	if err != nil {
 		return err
 	}
-	if len(reg.Attachments) > 0 {
-		for len(reg.Attachments) > 0 {
-			rec := reg.Attachments[0]
-			if err := stopAttachment(rec, deleteLocal); err != nil {
+	if len(reg.Mounts) > 0 {
+		for len(reg.Mounts) > 0 {
+			rec := reg.Mounts[0]
+			if err := stopMount(rec, deleteLocal); err != nil {
 				return err
 			}
-			reg.Attachments = reg.Attachments[1:]
-			printDetachResult(rec, deleteLocal)
+			reg.Mounts = reg.Mounts[1:]
+			printUnmountResult(rec, deleteLocal)
 		}
-		return saveAttachmentRegistry(reg)
+		return saveMountRegistry(reg)
 	}
-	return detachLegacyState(deleteLocal)
+	return unmountLegacyState(deleteLocal)
 }
 
-func detachLegacyState(deleteLocal bool) error {
+func unmountLegacyState(deleteLocal bool) error {
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			fmt.Println("not attached")
+			fmt.Println("not mounted")
 			return nil
 		}
 		return err
@@ -188,7 +188,7 @@ func detachLegacyState(deleteLocal bool) error {
 	if deleteLocal {
 		local = "deleted"
 	}
-	fmt.Printf("Detached workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
+	fmt.Printf("Unmounted workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
 	fmt.Printf("path   %s\n", st.LocalPath)
 	fmt.Printf("local  %s\n", local)
 	return nil

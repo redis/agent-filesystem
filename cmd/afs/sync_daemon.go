@@ -27,9 +27,9 @@ type syncDaemonConfig struct {
 	WatcherDebounce time.Duration
 	Readonly        bool
 	Interactive     bool // when true, log every file event to stderr
-	// ApprovedInitialAttachMerge is set by the attach preflight after it has
+	// ApprovedInitialMountMerge is set by the mount preflight after it has
 	// shown the local/remote plan and confirmed the safe union with the user.
-	ApprovedInitialAttachMerge bool
+	ApprovedInitialMountMerge bool
 	// Chunk-level delta sync knobs. Zero values use defaults.
 	ChunkSize      int // bytes per chunk (default 256 KB)
 	ChunkThreshold int // minimum file size to enable chunked sync (default 1 MB)
@@ -130,7 +130,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	if cfg.Rdb != nil && strings.TrimSpace(cfg.StorageID) != "" && strings.TrimSpace(cfg.SessionID) != "" {
-		d.uploader.attachChangelog(cfg.Rdb, cfg.StorageID, cfg.SessionID, cfg.User, cfg.AgentID, cfg.Label, cfg.AgentVersion)
+		d.uploader.mountChangelog(cfg.Rdb, cfg.StorageID, cfg.SessionID, cfg.User, cfg.AgentID, cfg.Label, cfg.AgentVersion)
 	}
 	d.downloader = newDownloader(cfg.FS, d.reconciler.downloadOut(), cfg.LocalRoot, conflict, echo, cfg.Readonly, log)
 	d.pump = newRemoteSubscriptionPump(cfg.FS, log, stateWriter)
@@ -333,7 +333,7 @@ func (d *syncDaemon) validateInitialSyncSafety(ctx context.Context) error {
 		return nil
 	}
 
-	if d.cfg.ApprovedInitialAttachMerge {
+	if d.cfg.ApprovedInitialMountMerge {
 		return nil
 	}
 
@@ -346,7 +346,7 @@ func (d *syncDaemon) validateInitialSyncSafety(ctx context.Context) error {
 	}
 
 	return fmt.Errorf(
-		"Attach blocked for workspace %q: local path %q is already populated and the remote workspace is not empty.\nUse an empty directory, import the local directory into a new workspace, or move conflicting files aside first.",
+		"Mount blocked for workspace %q: local path %q is already populated and the remote workspace is not empty.\nUse an empty directory, import the local directory into a new workspace, or move conflicting files aside first.",
 		d.cfg.Workspace,
 		d.cfg.LocalRoot,
 	)

@@ -28,7 +28,7 @@ func TestConfigPathDefaultsToAFSConfig(t *testing.T) {
 func TestWorkspaceRootShortcutsAreHiddenAliases(t *testing.T) {
 	t.Helper()
 
-	for _, command := range []string{"attach", "detach", "create", "list", "info", "import", "fork", "delete"} {
+	for _, command := range []string{"mount", "unmount", "create", "list", "info", "import", "fork", "delete"} {
 		if !isWorkspaceRootShortcut(command) {
 			t.Fatalf("isWorkspaceRootShortcut(%q) = false, want true", command)
 		}
@@ -39,14 +39,14 @@ func TestWorkspaceRootShortcutsAreHiddenAliases(t *testing.T) {
 		}
 	}
 
-	got := workspaceRootShortcutArgs([]string{"attach", "demo", "~/demo"})
-	want := []string{"ws", "attach", "demo", "~/demo"}
+	got := workspaceRootShortcutArgs([]string{"mount", "demo", "~/demo"})
+	want := []string{"ws", "mount", "demo", "~/demo"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("workspaceRootShortcutArgs() = %q, want %q", got, want)
 	}
 
 	out := captureStderrText(t, printUsage)
-	for _, hidden := range []string{"  attach", "  detach", "  create", "  list", "  import", "  fork", "  delete", "  reset"} {
+	for _, hidden := range []string{"  mount", "  unmount", "  create", "  list", "  import", "  fork", "  delete", "  reset"} {
 		if strings.Contains(out, hidden) {
 			t.Fatalf("top-level help should not document hidden shortcut %q:\n%s", hidden, out)
 		}
@@ -64,6 +64,27 @@ func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 
 	if got := compactDisplayPath("afs.config.json"); got != "afs.config.json" {
 		t.Fatalf("compactDisplayPath(single file) = %q, want %q", got, "afs.config.json")
+	}
+}
+
+func TestHomeRelativeDisplayPathUsesTildeForHomePath(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("HOME", "/Users/example")
+	path := "/Users/example/git/agent-filesystem/afs.config.json"
+	want := filepath.Join("~", "git", "agent-filesystem", "afs.config.json")
+	if got := homeRelativeDisplayPath(path); got != want {
+		t.Fatalf("homeRelativeDisplayPath() = %q, want %q", got, want)
+	}
+}
+
+func TestHomeRelativeDisplayPathLeavesNonHomePathAlone(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("HOME", "/Users/example")
+	path := "/tmp/agent-filesystem/afs.config.json"
+	if got := homeRelativeDisplayPath(path); got != path {
+		t.Fatalf("homeRelativeDisplayPath() = %q, want %q", got, path)
 	}
 }
 
@@ -228,7 +249,7 @@ func TestStatusTitleShowsRunningWithPID(t *testing.T) {
 	t.Helper()
 
 	title := statusTitle("●", 12345)
-	want := "AFS Running (pid 12345)"
+	want := "AFS Running (PID: 12345)"
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
 	}
@@ -242,8 +263,8 @@ func TestStatusTitleShowsRunningWithoutPID(t *testing.T) {
 	if !strings.Contains(title, want) {
 		t.Fatalf("statusTitle() = %q, want substring %q", title, want)
 	}
-	if strings.Contains(title, "pid") {
-		t.Fatalf("statusTitle() = %q, should not contain pid when pid=0", title)
+	if strings.Contains(title, "PID") {
+		t.Fatalf("statusTitle() = %q, should not contain PID when pid=0", title)
 	}
 }
 
@@ -286,27 +307,70 @@ func TestCmdStatusNotRunningShowsSelfHostedConfigURL(t *testing.T) {
 		t.Fatalf("cmdStatusNotRunning() returned error: %v", err)
 	}
 	clean := stripAnsi(out)
+	wantConfigPath := homeRelativeDisplayPath(configPath())
 	for _, want := range []string{
-		"AFS Daemon Not Running",
+		"AFS Not Running",
 		"control plane",
 		"http://127.0.0.1:8091",
-		"mode",
 		"config file",
+		wantConfigPath,
 		"database",
 	} {
 		if !strings.Contains(clean, want) {
 			t.Fatalf("cmdStatusNotRunning() output = %q, want substring %q", clean, want)
 		}
 	}
-	if strings.Contains(clean, "attach") {
-		t.Fatalf("cmdStatusNotRunning() output = %q, did not expect attach helper", clean)
+	configLine := ""
+	for _, line := range strings.Split(clean, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "config file") {
+			configLine = line
+			break
+		}
+	}
+	if got := strings.TrimSpace(strings.TrimPrefix(configLine, "config file")); got != wantConfigPath {
+		t.Fatalf("cmdStatusNotRunning() config file row = %q, want %q", got, wantConfigPath)
+	}
+	if strings.Contains(clean, "mode") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, did not expect mode while not running", clean)
+	}
+	if strings.Contains(clean, "mount") {
+		t.Fatalf("cmdStatusNotRunning() output = %q, did not expect mount helper", clean)
 	}
 	controlIndex := strings.Index(clean, "control plane")
-	modeIndex := strings.Index(clean, "mode")
 	configIndex := strings.Index(clean, "config file")
 	databaseIndex := strings.Index(clean, "database")
-	if !(controlIndex < modeIndex && modeIndex < configIndex && configIndex < databaseIndex) {
-		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane, mode, config file, database order", clean)
+	if !(controlIndex < configIndex && configIndex < databaseIndex) {
+		t.Fatalf("cmdStatusNotRunning() output = %q, want control plane, config file, database order", clean)
+	}
+}
+
+func TestCmdStatusWithStaleSyncStateOmitsMode(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	if err := saveState(state{
+		RedisAddr:        "localhost:6379",
+		RedisDB:          0,
+		CurrentWorkspace: "notes",
+		Mode:             modeSync,
+		SyncPID:          0,
+		LocalPath:        "/tmp/notes",
+		StartedAt:        time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, cmdStatus)
+	if err != nil {
+		t.Fatalf("cmdStatus() returned error: %v", err)
+	}
+	clean := stripAnsi(out)
+	if !strings.Contains(clean, "AFS Not Running") {
+		t.Fatalf("cmdStatus() output = %q, want not running title", clean)
+	}
+	if strings.Contains(clean, "mode") {
+		t.Fatalf("cmdStatus() output = %q, did not expect mode while not running", clean)
 	}
 }
 
@@ -424,7 +488,7 @@ func TestCmdStatusDoesNotPrintBannerForOperationalOutput(t *testing.T) {
 	}
 }
 
-func TestDetachAllStopsWithoutSavingMountedWorkspace(t *testing.T) {
+func TestUnmountAllStopsWithoutSavingMountedWorkspace(t *testing.T) {
 	t.Helper()
 
 	homeDir := t.TempDir()
@@ -458,23 +522,23 @@ func TestDetachAllStopsWithoutSavingMountedWorkspace(t *testing.T) {
 	}
 
 	out, err := captureStdout(t, func() error {
-		return detachAllActive(true)
+		return unmountAllActive(true)
 	})
 	if err != nil {
-		t.Fatalf("detachAllActive() returned error: %v", err)
+		t.Fatalf("unmountAllActive() returned error: %v", err)
 	}
 
 	if strings.Contains(out, "Saving mounted workspace") {
-		t.Fatalf("detachAllActive() output = %q, want no mounted workspace save step", out)
+		t.Fatalf("unmountAllActive() output = %q, want no mounted workspace save step", out)
 	}
-	if !strings.Contains(out, "Detached workspace demo") {
-		t.Fatalf("detachAllActive() output = %q, want detach message", out)
+	if !strings.Contains(out, "Unmounted workspace demo") {
+		t.Fatalf("unmountAllActive() output = %q, want unmount message", out)
 	}
 	if _, err := os.Stat(mountpoint); !os.IsNotExist(err) {
-		t.Fatalf("mountpoint should be removed after detachAllActive(--delete), stat err = %v", err)
+		t.Fatalf("mountpoint should be removed after unmountAllActive(--delete), stat err = %v", err)
 	}
 	if _, err := os.Stat(statePath()); !os.IsNotExist(err) {
-		t.Fatalf("statePath() should be removed after detachAllActive(), stat err = %v", err)
+		t.Fatalf("statePath() should be removed after unmountAllActive(), stat err = %v", err)
 	}
 }
 

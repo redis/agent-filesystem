@@ -284,8 +284,9 @@ func (s *uiStep) fail(detail string) {
 // ---------------------------------------------------------------------------
 
 type outputRow struct {
-	Label string
-	Value string
+	Label      string
+	Value      string
+	NoTruncate bool
 }
 
 func printSection(title string, rows []outputRow) {
@@ -321,7 +322,9 @@ func printSection(title string, rows []outputRow) {
 			if valueWidth < 1 {
 				valueWidth = 1
 			}
-			value = fitDisplayText(value, valueWidth)
+			if !r.NoTruncate {
+				value = fitDisplayText(value, valueWidth)
+			}
 			fmt.Printf("%s  %s\n", padVisibleText(label, maxLabel), value)
 		}
 	}

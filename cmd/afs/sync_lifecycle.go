@@ -106,11 +106,11 @@ func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requested
 // startSyncServices is the sync-mode counterpart to startServices. It boots
 // Redis (if managed), opens the live workspace root, does the initial
 // reconciliation (blocking with progress), then re-execs itself as a
-// background daemon process and returns. The parent attach process exits and
+// background daemon process and returns. The parent mount process exits and
 // returns control to the shell.
 func startSyncServices(cfg config, foreground bool) error {
 	if strings.TrimSpace(cfg.LocalPath) == "" {
-		return errors.New("localPath is required when mode=sync; run `afs ws attach <workspace> <directory>`")
+		return errors.New("localPath is required when mode=sync; run `afs ws mount <workspace> <directory>`")
 	}
 	localRoot, err := expandPath(cfg.LocalPath)
 	if err != nil {
@@ -640,11 +640,11 @@ func printSyncReadyBox(cfg config, workspace, localRoot string) {
 		rows = append(rows, outputRow{Label: "readonly", Value: "yes"})
 	}
 	rows = append(rows, outputRow{})
-	rows = append(rows, outputRow{Label: "detach", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws detach "+shellQuote(localRoot))})
+	rows = append(rows, outputRow{Label: "unmount", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" ws unmount "+shellQuote(localRoot))})
 	printSection(title, rows)
 }
 
-// stopSyncServicesIfActive performs detach cleanup when the running daemon was
+// stopSyncServicesIfActive performs unmount cleanup when the running daemon was
 // started in sync mode.
 func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
 	if strings.TrimSpace(st.Mode) != modeSync {
@@ -669,7 +669,7 @@ func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
 
 	if deleteLocal {
 		// Clean up sync state only when the user explicitly deletes the local
-		// copy; otherwise it remains as the baseline for a later re-attach.
+		// copy; otherwise it remains as the baseline for a later re-mount.
 		workspace := strings.TrimSpace(st.CurrentWorkspace)
 		_ = removeSyncState(workspace)
 	}
@@ -682,7 +682,7 @@ func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
 	if deleteLocal {
 		local = "deleted"
 	}
-	fmt.Printf("Detached workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
+	fmt.Printf("Unmounted workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
 	fmt.Printf("path   %s\n", st.LocalPath)
 	fmt.Printf("local  %s\n", local)
 	return true, nil

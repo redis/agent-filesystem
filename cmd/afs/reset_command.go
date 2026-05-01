@@ -9,7 +9,7 @@ import (
 func cmdReset() error {
 	if st, err := loadState(); err == nil {
 		if st.MountPID > 0 || st.SyncPID > 0 {
-			if err := detachAllActive(false); err != nil {
+			if err := unmountAllActive(false); err != nil {
 				return err
 			}
 		}
