@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
@@ -21,6 +22,7 @@ const (
 	opUploadMkdir
 	opUploadDelete
 	opUploadChmod
+	opUploadRename
 )
 
 // uploadOp is the work item the reconciler hands to the uploader. The
@@ -28,15 +30,17 @@ const (
 // hash so the uploader can detect drift between "what we read" and "what's
 // remote right now" without rehashing.
 type uploadOp struct {
-	Kind        uploadOpKind
-	Path        string // workspace-relative POSIX, no leading slash
-	AbsPath     string // absolute local path (for diagnostic logging)
-	Content     []byte // file body, only for non-chunked opUploadFile
-	Mode        uint32
-	Symlink     string // target, only for opUploadSymlink
-	LocalHash   string // sha256 of Content or compositeHash for chunked
-	StoredEntry SyncEntry
-	HasStored   bool
+	Kind          uploadOpKind
+	Path          string // workspace-relative POSIX, no leading slash
+	PrevPath      string // previous workspace-relative POSIX path for renames
+	AbsPath       string // absolute local path (for diagnostic logging)
+	Content       []byte // file body, only for non-chunked opUploadFile
+	Mode          uint32
+	Symlink       string // target, only for opUploadSymlink
+	LocalHash     string // sha256 of Content or compositeHash for chunked
+	LocalIdentity string
+	StoredEntry   SyncEntry
+	HasStored     bool
 	// Chunked upload fields (set when file > chunkThreshold).
 	Chunked     bool
 	FileSize    int64
@@ -149,6 +153,11 @@ func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
 		entry.Op = controlplane.ChangeOpChmod
 		entry.Mode = r.Op.Mode
 		entry.ContentHash = r.Op.LocalHash
+	case opUploadRename:
+		entry.Op = controlplane.ChangeOpRename
+		entry.PrevPath = r.Op.PrevPath
+		entry.Mode = r.Op.Mode
+		entry.ContentHash = r.Op.LocalHash
 	default:
 		return
 	}
@@ -161,7 +170,11 @@ func (u *uploader) emitChange(ctx context.Context, r uploadResult) {
 }
 
 func (u *uploader) recordVersionMutation(ctx context.Context, r uploadResult) *controlplane.FileVersion {
-	before := versionedSnapshotFromSyncEntry(absoluteRemotePath(r.Op.Path), r.Op.StoredEntry, r.Op.HasStored)
+	beforePath := absoluteRemotePath(r.Op.Path)
+	if r.Op.Kind == opUploadRename && strings.TrimSpace(r.Op.PrevPath) != "" {
+		beforePath = absoluteRemotePath(r.Op.PrevPath)
+	}
+	before := versionedSnapshotFromSyncEntry(beforePath, r.Op.StoredEntry, r.Op.HasStored)
 	after, shouldTrack, err := versionedSnapshotFromUploadResult(r)
 	if err != nil {
 		if u.log != nil {
@@ -255,6 +268,17 @@ func versionedSnapshotFromUploadResult(r uploadResult) (controlplane.VersionedFi
 			return controlplane.VersionedFileSnapshot{Path: path}, false, nil
 		}
 		return controlplane.VersionedFileSnapshot{Path: path}, true, nil
+	case opUploadRename:
+		if !r.Op.HasStored {
+			return controlplane.VersionedFileSnapshot{}, false, nil
+		}
+		snapshot := versionedSnapshotFromSyncEntry(path, r.Op.StoredEntry, true)
+		snapshot.Path = path
+		snapshot.Exists = true
+		if snapshot.Mode == 0 {
+			snapshot.Mode = r.Op.Mode
+		}
+		return snapshot, true, nil
 	case opUploadChmod:
 		before := versionedSnapshotFromSyncEntry(path, r.Op.StoredEntry, r.Op.HasStored)
 		if !before.Exists {
@@ -300,6 +324,8 @@ func (u *uploader) process(ctx context.Context, op uploadOp) {
 		u.processDelete(ctx, op)
 	case opUploadChmod:
 		u.processChmod(ctx, op)
+	case opUploadRename:
+		u.processRename(ctx, op)
 	default:
 		u.send(uploadResult{Op: op, Err: fmt.Errorf("unknown upload op kind: %d", op.Kind)})
 	}
@@ -453,6 +479,25 @@ func (u *uploader) processDelete(ctx context.Context, op uploadOp) {
 		return
 	}
 	u.send(uploadResult{Op: op})
+}
+
+func (u *uploader) processRename(ctx context.Context, op uploadOp) {
+	if strings.TrimSpace(op.PrevPath) == "" {
+		u.send(uploadResult{Op: op, Err: errors.New("rename upload missing previous path")})
+		return
+	}
+	srcPath := absoluteRemotePath(op.PrevPath)
+	dstPath := absoluteRemotePath(op.Path)
+	if err := u.fs.Rename(ctx, srcPath, dstPath, 0); err != nil {
+		u.send(uploadResult{Op: op, Err: fmt.Errorf("rename remote %s -> %s: %w", op.PrevPath, op.Path, err)})
+		return
+	}
+	stat, err := u.fs.Stat(ctx, dstPath)
+	if err != nil {
+		u.send(uploadResult{Op: op, Err: fmt.Errorf("post-rename stat %s: %w", op.Path, err)})
+		return
+	}
+	u.send(uploadResult{Op: op, RemoteStat: stat})
 }
 
 func (u *uploader) processChmod(ctx context.Context, op uploadOp) {

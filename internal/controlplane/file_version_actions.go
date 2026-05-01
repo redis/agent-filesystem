@@ -208,8 +208,11 @@ func (s *Service) UndeleteFileVersion(ctx context.Context, workspace, rawPath st
 	}
 
 	updatedStat, err := fsClient.Stat(ctx, normalizedPath)
-	if err != nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return FileVersionUndeleteResponse{}, err
+	}
+	if errors.Is(err, redis.Nil) {
+		updatedStat = nil
 	}
 	afterSnapshot, err := fileVersionedSnapshotFromFS(ctx, fsClient, normalizedPath, updatedStat)
 	if err != nil {

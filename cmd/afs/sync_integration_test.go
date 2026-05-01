@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -582,6 +583,134 @@ func TestSyncLocalDeletePropagates(t *testing.T) {
 	assertEventually(t, 3*time.Second, "remote delete", func() bool {
 		return !env.remoteExists(t, "doomed.txt")
 	})
+}
+
+func TestSyncHistoryDeleteRecordsTombstone(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	ctx := context.Background()
+	if err := env.cp.PutWorkspaceVersioningPolicy(ctx, env.workspace, controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy: %v", err)
+	}
+	meta, err := env.store.getWorkspaceMeta(ctx, env.workspace)
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta: %v", err)
+	}
+	storageID := controlplane.WorkspaceStorageID(meta)
+	service := controlPlaneServiceFromStore(defaultConfig(), env.store)
+	env.startDaemon(t, func(c *syncDaemonConfig) {
+		c.Rdb = env.rdb
+		c.StorageID = storageID
+		c.SessionID = "sess-history-delete"
+		c.AgentID = "agt-history-delete"
+		c.Label = "sync/history"
+		c.AgentVersion = "test"
+	})
+	defer env.stopDaemon()
+
+	abs := env.writeLocalFile(t, "deleted.txt", "first\nsecond\n")
+	assertEventually(t, 3*time.Second, "deleted.txt to land remotely", func() bool {
+		return env.remoteExists(t, "deleted.txt")
+	})
+
+	if err := removeFile(abs); err != nil {
+		t.Fatalf("remove local deleted.txt: %v", err)
+	}
+	assertEventually(t, 3*time.Second, "deleted.txt remote delete", func() bool {
+		return !env.remoteExists(t, "deleted.txt")
+	})
+
+	var history controlplane.FileHistoryResponse
+	assertEventually(t, 3*time.Second, "deleted.txt history tombstone", func() bool {
+		var getErr error
+		history, getErr = service.GetFileHistory(ctx, env.workspace, "/deleted.txt", false)
+		if getErr != nil || len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 2 {
+			return false
+		}
+		lineage := history.Lineages[0]
+		return lineage.State == controlplane.FileLineageStateDeleted &&
+			lineage.Versions[0].Op == controlplane.ChangeOpPut &&
+			lineage.Versions[1].Op == controlplane.ChangeOpDelete
+	})
+
+	if _, err := env.cp.ResolveLiveFileLineageByPath(ctx, env.workspace, "/deleted.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("ResolveLiveFileLineageByPath(/deleted.txt) error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestSyncHistoryRenamePreservesLineage(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	ctx := context.Background()
+	if err := env.cp.PutWorkspaceVersioningPolicy(ctx, env.workspace, controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy: %v", err)
+	}
+	meta, err := env.store.getWorkspaceMeta(ctx, env.workspace)
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta: %v", err)
+	}
+	storageID := controlplane.WorkspaceStorageID(meta)
+	service := controlPlaneServiceFromStore(defaultConfig(), env.store)
+	env.startDaemon(t, func(c *syncDaemonConfig) {
+		c.Rdb = env.rdb
+		c.StorageID = storageID
+		c.SessionID = "sess-history-rename"
+		c.AgentID = "agt-history-rename"
+		c.Label = "sync/history"
+		c.AgentVersion = "test"
+	})
+	defer env.stopDaemon()
+
+	oldAbs := env.writeLocalFile(t, "history.txt", "rename me\n")
+	assertEventually(t, 3*time.Second, "history.txt to land remotely", func() bool {
+		return env.remoteExists(t, "history.txt")
+	})
+
+	newAbs := filepath.Join(env.localRoot, "renamed.txt")
+	if err := os.Rename(oldAbs, newAbs); err != nil {
+		t.Fatalf("os.Rename(history.txt -> renamed.txt): %v", err)
+	}
+	if err := os.WriteFile(newAbs, []byte("rename me\nand update me\n"), 0o644); err != nil {
+		t.Fatalf("rewrite renamed.txt: %v", err)
+	}
+
+	assertEventually(t, 3*time.Second, "renamed.txt remote rename", func() bool {
+		return env.remoteExists(t, "renamed.txt") && !env.remoteExists(t, "history.txt")
+	})
+	assertEventually(t, 3*time.Second, "renamed.txt remote content update", func() bool {
+		return env.readRemoteFile(t, "renamed.txt") == "rename me\nand update me\n"
+	})
+
+	var oldHistory controlplane.FileHistoryResponse
+	assertEventually(t, 3*time.Second, "old path rename history", func() bool {
+		var getErr error
+		oldHistory, getErr = service.GetFileHistory(ctx, env.workspace, "/history.txt", false)
+		if getErr != nil || len(oldHistory.Lineages) != 1 || len(oldHistory.Lineages[0].Versions) != 2 {
+			return false
+		}
+		return oldHistory.Lineages[0].Versions[0].Op == controlplane.ChangeOpPut &&
+			oldHistory.Lineages[0].Versions[1].Op == controlplane.ChangeOpRename &&
+			oldHistory.Lineages[0].Versions[1].PrevPath == "/history.txt" &&
+			oldHistory.Lineages[0].Versions[1].Path == "/renamed.txt"
+	})
+
+	newHistory, err := service.GetFileHistory(ctx, env.workspace, "/renamed.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory(/renamed.txt) returned error: %v", err)
+	}
+	if len(newHistory.Lineages) != 1 {
+		t.Fatalf("len(newHistory.Lineages) = %d, want 1", len(newHistory.Lineages))
+	}
+	if got := newHistory.Lineages[0].Versions[len(newHistory.Lineages[0].Versions)-1].Op; got != controlplane.ChangeOpPut {
+		t.Fatalf("latest renamed.txt op = %q, want %q", got, controlplane.ChangeOpPut)
+	}
+	if newHistory.Lineages[0].FileID != oldHistory.Lineages[0].FileID {
+		t.Fatalf("renamed file_id = %q, want %q", newHistory.Lineages[0].FileID, oldHistory.Lineages[0].FileID)
+	}
 }
 
 // Scenario 16: macOS baseline ignore — .DS_Store never crosses.

@@ -25,6 +25,7 @@ type SyncEntry struct {
 	Mode          uint32    `json:"mode"`
 	Size          int64     `json:"size"`
 	LocalHash     string    `json:"local_hash,omitempty"`
+	LocalIdentity string    `json:"local_identity,omitempty"`
 	LocalMtimeMs  int64     `json:"local_mtime_ms"`
 	RemoteHash    string    `json:"remote_hash,omitempty"`
 	RemoteMtimeMs int64     `json:"remote_mtime_ms"`
