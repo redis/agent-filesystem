@@ -877,6 +877,109 @@ func TestStoreRecordFileVersionMutationRenameConflictsOnStaleBeforeSnapshot(t *t
 	}
 }
 
+func TestStoreRecordFileVersionMutationRenameAbsorbsTransientDestinationLineage(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	meta := FileVersionMutationMetadata{
+		Source:    ChangeSourceAgentSync,
+		SessionID: "sess-rename-race",
+		AgentID:   "agt-rename-race",
+	}
+	created, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/notes/old.txt"}, VersionedFileSnapshot{
+		Path:    "/notes/old.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, meta)
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(create old) returned error: %v", err)
+	}
+
+	if _, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/notes/new.txt"}, VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\nand update me\n"),
+	}, meta); err != nil {
+		t.Fatalf("RecordFileVersionMutation(create transient dest) returned error: %v", err)
+	}
+
+	renamed, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/old.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, meta)
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(rename over transient dest) returned error: %v", err)
+	}
+	if renamed.FileID != created.FileID {
+		t.Fatalf("renamed.FileID = %q, want %q", renamed.FileID, created.FileID)
+	}
+
+	updated, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\nand update me\n"),
+	}, meta)
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(update after absorbed rename) returned error: %v", err)
+	}
+	if updated.FileID != created.FileID {
+		t.Fatalf("updated.FileID = %q, want %q", updated.FileID, created.FileID)
+	}
+
+	oldHistory, err := service.GetFileHistory(context.Background(), "repo", "/notes/old.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory(old) returned error: %v", err)
+	}
+	if len(oldHistory.Lineages) != 1 || len(oldHistory.Lineages[0].Versions) != 2 {
+		t.Fatalf("oldHistory.Lineages = %#v, want create+rename only", oldHistory.Lineages)
+	}
+
+	newHistory, err := service.GetFileHistory(context.Background(), "repo", "/notes/new.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory(new) returned error: %v", err)
+	}
+	if len(newHistory.Lineages) != 1 {
+		t.Fatalf("len(newHistory.Lineages) = %d, want 1", len(newHistory.Lineages))
+	}
+	if newHistory.Lineages[0].FileID != created.FileID {
+		t.Fatalf("newHistory.Lineages[0].FileID = %q, want %q", newHistory.Lineages[0].FileID, created.FileID)
+	}
+	if gotOps := []string{newHistory.Lineages[0].Versions[0].Op, newHistory.Lineages[0].Versions[1].Op}; gotOps[0] != ChangeOpRename || gotOps[1] != ChangeOpPut {
+		t.Fatalf("newHistory ops = %#v, want rename then put", gotOps)
+	}
+}
+
 func TestStoreRecordFileVersionMutationSymlinkTargetChange(t *testing.T) {
 	t.Helper()
 
@@ -991,6 +1094,70 @@ func TestStoreRecordFileVersionMutationSeedsBaselineForExistingTrackedFile(t *te
 	}
 	if got := history.Lineages[0].Versions[1].ContentHash; got != textSHA256("after\n") {
 		t.Fatalf("mutation content hash = %q, want %q", got, textSHA256("after\n"))
+	}
+}
+
+func TestStoreRecordFileVersionMutationRepairsUninitializedLiveLineage(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	lineage, err := service.store.CreateFileLineage(context.Background(), "repo", "/notes/existing.txt", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("CreateFileLineage() returned error: %v", err)
+	}
+
+	version, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:        "/notes/existing.txt",
+		Exists:      true,
+		Kind:        "file",
+		Mode:        0o644,
+		Content:     []byte("before\n"),
+		ContentHash: textSHA256("before\n"),
+		BlobID:      textSHA256("before\n"),
+		SizeBytes:   int64(len("before\n")),
+	}, VersionedFileSnapshot{
+		Path:        "/notes/existing.txt",
+		Exists:      true,
+		Kind:        "file",
+		Mode:        0o644,
+		Content:     []byte("after\n"),
+		ContentHash: textSHA256("after\n"),
+		BlobID:      textSHA256("after\n"),
+		SizeBytes:   int64(len("after\n")),
+	}, FileVersionMutationMetadata{Source: ChangeSourceAgentSync})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(uninitialized lineage) returned error: %v", err)
+	}
+	if got := version.Ordinal; got != 2 {
+		t.Fatalf("version.Ordinal = %d, want 2", got)
+	}
+
+	resolved, err := service.store.GetFileLineage(context.Background(), "repo", lineage.FileID)
+	if err != nil {
+		t.Fatalf("GetFileLineage() returned error: %v", err)
+	}
+	if got := resolved.HeadOrdinal; got != 2 {
+		t.Fatalf("resolved.HeadOrdinal = %d, want 2", got)
+	}
+	if strings.TrimSpace(resolved.HeadVersionID) == "" {
+		t.Fatal("resolved.HeadVersionID = empty, want latest version id")
+	}
+
+	history, err := service.GetFileHistory(context.Background(), "repo", "/notes/existing.txt", false)
+	if err != nil {
+		t.Fatalf("GetFileHistory() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 2 {
+		t.Fatalf("history.Lineages = %#v, want one lineage with baseline + mutation", history.Lineages)
 	}
 }
 
@@ -1403,6 +1570,88 @@ func TestServiceUndeleteFileVersionRevivesDeletedLineage(t *testing.T) {
 	}
 	if versions[2].Source != ChangeSourceVersionUndelete {
 		t.Fatalf("versions[2].Source = %q, want %q", versions[2].Source, ChangeSourceVersionUndelete)
+	}
+}
+
+func TestServiceRestoreFileVersionAcrossRenamedPath(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	service, _, err := manager.serviceFor(context.Background(), databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+	if err := service.store.PutWorkspaceVersioningPolicy(context.Background(), "repo", WorkspaceVersioningPolicy{
+		Mode: WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	created, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{Path: "/notes/old.txt"}, VersionedFileSnapshot{
+		Path:    "/notes/old.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(create) returned error: %v", err)
+	}
+	if _, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/old.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP}); err != nil {
+		t.Fatalf("RecordFileVersionMutation(rename) returned error: %v", err)
+	}
+	if _, err := service.store.RecordFileVersionMutation(context.Background(), "repo", VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\n"),
+	}, VersionedFileSnapshot{
+		Path:    "/notes/new.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("rename me\nand update me\n"),
+	}, FileVersionMutationMetadata{Source: ChangeSourceMCP}); err != nil {
+		t.Fatalf("RecordFileVersionMutation(update) returned error: %v", err)
+	}
+
+	response, err := service.RestoreFileVersion(context.Background(), "repo", "/notes/new.txt", FileVersionSelector{
+		FileID:  created.FileID,
+		Ordinal: 1,
+	})
+	if err != nil {
+		t.Fatalf("RestoreFileVersion(across rename) returned error: %v", err)
+	}
+	if response.FileID != created.FileID {
+		t.Fatalf("response.FileID = %q, want %q", response.FileID, created.FileID)
+	}
+	if response.RestoredFromOrdinal != 1 {
+		t.Fatalf("response.RestoredFromOrdinal = %d, want 1", response.RestoredFromOrdinal)
+	}
+
+	fsKey, _, _, err := EnsureWorkspaceRoot(context.Background(), service.store, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	content, err := client.New(service.store.rdb, fsKey).Cat(context.Background(), "/notes/new.txt")
+	if err != nil {
+		t.Fatalf("Cat() returned error: %v", err)
+	}
+	if string(content) != "rename me\n" {
+		t.Fatalf("content = %q, want %q", string(content), "rename me\n")
 	}
 }
 

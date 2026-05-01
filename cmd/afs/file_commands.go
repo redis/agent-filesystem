@@ -362,7 +362,7 @@ func cmdFileDiff(args []string) error {
 	}
 	diff, err := session.controlPlane.DiffFileVersions(
 		context.Background(),
-		selection.ID,
+		fileDiffWorkspaceRef(session.cfg, selection, parsed),
 		parsed.path,
 		fileDiffOperandFromArgs(parsed.from),
 		fileDiffOperandFromArgs(parsed.to),
@@ -727,6 +727,25 @@ func parseFileDiffArgs(args []string) (fileDiffArgs, error) {
 
 func normalizeFileDiffRef(raw string) string {
 	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func usesFileDiffLiveRef(operand fileDiffOperandArgs) bool {
+	switch strings.TrimSpace(strings.ToLower(operand.ref)) {
+	case "head", "working-copy":
+		return true
+	default:
+		return false
+	}
+}
+
+func fileDiffWorkspaceRef(cfg config, selection workspaceSelection, parsed fileDiffArgs) string {
+	workspaceRef := selection.ID
+	if usesFileDiffLiveRef(parsed.from) || usesFileDiffLiveRef(parsed.to) {
+		if mode, modeErr := effectiveProductMode(cfg); modeErr == nil && mode == productModeLocal {
+			return selection.Name
+		}
+	}
+	return workspaceRef
 }
 
 func hasFileDiffOperand(operand fileDiffOperandArgs) bool {

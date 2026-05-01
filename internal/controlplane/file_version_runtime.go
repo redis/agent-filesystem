@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 type VersionedFileSnapshot struct {
@@ -60,6 +62,7 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 		return nil, err
 	}
 	trackedAlready := err == nil
+	createdLineage := false
 	if !trackedAlready {
 		shouldTrack, trackErr := s.shouldTrackVersionedPath(ctx, workspace, livePath)
 		if trackErr != nil {
@@ -72,6 +75,7 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 		if err != nil {
 			return nil, err
 		}
+		createdLineage = true
 	}
 	policy, err := s.GetWorkspaceVersioningPolicy(ctx, workspace)
 	if err != nil {
@@ -79,6 +83,7 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 	}
 	before = applyLargeFileGuardrail(policy, before)
 	after = applyLargeFileGuardrail(policy, after)
+	lineageUninitialized := trackedAlready && strings.TrimSpace(lineage.HeadVersionID) == "" && lineage.HeadOrdinal == 0
 	if !trackedAlready && !rename && before.Exists && after.Exists && snapshotsEquivalent(before, after) && strings.TrimSpace(metadata.Source) != ChangeSourceVersionRestore {
 		return nil, nil
 	}
@@ -91,8 +96,12 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 			return nil, ErrWorkspaceConflict
 		}
 	}
-	if !trackedAlready && before.Exists && !skipFileVersionHeadValidation(metadata.Source) {
+	seedBaseline := before.Exists && !skipFileVersionHeadValidation(metadata.Source) && (!trackedAlready || lineageUninitialized)
+	if seedBaseline {
 		if _, err := s.AppendFileVersion(ctx, workspace, lineage.FileID, baselineVersionForSnapshot(before, metadata)); err != nil {
+			if createdLineage {
+				_ = s.resetEmptyFileLineage(ctx, workspace, lineage.FileID, lineage.CurrentPath)
+			}
 			return nil, err
 		}
 	}
@@ -161,7 +170,7 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 	var appended FileVersion
 	if rename {
 		appended, err = s.RenameFileLineageWithVersion(ctx, workspace, lineage.FileID, before, version)
-	} else if before.Exists && !skipFileVersionHeadValidation(metadata.Source) {
+	} else if before.Exists && !skipFileVersionHeadValidation(metadata.Source) && !seedBaseline {
 		appended, err = s.AppendFileVersionChecked(ctx, workspace, lineage.FileID, before, version, !after.Exists)
 	} else {
 		appended, err = s.AppendFileVersion(ctx, workspace, lineage.FileID, version)
@@ -170,6 +179,37 @@ func (s *Store) RecordFileVersionMutation(ctx context.Context, workspace string,
 		return nil, err
 	}
 	return &appended, nil
+}
+
+func (s *Store) resetEmptyFileLineage(ctx context.Context, workspace, fileID, path string) error {
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	normalizedPath, err := normalizeVersionedPath(path)
+	if err != nil {
+		return err
+	}
+	currentID, err := s.rdb.HGet(ctx, workspacePathFileIDsKey(storageID), normalizedPath).Result()
+	if err != nil && err != redis.Nil {
+		return err
+	}
+	if strings.TrimSpace(currentID) != strings.TrimSpace(fileID) {
+		return nil
+	}
+	lineage, err := s.getFileLineageByStorageID(ctx, storageID, fileID)
+	if err != nil {
+		return err
+	}
+	if lineage.HeadOrdinal != 0 || strings.TrimSpace(lineage.HeadVersionID) != "" {
+		return nil
+	}
+	_, err = s.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.HDel(ctx, workspacePathFileIDsKey(storageID), normalizedPath)
+		pipe.Del(ctx, fileLineageMetaKey(storageID, fileID))
+		return nil
+	})
+	return err
 }
 
 func baselineVersionForSnapshot(snapshot VersionedFileSnapshot, metadata FileVersionMutationMetadata) FileVersion {

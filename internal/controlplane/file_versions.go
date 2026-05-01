@@ -39,6 +39,11 @@ type FileLineage struct {
 	HeadVersionID string    `json:"head_version_id,omitempty"`
 }
 
+type renameRaceDestination struct {
+	fileID   string
+	versions []FileVersion
+}
+
 type FileVersion struct {
 	VersionID     string    `json:"version_id"`
 	FileID        string    `json:"file_id"`
@@ -496,6 +501,7 @@ func (s *Store) RenameFileLineageWithVersion(ctx context.Context, workspace, fil
 	for attempt := 0; attempt < 8; attempt++ {
 		var appended FileVersion
 		err = s.rdb.Watch(ctx, func(tx *redis.Tx) error {
+			var transientDest *renameRaceDestination
 			lineage, err := s.getFileLineageForCmd(ctx, tx, storageID, fileID)
 			if err != nil {
 				return err
@@ -518,7 +524,13 @@ func (s *Store) RenameFileLineageWithVersion(ctx context.Context, workspace, fil
 				return err
 			}
 			if err == nil && strings.TrimSpace(currentID) != "" && strings.TrimSpace(currentID) != fileID {
-				return ErrWorkspaceConflict
+				transientDest, err = s.renameRaceDestinationForCmd(ctx, tx, storageID, strings.TrimSpace(currentID), version)
+				if err != nil {
+					return err
+				}
+				if transientDest == nil {
+					return ErrWorkspaceConflict
+				}
 			}
 			oldPathID, err := tx.HGet(ctx, workspacePathFileIDsKey(storageID), version.PrevPath).Result()
 			if err != nil && err != redis.Nil {
@@ -560,6 +572,11 @@ func (s *Store) RenameFileLineageWithVersion(ctx context.Context, workspace, fil
 			}
 
 			_, err = tx.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+				if transientDest != nil {
+					applyTrimmedFileVersions(ctx, pipe, storageID, transientDest.fileID, transientDest.versions)
+					pipe.Del(ctx, fileLineageMetaKey(storageID, transientDest.fileID))
+					pipe.Del(ctx, fileLineageVersionsKey(storageID, transientDest.fileID))
+				}
 				if err := setJSON(ctx, pipe, fileVersionKey(storageID, fileID, appended.VersionID), appended); err != nil {
 					return err
 				}
@@ -599,6 +616,47 @@ func (s *Store) RenameFileLineageWithVersion(ctx context.Context, workspace, fil
 	}
 
 	return FileVersion{}, ErrWorkspaceConflict
+}
+
+func (s *Store) renameRaceDestinationForCmd(ctx context.Context, cmd redis.Cmdable, workspace, destFileID string, renameVersion FileVersion) (*renameRaceDestination, error) {
+	destFileID = strings.TrimSpace(destFileID)
+	if destFileID == "" || destFileID == strings.TrimSpace(renameVersion.FileID) {
+		return nil, nil
+	}
+	lineage, err := s.getFileLineageForCmd(ctx, cmd, workspace, destFileID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if lineage.State != FileLineageStateLive || lineage.CurrentPath != renameVersion.Path {
+		return nil, nil
+	}
+	versions, err := s.listFileVersionsForCmd(ctx, cmd, workspace, destFileID, true)
+	if err != nil {
+		return nil, err
+	}
+	if len(versions) != 1 {
+		return nil, nil
+	}
+	created := versions[0]
+	if created.Op != ChangeOpPut && created.Op != ChangeOpSymlink {
+		return nil, nil
+	}
+	if strings.TrimSpace(created.Source) != strings.TrimSpace(renameVersion.Source) {
+		return nil, nil
+	}
+	if strings.TrimSpace(renameVersion.SessionID) != "" && strings.TrimSpace(created.SessionID) != strings.TrimSpace(renameVersion.SessionID) {
+		return nil, nil
+	}
+	if strings.TrimSpace(renameVersion.AgentID) != "" && strings.TrimSpace(created.AgentID) != strings.TrimSpace(renameVersion.AgentID) {
+		return nil, nil
+	}
+	if created.CreatedAt.Before(renameVersion.CreatedAt.Add(-5*time.Second)) || created.CreatedAt.After(renameVersion.CreatedAt.Add(5*time.Second)) {
+		return nil, nil
+	}
+	return &renameRaceDestination{fileID: destFileID, versions: versions}, nil
 }
 
 func (s *Store) AppendFileVersionChecked(ctx context.Context, workspace, fileID string, expected VersionedFileSnapshot, version FileVersion, deleteAfter bool) (FileVersion, error) {

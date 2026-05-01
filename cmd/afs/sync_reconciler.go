@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -623,6 +624,66 @@ func (r *reconciler) takeRenameCandidate(key string) (renameCandidate, bool) {
 	return candidate, true
 }
 
+func (r *reconciler) takeFallbackRenameCandidate(rel, wantType string) (renameCandidate, bool) {
+	if strings.TrimSpace(rel) == "" || strings.TrimSpace(wantType) == "" {
+		return renameCandidate{}, false
+	}
+	dir := path.Dir(rel)
+	now := time.Now().UTC()
+
+	r.renameMu.Lock()
+	defer r.renameMu.Unlock()
+
+	var (
+		matchKey string
+		match    renameCandidate
+		count    int
+	)
+	for key, candidate := range r.renameCandidates {
+		if now.Sub(candidate.recordedAt) > 5*time.Second {
+			delete(r.renameCandidates, key)
+			continue
+		}
+		if candidate.entry.Type != wantType {
+			continue
+		}
+		if candidate.path == rel || path.Dir(candidate.path) != dir {
+			continue
+		}
+		matchKey = key
+		match = candidate
+		count++
+		if count > 1 {
+			return renameCandidate{}, false
+		}
+	}
+	if count != 1 {
+		return renameCandidate{}, false
+	}
+	delete(r.renameCandidates, matchKey)
+	return match, true
+}
+
+func (r *reconciler) takeRenameCandidateForLocalFile(rel, identity, hash string, size int64, hasStored bool) (renameCandidate, bool) {
+	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(identity, hash, size)); ok {
+		return candidate, true
+	}
+	if hasStored {
+		return renameCandidate{}, false
+	}
+	return r.takeFallbackRenameCandidate(rel, "file")
+}
+
+func (r *reconciler) takeRenameCandidateForLocalSymlink(rel, identity, target string, hasStored bool) (renameCandidate, bool) {
+	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalSymlink(identity, target)); ok {
+		return candidate, true
+	}
+	if hasStored {
+		return renameCandidate{}, false
+	}
+	return r.takeFallbackRenameCandidate(rel, "symlink")
+}
+
 func (r *reconciler) renameCandidateStillPending(key, path string) bool {
 	if key == "" {
 		return false
@@ -700,7 +761,7 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 			return
 		}
 		hash := compositeHash(hashes)
-		if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, actualSize)); ok {
+		if candidate, ok := r.takeRenameCandidateForLocalFile(rel, localIdentity, hash, actualSize, hasStored); ok {
 			r.installPendingRename(rel, localIdentity, candidate.entry)
 			r.uploadCh <- uploadOp{
 				Kind:          opUploadRename,
@@ -774,7 +835,7 @@ func (r *reconciler) handleLocalFile(rel, abs string, info fs.FileInfo) {
 		return
 	}
 	hash := sha256Hex(data)
-	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalFile(localIdentity, hash, fileSize)); ok {
+	if candidate, ok := r.takeRenameCandidateForLocalFile(rel, localIdentity, hash, fileSize, hasStored); ok {
 		r.installPendingRename(rel, localIdentity, candidate.entry)
 		r.uploadCh <- uploadOp{
 			Kind:          opUploadRename,
@@ -843,7 +904,7 @@ func (r *reconciler) handleLocalSymlink(rel, abs string) {
 	r.state.mu.Lock()
 	stored, hasStored := r.state.state.Entries[rel]
 	r.state.mu.Unlock()
-	if candidate, ok := r.takeRenameCandidate(renameCandidateKeyForLocalSymlink(localIdentity, target)); ok {
+	if candidate, ok := r.takeRenameCandidateForLocalSymlink(rel, localIdentity, target, hasStored); ok {
 		r.installPendingRename(rel, localIdentity, candidate.entry)
 		r.uploadCh <- uploadOp{
 			Kind:          opUploadRename,

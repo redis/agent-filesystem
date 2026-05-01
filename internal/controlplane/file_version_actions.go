@@ -53,7 +53,16 @@ func (s *Service) RestoreFileVersion(ctx context.Context, workspace, rawPath str
 		return FileVersionRestoreResponse{}, fmt.Errorf("version %q is a tombstone; use undelete instead", selected.VersionID)
 	}
 	if normalizedPath != selected.Path {
-		return FileVersionRestoreResponse{}, fmt.Errorf("version %q belongs to %q, not %q", selected.VersionID, selected.Path, normalizedPath)
+		lineage, err := s.store.ResolveLiveFileLineageByPath(ctx, workspace, normalizedPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return FileVersionRestoreResponse{}, fmt.Errorf("version %q belongs to %q, not %q", selected.VersionID, selected.Path, normalizedPath)
+			}
+			return FileVersionRestoreResponse{}, err
+		}
+		if lineage.FileID != selected.FileID {
+			return FileVersionRestoreResponse{}, fmt.Errorf("version %q belongs to %q, not %q", selected.VersionID, selected.Path, normalizedPath)
+		}
 	}
 
 	meta, err := s.store.GetWorkspaceMeta(ctx, workspace)

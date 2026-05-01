@@ -872,6 +872,59 @@ func TestSyncHistoryExistingTrackedFileSeedsBaseline(t *testing.T) {
 	}
 }
 
+func TestSyncHistoryExistingTrackedFileAfterPolicyEnabledLate(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	ctx := context.Background()
+	meta, err := env.store.getWorkspaceMeta(ctx, env.workspace)
+	if err != nil {
+		t.Fatalf("getWorkspaceMeta: %v", err)
+	}
+	storageID := controlplane.WorkspaceStorageID(meta)
+
+	env.writeRemoteFile(t, "existing.txt", "before\n")
+	env.startDaemon(t, func(c *syncDaemonConfig) {
+		c.Rdb = env.rdb
+		c.StorageID = storageID
+		c.SessionID = "sess-history-existing-late"
+		c.AgentID = "agt-history-existing-late"
+		c.Label = "sync/history-existing-late"
+		c.AgentVersion = "test"
+	})
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "existing.txt local materialized", func() bool {
+		return env.localExists("existing.txt") && env.readLocalFile(t, "existing.txt") == "before\n"
+	})
+
+	if err := env.cp.PutWorkspaceVersioningPolicy(ctx, env.workspace, controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy late: %v", err)
+	}
+
+	env.writeLocalFile(t, "existing.txt", "after\n")
+
+	assertEventually(t, 3*time.Second, "existing.txt updated remotely", func() bool {
+		return env.remoteExists(t, "existing.txt") && env.readRemoteFile(t, "existing.txt") == "after\n"
+	})
+
+	service := controlPlaneServiceFromStore(defaultConfig(), env.store)
+	var history controlplane.FileHistoryResponse
+	assertEventually(t, 3*time.Second, "existing.txt late-enabled history", func() bool {
+		var getErr error
+		history, getErr = service.GetFileHistory(ctx, env.workspace, "/existing.txt", false)
+		return getErr == nil && len(history.Lineages) == 1 && len(history.Lineages[0].Versions) == 2
+	})
+
+	if got := history.Lineages[0].Versions[0].ContentHash; got != sha256Hex([]byte("before\n")) {
+		t.Fatalf("baseline content hash = %q, want %q", got, sha256Hex([]byte("before\n")))
+	}
+	if got := history.Lineages[0].Versions[1].ContentHash; got != sha256Hex([]byte("after\n")) {
+		t.Fatalf("latest content hash = %q, want %q", got, sha256Hex([]byte("after\n")))
+	}
+}
+
 func TestSyncHistorySymlinkDeleteProducesTombstone(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)

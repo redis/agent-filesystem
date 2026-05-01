@@ -103,6 +103,30 @@ func TestParseFileDiffArgs(t *testing.T) {
 	}
 }
 
+func TestFileDiffWorkspaceRefUsesNameForLiveRefsInLocalMode(t *testing.T) {
+	parsed := fileDiffArgs{
+		from: fileDiffOperandArgs{versionID: "ver_123"},
+		to:   fileDiffOperandArgs{ref: "head"},
+	}
+	selection := workspaceSelection{ID: "ws_repo", Name: "repo"}
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeLocal
+	if got := fileDiffWorkspaceRef(cfg, selection, parsed); got != "repo" {
+		t.Fatalf("fileDiffWorkspaceRef(local live ref) = %q, want %q", got, "repo")
+	}
+
+	cfg.ProductMode = productModeSelfHosted
+	if got := fileDiffWorkspaceRef(cfg, selection, parsed); got != "ws_repo" {
+		t.Fatalf("fileDiffWorkspaceRef(managed live ref) = %q, want %q", got, "ws_repo")
+	}
+
+	parsed.to = fileDiffOperandArgs{versionID: "ver_456"}
+	cfg.ProductMode = productModeLocal
+	if got := fileDiffWorkspaceRef(cfg, selection, parsed); got != "ws_repo" {
+		t.Fatalf("fileDiffWorkspaceRef(version diff) = %q, want %q", got, "ws_repo")
+	}
+}
+
 func TestParseFileUndeleteArgs(t *testing.T) {
 	parsed, err := parseFileUndeleteArgs([]string{"repo", "/notes/app.txt", "--version", "fv_123"})
 	if err != nil {
