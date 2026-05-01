@@ -351,7 +351,7 @@ In sync mode:
 
 In mounted filesystem mode:
 
-- you work in the mounted mountpoint
+- you work in the mountpoint
 - edits go straight into the live Redis-backed workspace root
 - `afs ws unmount` just unmounts; it does not create or sync a separate draft
 

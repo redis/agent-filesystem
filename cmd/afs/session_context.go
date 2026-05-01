@@ -4,7 +4,7 @@ import "context"
 
 // sessionIDContextKey is the context key under which the active AFS session
 // ID is stashed by sync/mount daemons before making control-plane calls.
-// The HTTP client reads it and mountes the X-AFS-Session-Id header so the
+// The HTTP client reads it and adds the X-AFS-Session-Id header so the
 // control plane can attribute changelog entries.
 type sessionIDContextKey struct{}
 

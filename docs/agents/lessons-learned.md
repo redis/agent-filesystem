@@ -14,7 +14,7 @@ future agents should not have to rediscover.
   cross-tenant workspace/database identifiers.
 - Auth commands are nested under `afs auth`. Keep authentication
   login/logout/status under that command family; top-level `afs status`
-  remains the workspace attachment status. Use `afs auth login`,
+  remains the workspace mount status. Use `afs auth login`,
   `afs auth logout`, and `afs auth status` in help text, docs, and install
   scripts.
 - `cmd/afs/auth_commands.go` treats cloud-vs-self-managed login as a hostname
@@ -37,20 +37,20 @@ future agents should not have to rediscover.
   has a tracked workspace session id. If the web UI shows no active agents and
   file changes only appear in the low-level `:changes` stream, inspect session
   creation before debugging the uploader.
-- Local attachment state and control-plane agent sessions are different views.
-  `~/.afs/attachments.json` is what `afs status`/`afs ws detach` can manage
+- Local mount state and control-plane agent sessions are different views.
+  `~/.afs/mounts.json` is what `afs status`/`afs ws unmount` can manage
   locally; `/v1/agents` shows every fresh session heartbeat, including daemons
-  that are no longer in the local attachment registry.
+  that are no longer in the local mount registry.
 - `afs status` should lead with daemon liveness (`AFS Running`/`AFS Not
-  Running`). Stopped attachment-registry rows are cleanup records, not attached
+  Running`). Stopped mount-registry rows are cleanup records, not mounted
   workspaces. Cross-check the local process table for `_sync-daemon` so
   registry drift cannot hide unmanaged live daemons.
 - Browser/UI `draft_state` must come from the live workspace root dirty marker
   when it exists, not only `WorkspaceMeta.DirtyHint`. A stale clean
   `DirtyHint` can hide `working-copy` even though the Redis root contains
   unsaved files.
-- Reattaching a workspace to an empty path with prior sync state is
-  ambiguous. A missing local root should be treated as a fresh attach and
+- Remounting a workspace to an empty path with prior sync state is
+  ambiguous. A missing local root should be treated as a fresh mount and
   download from the workspace; an existing empty root needs an explicit
   destructive confirmation before propagating local absence as remote deletes.
 
