@@ -53,7 +53,7 @@ default.
 7. Report the workspace, changed paths, validation, and checkpoint name.
 
 Do not assume an implicit active workspace. Pass a workspace explicitly, or use
-an attached workspace when the command supports attachment-based selection.
+a mounted workspace when the command supports mount-based selection.
 
 ## MCP Setup
 
@@ -108,13 +108,13 @@ Authenticate and create a workspace:
 ```bash
 afs auth login
 afs ws create getting-started
-afs ws attach getting-started ~/getting-started
+afs ws mount getting-started ~/getting-started
 ```
 
 Import an existing directory:
 
 ```bash
-afs ws import --attach-at-source my-project ~/src/my-project
+afs ws import --mount-at-source my-project ~/src/my-project
 ```
 
 Create checkpoints around important changes:
@@ -130,7 +130,7 @@ Fork for parallel work:
 
 ```bash
 afs ws fork my-project my-project-experiment
-afs ws attach my-project-experiment ~/my-project-experiment
+afs ws mount my-project-experiment ~/my-project-experiment
 ```
 
 Run the MCP server:
@@ -147,12 +147,12 @@ afs mcp --workspace my-project --profile workspace-rw-checkpoint
 | `afs auth logout` | Clear cached authentication. |
 | `afs auth status` | Show authentication status. |
 | `afs setup` | Configure first-run settings. |
-| `afs status` | Show daemon status and local workspace attachments. |
-| `afs ws attach [workspace] [directory]` | Attach a workspace to a local folder. |
-| `afs ws detach [workspace|directory]` | Detach a workspace and preserve local files by default. |
+| `afs status` | Show daemon status and local workspace mounts. |
+| `afs ws mount [workspace] [directory]` | Mount a workspace at a local folder. |
+| `afs ws unmount [workspace|directory]` | Unmount a workspace and preserve local files by default. |
 | `afs ws list` | List workspaces. |
 | `afs ws create <name>` | Create an empty workspace. |
-| `afs ws import [--attach-at-source] <name> <dir>` | Import a local directory into AFS. |
+| `afs ws import [--mount-at-source] <name> <dir>` | Import a local directory into AFS. |
 | `afs ws fork <source> <target>` | Create a second line of work. |
 | `afs cp create [workspace] [name]` | Save live state as a restore point. |
 | `afs cp list [workspace]` | List checkpoints. |
@@ -229,7 +229,7 @@ afs fs grep --workspace my-project -E "error|warning"
 Sync mode:
 
 ```bash
-afs ws attach my-project ~/afs/my-project
+afs ws mount my-project ~/afs/my-project
 cd ~/afs/my-project
 ```
 
@@ -237,11 +237,11 @@ Mount mode:
 
 ```bash
 afs config set --mode mount --mount-backend nfs
-afs ws attach my-project ~/afs/my-project
-afs ws detach my-project
+afs ws mount my-project ~/afs/my-project
+afs ws unmount my-project
 ```
 
-If you run `afs ws attach` without a workspace, AFS lists available workspaces
+If you run `afs ws mount` without a workspace, AFS lists available workspaces
 and prompts you to choose one.
 
 ## Deployment Modes
@@ -265,7 +265,7 @@ Point the CLI at a Self-managed control plane:
 ```bash
 afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs ws attach getting-started ~/getting-started
+afs ws mount getting-started ~/getting-started
 ```
 
 ## Handoff Template

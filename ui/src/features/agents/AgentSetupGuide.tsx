@@ -28,7 +28,7 @@ export function AgentSetupGuide({ compact = false }: Props) {
   const isCloud = authConfig.productMode === "cloud";
   const installCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
   const loginCmd = `afs auth login`;
-  const attachCmd = `afs ws attach <workspace> ~/workspace`;
+  const mountCmd = `afs ws mount <workspace> ~/workspace`;
   const manualCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o afs && chmod +x afs`;
   const manualConfigCmd = `afs auth login --self-hosted --url ${controlPlaneUrl}`;
 
@@ -146,24 +146,24 @@ export function AgentSetupGuide({ compact = false }: Props) {
                     </CopyButton>
                   </CodeContainer>
                   <StepHint>
-                    After a workspace is attached, the agent appears on this
+                    After a workspace is mounted, the agent appears on this
                     page with a live status indicator.
                   </StepHint>
 
                   <StepDivider />
 
                   <StepNumber>3</StepNumber>
-                  <StepTitle>Attach a workspace</StepTitle>
+                  <StepTitle>Mount a workspace</StepTitle>
                   <StepDesc>
-                    Pick any workspace and attach it to a local folder.
+                    Pick any workspace and mount it to a local folder.
                   </StepDesc>
                   <CodeContainer>
-                    <CodePre>{attachCmd}</CodePre>
+                    <CodePre>{mountCmd}</CodePre>
                     <CopyButton
                       type="button"
-                      onClick={() => copyToClipboard(attachCmd, "attach")}
+                      onClick={() => copyToClipboard(mountCmd, "mount")}
                     >
-                      {copied === "attach" ? "Copied!" : "Copy"}
+                      {copied === "mount" ? "Copied!" : "Copy"}
                     </CopyButton>
                   </CodeContainer>
                 </>
@@ -172,22 +172,22 @@ export function AgentSetupGuide({ compact = false }: Props) {
                   <StepDivider />
 
                   <StepNumber>2</StepNumber>
-                  <StepTitle>Attach a workspace</StepTitle>
+                  <StepTitle>Mount a workspace</StepTitle>
                   <StepDesc>
-                    The installer points the CLI at this control plane. Attach
+                    The installer points the CLI at this control plane. Mount
                     any workspace to a local folder when you are ready to work.
                   </StepDesc>
                   <CodeContainer>
-                    <CodePre>{attachCmd}</CodePre>
+                    <CodePre>{mountCmd}</CodePre>
                     <CopyButton
                       type="button"
-                      onClick={() => copyToClipboard(attachCmd, "attach")}
+                      onClick={() => copyToClipboard(mountCmd, "mount")}
                     >
-                      {copied === "attach" ? "Copied!" : "Copy"}
+                      {copied === "mount" ? "Copied!" : "Copy"}
                     </CopyButton>
                   </CodeContainer>
                   <StepHint>
-                    Once the workspace is attached, the agent appears here with
+                    Once the workspace is mounted, the agent appears here with
                     a live status indicator.
                   </StepHint>
                 </>

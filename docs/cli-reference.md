@@ -24,8 +24,8 @@ Primary commands:
 | --- | --- |
 | `afs auth` | Log in, log out, and inspect authentication. |
 | `afs setup` | Configure basic connection defaults. |
-| `afs status` | Show AFS status and attached workspaces. |
-| `afs ws` | Create, list, attach, detach, fork, delete, or import workspaces. |
+| `afs status` | Show AFS status and mounted workspaces. |
+| `afs ws` | Create, list, mount, unmount, fork, delete, or import workspaces. |
 | `afs fs` | Read, search, and safely write workspace files. |
 | `afs cp` | Create, list, and restore checkpoints. |
 | `afs database` | Advanced control-plane database operations. |
@@ -103,52 +103,52 @@ afs setup
 ```
 
 Guided configuration for connection basics. It does not select a persistent
-"current" workspace; use `afs ws attach <workspace> <directory>` to attach a
+"current" workspace; use `afs ws mount <workspace> <directory>` to mount a
 workspace when you are ready to work.
 
-### `afs ws attach`
+### `afs ws mount`
 
 ```bash
-afs ws attach [--dry-run] [--verbose] [<workspace> <directory>]
+afs ws mount [--dry-run] [--verbose] [<workspace> <directory>]
 ```
 
-Attaches a durable workspace to a local directory using sync mode. The
+Mounts a durable workspace to a local directory using sync mode. The
 directory is created if needed. AFS no longer saves "current workspace" or
-"current local path" in `afs.config.json`; active attachments are runtime
+"current local path" in `afs.config.json`; active mounts are runtime
 state keyed by local directory.
 
-Attach safety rules:
+Mount safety rules:
 
 - Empty local directory + populated workspace: downloads workspace files.
 - Populated local directory + empty workspace: uploads local files.
 - Populated local directory + populated workspace with no prior sync baseline:
-  attach is blocked so files are not overwritten silently.
+  mount is blocked so files are not overwritten silently.
 - Existing sync baseline: AFS reconciles from that baseline.
 
 Examples:
 
 ```bash
-afs ws attach getting-started ~/getting-started
-afs ws attach notes ~/work/notes
-afs ws attach --dry-run notes ~/work/notes
+afs ws mount getting-started ~/getting-started
+afs ws mount notes ~/work/notes
+afs ws mount --dry-run notes ~/work/notes
 ```
 
-### `afs ws detach`
+### `afs ws unmount`
 
 ```bash
-afs ws detach [--delete] [<workspace|directory>]
+afs ws unmount [--delete] [<workspace|directory>]
 ```
 
-Stops AFS from managing an attached workspace. The target can be a workspace
-name, workspace ID, or attached local directory. With no target, AFS lists
-attached workspaces and prompts for a numbered selection.
+Stops AFS from managing a mounted workspace. The target can be a workspace
+name, workspace ID, or mounted local directory. With no target, AFS lists
+mounted workspaces and prompts for a numbered selection.
 Local files are preserved by default. Use `--delete` only when you intentionally
-want to remove the attached local directory after the daemon stops.
+want to remove the mounted local directory after the daemon stops.
 
 ```bash
-afs ws detach notes
-afs ws detach ~/work/notes
-afs ws detach --delete ~/scratch/throwaway
+afs ws unmount notes
+afs ws unmount ~/work/notes
+afs ws unmount --delete ~/scratch/throwaway
 ```
 
 ### `afs status`
@@ -157,8 +157,8 @@ afs ws detach --delete ~/scratch/throwaway
 afs status [--verbose]
 ```
 
-Shows active attachments in aligned plain columns. Use `--verbose` to include
-control-plane, database, session, attachment id, and process details.
+Shows active mounts in aligned plain columns. Use `--verbose` to include
+control-plane, database, session, mount id, and process details.
 
 ## Configuration
 
@@ -193,7 +193,7 @@ Common keys:
 | `mode` | Local runtime mode: `sync` or `mount`. |
 | `redis.url` | Standalone Redis URL. |
 | `agent.name` | Human-friendly agent name for attribution. |
-| `sync.fileSizeCapMB` | Maximum file size synced by the attach daemon. |
+| `sync.fileSizeCapMB` | Maximum file size synced by the mount daemon. |
 
 Examples:
 
@@ -234,12 +234,12 @@ Subcommands:
 | --- | --- |
 | `afs ws create [--database <database>] <workspace>` | Create an empty workspace with an initial checkpoint named `initial`. |
 | `afs ws list` | List workspaces. |
-| `afs ws info <workspace>` | Show workspace metadata without attaching it locally. |
-| `afs ws attach <workspace> [directory]` | Attach a workspace to a local directory. |
-| `afs ws detach [--delete] [<workspace|directory>]` | Detach a workspace from AFS. |
+| `afs ws info <workspace>` | Show workspace metadata without mounting it locally. |
+| `afs ws mount <workspace> [directory]` | Mount a workspace at a local directory. |
+| `afs ws unmount [--delete] [<workspace|directory>]` | Unmount a workspace from AFS. |
 | `afs ws fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current checkpoint. |
 | `afs ws delete [--no-confirmation] <workspace>...` | Delete one or more workspaces and local materialized state. Prompts before deleting unless `--no-confirmation` is set. |
-| `afs ws import [--force] [--attach-at-source] [--database <database>] <workspace> <directory>` | Import a local directory into a workspace. `--attach-at-source` attaches the source folder after import. |
+| `afs ws import [--force] [--mount-at-source] [--database <database>] <workspace> <directory>` | Import a local directory into a workspace. `--mount-at-source` mounts the source folder after import. |
 
 Examples:
 
@@ -247,9 +247,9 @@ Examples:
 afs ws create demo
 afs ws list
 afs ws info demo
-afs ws import --attach-at-source demo ~/src/demo
-afs ws attach demo ~/src/demo
-afs ws detach demo
+afs ws import --mount-at-source demo ~/src/demo
+afs ws mount demo ~/src/demo
+afs ws unmount demo
 afs ws fork demo demo-copy
 afs ws delete --no-confirmation demo-copy
 ```
@@ -259,7 +259,7 @@ Import options:
 | Option | Meaning |
 | --- | --- |
 | `--force` | Replace an existing workspace. |
-| `--attach-at-source` | Attach the imported source directory immediately after import. |
+| `--mount-at-source` | Mount the imported source directory immediately after import. |
 | `--database <database-id|database-name>` | Override the control-plane database for the import. |
 
 ## Checkpoints
@@ -310,7 +310,7 @@ Checkpoint rules:
 
 ## Filesystem
 
-`afs fs` inspects live workspace files without attaching the workspace to a
+`afs fs` inspects live workspace files without mounting the workspace to a
 local directory. Pass the workspace before the subcommand:
 
 ```bash
@@ -325,7 +325,7 @@ Subcommands:
 | `afs fs -w <workspace> cat <path>` | Print a workspace file. |
 | `afs fs -w <workspace> find [path] [-name <pattern>] [-type f|d|l] [-print]` | Find workspace paths by basename pattern. |
 | `afs fs -w <workspace> grep [flags] <pattern>` | Search workspace file contents. |
-| `afs fs create-exclusive <path>` | Create a file through an attached sync workspace only if it does not exist. |
+| `afs fs create-exclusive <path>` | Create a file through a mounted sync workspace only if it does not exist. |
 
 Examples:
 
@@ -395,7 +395,7 @@ control-plane default.
 ## Logs
 
 Log commands inspect file-change history for a running or recent local
-attachment.
+mount.
 
 | Command | Meaning |
 | --- | --- |

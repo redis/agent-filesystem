@@ -80,20 +80,20 @@ export function DocsDocumentPage() {
           <p>
             Agent Filesystem (AFS) gives agents a shared, versioned file tree
             backed by Redis. In AFS, each file tree is a workspace. A workspace
-            can be attached to any local directory, so agents can read and write
+            can be mounted at any local directory, so agents can read and write
             shared state through ordinary filesystem paths.
           </p>
           <p>
-            When a workspace is attached, the local directory becomes a live
+            When a workspace is mounted, the local directory becomes a live
             view of the Redis-backed workspace. Changes written to that
-            directory sync back to Redis, and changes from other attached agents
+            directory sync back to Redis, and changes from other mounted agents
             sync back down to the local directory.
           </p>
-          <TerminalBlock code={`afs ws attach memories /agent/memories`} />
+          <TerminalBlock code={`afs ws mount memories /agent/memories`} />
           <p>
-            This attaches the <InlineCode>memories</InlineCode> workspace at{" "}
+            This mounts the <InlineCode>memories</InlineCode> workspace at{" "}
             <InlineCode>/agent/memories</InlineCode>. Agent 1 can edit files in
-            that folder, Agent 2 can attach the same workspace somewhere else,
+            that folder, Agent 2 can mount the same workspace somewhere else,
             and both agents still work against one shared filesystem.
           </p>
           <p>
@@ -118,7 +118,7 @@ export function DocsDocumentPage() {
                 <span>MCP or SDK tools</span>
               </DiagramNode>
             </DiagramRow>
-            <DiagramArrow>attach to the same</DiagramArrow>
+            <DiagramArrow>mount to the same</DiagramArrow>
             <DiagramNode>
               <strong>Workspace: memories</strong>
               <span>one shared live file tree</span>
@@ -175,7 +175,7 @@ export function DocsDocumentPage() {
               file tree agents and local tools will edit.
             </li>
             <li>
-              <strong>Attach it locally.</strong> Run <InlineCode>afs ws attach</InlineCode>{" "}
+              <strong>Mount it locally.</strong> Run <InlineCode>afs ws mount</InlineCode>{" "}
               so editors, shells, test runners, and agents can use the files.
             </li>
             <li>
@@ -187,14 +187,14 @@ export function DocsDocumentPage() {
           <TerminalBlock
             code={`afs auth login
 afs ws create getting-started
-afs ws attach getting-started ~/afs/getting-started
+afs ws mount getting-started ~/afs/getting-started
 
 echo "hello world" > ~/afs/getting-started/README.md
 afs cp create getting-started first-local-edit`}
           />
 
           <Note>
-            The core loop is small: authenticate once, attach a workspace, edit
+            The core loop is small: authenticate once, mount a workspace, edit
             files, and checkpoint the state
             worth keeping.
           </Note>
@@ -242,7 +242,7 @@ afs cp create getting-started first-local-edit`}
           <SectionEyebrow>Daily operation</SectionEyebrow>
           <h2>CLI Workflow</h2>
           <p>
-            The CLI owns authentication, workspace attachment, local lifecycle,
+            The CLI owns authentication, workspace mount, local lifecycle,
             config, checkpoints, search, and the built-in MCP server.
           </p>
           <p>
@@ -254,7 +254,7 @@ afs cp create getting-started first-local-edit`}
           <h3>Fresh setup</h3>
           <TerminalBlock
             code={`afs auth login
-afs ws attach getting-started ~/getting-started`}
+afs ws mount getting-started ~/getting-started`}
           />
 
           <h3>Create, import, and start</h3>
@@ -265,10 +265,10 @@ afs ws attach getting-started ~/getting-started`}
           <TerminalBlock
             code={`# New workspace
 afs ws create demo
-afs ws attach demo ~/demo
+afs ws mount demo ~/demo
 
 # Existing directory
-afs ws import --attach-at-source demo ~/src/demo`}
+afs ws import --mount-at-source demo ~/src/demo`}
           />
 
           <h3>Daily commands</h3>
@@ -284,7 +284,7 @@ afs ws import --attach-at-source demo ~/src/demo`}
                 <td>
                   <InlineCode>afs status</InlineCode>
                 </td>
-                <td>Check daemon status, configuration, and local attachments.</td>
+                <td>Check daemon status, configuration, and local mounts.</td>
               </tr>
               <tr>
                 <td>
@@ -294,9 +294,9 @@ afs ws import --attach-at-source demo ~/src/demo`}
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs ws attach</InlineCode>
+                  <InlineCode>afs ws mount</InlineCode>
                 </td>
-                <td>Attach a workspace to a local folder.</td>
+                <td>Mount a workspace at a local folder.</td>
               </tr>
               <tr>
                 <td>
@@ -312,9 +312,9 @@ afs ws import --attach-at-source demo ~/src/demo`}
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs ws detach</InlineCode>
+                  <InlineCode>afs ws unmount</InlineCode>
                 </td>
-                <td>Detach a workspace while preserving local files by default.</td>
+                <td>Unmount a workspace while preserving local files by default.</td>
               </tr>
             </tbody>
           </MarkdownTable>
@@ -334,14 +334,14 @@ afs config list`}
           <h2>Workspaces and Checkpoints</h2>
           <p>
             Workspaces are the durable unit of collaboration. You create one for
-            a project, import one from an existing folder, attach it for local
+            a project, import one from an existing folder, mount it for local
             work, fork it for parallel work, and checkpoint the states that
             matter.
           </p>
 
           <TerminalBlock
             code={`afs ws create demo
-afs ws import --attach-at-source demo ~/src/demo
+afs ws import --mount-at-source demo ~/src/demo
 afs ws list
 afs ws fork demo demo-experiment
 
@@ -395,15 +395,15 @@ afs cp restore demo before-refactor`}
 
           <h3>Sync mode</h3>
           <TerminalBlock
-            code={`afs ws attach demo ~/afs/demo
+            code={`afs ws mount demo ~/afs/demo
 cd ~/afs/demo`}
           />
 
           <h3>Live mount mode</h3>
           <TerminalBlock
             code={`afs config set --mode mount --mount-backend nfs
-afs ws attach demo ~/afs/demo
-afs ws detach demo`}
+afs ws mount demo ~/afs/demo
+afs ws unmount demo`}
           />
 
           <h3>Import hygiene</h3>
@@ -621,7 +621,7 @@ export AFS_API_BASE_URL="http://127.0.0.1:8091"`}
           <TerminalBlock
             code={`afs config set config.source self-managed
 afs config set controlPlane.url http://127.0.0.1:8091
-afs ws attach getting-started ~/getting-started`}
+afs ws mount getting-started ~/getting-started`}
           />
         </DocSection>
 

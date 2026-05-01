@@ -75,10 +75,10 @@ shell_integration_for_shell() {
       cat <<EOF
 afs() {
   local _afs_bin="$INSTALL_DIR/$BIN_NAME"
-  if [ "\$#" -ge 2 ] && [ "\$1" = "ws" ] && [ "\$2" = "attach" ]; then
+  if [ "\$#" -ge 2 ] && [ "\$1" = "ws" ] && [ "\$2" = "mount" ]; then
     local _afs_cd_file
     _afs_cd_file="\$(mktemp)"
-    AFS_ATTACH_CD_FILE="\$_afs_cd_file" "\$_afs_bin" "\$@"
+    AFS_MOUNT_CD_FILE="\$_afs_cd_file" "\$_afs_bin" "\$@"
     local _afs_status
     _afs_status=\$?
     if [ "\$_afs_status" -eq 0 ] && [ -s "\$_afs_cd_file" ]; then
@@ -99,9 +99,9 @@ EOF
       cat <<EOF
 function afs
   set -l _afs_bin "$INSTALL_DIR/$BIN_NAME"
-  if test (count \$argv) -ge 2; and test "\$argv[1]" = "ws"; and test "\$argv[2]" = "attach"
+  if test (count \$argv) -ge 2; and test "\$argv[1]" = "ws"; and test "\$argv[2]" = "mount"
     set -l _afs_cd_file (mktemp)
-    env AFS_ATTACH_CD_FILE="\$_afs_cd_file" "\$_afs_bin" \$argv
+    env AFS_MOUNT_CD_FILE="\$_afs_cd_file" "\$_afs_bin" \$argv
     set -l _afs_status \$status
     if test \$_afs_status -eq 0; and test -s "\$_afs_cd_file"
       set -l _afs_target (string trim < "\$_afs_cd_file")
@@ -231,7 +231,7 @@ esac
 echo
 echo "Next:"
 echo "    $CLI_CMD auth login  # sign in and link this CLI to your account"
-echo "    $CLI_CMD ws attach   # choose a workspace and local folder"
+echo "    $CLI_CMD ws mount   # choose a workspace and local folder"
 {{else}}info "Pointing CLI at ${CONTROL_PLANE}"
 if ! "$target" auth login --self-hosted --url "$CONTROL_PLANE" >/dev/null 2>&1; then
   warn "Could not configure the CLI automatically. Run this later:"
@@ -241,7 +241,7 @@ fi
 info "Installation complete."
 echo
 echo "Next:"
-echo "    $CLI_CMD ws attach   # choose a workspace and local folder"
+echo "    $CLI_CMD ws mount   # choose a workspace and local folder"
 {{end}}`
 
 type installScriptData struct {

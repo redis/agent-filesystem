@@ -41,8 +41,8 @@ make web-dev        # run the control plane and UI together
 
 # CLI lifecycle helpers
 ./afs status
-./afs ws attach <workspace> <directory>
-./afs ws detach <workspace-or-directory>
+./afs ws mount <workspace> <directory>
+./afs ws unmount <workspace-or-directory>
 ./afs ws import <workspace> <directory>
 ./afs cp list <workspace>
 

@@ -13,9 +13,10 @@ import (
 const mountRegistryVersion = 1
 
 type mountRegistry struct {
-	Version     int                `json:"version"`
-	UpdatedAt   time.Time          `json:"updated_at"`
-	Mounts []mountRecord `json:"mounts"`
+	Version      int           `json:"version"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+	Mounts       []mountRecord `json:"mounts"`
+	LegacyMounts []mountRecord `json:"attachments,omitempty"`
 }
 
 type mountRecord struct {
@@ -41,18 +42,33 @@ func mountRegistryPath() string {
 	return filepath.Join(stateDir(), "mounts.json")
 }
 
+func legacyMountRegistryPath() string {
+	return filepath.Join(stateDir(), "attachments.json")
+}
+
 func loadMountRegistry() (mountRegistry, error) {
 	reg := mountRegistry{Version: mountRegistryVersion}
 	raw, err := os.ReadFile(mountRegistryPath())
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return reg, nil
+			raw, err = os.ReadFile(legacyMountRegistryPath())
+			if errors.Is(err, os.ErrNotExist) {
+				return reg, nil
+			}
+			if err != nil {
+				return reg, err
+			}
+		} else {
+			return reg, err
 		}
-		return reg, err
 	}
 	if err := json.Unmarshal(raw, &reg); err != nil {
 		return reg, fmt.Errorf("parse mount registry: %w", err)
 	}
+	if len(reg.Mounts) == 0 && len(reg.LegacyMounts) > 0 {
+		reg.Mounts = reg.LegacyMounts
+	}
+	reg.LegacyMounts = nil
 	if reg.Version == 0 {
 		reg.Version = mountRegistryVersion
 	}

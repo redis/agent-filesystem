@@ -14,7 +14,7 @@ Filesystems are a great interface for agents because they already know how to re
 AFS fixes that by:
 
 - storing workspace state in Redis
-- attaching workspaces to real local folders through sync or an optional live mount
+- mounting workspaces to real local folders through sync or an optional live mount
 - letting you checkpoint and restore workspaces
 - letting you fork a workspace for parallel work
 
@@ -109,29 +109,29 @@ Connect the CLI:
 The default path is sync mode: Redis stays the source of truth while AFS keeps
 a real local folder up to date.
 
-To start using AFS, create or import a workspace and attach it to a local
+To start using AFS, create or import a workspace and mount it to a local
 folder:
 
 ```bash
 ./afs ws create my-repo
-./afs ws attach my-repo ~/my-repo
+./afs ws mount my-repo ~/my-repo
 cd ~/my-repo
 ls
 echo "# Notes" > notes.md
 ```
 
-If you want to check or stop local attachments:
+If you want to check or stop local mounts:
 
 ```bash
 ./afs status
-./afs ws detach my-repo
+./afs ws unmount my-repo
 ```
 
 If you want to bring an existing folder into AFS:
 
 ```bash
 ./afs ws import my-repo ./repo
-./afs ws attach my-repo ./repo
+./afs ws mount my-repo ./repo
 ```
 
 If you want to exclude local junk before importing, create a `.afsignore` file in that folder first.
@@ -188,7 +188,7 @@ Notable current rules:
 
 - Redis connection is required; there is no `useExistingRedis` or managed-Redis mode
 - `redisKey` is not a config setting anymore; workspace keys are derived internally
-- `workspace run` is gone; use `afs ws attach` for local work
+- `workspace run` is gone; use `afs ws mount` for local work
 - `workRoot` is internal state, not a user-facing config field
 - `afs.config.json` stores connection defaults, not the current workspace or local folder
 
@@ -229,7 +229,7 @@ AFS has two main concepts:
 Typical flow:
 
 1. Put a workspace into AFS with `ws create` or `ws import`
-2. Attach it to a normal local directory
+2. Mount it to a normal local directory
 3. Save stable moments with `cp create`
 4. Fork it when you want a second line of work
 5. Restore a checkpoint if you want to go back
@@ -246,22 +246,22 @@ The simplest way to think about AFS is:
 
 Sync mode is the default and recommended local surface.
 
-- `afs ws attach <workspace> <directory>` starts a background sync daemon
+- `afs ws mount <workspace> <directory>` starts a background sync daemon
 - local edits are reconciled with the live Redis-backed workspace root
-- `afs ws detach <workspace-or-directory>` stops the sync daemon and preserves local files
+- `afs ws unmount <workspace-or-directory>` stops the sync daemon and preserves local files
 
 ### Live Mount Mode
 
 Live mount mode exposes the workspace directly as a Redis-backed filesystem.
 
-- `afs ws attach <workspace> <directory>` owns the local mountpoint
+- `afs ws mount <workspace> <directory>` owns the local mountpoint
 - edits go straight into the live Redis-backed workspace root
-- `afs ws detach <workspace-or-directory>` unmounts the filesystem and stops the mount daemon
+- `afs ws unmount <workspace-or-directory>` unmounts the filesystem and stops the mount daemon
 
 On macOS AFS uses NFS. On Linux AFS uses FUSE.
 
-Before using live mount mode, create or import a workspace and attach it with
-`afs ws attach <workspace> <directory>`.
+Before using live mount mode, create or import a workspace and mount it with
+`afs ws mount <workspace> <directory>`.
 
 Current macOS/NFS caveats:
 
@@ -274,10 +274,10 @@ Current macOS/NFS caveats:
 ./afs auth login
 ./afs config show --json
 ./afs ws create <workspace>
-./afs ws import --attach-at-source <workspace> <directory>
+./afs ws import --mount-at-source <workspace> <directory>
 ./afs ws list
-./afs ws attach <workspace> <directory>
-./afs ws detach <workspace-or-directory>
+./afs ws mount <workspace> <directory>
+./afs ws unmount <workspace-or-directory>
 ./afs ws fork <workspace> <new-workspace>
 ./afs cp create <workspace> <name>
 ./afs cp list <workspace>
@@ -334,7 +334,7 @@ Notes:
 ## What Gets Stored Where
 
 - Redis stores both the live workspace working copy and the immutable checkpoint history
-- attached folders are tracked as runtime state
+- mounted folders are tracked as runtime state
 - `~/.afs` is reserved for AFS runtime state and internal local metadata
 - `afs.config.json` stores local CLI configuration next to the `afs` binary
 
@@ -345,15 +345,15 @@ You can think of Redis as the source of truth for both:
 
 In sync mode:
 
-- you work in the directory passed to `afs ws attach`
+- you work in the directory passed to `afs ws mount`
 - AFS keeps that directory reconciled with the live Redis-backed workspace root
-- `afs ws detach` stops the sync daemon but does not discard workspace state
+- `afs ws unmount` stops the sync daemon but does not discard workspace state
 
 In mounted filesystem mode:
 
-- you work in the attached mountpoint
+- you work in the mounted mountpoint
 - edits go straight into the live Redis-backed workspace root
-- `afs ws detach` just unmounts; it does not create or sync a separate draft
+- `afs ws unmount` just unmounts; it does not create or sync a separate draft
 
 ## Build
 
@@ -413,13 +413,13 @@ You can override the defaults at invocation time:
 make web-dev AFS_WEB_SERVER_ADDR=127.0.0.1:9001 AFS_WEB_API_BASE_URL=http://127.0.0.1:9001 AFS_WEB_UI_PORT=4173
 ```
 
-## Attach a Workspace
+## Mount a Workspace
 
-Attach a workspace when you want a normal local directory that stays connected
+Mount a workspace when you want a normal local directory that stays connected
 to the Redis-backed workspace:
 
 ```bash
-./afs ws attach my-repo ~/src/my-repo
+./afs ws mount my-repo ~/src/my-repo
 ```
 
 ## Repo Contents
@@ -438,6 +438,6 @@ But if you are brand new here, start with:
 make
 ./afs auth login
 ./afs ws create demo
-./afs ws attach demo ~/demo
+./afs ws mount demo ~/demo
 cd ~/demo
 ```

@@ -32,12 +32,12 @@ directory.
 Use sync mode when the agent or user wants a real local directory:
 
 ```bash
-./afs ws attach my-project ~/my-project
+./afs ws mount my-project ~/my-project
 cd ~/my-project
 ```
 
 ### 3. Live mount mode
-Use `./afs config set --mode mount` before attaching when you need the
+Use `./afs config set --mode mount` before mounting when you need the
 workspace exposed directly as a mount rather than through the sync daemon.
 
 ## Common Flows
@@ -50,7 +50,7 @@ workspace exposed directly as a mount rather than through the sync daemon.
 
 ### Start working locally
 ```bash
-./afs ws attach my-project ~/my-project
+./afs ws mount my-project ~/my-project
 cd ~/my-project
 ```
 

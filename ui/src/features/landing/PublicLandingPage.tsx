@@ -69,7 +69,7 @@ export function PublicLandingPage() {
 
         <HeroLead>
           AFS gives agents a filesystem-shaped workspace backed by Redis.
-          Workspaces can be attached to real local directories, shared through
+          Workspaces can be mounted at real local directories, shared through
           MCP tools, checkpointed, restored, and forked without trapping agent
           state on one machine's local disk.
         </HeroLead>
@@ -116,8 +116,8 @@ export function PublicLandingPage() {
           <TerminalComment># cloud start</TerminalComment>
           <TerminalLine><Prompt>$</Prompt> curl -fsSL https://afs.cloud/install.sh | bash</TerminalLine>
           <TerminalLine><Prompt>$</Prompt> afs auth login</TerminalLine>
-          <TerminalLine><Prompt>$</Prompt> afs ws attach getting-started ~/getting-started</TerminalLine>
-          <TerminalOutput><Ok>ok</Ok> attached getting-started at ~/getting-started</TerminalOutput>
+          <TerminalLine><Prompt>$</Prompt> afs ws mount getting-started ~/getting-started</TerminalLine>
+          <TerminalOutput><Ok>ok</Ok> mounted getting-started at ~/getting-started</TerminalOutput>
           <TerminalGap />
           <TerminalComment># repo start</TerminalComment>
           <TerminalLine><Prompt>$</Prompt> git clone https://github.com/redis/agent-filesystem.git</TerminalLine>
@@ -132,7 +132,7 @@ export function PublicLandingPage() {
         <SectionTitle>Agent workspaces that behave like filesystems.</SectionTitle>
         <SectionText>
           Agent Filesystem gives agents a shared, versioned file tree. Each file
-          tree is a workspace. Attach that workspace to a local directory so
+          tree is a workspace. Mount that workspace to a local directory so
           editors, shells, scripts, and agents can work through ordinary paths,
           while Redis keeps the durable source of truth.
         </SectionText>
@@ -156,9 +156,9 @@ export function PublicLandingPage() {
       <FlowSection>
         <FlowCopy>
           <SectionKicker>How It Feels</SectionKicker>
-          <SectionTitle>Authenticate once. Attach a workspace. Checkpoint the good state.</SectionTitle>
+          <SectionTitle>Authenticate once. Mount a workspace. Checkpoint the good state.</SectionTitle>
           <SectionText>
-            The core loop is small: sign in, attach a workspace, edit locally or
+            The core loop is small: sign in, mount a workspace, edit locally or
             through MCP, checkpoint useful state, and restore or fork when the
             work needs another line.
           </SectionText>

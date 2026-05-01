@@ -129,9 +129,9 @@ function ConnectCLIPage() {
 
   if (search.connected) {
     const connectedWorkspaceName = search.workspace_name?.trim();
-    const connectedAttachCommand = connectedWorkspaceName
-      ? `afs ws attach ${canonicalWorkspaceName(connectedWorkspaceName)} ~/afs/${canonicalWorkspaceName(connectedWorkspaceName)}`
-      : "afs ws attach";
+    const connectedMountCommand = connectedWorkspaceName
+      ? `afs ws mount ${canonicalWorkspaceName(connectedWorkspaceName)} ~/afs/${canonicalWorkspaceName(connectedWorkspaceName)}`
+      : "afs ws mount";
 
     return (
       <PageShell>
@@ -140,12 +140,12 @@ function ConnectCLIPage() {
           <Title>CLI connected</Title>
           <Description>
             {connectedWorkspaceName
-              ? `Your terminal is now linked to ${displayWorkspaceName(connectedWorkspaceName)}. Return to the terminal and run ${connectedAttachCommand} to attach it locally.`
-              : "Your terminal is now linked. Return to the terminal and run afs ws attach to attach a workspace locally."}
+              ? `Your terminal is now linked to ${displayWorkspaceName(connectedWorkspaceName)}. Return to the terminal and run ${connectedMountCommand} to mount it locally.`
+              : "Your terminal is now linked. Return to the terminal and run afs ws mount to mount a workspace locally."}
           </Description>
           <SuccessPanel>
-            <SuccessCode>{connectedAttachCommand}</SuccessCode>
-            <SuccessHint>You can close this tab after the workspace is attached.</SuccessHint>
+            <SuccessCode>{connectedMountCommand}</SuccessCode>
+            <SuccessHint>You can close this tab after the workspace is mounted.</SuccessHint>
           </SuccessPanel>
         </ConnectCard>
       </PageShell>

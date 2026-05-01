@@ -33,7 +33,7 @@ export function ConnectAgentBanner({
   const mountPath = `~/afs/${canonicalWorkspaceName(workspaceName)}`;
   const downloadCmd = `curl -fsSL ${controlPlaneUrl}/install.sh | bash`;
   const loginCmd = `afs auth login`;
-  const attachCmd = `afs ws attach ${canonicalWorkspaceName(workspaceName)} ${mountPath}`;
+  const mountCmd = `afs ws mount ${canonicalWorkspaceName(workspaceName)} ${mountPath}`;
   const mcpLocalConfig = JSON.stringify(
     {
       mcpServers: {
@@ -153,18 +153,18 @@ export function ConnectAgentBanner({
 
                 <SubStepDivider />
 
-                <SubStepLabel>3 &mdash; Attach the workspace</SubStepLabel>
+                <SubStepLabel>3 &mdash; Mount the workspace</SubStepLabel>
                 <StepDescription>
-                  Attaches the workspace at <code>{mountPath}/</code> so any
+                  Mounts the workspace at <code>{mountPath}/</code> so any
                   agent on this machine can read and write files.
                 </StepDescription>
                 <CodeContainer>
-                  <CodePre>{attachCmd}</CodePre>
+                  <CodePre>{mountCmd}</CodePre>
                   <CopyButton
                     type="button"
-                    onClick={() => copyToClipboard(attachCmd, "attach")}
+                    onClick={() => copyToClipboard(mountCmd, "mount")}
                   >
-                    {copied === "attach" ? "Copied!" : "Copy"}
+                    {copied === "mount" ? "Copied!" : "Copy"}
                   </CopyButton>
                 </CodeContainer>
               </>

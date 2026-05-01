@@ -34,7 +34,7 @@ As of 2026-04-17, the hosted production deploy now has these pieces in place:
 - `afs auth logout` and `afs status` exist
 
 This means the hosted service can now support the initial "run `afs auth login`,
-finish browser handoff, then run `afs ws attach`" flow.
+finish browser handoff, then run `afs ws mount`" flow.
 
 ## Product Modes
 
@@ -66,7 +66,7 @@ The developer:
 1. clones the repo
 2. runs `make`
 3. runs `./afs auth login`
-4. runs `./afs ws attach`
+4. runs `./afs ws mount`
 
 ### Local
 
@@ -85,7 +85,7 @@ The developer:
 - hosted flow creates or reuses `getting-started`
 - browser hands the CLI a short-lived onboarding token through the localhost
   callback
-- CLI stores its durable local config and then continues with `afs ws attach`
+- CLI stores its durable local config and then continues with `afs ws mount`
 
 Near-term improvement:
 
@@ -101,7 +101,7 @@ The developer:
 4. downloads the CLI from the workspace page
 5. runs `afs auth login`
 6. finishes the browser handoff
-7. runs `afs ws attach getting-started ~/getting-started`
+7. runs `afs ws mount getting-started ~/getting-started`
 8. starts using AFS
 
 ### Important rule
@@ -111,7 +111,7 @@ Do not ship a special binary with long-lived auth baked into it.
 Instead:
 
 - ship the normal signed CLI artifact
-- use browser login and a short-lived bootstrap token to attach the CLI
+- use browser login and a short-lived bootstrap token to mount the CLI
 - let the CLI store its own long-lived local auth state afterward
 
 ## Naming
@@ -143,7 +143,7 @@ To support both entry ramps cleanly, the next missing pieces are:
 - real browser sign-up/sign-in and account model
 - hosted session identity beyond one-time CLI bootstrap
 - direct browser launch from `afs auth login`
-- smoother first-run `afs ws attach` UX for cloud mode
+- smoother first-run `afs ws mount` UX for cloud mode
 - production-domain auth, onboarding, and smoke coverage
 
 ## Auth Milestone
@@ -174,5 +174,5 @@ Important deployment rule:
 1. keep preview deploys healthy and repeatable on Vercel
 2. add real hosted account auth
 3. make the CLI/browser handoff consume the authenticated web session
-4. make cloud-mode `afs ws attach` feel first-class after login
+4. make cloud-mode `afs ws mount` feel first-class after login
 5. add durable end-to-end coverage on the public production domain

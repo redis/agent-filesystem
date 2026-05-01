@@ -29,7 +29,7 @@ fs.close()`;
 
 export const cliGettingStartedSample = `afs auth login
 afs ws create foobar
-afs ws attach foobar ~/afs/foobar
+afs ws mount foobar ~/afs/foobar
 
 echo "hello world" > ~/afs/foobar/src/README.md
 cat ~/afs/foobar/src/README.md

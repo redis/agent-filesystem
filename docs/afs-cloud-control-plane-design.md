@@ -83,12 +83,12 @@ This section reflects the repository as it exists today.
   exchange, trusted-header/Clerk-backed auth middleware, CLI token auth, and MCP
   token auth
 - workspace and checkpoint control-plane operations now work over HTTP in `self-hosted` mode
-- `afs ws attach` and `afs ws detach` now work in `self-hosted` mode for `sync`
-- `afs ws attach` in `self-hosted` mode now asks the control plane for a workspace bootstrap/session bundle, then starts the local sync daemon from that bundle
+- `afs ws mount` and `afs ws unmount` now work in `self-hosted` mode for `sync`
+- `afs ws mount` in `self-hosted` mode now asks the control plane for a workspace bootstrap/session bundle, then starts the local sync daemon from that bundle
 - setup and status now expose the local-vs-managed model more clearly
 - managed workspace sessions now persist real session records with heartbeat, disconnect, and stale-expiry handling
 - the web UI now exposes connected-agent counts per workspace plus an Agents view
-- the managed CLI path is now workspace-first for listing, selection, and `afs ws attach`; it no longer requires `controlPlane.database` for the normal self-hosted flow
+- the managed CLI path is now workspace-first for listing, selection, and `afs ws mount`; it no longer requires `controlPlane.database` for the normal self-hosted flow
 - the control plane now owns a SQLite workspace catalog for aggregate ws listing and workspace-to-database routing
 - the control plane catalog now also owns the registered database list, replacing `afs.databases.json` as the primary persistent registry
 - the control plane catalog now indexes session lifecycle metadata while Redis remains the live lease/presence plane
@@ -103,7 +103,7 @@ This section reflects the repository as it exists today.
 - route-surface split and auth middleware exist, but service-layer tenant checks
   are still uneven across the older control-plane operations
 - workspace-first routing now exists with stable opaque workspace ids, but some mutation paths and follow-on UX still need cleanup around fully id-first APIs
-- `self-hosted` `afs ws attach` works only for `sync`; mount mode is still local-only
+- `self-hosted` `afs ws mount` works only for `sync`; mount mode is still local-only
 - the web UI is now mostly workspace-first, but a few creation/mutation paths still depend on scoped database endpoints under the hood
 - cloud login exists as a bootstrap path, but durable secure profile storage,
   user/org ownership, token refresh, and credential brokering are not complete
@@ -806,7 +806,7 @@ The selected profile decides which backend is used.
 
 The important design point is that browser login, token storage, workspace-session bootstrap, and filesystem operations should not all be fused into one implementation path.
 
-### Cloud-connected `afs ws attach`
+### Cloud-connected `afs ws mount`
 
 Recommended first cloud runtime:
 
@@ -923,7 +923,7 @@ Tests:
 
 - existing CLI unit tests still pass
 - `go test ./cmd/afs ./cmd/afs-control-plane ./internal/...`
-- manual smoke test for `afs setup`, `afs ws attach`, `afs ws create`, `afs cp list`
+- manual smoke test for `afs setup`, `afs ws mount`, `afs ws create`, `afs cp list`
 
 Exit criteria:
 
@@ -946,7 +946,7 @@ What is done:
 - separate admin and client HTTP muxes now exist
 - the CLI now has an `HTTPBackend` and self-hosted control-plane client
 - workspace create/list/use/fork and checkpoint list/save/restore now work over HTTP
-- `self-hosted` `afs ws attach` now works for sync by creating a workspace bootstrap/session through the client route surface
+- `self-hosted` `afs ws mount` now works for sync by creating a workspace bootstrap/session through the client route surface
 
 What is still missing in this phase:
 
@@ -997,14 +997,14 @@ Tests:
 
 Exit criteria:
 
-- the managed CLI is workspace-first for `ws list`, `ws attach`, and `afs ws attach`
+- the managed CLI is workspace-first for `ws list`, `ws mount`, and `afs ws mount`
 - `GET /v1/workspaces` is served from the control-plane catalog, not live fan-out
 - duplicate workspace names across databases fail explicitly instead of silently guessing
 
 Current status against exit criteria:
 
 - first slice is implemented with a SQLite workspace catalog backing aggregate list and workspace resolution
-- the CLI no longer requires `controlPlane.database` for normal self-hosted list/attach flows
+- the CLI no longer requires `controlPlane.database` for normal self-hosted list/mount flows
 - the web UI no longer requires selecting a database for normal browsing; databases are now managed through a dedicated sidebar tab
 - workspace identity is still name-based today; opaque stable workspace ids are the main remaining follow-up for this phase
 - create/update/delete and some detail routing still carry database context because the catalog does not yet own globally stable workspace ids
@@ -1083,7 +1083,7 @@ Scope:
 
 What is done:
 
-- the control plane issues real workspace sessions for `afs ws attach` in `self-hosted` mode
+- the control plane issues real workspace sessions for `afs ws mount` in `self-hosted` mode
 - session records persist with heartbeat, disconnect, and stale expiry
 - the web UI shows connected-agent counts, an Agents view, and workspace-linked connected-client drilldowns
 
@@ -1110,7 +1110,7 @@ Status: partially prototyped through self-hosted sync bootstrap
 
 Scope:
 
-- make `afs ws attach` work in cloud mode
+- make `afs ws mount` work in cloud mode
 - child daemon starts from a cloud-issued session bundle
 - no long-lived Redis credentials in local config
 
@@ -1133,7 +1133,7 @@ Why sync first:
 
 Tests:
 
-- cloud login -> create workspace -> `afs ws attach`
+- cloud login -> create workspace -> `afs ws mount`
 - reconnect after short-lived credential rotation
 - session expiry and renewal behavior
 - basic checkpoint flow in cloud mode
@@ -1174,7 +1174,7 @@ Scope:
 
 Tests:
 
-- cloud login -> `afs ws attach`
+- cloud login -> `afs ws mount`
 - mount/unmount lifecycle
 - presence reporting from mount daemons
 

@@ -11,7 +11,7 @@ not yet have a real website account system.
 Today, the browser flow is doing two things:
 
 - creating or reusing the default `getting-started` workspace
-- handing the CLI a short-lived onboarding token so `afs ws attach` can work
+- handing the CLI a short-lived onboarding token so `afs ws mount` can work
 
 That is good enough to prove the hosted runtime, but it is not the final
 product shape.
@@ -31,7 +31,7 @@ The website needs:
 The sync path also needs a second credential type:
 
 - scoped machine tokens for developers, CI, and agents
-- no admin browser login required for routine `afs ws attach` / sync activity
+- no admin browser login required for routine `afs ws mount` / sync activity
 - revocable, auditable, and limited to the org/database/workspace permissions we grant
 
 ## Auth boundary first

@@ -30,8 +30,8 @@ It is the single root for docs, active backlog notes, and longer design plans.
   versioned-filesystem behavior.
 - `plans/usage-feedback-tracker-2026-04-30.md` - working tracker for the
   2026-04-30 usage feedback, bug triage, and implementation plan.
-- `plans/cli-attach-detach-command-surface.md` - draft plan for replacing the
-  `up`/`down` local lifecycle with `attach`/`detach`.
+- `plans/cli-mount-unmount-command-surface.md` - draft plan for replacing the
+  `up`/`down` local lifecycle with `mount`/`unmount`.
 - `plans/event-history-merge.md` - plan to merge audit and changelog streams.
 - `plans/observability.md` - observability research and milestone notes.
 

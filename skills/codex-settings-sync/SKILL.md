@@ -22,16 +22,16 @@ Open the bundled starter ignore file at [assets/.afsignore](assets/.afsignore) a
 2. Ensure `agent-filesystem` is built with `make`.
 3. Configure `afs` to point at the shared Redis instance.
 4. Create or update `~/.codex/.afsignore` before migration.
-5. On the source machine, run `./afs ws import --attach-at-source .codex ~/.codex`.
-6. Explain that the imported workspace is attached at `~/.codex`, and the workspace name is `.codex`.
-7. On each additional machine, move aside any existing `~/.codex`, choose mount mode with `./afs config set --mode mount` if you want a live mount there, then run `./afs ws attach .codex ~/.codex`.
+5. On the source machine, run `./afs ws import --mount-at-source .codex ~/.codex`.
+6. Explain that the imported workspace is mounted at `~/.codex`, and the workspace name is `.codex`.
+7. On each additional machine, move aside any existing `~/.codex`, choose mount mode with `./afs config set --mode mount` if you want a live mount there, then run `./afs ws mount .codex ~/.codex`.
 8. Verify with `./afs status` and `ls -la ~/.codex`.
 
 ## Secondary machine config
 
 Point the CLI at the same control plane or Redis database. Then run
 `./afs config set --mode mount` for live mount mode, or
-`./afs config set --mode sync` for sync mode, before attaching `.codex` at
+`./afs config set --mode sync` for sync mode, before mounting `.codex` at
 that machine's `~/.codex`.
 
 ## Notes to surface
@@ -47,13 +47,13 @@ that machine's `~/.codex`.
 Source machine rollback:
 
 ```bash
-./afs ws detach ~/.codex
+./afs ws unmount ~/.codex
 ```
 
 Secondary machine rollback:
 
 ```bash
-./afs ws detach ~/.codex
+./afs ws unmount ~/.codex
 rm -rf ~/.codex
 mv ~/.codex.local-backup ~/.codex
 ```

@@ -84,7 +84,7 @@ token management tools.
 
 Local stdio MCP only.
 
-Shows local AFS configuration and attachment status.
+Shows local AFS configuration and mount status.
 
 Arguments: none.
 

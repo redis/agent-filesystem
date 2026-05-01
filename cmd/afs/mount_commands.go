@@ -17,7 +17,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const mountShellCDFileEnv = "AFS_ATTACH_CD_FILE"
+const mountShellCDFileEnv = "AFS_MOUNT_CD_FILE"
 
 type mountOptions struct {
 	workspace string
@@ -351,7 +351,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 		return err
 	}
 	upsertMount(&reg, mountRecord{
-		ID:                   "att_" + id,
+		ID:                   "mnt_" + id,
 		Workspace:            bootstrap.workspace,
 		WorkspaceID:          runtimeCfg.CurrentWorkspaceID,
 		LocalPath:            localRoot,
@@ -416,7 +416,7 @@ type mountPromptChoice struct {
 	Workspace   string
 	WorkspaceID string
 	Path        string
-	Mounted    bool
+	Mounted     bool
 }
 
 func promptMountSelection(opts mountOptions) error {
@@ -507,7 +507,7 @@ func mountPromptChoices(reg mountRegistry, workspaces []workspaceSummary) []moun
 			Workspace:   rec.Workspace,
 			WorkspaceID: rec.WorkspaceID,
 			Path:        rec.LocalPath,
-			Mounted:    true,
+			Mounted:     true,
 		})
 		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
 			mountedByID[id] = true

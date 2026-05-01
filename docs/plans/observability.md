@@ -184,7 +184,7 @@ Three Redis writes per FS op (stream append, summary hash, last-writer hash). Ac
 ### Session identity (minimal)
 Keep existing machine-derived fields (hostname, OS, agent version). Add two things:
 
-- **Label** — optional user-supplied string, set at `afs ws attach --label "<string>"` and editable via `afs log rename <id> "<string>"`. Display field only, not an identity key. Session ID remains the opaque primary key.
+- **Label** — optional user-supplied string, set at `afs ws mount --label "<string>"` and editable via `afs log rename <id> "<string>"`. Display field only, not an identity key. Session ID remains the opaque primary key.
 - **Authenticated user** — when the request carries a Clerk token, record the user on the session row. In local/CLI-token mode, leave null or record the token owner, whichever is already present.
 
 No agent-kind auto-detect, no run-vs-session split. Revisit if users ask.
@@ -277,7 +277,7 @@ Add: `afs_redis_probe_duration_seconds{database}` — our own latency to Redis, 
 - `afs_auth_tokens_active{kind}` gauge
 - `afs_auth_token_exchanges_total`
 
-[auth.go](../../internal/controlplane/auth.go), esp. `verifyClerkSessionToken`, `AttachCLITokenAuthenticator`.
+[auth.go](../../internal/controlplane/auth.go), esp. `verifyClerkSessionToken`, `MountCLITokenAuthenticator`.
 
 ### 3.7 Storage cost (derived)
 - `afs_workspace_blob_bytes{workspace}` — sum of unique blob sizes

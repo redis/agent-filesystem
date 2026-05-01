@@ -424,15 +424,15 @@ getting-started/
 
 1. **Browse files** — Click through the file tree on the left to explore.
 2. **Create a checkpoint** — Go to the Checkpoints tab and save a snapshot.
-3. **Connect an agent** — Attach this workspace locally or use MCP tools.
+3. **Connect an agent** — Mount this workspace locally or use MCP tools.
 4. **Edit and compare** — Have an agent modify ` + "`examples/hello.py`" + `, then
    compare the workspace state against your checkpoint.
 
 ## Connect an agent
 
-**Option A: Attach locally**
+**Option A: Mount locally**
 ` + "```bash" + `
-afs ws attach getting-started ~/getting-started
+afs ws mount getting-started ~/getting-started
 # The workspace appears at ~/getting-started/
 ` + "```" + `
 
@@ -465,11 +465,11 @@ Get an AI agent working with AFS in under 5 minutes.
 - AFS binary installed (you already have this if you can see this file)
 - Redis running (AFS stores everything in Redis)
 
-## Step 1: Attach the workspace
+## Step 1: Mount the workspace
 
 ` + "```bash" + `
-# Attach this workspace; files appear at ~/getting-started/
-afs ws attach getting-started ~/getting-started
+# Mount this workspace; files appear at ~/getting-started/
+afs ws mount getting-started ~/getting-started
 ` + "```" + `
 
 Your agent can now read and write files in that directory using normal file I/O.

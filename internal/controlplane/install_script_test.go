@@ -28,7 +28,7 @@ func TestRenderInstallScriptInjectsRequestOrigin(t *testing.T) {
 		`configure_shell_path()`,
 		`# Added by Agent Filesystem installer`,
 		`# Added by Agent Filesystem installer: shell integration`,
-		`AFS_ATTACH_CD_FILE`,
+		`AFS_MOUNT_CD_FILE`,
 		`cd "\$_afs_target"`,
 		`set -euo pipefail`,
 	} {
@@ -62,7 +62,7 @@ func TestInstallScriptDefaultsToHostHeader(t *testing.T) {
 func TestInstallScriptSelfHostedAutoConfigures(t *testing.T) {
 	// Default (no env var) is self-hosted; the rendered script should skip the
 	// cloud sign-in hint and instead invoke the self-hosted login flow against
-	// the serving control plane so `afs ws attach` works without further setup.
+	// the serving control plane so `afs ws mount` works without further setup.
 	req := httptest.NewRequest("GET", "/install.sh", nil)
 	req.Host = "afs.internal.example"
 
@@ -72,7 +72,7 @@ func TestInstallScriptSelfHostedAutoConfigures(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"$target" auth login --self-hosted --url "$CONTROL_PLANE"`,
-		`$CLI_CMD ws attach`,
+		`$CLI_CMD ws mount`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("self-hosted install script missing %q; got:\n%s", want, body)

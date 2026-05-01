@@ -29,7 +29,7 @@ When connected via MCP, you have access to:
 
 | Category | Operations |
 |----------|-----------|
-| Workspace management | Create, list, attach, fork, delete workspaces |
+| Workspace management | Create, list, mount, fork, delete workspaces |
 | File operations | Read, write, edit, delete, copy, move files |
 | Navigation | List directories, tree view, find by pattern, stat |
 | Search | Grep across workspace files directly in Redis |
@@ -46,10 +46,10 @@ Create checkpoints explicitly when you want a durable restore point.
 ./afs ws create my-project
 ```
 
-### 2. Attach a local directory (optional)
+### 2. Mount a local directory (optional)
 
 ```bash
-./afs ws attach my-project ~/afs/my-project
+./afs ws mount my-project ~/afs/my-project
 # Workspace is now at ~/afs/my-project/
 ```
 
@@ -82,7 +82,7 @@ To restore:
 ### 5. Import an existing directory
 
 ```bash
-./afs ws import --attach-at-source my-project /path/to/existing/directory
+./afs ws import --mount-at-source my-project /path/to/existing/directory
 ```
 
 Add a `.afsignore` file (same syntax as `.gitignore`) to exclude `node_modules/`, `.venv/`, build artifacts, etc.
@@ -137,7 +137,7 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
 | Command | Description |
 |---------|-------------|
 | `afs setup` | Interactive connection configuration |
-| `afs status` | Show daemon status and workspace attachments |
+| `afs status` | Show daemon status and workspace mounts |
 
 ### Workspaces
 
@@ -145,9 +145,9 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
 |---------|-------------|
 | `afs ws create <name>` | Create a new workspace |
 | `afs ws list` | List all workspaces |
-| `afs ws attach <name> <dir>` | Attach a workspace to a local folder |
-| `afs ws detach <name-or-dir>` | Detach a workspace and preserve local files |
-| `afs ws import --attach-at-source <name> <dir>` | Import and attach a local directory |
+| `afs ws mount <name> <dir>` | Mount a workspace at a local folder |
+| `afs ws unmount <name-or-dir>` | Unmount a workspace and preserve local files |
+| `afs ws import --mount-at-source <name> <dir>` | Import and mount a local directory |
 | `afs ws fork <name> <new>` | Fork for parallel work |
 | `afs ws delete <name>` | Remove a workspace |
 
