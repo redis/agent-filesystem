@@ -126,7 +126,7 @@ func cmdSessionLog(args []string) error {
 	}
 	defer closeFn()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
+	selection, err := resolveCommandWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
 	if err != nil {
 		return err
 	}
@@ -396,7 +396,7 @@ func cmdSessionSummary(args []string) error {
 	}
 	defer closeFn()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
+	selection, err := resolveCommandWorkspaceSelectionFromControlPlane(ctx, cfg, service, flags.workspace)
 	if err != nil {
 		return err
 	}

@@ -45,13 +45,13 @@ export function ActionsInline({ actions, featuredCount = 3 }: { actions: Action[
     <span className="actions-inline">
       {visible.map((a, i) => (
         <Fragment key={a.verb}>
-          {i > 0 && <span className="sep"> · </span>}
+          {i > 0 && ' '}
           <ActionVerb a={a} />
         </Fragment>
       ))}
       {rest.length > 0 && (
         <>
-          <span className="sep"> · </span>
+          {' '}
           <button
             type="button"
             className="more-toggle"
@@ -61,7 +61,7 @@ export function ActionsInline({ actions, featuredCount = 3 }: { actions: Action[
             }}
             aria-expanded={expanded}
           >
-            {expanded ? '‹' : `more (${rest.length}) ›`}
+            {expanded ? 'less' : `more (${rest.length})`}
           </button>
         </>
       )}
@@ -70,8 +70,11 @@ export function ActionsInline({ actions, featuredCount = 3 }: { actions: Action[
 }
 
 function ActionVerb({ a }: { a: Action }) {
-  if (a.method === 'GET') {
-    return <Link className="verb" to={a.href}>{a.verb}</Link>
-  }
-  return <span className="verb">{a.verb}</span>
+  // GET verbs go to their natural href (e.g. diff page).
+  // non-GET verbs aren't browser-navigable; route them to the resource's
+  // owner page (the workspace detail) so the click does something useful.
+  const target = a.method === 'GET'
+    ? a.href
+    : (a.href.match(/^(\/workspaces\/[^/]+)/)?.[1] ?? a.href)
+  return <Link className="verb" to={target}>{a.verb}</Link>
 }

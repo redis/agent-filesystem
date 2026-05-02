@@ -74,7 +74,7 @@ func cmdFS(args []string) error {
 		return cmdFSFind(parsed.workspace, parsed.args)
 	case "create-exclusive":
 		if strings.TrimSpace(parsed.workspace) != "" {
-			return errors.New("--workspace is not supported with fs create-exclusive; use the mounted sync workspace")
+			return errors.New("workspace is not supported with fs create-exclusive; use the mounted sync workspace")
 		}
 		return cmdFileCreateExclusive(parsed.args)
 	case "history":
@@ -96,7 +96,7 @@ func fsFileCommandArgs(subcommand, workspace string, args []string) []string {
 	rewritten := make([]string, 0, len(args)+4)
 	rewritten = append(rewritten, "fs", subcommand)
 	if strings.TrimSpace(workspace) != "" {
-		rewritten = append(rewritten, "--workspace", strings.TrimSpace(workspace))
+		rewritten = append(rewritten, strings.TrimSpace(workspace))
 	}
 	return append(rewritten, args...)
 }
@@ -123,26 +123,35 @@ type fsDispatchArgs struct {
 
 func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
 	var parsed fsDispatchArgs
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--workspace" || arg == "-w":
-			if i+1 >= len(args) {
-				return parsed, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			parsed.workspace = strings.TrimSpace(args[i])
-		case strings.HasPrefix(arg, "--workspace="):
-			parsed.workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
-		case strings.HasPrefix(arg, "-"):
-			return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", arg, fsUsageText(filepath.Base(os.Args[0])))
-		default:
-			parsed.subcommand = arg
-			parsed.args = args[i+1:]
-			return parsed, nil
-		}
+	if len(args) == 0 {
+		return parsed, nil
 	}
+	if strings.HasPrefix(args[0], "-") {
+		return parsed, fmt.Errorf("unknown filesystem flag %q\n\n%s", args[0], fsUsageText(filepath.Base(os.Args[0])))
+	}
+	if len(args) >= 2 && isFSSubcommand(args[1]) {
+		parsed.workspace = strings.TrimSpace(args[0])
+		parsed.subcommand = args[1]
+		parsed.args = args[2:]
+		return parsed, nil
+	}
+	if isFSSubcommand(args[0]) {
+		parsed.subcommand = args[0]
+		parsed.args = args[1:]
+		return parsed, nil
+	}
+	parsed.subcommand = args[0]
+	parsed.args = args[1:]
 	return parsed, nil
+}
+
+func isFSSubcommand(command string) bool {
+	switch command {
+	case "ls", "cat", "find", "create-exclusive", "history", "diff", "restore", "undelete", "grep":
+		return true
+	default:
+		return false
+	}
 }
 
 func cmdFileCreateExclusive(args []string) error {
@@ -226,12 +235,10 @@ func cmdFileCreateExclusive(args []string) error {
 
 func fsUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs <subcommand>
+  %s fs [workspace] <subcommand>
+  %s fs create-exclusive [options] <path>
 
 Read, search, and safely write workspace files.
-
-Options:
-  -w, --workspace <workspace>   Select the workspace for remote inspection
 
 Subcommands:
   ls                 List workspace files
@@ -245,13 +252,14 @@ Subcommands:
   undelete           Revive a deleted file lineage
 
 Examples:
-  %s fs -w demo ls
-  %s fs -w demo cat README.md
-  %s fs -w demo cat README.md --version <version-id>
-  %s fs -w demo history README.md
-  %s fs -w demo find . -name '*.md' -print
-  %s fs -w demo grep Redis
-`, bin, bin, bin, bin, bin, bin, bin)
+  %s fs demo ls
+  %s fs ls
+  %s fs demo cat README.md
+  %s fs demo cat README.md --version <version-id>
+  %s fs demo history README.md
+  %s fs demo find . -name '*.md' -print
+  %s fs demo grep Redis
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {

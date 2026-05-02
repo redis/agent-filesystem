@@ -122,13 +122,6 @@ func parseFileHistoryArgs(args []string) (fileHistoryArgs, error) {
 	parsed := fileHistoryArgs{newestFirst: true}
 	positionals := make([]string, 0, 2)
 	for index := 0; index < len(args); index++ {
-		if ok, next, err := parseFileWorkspaceFlag(&parsed.workspace, args, index); ok || err != nil {
-			if err != nil {
-				return parsed, err
-			}
-			index = next
-			continue
-		}
 		arg := args[index]
 		switch {
 		case arg == "--order":
@@ -193,26 +186,6 @@ func parseFileHistoryArgs(args []string) (fileHistoryArgs, error) {
 	parsed.workspace = positionals[0]
 	parsed.path = positionals[1]
 	return parsed, nil
-}
-
-func parseFileWorkspaceFlag(workspace *string, args []string, index int) (bool, int, error) {
-	arg := args[index]
-	switch {
-	case arg == "--workspace" || arg == "-w":
-		if index+1 >= len(args) {
-			return true, index, fmt.Errorf("%s requires a value", arg)
-		}
-		*workspace = strings.TrimSpace(args[index+1])
-		return true, index + 1, nil
-	case strings.HasPrefix(arg, "--workspace="):
-		*workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
-		return true, index, nil
-	case strings.HasPrefix(arg, "-w="):
-		*workspace = strings.TrimSpace(strings.TrimPrefix(arg, "-w="))
-		return true, index, nil
-	default:
-		return false, index, nil
-	}
 }
 
 type fileShowArgs struct {
@@ -312,13 +285,6 @@ func parseFileShowArgs(args []string) (fileShowArgs, error) {
 	var parsed fileShowArgs
 	positionals := make([]string, 0, 2)
 	for index := 0; index < len(args); index++ {
-		if ok, next, err := parseFileWorkspaceFlag(&parsed.workspace, args, index); ok || err != nil {
-			if err != nil {
-				return parsed, err
-			}
-			index = next
-			continue
-		}
 		arg := args[index]
 		switch {
 		case arg == "--version":
@@ -528,13 +494,6 @@ func parseFileRestoreArgs(args []string) (fileRestoreArgs, error) {
 	var parsed fileRestoreArgs
 	positionals := make([]string, 0, 2)
 	for index := 0; index < len(args); index++ {
-		if ok, next, err := parseFileWorkspaceFlag(&parsed.workspace, args, index); ok || err != nil {
-			if err != nil {
-				return parsed, err
-			}
-			index = next
-			continue
-		}
 		arg := args[index]
 		switch {
 		case arg == "--version":
@@ -597,13 +556,6 @@ func parseFileUndeleteArgs(args []string) (fileUndeleteArgs, error) {
 	var parsed fileUndeleteArgs
 	positionals := make([]string, 0, 2)
 	for index := 0; index < len(args); index++ {
-		if ok, next, err := parseFileWorkspaceFlag(&parsed.workspace, args, index); ok || err != nil {
-			if err != nil {
-				return parsed, err
-			}
-			index = next
-			continue
-		}
 		arg := args[index]
 		switch {
 		case arg == "--version":
@@ -666,13 +618,6 @@ func parseFileDiffArgs(args []string) (fileDiffArgs, error) {
 	var parsed fileDiffArgs
 	positionals := make([]string, 0, 2)
 	for index := 0; index < len(args); index++ {
-		if ok, next, err := parseFileWorkspaceFlag(&parsed.workspace, args, index); ok || err != nil {
-			if err != nil {
-				return parsed, err
-			}
-			index = next
-			continue
-		}
 		arg := args[index]
 		switch {
 		case arg == "--from-ref":
@@ -864,46 +809,46 @@ Run '%s fs <subcommand> --help' for details.
 
 func fileHistoryUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs [-w <workspace>] history <path> [--order asc|desc] [--limit <n>] [--cursor <opaque>]
+  %s fs [workspace] history <path> [--order asc|desc] [--limit <n>] [--cursor <opaque>]
 
 List file history in deterministic lineage order. The default order is desc.
 Use --limit and --cursor to page through long histories without losing history order.
-If -w is omitted, AFS prompts for a workspace when needed.
+If workspace is omitted, AFS prompts for one when needed.
 `, bin)
 }
 
 func fileShowUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs [-w <workspace>] cat <path> (--version <version-id> | --file-id <file-id> --ordinal <n>)
+  %s fs [workspace] cat <path> (--version <version-id> | --file-id <file-id> --ordinal <n>)
 
 Show the exact historical content for a file version.
-If -w is omitted, AFS prompts for a workspace when needed.
+If workspace is omitted, AFS prompts for one when needed.
 `, bin)
 }
 
 func fileDiffUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs [-w <workspace>] diff <path> (--from-ref <head|working-copy> | --from-version <version-id> | --from-file-id <file-id> --from-ordinal <n>) [--to-ref <head|working-copy> | --to-version <version-id> | --to-file-id <file-id> --to-ordinal <n>]
+  %s fs [workspace] diff <path> (--from-ref <head|working-copy> | --from-version <version-id> | --from-file-id <file-id> --from-ordinal <n>) [--to-ref <head|working-copy> | --to-version <version-id> | --to-file-id <file-id> --to-ordinal <n>]
 
 Diff one file version selector against another. If the --to selector is omitted, AFS diffs against head.
-If -w is omitted, AFS prompts for a workspace when needed.
+If workspace is omitted, AFS prompts for one when needed.
 `, bin)
 }
 
 func fileRestoreUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs [-w <workspace>] restore <path> (--version <version-id> | --file-id <file-id> --ordinal <n>)
+  %s fs [workspace] restore <path> (--version <version-id> | --file-id <file-id> --ordinal <n>)
 
 Restore historical content into the live workspace and create a new latest version.
-If -w is omitted, AFS prompts for a workspace when needed.
+If workspace is omitted, AFS prompts for one when needed.
 `, bin)
 }
 
 func fileUndeleteUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs [-w <workspace>] undelete <path> [--version <version-id> | --file-id <file-id> --ordinal <n>]
+  %s fs [workspace] undelete <path> [--version <version-id> | --file-id <file-id> --ordinal <n>]
 
 Revive the latest deleted lineage at a path by default, or restore a selected historical version from a deleted lineage.
-If -w is omitted, AFS prompts for a workspace when needed.
+If workspace is omitted, AFS prompts for one when needed.
 `, bin)
 }

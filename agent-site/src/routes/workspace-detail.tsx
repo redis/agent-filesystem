@@ -4,6 +4,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { Frame } from '../frame'
 import { ActionsInline } from '../actions-row'
+import { formatBytes, formatBytesDelta } from '../format'
 import { loadWorkspace, loadCheckpoints, loadSessions, loadActivity } from '../loaders'
 import { useFetch } from '../hooks'
 import { adaptWorkspaceDetail, type RawWorkspaceDetail } from '../adapters'
@@ -89,7 +90,7 @@ export default function WorkspaceDetail() {
     <Frame
       path="/workspaces/:id"
       realPath={`/workspaces/${w.id}`}
-      meta={`${w.draft_state} · ${w.file_count} files · ${w.total_bytes.toLocaleString()}b · ${w.checkpoint_count} checkpoints${isLive ? '' : ' · using mocks (api unreachable)'}`}
+      meta={`${w.draft_state} · ${w.file_count} files · ${formatBytes(w.total_bytes)} · ${w.checkpoint_count} checkpoints${isLive ? '' : ' · using mocks (api unreachable)'}`}
       request={{ method: 'GET', path: `/v1/workspaces/${w.id}`, headers: { etag: w.etag, cost_ms: 6 } }}
       json={{ workspace: w, checkpoints, sessions, recent_activity: activity }}
       toolCall={{ name: 'workspace_get', args: { id: w.id } }}
@@ -111,7 +112,7 @@ export default function WorkspaceDetail() {
           <span className={`chip ${w.draft_state === 'dirty' ? 'warn' : 'ok'}`}>{w.draft_state}</span>
         </dd>
         <dt>etag</dt>           <dd className="dim">{w.etag} <span className="dim">(use If-Match for safe writes)</span></dd>
-        <dt>files</dt>          <dd>{w.file_count} files · {w.folder_count} folders · {w.total_bytes.toLocaleString()}b</dd>
+        <dt>files</dt>          <dd>{w.file_count} files · {w.folder_count} folders · {formatBytes(w.total_bytes)}</dd>
         <dt>last cp</dt>        <dd>{w.last_checkpoint_at ?? <span className="dim">(never)</span>}</dd>
         <dt>updated</dt>        <dd>{w.updated_at}</dd>
       </dl>
@@ -134,7 +135,7 @@ export default function WorkspaceDetail() {
                 <td className="strong">{c.name}</td>
                 <td className="dim">{c.parent_id ?? '—'}</td>
                 <td className={`num ${c.delta_files >= 0 ? 'ok' : 'err'}`}>{c.delta_files >= 0 ? '+' : ''}{c.delta_files}</td>
-                <td className={`num ${c.delta_bytes >= 0 ? 'ok' : 'err'}`}>{c.delta_bytes >= 0 ? '+' : ''}{c.delta_bytes}</td>
+                <td className={`num ${c.delta_bytes >= 0 ? 'ok' : 'err'}`}>{formatBytesDelta(c.delta_bytes)}</td>
                 <td className="dim">{c.created_at}</td>
               </tr>
             ))}
@@ -175,7 +176,7 @@ export default function WorkspaceDetail() {
                 <td className="dim">{e.ts.slice(11, 23)}</td>
                 <td className="verb">{e.op}</td>
                 <td className="strong">{e.path ?? '—'}</td>
-                <td className={`num ${(e.bytes_delta ?? 0) >= 0 ? 'ok' : 'err'}`}>{e.bytes_delta != null ? (e.bytes_delta >= 0 ? '+' : '') + e.bytes_delta : '—'}</td>
+                <td className={`num ${(e.bytes_delta ?? 0) >= 0 ? 'ok' : 'err'}`}>{e.bytes_delta != null ? formatBytesDelta(e.bytes_delta) : '—'}</td>
                 <td className="dim">{e.agent_id ?? e.user}</td>
               </tr>
             ))}

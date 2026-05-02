@@ -158,14 +158,6 @@ func parseGrepArgs(args []string) (grepOptions, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
-		case arg == "--workspace" || arg == "-W":
-			if i+1 >= len(args) {
-				return opts, fmt.Errorf("missing value for %q", arg)
-			}
-			i++
-			opts.workspace = strings.TrimSpace(args[i])
-		case strings.HasPrefix(arg, "--workspace="):
-			opts.workspace = strings.TrimSpace(strings.TrimPrefix(arg, "--workspace="))
 		case arg == "--path":
 			if i+1 >= len(args) {
 				return opts, fmt.Errorf("missing value for %q", arg)
@@ -270,8 +262,8 @@ func parseGrepArgs(args []string) (grepOptions, error) {
 
 func grepUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs grep [flags] <pattern>
-  %s fs grep [flags] -e <pattern>
+  %s fs [workspace] grep [flags] <pattern>
+  %s fs [workspace] grep [flags] -e <pattern>
 
 Search the live Redis-backed AFS namespace for a workspace.
 Literal substring matching remains the default for compatibility. Use -E/-G
@@ -279,7 +271,6 @@ for regex mode, -F for explicit fixed-string mode, or --glob for AFS glob
 matching semantics (*, ?, [a-z], [!x], \ escaping).
 
 Options:
-  --workspace <name>  Search a specific workspace
   --path <path>       Limit the search to a file or directory inside the workspace
   -i, --ignore-case   Case-insensitive matching
   -F                  Treat patterns as fixed strings
@@ -297,10 +288,10 @@ Options:
 
 Examples:
   %s fs grep "hello"
-  %s fs grep -E "error|warning"
-  %s fs grep -w --path /logs token
-  %s fs grep -l -i --workspace repo "disk full"
-  %s fs grep --glob --path /src "*TODO*"
+  %s fs repo grep -E "error|warning"
+  %s fs repo grep -w --path /logs token
+  %s fs repo grep -l -i "disk full"
+  %s fs repo grep --glob --path /src "*TODO*"
 `, bin, bin, bin, bin, bin, bin, bin)
 }
 

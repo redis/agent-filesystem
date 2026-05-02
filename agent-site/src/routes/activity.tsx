@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Frame } from '../frame'
+import { formatBytesDelta } from '../format'
 import { loadActivity } from '../loaders'
 import type { ActivityEvent } from '../types'
 
@@ -106,7 +107,7 @@ export default function Activity() {
               <td><Link to={`/workspaces/${e.workspace_id}`}>{e.workspace_id}</Link></td>
               <td className="verb">{e.op}</td>
               <td className="strong">{e.path ?? '—'}</td>
-              <td className={`num ${(e.bytes_delta ?? 0) >= 0 ? 'ok' : 'err'}`}>{e.bytes_delta != null ? (e.bytes_delta >= 0 ? '+' : '') + e.bytes_delta : '—'}</td>
+              <td className={`num ${(e.bytes_delta ?? 0) >= 0 ? 'ok' : 'err'}`}>{e.bytes_delta != null ? formatBytesDelta(e.bytes_delta) : '—'}</td>
               <td className="dim">{e.agent_id ?? e.user}</td>
               <td className="dim">{e.session_id ?? '—'}</td>
             </tr>

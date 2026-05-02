@@ -67,26 +67,34 @@ func TestFSFileCommandArgsKeepsWorkspaceSeparateFromPath(t *testing.T) {
 	}
 }
 
-func TestCmdFSHistoryWithWorkspaceFlagStillRequiresPath(t *testing.T) {
-	err := cmdFS([]string{"fs", "-w", "repo", "history"})
+func TestCmdFSRejectsWorkspaceFlag(t *testing.T) {
+	err := cmdFS([]string{"fs", "-w", "repo", "history", "/notes/app.txt"})
 	if err == nil {
-		t.Fatal("cmdFS(history) returned nil error, want missing path usage")
+		t.Fatal("cmdFS(-w) returned nil error, want unknown flag")
 	}
-	if !strings.Contains(err.Error(), "usage requires <path>") {
-		t.Fatalf("cmdFS(history) error = %q, want missing path usage", err)
+	if !strings.Contains(err.Error(), `unknown filesystem flag "-w"`) {
+		t.Fatalf("cmdFS(-w) error = %q, want unknown filesystem flag", err)
 	}
 	if strings.Contains(err.Error(), "current workspace") || strings.Contains(err.Error(), "ws use") {
-		t.Fatalf("cmdFS(history) error = %q, want path error without stale workspace guidance", err)
+		t.Fatalf("cmdFS(-w) error = %q, want no stale workspace guidance", err)
+	}
+
+	_, err = parseGrepArgs([]string{"--workspace", "repo", "TODO"})
+	if err == nil {
+		t.Fatal("parseGrepArgs(--workspace) returned nil error, want unknown flag")
+	}
+	if !strings.Contains(err.Error(), `unknown flag "--workspace"`) {
+		t.Fatalf("parseGrepArgs(--workspace) error = %q, want unknown flag", err)
 	}
 }
 
-func TestFileHistoryUsageMatchesFSWorkspaceFlag(t *testing.T) {
+func TestFileHistoryUsageMatchesPositionalWorkspace(t *testing.T) {
 	usage := fileHistoryUsageText("afs")
-	if !strings.Contains(usage, "afs fs [-w <workspace>] history <path>") {
-		t.Fatalf("fileHistoryUsageText() = %q, want fs -w usage", usage)
+	if !strings.Contains(usage, "afs fs [workspace] history <path>") {
+		t.Fatalf("fileHistoryUsageText() = %q, want positional workspace usage", usage)
 	}
-	if strings.Contains(usage, "[workspace] <path>") {
-		t.Fatalf("fileHistoryUsageText() = %q, did not expect positional workspace usage", usage)
+	if strings.Contains(usage, "-w") || strings.Contains(usage, "--workspace") {
+		t.Fatalf("fileHistoryUsageText() = %q, did not expect workspace flag usage", usage)
 	}
 	if strings.Contains(usage, "current workspace") || strings.Contains(usage, "ws use") {
 		t.Fatalf("fileHistoryUsageText() = %q, did not expect stale workspace-selection copy", usage)

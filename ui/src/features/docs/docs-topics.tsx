@@ -394,7 +394,7 @@ afs ws import --mount-at-source demo ~/src/demo`}</code>
               <td>Save the current live workspace as a restore point.</td>
             </tr>
             <tr>
-              <td><InlineCode>afs fs grep --workspace demo TODO</InlineCode></td>
+              <td><InlineCode>afs fs demo grep TODO</InlineCode></td>
               <td>Search workspace files directly through AFS.</td>
             </tr>
             <tr>
@@ -1114,9 +1114,9 @@ const performanceTopic: DocsTopic = {
             workspace, <InlineCode>rg</InlineCode> remains the right tool.
           </DocProse>
           <CodeBlock>
-            <code>{`afs fs grep --workspace demo "TODO"
-afs fs grep -l -i --workspace demo "disk full"
-afs fs grep --workspace demo -E "error|warning"`}</code>
+            <code>{`afs fs demo grep "TODO"
+afs fs demo grep -l -i "disk full"
+afs fs demo grep -E "error|warning"`}</code>
           </CodeBlock>
         </>
       ),

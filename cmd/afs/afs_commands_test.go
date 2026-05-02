@@ -397,6 +397,190 @@ func TestResolveWorkspaceSelectionFromControlPlanePrefersConfiguredWorkspaceID(t
 	}
 }
 
+func TestResolveWorkspaceSelectionPrefersCWDMountedWorkspace(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	mountDir := filepath.Join(homeDir, "beta")
+	subDir := filepath.Join(mountDir, "docs")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(mount) returned error: %v", err)
+	}
+	oldCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCWD)
+	})
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatalf("Chdir(subdir) returned error: %v", err)
+	}
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = "127.0.0.1:6379"
+	cfg.CurrentWorkspace = "alpha"
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{{
+		ID:          "att_beta",
+		Workspace:   "beta",
+		WorkspaceID: "ws_beta",
+		LocalPath:   mountDir,
+		ProductMode: productModeLocal,
+		RedisAddr:   cfg.RedisAddr,
+		RedisDB:     cfg.RedisDB,
+		PID:         os.Getpid(),
+		StartedAt:   time.Now().UTC(),
+	}}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	selection, err := resolveWorkspaceSelectionFromSummaries(cfg, "", []workspaceSummary{
+		{ID: "ws_alpha", Name: "alpha"},
+		{ID: "ws_beta", Name: "beta"},
+	}, false)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceSelectionFromSummaries() returned error: %v", err)
+	}
+	if selection.ID != "ws_beta" || selection.Name != "beta" || selection.Source != workspaceSelectionCWD {
+		t.Fatalf("selection = %+v, want CWD-mounted beta", selection)
+	}
+}
+
+func TestResolveWorkspaceSelectionUsesOnlyMountedWorkspace(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	otherDir := filepath.Join(homeDir, "outside")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(outside) returned error: %v", err)
+	}
+	oldCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCWD)
+	})
+	if err := os.Chdir(otherDir); err != nil {
+		t.Fatalf("Chdir(outside) returned error: %v", err)
+	}
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = "127.0.0.1:6379"
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{{
+		ID:          "att_beta",
+		Workspace:   "beta",
+		WorkspaceID: "ws_beta",
+		LocalPath:   filepath.Join(homeDir, "beta"),
+		ProductMode: productModeLocal,
+		RedisAddr:   cfg.RedisAddr,
+		RedisDB:     cfg.RedisDB,
+		PID:         os.Getpid(),
+		StartedAt:   time.Now().UTC(),
+	}}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	selection, err := resolveWorkspaceSelectionFromSummaries(cfg, "", []workspaceSummary{
+		{ID: "ws_beta", Name: "beta"},
+	}, false)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceSelectionFromSummaries() returned error: %v", err)
+	}
+	if selection.ID != "ws_beta" || selection.Name != "beta" || selection.Source != workspaceSelectionSingleMount {
+		t.Fatalf("selection = %+v, want only mounted beta", selection)
+	}
+}
+
+func TestResolveWorkspaceSelectionMultipleMountsRequireWorkspace(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	outsideDir := filepath.Join(homeDir, "outside")
+	if err := os.MkdirAll(outsideDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(outside) returned error: %v", err)
+	}
+	oldCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldCWD)
+	})
+	if err := os.Chdir(outsideDir); err != nil {
+		t.Fatalf("Chdir(outside) returned error: %v", err)
+	}
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = "127.0.0.1:6379"
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{
+		{
+			ID:        "att_alpha",
+			Workspace: "alpha",
+			LocalPath: filepath.Join(homeDir, "alpha"),
+			RedisAddr: cfg.RedisAddr,
+			RedisDB:   cfg.RedisDB,
+			PID:       os.Getpid(),
+		},
+		{
+			ID:        "att_beta",
+			Workspace: "beta",
+			LocalPath: filepath.Join(homeDir, "beta"),
+			RedisAddr: cfg.RedisAddr,
+			RedisDB:   cfg.RedisDB,
+			PID:       os.Getpid(),
+		},
+	}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	_, err = resolveWorkspaceSelectionFromSummaries(cfg, "", []workspaceSummary{
+		{Name: "alpha"},
+		{Name: "beta"},
+	}, false)
+	if err == nil {
+		t.Fatal("resolveWorkspaceSelectionFromSummaries() returned nil error, want multiple-mount guidance")
+	}
+	if !strings.Contains(err.Error(), "multiple workspaces are mounted") {
+		t.Fatalf("error = %q, want multiple-mount guidance", err)
+	}
+}
+
+func TestResolveWorkspaceSelectionPromptsWhenSavedDefaultIsMissing(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdin) returned error: %v", err)
+	}
+	if _, err := input.WriteString("2\n"); err != nil {
+		t.Fatalf("WriteString(stdin) returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek(stdin) returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	cfg := defaultConfig()
+	cfg.CurrentWorkspace = "missing"
+	selection, err := resolveWorkspaceSelectionFromSummaries(cfg, "", []workspaceSummary{
+		{ID: "ws_alpha", Name: "alpha"},
+		{ID: "ws_beta", Name: "beta"},
+	}, true)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceSelectionFromSummaries() returned error: %v", err)
+	}
+	if selection.ID != "ws_beta" || selection.Name != "beta" || selection.Source != workspaceSelectionPrompt {
+		t.Fatalf("selection = %+v, want prompted beta", selection)
+	}
+}
+
 func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameErrorIncludesDatabaseNames(t *testing.T) {
 	t.Helper()
 
@@ -420,7 +604,7 @@ func TestResolveWorkspaceSelectionFromControlPlaneDuplicateNameErrorIncludesData
 	}
 }
 
-func TestResolveWorkspaceSelectionFromControlPlaneCurrentWorkspaceAmbiguityIncludesRecovery(t *testing.T) {
+func TestResolveWorkspaceSelectionFromControlPlaneDefaultWorkspaceAmbiguityIncludesRecovery(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
@@ -437,12 +621,12 @@ func TestResolveWorkspaceSelectionFromControlPlaneCurrentWorkspaceAmbiguityInclu
 		},
 	}, "")
 	if err == nil {
-		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want current-workspace ambiguity guidance")
+		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want default-workspace ambiguity guidance")
 	}
-	if !strings.Contains(err.Error(), `workspace "getting-started" is ambiguous`) {
-		t.Fatalf("error = %q, want workspace ambiguity preamble", err)
+	if !strings.Contains(err.Error(), `default workspace "getting-started" is ambiguous`) {
+		t.Fatalf("error = %q, want default workspace ambiguity preamble", err)
 	}
-	if !strings.Contains(err.Error(), "pass the workspace id explicitly") {
+	if !strings.Contains(err.Error(), "ws set-default <workspace-id>") {
 		t.Fatalf("error = %q, want recovery command", err)
 	}
 }
@@ -496,7 +680,7 @@ func TestResolveWorkspaceSelectionFromControlPlaneRejectsTypo(t *testing.T) {
 	}
 }
 
-func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *testing.T) {
+func TestCurrentWorkspaceNameErrorsWhenConfiguredDefaultWorkspaceMissing(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -517,10 +701,10 @@ func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *test
 
 	_, err := currentWorkspaceName(ctx, cfg, store)
 	if err == nil {
-		t.Fatal("currentWorkspaceName() returned nil error, want missing current workspace error")
+		t.Fatal("currentWorkspaceName() returned nil error, want missing default workspace error")
 	}
-	if !strings.Contains(err.Error(), `workspace "missing" does not exist`) {
-		t.Fatalf("currentWorkspaceName() error = %q, want missing configured current workspace", err)
+	if !strings.Contains(err.Error(), `default workspace "missing" does not exist`) {
+		t.Fatalf("currentWorkspaceName() error = %q, want missing configured default workspace", err)
 	}
 }
 
@@ -549,8 +733,8 @@ func TestCurrentWorkspaceNameErrorsWhenNoWorkspaceCanBeInferred(t *testing.T) {
 	if err == nil {
 		t.Fatal("currentWorkspaceName() returned nil error, want explicit workspace error")
 	}
-	if !strings.Contains(err.Error(), "workspace is required; pass a workspace explicitly") {
-		t.Fatalf("currentWorkspaceName() error = %q, want explicit workspace guidance", err)
+	if !strings.Contains(err.Error(), "workspace is required") {
+		t.Fatalf("currentWorkspaceName() error = %q, want missing workspace guidance", err)
 	}
 }
 

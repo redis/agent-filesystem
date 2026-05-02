@@ -134,7 +134,7 @@ func TestTopLevelUsageSurfacesAuthInsteadOfLoginLogout(t *testing.T) {
 		t.Fatalf("printUsage() returned error: %v", err)
 	}
 	out = stripAnsi(out)
-	if !strings.Contains(out, "auth") || !strings.Contains(out, "Login, logout, and inspect authentication") {
+	if !strings.Contains(out, "auth") || !strings.Contains(out, "login, logout, and inspect authentication") {
 		t.Fatalf("printUsage() = %q, want auth command", out)
 	}
 	if strings.Contains(out, "\n  login") || strings.Contains(out, "\n  logout") {

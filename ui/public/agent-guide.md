@@ -98,8 +98,8 @@ Add a `.afsignore` file (same syntax as `.gitignore`) to exclude `node_modules/`
 Search directly in Redis without needing a local mount:
 
 ```bash
-./afs fs grep --workspace my-project "TODO"
-./afs fs grep --workspace my-project --path /src -E "function|class"
+./afs fs my-project grep "TODO"
+./afs fs my-project grep --path /src -E "function|class"
 ```
 
 ## Configuration

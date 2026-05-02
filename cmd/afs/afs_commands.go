@@ -681,31 +681,34 @@ func afsBlobTotals(blobs map[string][]byte) (int, int64) {
 	return len(blobs), total
 }
 
+type workspaceSelection struct {
+	ID        string
+	Name      string
+	Source    workspaceSelectionSource
+	MountPath string
+}
+
+type workspaceSelectionSource string
+
+const (
+	workspaceSelectionExplicit     workspaceSelectionSource = "explicit"
+	workspaceSelectionCWD          workspaceSelectionSource = "cwd-mounted"
+	workspaceSelectionSingleMount  workspaceSelectionSource = "mounted"
+	workspaceSelectionActiveState  workspaceSelectionSource = "active-runtime"
+	workspaceSelectionSavedDefault workspaceSelectionSource = "default"
+	workspaceSelectionPrompt       workspaceSelectionSource = "prompt"
+)
+
 func currentWorkspaceName(ctx context.Context, cfg config, store *afsStore) (string, error) {
-	workspace := selectedWorkspaceName(cfg)
-	if workspace != "" {
-		exists, err := store.workspaceExists(ctx, workspace)
-		if err != nil {
-			return "", err
-		}
-		if exists {
-			return workspace, nil
-		}
-		return "", fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", workspace)
-	}
 	workspaces, err := store.listWorkspaces(ctx)
 	if err != nil {
 		return "", err
 	}
-	if len(workspaces) == 1 {
-		return workspaces[0].Name, nil
+	selection, err := resolveWorkspaceSelectionFromSummaries(cfg, "", workspaceSummariesFromMetas(workspaces), false)
+	if err != nil {
+		return "", err
 	}
-	return "", errors.New("workspace is required; pass a workspace explicitly")
-}
-
-type workspaceSelection struct {
-	ID   string
-	Name string
+	return selection.Name, nil
 }
 
 func currentWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, service afsControlPlane) (workspaceSelection, error) {
@@ -720,66 +723,110 @@ func resolveWorkspaceName(ctx context.Context, cfg config, store *afsStore, requ
 }
 
 func resolveWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, service afsControlPlane, requested string) (workspaceSelection, error) {
+	return resolveWorkspaceSelectionFromControlPlaneWithPrompt(ctx, cfg, service, requested, false)
+}
+
+func resolveCommandWorkspaceSelectionFromControlPlane(ctx context.Context, cfg config, service afsControlPlane, requested string) (workspaceSelection, error) {
+	return resolveWorkspaceSelectionFromControlPlaneWithPrompt(ctx, cfg, service, requested, true)
+}
+
+func resolveWorkspaceSelectionFromControlPlaneWithPrompt(ctx context.Context, cfg config, service afsControlPlane, requested string, allowPrompt bool) (workspaceSelection, error) {
 	workspaces, err := service.ListWorkspaceSummaries(ctx)
 	if err != nil {
 		return workspaceSelection{}, err
 	}
+	return resolveWorkspaceSelectionFromSummaries(cfg, requested, workspaces.Items, allowPrompt)
+}
 
+func resolveWorkspaceSelectionFromSummaries(cfg config, requested string, workspaces []workspaceSummary, allowPrompt bool) (workspaceSelection, error) {
 	ref := strings.TrimSpace(requested)
-	configDisplayName := selectedWorkspaceName(cfg)
-	displayName := ""
-	if ref == "" {
-		// No explicit workspace: resolve against the current config. Pass the
-		// config's display name as a fallback to matchWorkspaceSelection so a
-		// stale ID can be repaired via the still-valid name.
-		displayName = configDisplayName
-		// In managed modes, an explicitly configured workspace ID should win
-		// over any inherited runtime state so duplicate-name routing stays
-		// stable across bootstrap and reconnect flows.
-		if configuredID := strings.TrimSpace(cfg.CurrentWorkspaceID); configuredID != "" {
-			ref = configuredID
-			if configuredName := strings.TrimSpace(cfg.CurrentWorkspace); configuredName != "" {
-				displayName = configuredName
-			}
-		} else {
-			ref = selectedWorkspaceReference(cfg)
+	if ref != "" {
+		selection, err := resolveExplicitWorkspaceSelection(ref, workspaces)
+		if err != nil {
+			return workspaceSelection{}, err
 		}
-	}
-	if ref == "" {
-		if len(workspaces.Items) == 1 {
-			only := workspaces.Items[0]
-			return workspaceSelection{ID: only.ID, Name: only.Name}, nil
-		}
-		return workspaceSelection{}, errors.New("workspace is required; pass a workspace explicitly")
+		return selection, nil
 	}
 
-	// When the user supplied an explicit workspace, we do NOT fall back to
-	// the currently-selected workspace on a miss — that turned typos into
-	// silent successes.
-	if match, ok, err := matchWorkspaceSelection(ref, displayName, workspaces.Items); err != nil {
-		if requested == "" {
-			label := ref
-			if configDisplayName != "" {
-				label = configDisplayName
+	var fallbackErr error
+	trySelection := func(selection workspaceSelection, ok bool, err error) (workspaceSelection, bool, error) {
+		if err != nil {
+			if allowPrompt {
+				if fallbackErr == nil {
+					fallbackErr = err
+				}
+				return workspaceSelection{}, false, nil
 			}
-			return workspaceSelection{}, fmt.Errorf("workspace %q is ambiguous: %w\nRun '%s ws list' and pass the workspace id explicitly", label, err, filepath.Base(os.Args[0]))
+			return workspaceSelection{}, false, err
 		}
-		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s ws list' and pass the workspace id explicitly", err, filepath.Base(os.Args[0]))
+		if ok {
+			return selection, true, nil
+		}
+		return workspaceSelection{}, false, nil
+	}
+
+	if selection, ok, err := trySelection(workspaceSelectionFromCWDMount(cfg, workspaces)); err != nil {
+		return workspaceSelection{}, err
 	} else if ok {
+		return selection, nil
+	}
+
+	if selection, ok, err := trySelection(workspaceSelectionFromSingleMount(cfg, workspaces)); err != nil {
+		return workspaceSelection{}, err
+	} else if ok {
+		return selection, nil
+	}
+
+	if strings.TrimSpace(cfg.CurrentWorkspaceID) != "" {
+		if selection, ok, err := trySelection(workspaceSelectionFromSavedDefault(cfg, workspaces)); err != nil {
+			return workspaceSelection{}, err
+		} else if ok {
+			return selection, nil
+		}
+	}
+
+	if selection, ok, err := trySelection(workspaceSelectionFromActiveState(cfg, workspaces)); err != nil {
+		return workspaceSelection{}, err
+	} else if ok {
+		return selection, nil
+	}
+
+	if selection, ok, err := trySelection(workspaceSelectionFromSavedDefault(cfg, workspaces)); err != nil {
+		return workspaceSelection{}, err
+	} else if ok {
+		return selection, nil
+	}
+
+	if allowPrompt {
+		selection, err := promptWorkspaceSelectionFromSummaries(workspaces)
+		if err == nil {
+			return selection, nil
+		}
+		if fallbackErr != nil {
+			return workspaceSelection{}, fallbackErr
+		}
+		return workspaceSelection{}, err
+	}
+
+	return workspaceSelection{}, workspaceRequiredError(cfg)
+}
+
+func resolveExplicitWorkspaceSelection(ref string, workspaces []workspaceSummary) (workspaceSelection, error) {
+	match, ok, err := matchWorkspaceSelection(ref, "", workspaces)
+	if err != nil {
+		return workspaceSelection{}, fmt.Errorf("%w\nRun '%s ws list' and pass the workspace id explicitly", err, filepath.Base(os.Args[0]))
+	}
+	if ok {
+		match.Source = workspaceSelectionExplicit
 		return match, nil
 	}
-
-	if requested == "" {
-		label := ref
-		if configDisplayName != "" {
-			label = configDisplayName
-		}
-		return workspaceSelection{}, fmt.Errorf("workspace %q does not exist; pass a workspace explicitly", label)
-	}
-	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", ref)
+	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", strings.TrimSpace(ref))
 }
 
 func selectedWorkspaceName(cfg config) string {
+	if active := selectedMountedWorkspace(cfg); active.Name != "" {
+		return active.Name
+	}
 	if active := activeWorkspaceFromState(cfg); active.Name != "" {
 		return active.Name
 	}
@@ -787,6 +834,12 @@ func selectedWorkspaceName(cfg config) string {
 }
 
 func selectedWorkspaceReference(cfg config) string {
+	if active := selectedMountedWorkspace(cfg); active.ID != "" || active.Name != "" {
+		if active.ID != "" {
+			return active.ID
+		}
+		return active.Name
+	}
 	if active := activeWorkspaceFromState(cfg); active.ID != "" || active.Name != "" {
 		if active.ID != "" {
 			return active.ID
@@ -797,6 +850,23 @@ func selectedWorkspaceReference(cfg config) string {
 		return strings.TrimSpace(cfg.CurrentWorkspaceID)
 	}
 	return strings.TrimSpace(cfg.CurrentWorkspace)
+}
+
+func configuredWorkspaceReference(cfg config) string {
+	if strings.TrimSpace(cfg.CurrentWorkspaceID) != "" {
+		return strings.TrimSpace(cfg.CurrentWorkspaceID)
+	}
+	return strings.TrimSpace(cfg.CurrentWorkspace)
+}
+
+func selectedMountedWorkspace(cfg config) workspaceSelection {
+	if selection, ok, _ := workspaceSelectionFromCWDMount(cfg, nil); ok {
+		return selection
+	}
+	if selection, ok, _ := workspaceSelectionFromSingleMount(cfg, nil); ok {
+		return selection
+	}
+	return workspaceSelection{}
 }
 
 func activeWorkspaceFromState(cfg config) workspaceSelection {
@@ -816,8 +886,9 @@ func activeWorkspaceFromState(cfg config) workspaceSelection {
 			return workspaceSelection{}
 		}
 		return workspaceSelection{
-			ID:   strings.TrimSpace(st.CurrentWorkspaceID),
-			Name: strings.TrimSpace(st.CurrentWorkspace),
+			ID:     strings.TrimSpace(st.CurrentWorkspaceID),
+			Name:   strings.TrimSpace(st.CurrentWorkspace),
+			Source: workspaceSelectionActiveState,
 		}
 	}
 
@@ -827,9 +898,241 @@ func activeWorkspaceFromState(cfg config) workspaceSelection {
 	}
 
 	return workspaceSelection{
-		ID:   strings.TrimSpace(st.CurrentWorkspaceID),
-		Name: strings.TrimSpace(st.CurrentWorkspace),
+		ID:     strings.TrimSpace(st.CurrentWorkspaceID),
+		Name:   strings.TrimSpace(st.CurrentWorkspace),
+		Source: workspaceSelectionActiveState,
 	}
+}
+
+func workspaceSelectionFromCWDMount(cfg config, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return workspaceSelection{}, false, nil
+	}
+	reg, err := loadMountRegistry()
+	if err != nil {
+		return workspaceSelection{}, false, err
+	}
+	var matches []mountRecord
+	for _, rec := range runningMountRecordsForConfig(cfg, reg.Mounts) {
+		localPath := physicalCleanPath(rec.LocalPath)
+		cleanCWD := physicalCleanPath(cwd)
+		if cleanCWD == localPath || pathContains(localPath, cleanCWD) {
+			matches = append(matches, rec)
+		}
+	}
+	if len(matches) == 0 {
+		return workspaceSelection{}, false, nil
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		return len(filepath.Clean(matches[i].LocalPath)) > len(filepath.Clean(matches[j].LocalPath))
+	})
+	return workspaceSelectionFromMountRecord(matches[0], workspaces, workspaceSelectionCWD)
+}
+
+func workspaceSelectionFromSingleMount(cfg config, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	reg, err := loadMountRegistry()
+	if err != nil {
+		return workspaceSelection{}, false, err
+	}
+	running := runningMountRecordsForConfig(cfg, reg.Mounts)
+	if len(running) != 1 {
+		return workspaceSelection{}, false, nil
+	}
+	return workspaceSelectionFromMountRecord(running[0], workspaces, workspaceSelectionSingleMount)
+}
+
+func physicalCleanPath(path string) string {
+	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return clean
+}
+
+func runningMountRecordsForConfig(cfg config, records []mountRecord) []mountRecord {
+	matches := make([]mountRecord, 0, len(records))
+	for _, rec := range sortedMountRecords(records) {
+		if mountStatus(rec) != "running" {
+			continue
+		}
+		if !mountRecordMatchesConfig(cfg, rec) {
+			continue
+		}
+		matches = append(matches, rec)
+	}
+	return matches
+}
+
+func mountRecordMatchesConfig(cfg config, rec mountRecord) bool {
+	cfgMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return false
+	}
+	recMode := strings.TrimSpace(rec.ProductMode)
+	if recMode != "" && recMode != cfgMode {
+		return false
+	}
+	switch cfgMode {
+	case productModeLocal:
+		if strings.TrimSpace(rec.RedisAddr) != "" && strings.TrimSpace(cfg.RedisAddr) != "" && strings.TrimSpace(rec.RedisAddr) != strings.TrimSpace(cfg.RedisAddr) {
+			return false
+		}
+		return rec.RedisDB == cfg.RedisDB
+	case productModeSelfHosted, productModeCloud:
+		recURL := strings.TrimSpace(rec.ControlPlaneURL)
+		cfgURL := strings.TrimSpace(cfg.URL)
+		if recURL == "" || cfgURL == "" {
+			return false
+		}
+		return recURL == cfgURL
+	default:
+		return false
+	}
+}
+
+func workspaceSelectionFromMountRecord(rec mountRecord, workspaces []workspaceSummary, source workspaceSelectionSource) (workspaceSelection, bool, error) {
+	selection := workspaceSelection{
+		ID:        strings.TrimSpace(rec.WorkspaceID),
+		Name:      strings.TrimSpace(rec.Workspace),
+		Source:    source,
+		MountPath: strings.TrimSpace(rec.LocalPath),
+	}
+	if len(workspaces) == 0 {
+		return selection, selection.Name != "" || selection.ID != "", nil
+	}
+	ref := selection.ID
+	if ref == "" {
+		ref = selection.Name
+	}
+	match, ok, err := matchWorkspaceSelection(ref, selection.Name, workspaces)
+	if err != nil {
+		return workspaceSelection{}, false, fmt.Errorf("mounted workspace %q is ambiguous: %w\nRun '%s ws list' and pass a workspace id explicitly", selection.Name, err, filepath.Base(os.Args[0]))
+	}
+	if !ok {
+		label := selection.Name
+		if label == "" {
+			label = selection.ID
+		}
+		return workspaceSelection{}, false, fmt.Errorf("mounted workspace %q does not exist; pass a workspace explicitly", label)
+	}
+	match.Source = source
+	match.MountPath = selection.MountPath
+	return match, true, nil
+}
+
+func workspaceSelectionFromActiveState(cfg config, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	active := activeWorkspaceFromState(cfg)
+	if active.ID == "" && active.Name == "" {
+		return workspaceSelection{}, false, nil
+	}
+	if len(workspaces) == 0 {
+		return active, true, nil
+	}
+	ref := active.ID
+	if ref == "" {
+		ref = active.Name
+	}
+	match, ok, err := matchWorkspaceSelection(ref, active.Name, workspaces)
+	if err != nil {
+		return workspaceSelection{}, false, fmt.Errorf("active workspace %q is ambiguous: %w\nRun '%s ws list' and pass a workspace id explicitly", active.Name, err, filepath.Base(os.Args[0]))
+	}
+	if !ok {
+		label := active.Name
+		if label == "" {
+			label = active.ID
+		}
+		return workspaceSelection{}, false, fmt.Errorf("active workspace %q does not exist; pass a workspace explicitly", label)
+	}
+	match.Source = workspaceSelectionActiveState
+	return match, true, nil
+}
+
+func workspaceSelectionFromSavedDefault(cfg config, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	ref := configuredWorkspaceReference(cfg)
+	if ref == "" {
+		return workspaceSelection{}, false, nil
+	}
+	displayName := strings.TrimSpace(cfg.CurrentWorkspace)
+	match, ok, err := matchWorkspaceSelection(ref, displayName, workspaces)
+	if err != nil {
+		label := displayName
+		if label == "" {
+			label = ref
+		}
+		return workspaceSelection{}, false, fmt.Errorf("default workspace %q is ambiguous: %w\nRun '%s ws set-default <workspace-id>'", label, err, filepath.Base(os.Args[0]))
+	}
+	if !ok {
+		label := displayName
+		if label == "" {
+			label = ref
+		}
+		return workspaceSelection{}, false, fmt.Errorf("default workspace %q does not exist; pass a workspace explicitly or run '%s ws unset-default'", label, filepath.Base(os.Args[0]))
+	}
+	match.Source = workspaceSelectionSavedDefault
+	return match, true, nil
+}
+
+func workspaceRequiredError(cfg config) error {
+	reg, err := loadMountRegistry()
+	if err == nil {
+		running := runningMountRecordsForConfig(cfg, reg.Mounts)
+		if len(running) > 1 {
+			return fmt.Errorf("workspace is required; multiple workspaces are mounted\nRun this command inside a mounted workspace, pass a workspace explicitly, or run '%s ws set-default <workspace>'", filepath.Base(os.Args[0]))
+		}
+	}
+	return fmt.Errorf("workspace is required; pass a workspace explicitly or run '%s ws set-default <workspace>'", filepath.Base(os.Args[0]))
+}
+
+func workspaceSummariesFromMetas(metas []workspaceMeta) []workspaceSummary {
+	items := make([]workspaceSummary, 0, len(metas))
+	for _, meta := range metas {
+		items = append(items, workspaceSummary{
+			ID:           strings.TrimSpace(meta.ID),
+			Name:         strings.TrimSpace(meta.Name),
+			DatabaseID:   strings.TrimSpace(meta.DatabaseID),
+			DatabaseName: strings.TrimSpace(meta.DatabaseName),
+			RedisKey:     strings.TrimSpace(meta.ID),
+			UpdatedAt:    meta.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+	return items
+}
+
+func promptWorkspaceSelectionFromSummaries(workspaces []workspaceSummary) (workspaceSelection, error) {
+	if len(workspaces) == 0 {
+		return workspaceSelection{}, fmt.Errorf("no workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
+	}
+
+	fmt.Println()
+	fmt.Println("Select workspace")
+	fmt.Println()
+	printPlainTable([]string{"#", "Workspace", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces, workspaceListMounts()))
+	fmt.Println()
+	fmt.Print("Workspace: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	raw, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(raw) == "" {
+		fmt.Println()
+		return workspaceSelection{}, errors.New("workspace selection cancelled")
+	}
+	choiceText := strings.TrimSpace(raw)
+	if choiceText == "" {
+		fmt.Println()
+		return workspaceSelection{}, errors.New("workspace selection cancelled")
+	}
+	idx, err := strconv.Atoi(choiceText)
+	if err != nil || idx < 1 || idx > len(workspaces) {
+		return workspaceSelection{}, fmt.Errorf("invalid selection %q", choiceText)
+	}
+	fmt.Println()
+	selected := workspaces[idx-1]
+	return workspaceSelection{
+		ID:     selected.ID,
+		Name:   selected.Name,
+		Source: workspaceSelectionPrompt,
+	}, nil
 }
 
 func runtimeStateMatchesConfig(cfg config, st state) bool {

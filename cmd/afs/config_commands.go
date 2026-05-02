@@ -197,7 +197,7 @@ func cmdConfigShow(args []string) error {
 	if jsonOut.set && jsonOut.value {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(cfg)
+		return enc.Encode(persistedConfigFromRuntime(cfg))
 	}
 
 	source := "defaults (not yet saved)"
@@ -823,9 +823,9 @@ Notes:
   Keys are case-insensitive.
   Use "self-managed" for the control-plane-backed mode.
   Workspace mounts are runtime state; use '%s ws mount <workspace> <directory>'.
-  Current workspace is not configured here.
+  Default workspace is managed with '%s ws set-default <workspace>'.
   Mode and other runtime paths stay available in afs.config.json.
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func configUnsetUsageText(bin string) string {

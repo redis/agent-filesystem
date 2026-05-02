@@ -4,6 +4,7 @@
 import { Link } from 'react-router-dom'
 import { Frame } from '../frame'
 import { ActionsInline } from '../actions-row'
+import { formatBytes } from '../format'
 import { loadWorkspaces } from '../loaders'
 import { useFetch } from '../hooks'
 import { adaptWorkspaceList } from '../adapters'
@@ -43,7 +44,7 @@ export default function Workspaces() {
             <th>state</th>
             <th className="num">files</th>
             <th className="num">bytes</th>
-            <th className="num">cps</th>
+            <th className="num">checkpoints</th>
             <th>updated</th>
             <th>_actions</th>
           </tr>
@@ -59,11 +60,12 @@ export default function Workspaces() {
                 <span className={`chip ${w.draft_state === 'dirty' ? 'warn' : 'ok'}`}>{w.draft_state}</span>
               </td>
               <td className="num">{w.file_count}</td>
-              <td className="num">{w.total_bytes.toLocaleString()}</td>
+              <td className="num">{formatBytes(w.total_bytes)}</td>
               <td className="num">{w.checkpoint_count}</td>
               <td className="dim">{relTime(w.updated_at)}</td>
               <td className="actions">
-                <ActionsInline actions={w._actions} featuredCount={3} />
+                {/* table view: 2 inline (checkpoint, restore) + more (2). delete is hidden in list views — too easy to click destructively; available on the detail page. */}
+                <ActionsInline actions={w._actions.slice(0, 4)} featuredCount={2} />
               </td>
             </tr>
           ))}

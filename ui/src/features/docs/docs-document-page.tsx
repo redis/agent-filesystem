@@ -306,7 +306,7 @@ afs ws import --mount-at-source demo ~/src/demo`}
               </tr>
               <tr>
                 <td>
-                  <InlineCode>afs fs grep --workspace demo TODO</InlineCode>
+                  <InlineCode>afs fs demo grep TODO</InlineCode>
                 </td>
                 <td>Search workspace files directly through AFS.</td>
               </tr>
@@ -663,9 +663,9 @@ afs ws mount getting-started ~/getting-started`}
           </MarkdownTable>
 
           <TerminalBlock
-            code={`afs fs grep --workspace demo "TODO"
-afs fs grep -l -i --workspace demo "disk full"
-afs fs grep --workspace demo -E "error|warning"`}
+            code={`afs fs demo grep "TODO"
+afs fs demo grep -l -i "disk full"
+afs fs demo grep -E "error|warning"`}
           />
 
           <Note>

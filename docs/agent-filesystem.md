@@ -219,9 +219,9 @@ a synced or mounted workspace, local `rg` is often the right tool.
 Examples:
 
 ```bash
-afs fs grep --workspace my-project "TODO"
-afs fs grep -l -i --workspace my-project "disk full"
-afs fs grep --workspace my-project -E "error|warning"
+afs fs my-project grep "TODO"
+afs fs my-project grep -l -i "disk full"
+afs fs my-project grep -E "error|warning"
 ```
 
 ## Local Runtime Notes

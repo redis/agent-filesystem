@@ -56,6 +56,7 @@ type persistedConfig struct {
 	Redis        redisConfig          `json:"redis"`
 	ControlPlane controlPlaneSettings `json:"controlPlane,omitempty"`
 	Agent        agentSettings        `json:"agent,omitempty"`
+	Workspace    workspaceSettings    `json:"workspace,omitempty"`
 	ProductMode  string               `json:"productMode,omitempty"`
 	Mode         string               `json:"mode,omitempty"`
 	Sync         *syncSettings        `json:"sync,omitempty"`
@@ -89,6 +90,12 @@ func persistedConfigFromRuntime(cfg config) persistedConfig {
 			ID:   strings.TrimSpace(cfg.ID),
 			Name: strings.TrimSpace(cfg.Name),
 		},
+	}
+	if strings.TrimSpace(cfg.CurrentWorkspace) != "" || strings.TrimSpace(cfg.CurrentWorkspaceID) != "" {
+		out.Workspace = workspaceSettings{
+			DefaultWorkspace:   strings.TrimSpace(cfg.CurrentWorkspace),
+			DefaultWorkspaceID: strings.TrimSpace(cfg.CurrentWorkspaceID),
+		}
 	}
 	if productMode != productModeLocal {
 		out.ControlPlane = controlPlaneSettings{
@@ -146,15 +153,23 @@ func loadConfig() (config, error) {
 	} else if legacy.SyncFileSizeCapMB != 0 {
 		cfg.syncSettings = legacy.syncSettings
 	}
+	cfg.CurrentWorkspace = strings.TrimSpace(raw.Workspace.DefaultWorkspace)
+	cfg.CurrentWorkspaceID = strings.TrimSpace(raw.Workspace.DefaultWorkspaceID)
+	if cfg.CurrentWorkspace == "" && cfg.CurrentWorkspaceID == "" {
+		if raw.Runtime != nil {
+			cfg.CurrentWorkspace = strings.TrimSpace(raw.Runtime.CurrentWorkspace)
+			cfg.CurrentWorkspaceID = strings.TrimSpace(raw.Runtime.CurrentWorkspaceID)
+		} else {
+			cfg.CurrentWorkspace = legacy.CurrentWorkspace
+			cfg.CurrentWorkspaceID = legacy.CurrentWorkspaceID
+		}
+	}
+
 	if raw.Runtime != nil {
-		cfg.CurrentWorkspace = raw.Runtime.CurrentWorkspace
-		cfg.CurrentWorkspaceID = raw.Runtime.CurrentWorkspaceID
 		cfg.LocalPath = raw.Runtime.LocalPath
 		cfg.mountSettings = raw.Runtime.Mount
 		cfg.logSettings = raw.Runtime.Logs
 	} else {
-		cfg.CurrentWorkspace = legacy.CurrentWorkspace
-		cfg.CurrentWorkspaceID = legacy.CurrentWorkspaceID
 		cfg.LocalPath = legacy.LocalPath
 		cfg.mountSettings = legacy.mountSettings
 		cfg.logSettings = legacy.logSettings

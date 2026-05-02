@@ -142,6 +142,14 @@ If you want to save a known-good point:
 ./afs cp create my-repo before-refactor
 ```
 
+If you want commands with an optional workspace argument to use `my-repo` by
+default:
+
+```bash
+./afs ws set-default my-repo
+./afs cp list
+```
+
 If you want a second line of work:
 
 ```bash
@@ -190,7 +198,7 @@ Notable current rules:
 - `redisKey` is not a config setting anymore; workspace keys are derived internally
 - `workspace run` is gone; use `afs ws mount` for local work
 - `workRoot` is internal state, not a user-facing config field
-- `afs.config.json` stores connection defaults, not the current workspace or local folder
+- `afs.config.json` stores connection defaults and an optional default workspace, not the current local folder
 
 ## MCP Server
 
@@ -276,6 +284,7 @@ Current macOS/NFS caveats:
 ./afs ws create <workspace>
 ./afs ws import --mount-at-source <workspace> <directory>
 ./afs ws list
+./afs ws set-default <workspace>
 ./afs ws mount <workspace> <directory>
 ./afs ws unmount <workspace-or-directory>
 ./afs ws fork <workspace> <new-workspace>

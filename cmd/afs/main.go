@@ -138,18 +138,18 @@ func printUsage() {
 	fmt.Fprintf(w, "  %s-V, --version%s        %sOutput the version number%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
-	fmt.Fprintf(w, "  %sstatus%s             %sShow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sstatus%s             %sshow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sws%s (workspace)     %sMount, unmount, create, list, import, fork, versioning%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sRead, search, and safely write workspace files%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %scp%s (checkpoint)    %sCreate, list, show, diff, restore%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, unmount, create, list, import, fork, versioning, delete%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sread, search, and safely write workspace files%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %scp%s (checkpoint)    %screate, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sauth%s               %sLogin, logout, and inspect authentication%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %ssetup%s              %sConfigure basic connection defaults%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sconfig%s             %sGet, set, list, unset, reset config%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sdatabase%s           %sAdvanced database operations%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %smcp%s                %sStart the MCP server%s\n\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sauth%s               %slogin, logout, and inspect authentication%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %ssetup%s              %sconfigure basic connection defaults%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sconfig%s             %sget, set, list, unset, reset config%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sdatabase%s           %sadvanced database operations%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %smcp%s                %sstart the MCP server%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %s%s auth login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)

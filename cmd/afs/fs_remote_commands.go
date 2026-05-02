@@ -42,10 +42,7 @@ func openFSRemoteWorkspace(ctx context.Context, workspace string) (*fsRemoteWork
 }
 
 func resolveFSWorkspaceSelection(ctx context.Context, cfg config, service afsControlPlane, workspace string) (workspaceSelection, error) {
-	if strings.TrimSpace(workspace) != "" {
-		return resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
-	}
-	return promptCheckpointWorkspaceSelection(ctx, service)
+	return resolveCommandWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
 }
 
 func cmdFSList(workspace string, args []string) error {
@@ -382,7 +379,7 @@ func formatFSMtime(raw string) string {
 
 func fsListUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs -w <workspace> ls [path]
+  %s fs [workspace] ls [path]
 
 List files in a workspace directory.
 `, bin)
@@ -390,8 +387,8 @@ List files in a workspace directory.
 
 func fsCatUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs -w <workspace> cat <path>
-  %s fs -w <workspace> cat <path> --version <version-id>
+  %s fs [workspace] cat <path>
+  %s fs [workspace] cat <path> --version <version-id>
 
 Print a workspace file to stdout. With --version or --file-id/--ordinal, print
 an exact historical file version.
@@ -400,7 +397,7 @@ an exact historical file version.
 
 func fsFindUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s fs -w <workspace> find [path] [-name <pattern>] [-type f|d|l] [-print]
+  %s fs [workspace] find [path] [-name <pattern>] [-type f|d|l] [-print]
 
 Find workspace paths by basename pattern.
 `, bin)

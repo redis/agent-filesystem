@@ -117,13 +117,13 @@ export function Frame(props: FrameProps) {
           <span className="verb">{request.method}</span>{' '}
           <span className="strong">{path}</span>
         </div>
-        <div className="dim">├{'─'.repeat(60)}</div>
+        <div className="dim">├{'─'.repeat(FRAME_WIDTH - 1)}</div>
       </header>
 
       <main>{children}</main>
 
       <footer className="frame-footer">
-        <div className="dim">├{'─'.repeat(60)}</div>
+        <div className="dim">├{'─'.repeat(FRAME_WIDTH - 1)}</div>
         <RequestRow request={request} realPath={realPath} />
         <FormatToggle
           openFormat={openFormat}
@@ -138,17 +138,22 @@ export function Frame(props: FrameProps) {
           pyCall={pyCall}
           tsCall={tsCall}
         />
-        <div className="dim">└{'─'.repeat(60)}</div>
+        <div className="dim">└{'─'.repeat(FRAME_WIDTH - 1)}</div>
       </footer>
     </div>
   )
 }
 
+// total visible width of the ┌─ … ─┐ chrome line, in chars.
+// every horizontal rule in the frame matches this.
+const FRAME_WIDTH = 70
+
 function CommandLine({ cliCommand, request, path }: { cliCommand?: string[]; request: RequestShape; path: string }) {
   const cliText = cliCommand && cliCommand.length > 0 ? `$ ${cliCommand.join(' ')}` : null
   const fallback = `${request.method} ${path}`
   const head = cliText ?? fallback
-  const dashes = '─'.repeat(Math.max(2, 70 - head.length - 4))
+  // ┌─ + space + head + space → that's 4 chars of fixed prefix/spacing
+  const dashes = '─'.repeat(Math.max(2, FRAME_WIDTH - head.length - 4))
   return (
     <div className="dim">
       <span>┌─ </span>

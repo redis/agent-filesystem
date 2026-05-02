@@ -452,7 +452,7 @@ details.expand-inline > .body {
 
 /* compact inline actions for table cells */
 .actions-inline {
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .actions-inline .verb {

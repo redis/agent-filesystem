@@ -48,6 +48,12 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceClone(args)
 	case "versioning":
 		return cmdWorkspaceVersioning(args)
+	case "default":
+		return cmdWorkspaceDefault(args)
+	case "set-default":
+		return cmdWorkspaceSetDefault(args)
+	case "unset-default":
+		return cmdWorkspaceUnsetDefault(args)
 	case "info":
 		return cmdWorkspaceInfo(args)
 	case "mount":
@@ -224,7 +230,7 @@ func cmdWorkspaceList(args []string) error {
 		fmt.Println("No workspaces found")
 	} else {
 		printPlainTable(
-			[]string{"Workspace", "Database", "ID", "Updated", "Mounted"},
+			[]string{"", "Workspace", "Database", "ID", "Updated", "Mounted"},
 			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts()),
 		)
 	}
@@ -232,12 +238,163 @@ func cmdWorkspaceList(args []string) error {
 	return nil
 }
 
+func cmdWorkspaceDefault(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+		return nil
+	}
+	if len(args) != 2 {
+		return fmt.Errorf("%s", workspaceDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	rows := []outputRow{
+		{Label: "saved default", Value: workspaceDefaultLabel(cfg)},
+	}
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, "")
+	if err != nil {
+		rows = append(rows,
+			outputRow{Label: "effective", Value: clr(ansiDim, "none")},
+			outputRow{Label: "note", Value: err.Error()},
+		)
+	} else {
+		rows = append(rows,
+			outputRow{Label: "effective", Value: selection.Name},
+			outputRow{Label: "source", Value: workspaceSelectionSourceLabel(selection)},
+		)
+		if selection.MountPath != "" {
+			rows = append(rows, outputRow{Label: "mounted at", Value: workspaceListMountedPath(selection.MountPath)})
+		}
+		if selection.ID != "" {
+			rows = append(rows, outputRow{Label: "id", Value: selection.ID})
+		}
+	}
+	rows = append(rows, outputRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
+	printSection(clr(ansiBold, "default workspace"), rows)
+	return nil
+}
+
+func cmdWorkspaceSetDefault(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceSetDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+		return nil
+	}
+	if len(args) != 3 {
+		return fmt.Errorf("%s", workspaceSetDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+	}
+
+	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, args[2])
+	if err != nil {
+		return err
+	}
+	if err := applyWorkspaceSelection(&cfg, selection); err != nil {
+		return err
+	}
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+
+	rows := []outputRow{
+		{Label: "workspace", Value: selection.Name},
+	}
+	if selection.ID != "" {
+		rows = append(rows, outputRow{Label: "id", Value: selection.ID})
+	}
+	if mounted := selectedMountedWorkspace(cfg); mounted.Name != "" && !sameWorkspaceSelection(mounted, selection) {
+		rows = append(rows,
+			outputRow{},
+			outputRow{Label: "active mount", Value: mounted.Name},
+			outputRow{Label: "note", Value: "mounted workspace takes precedence until it is unmounted or you leave its folder"},
+		)
+		if mounted.MountPath != "" {
+			rows = append(rows, outputRow{Label: "mounted at", Value: workspaceListMountedPath(mounted.MountPath)})
+		}
+	}
+	rows = append(rows, outputRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
+	printSection(markerSuccess+" "+clr(ansiBold, "default workspace set"), rows)
+	return nil
+}
+
+func cmdWorkspaceUnsetDefault(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceUnsetDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+		return nil
+	}
+	if len(args) != 2 {
+		return fmt.Errorf("%s", workspaceUnsetDefaultUsageText(filepath.Base(os.Args[0]), args[0]))
+	}
+
+	cfg, err := loadAFSConfig()
+	if err != nil {
+		return err
+	}
+	cfg.CurrentWorkspace = ""
+	cfg.CurrentWorkspaceID = ""
+	if err := saveConfig(cfg); err != nil {
+		return err
+	}
+	printSection(markerSuccess+" "+clr(ansiBold, "default workspace cleared"), []outputRow{
+		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
+	})
+	return nil
+}
+
+func workspaceDefaultLabel(cfg config) string {
+	if strings.TrimSpace(cfg.CurrentWorkspace) == "" && strings.TrimSpace(cfg.CurrentWorkspaceID) == "" {
+		return clr(ansiDim, "unset")
+	}
+	if strings.TrimSpace(cfg.CurrentWorkspaceID) != "" && strings.TrimSpace(cfg.CurrentWorkspace) != "" {
+		return fmt.Sprintf("%s (%s)", strings.TrimSpace(cfg.CurrentWorkspace), strings.TrimSpace(cfg.CurrentWorkspaceID))
+	}
+	if strings.TrimSpace(cfg.CurrentWorkspaceID) != "" {
+		return strings.TrimSpace(cfg.CurrentWorkspaceID)
+	}
+	return strings.TrimSpace(cfg.CurrentWorkspace)
+}
+
+func workspaceSelectionSourceLabel(selection workspaceSelection) string {
+	switch selection.Source {
+	case workspaceSelectionExplicit:
+		return "explicit"
+	case workspaceSelectionCWD:
+		return "mounted workspace from current directory"
+	case workspaceSelectionSingleMount:
+		return "only mounted workspace"
+	case workspaceSelectionActiveState:
+		return "active runtime state"
+	case workspaceSelectionSavedDefault:
+		return "saved default"
+	case workspaceSelectionPrompt:
+		return "selected"
+	default:
+		return "resolved"
+	}
+}
+
+func sameWorkspaceSelection(left, right workspaceSelection) bool {
+	if left.ID != "" && right.ID != "" {
+		return left.ID == right.ID
+	}
+	return strings.TrimSpace(left.Name) != "" && strings.TrimSpace(left.Name) == strings.TrimSpace(right.Name)
+}
+
 func cmdWorkspaceInfo(args []string) error {
 	if len(args) > 2 && isHelpArg(args[2]) {
 		fmt.Fprint(os.Stderr, workspaceInfoUsageText(filepath.Base(os.Args[0]), args[0]))
 		return nil
 	}
-	if len(args) != 3 {
+	if len(args) != 2 && len(args) != 3 {
 		fmt.Fprint(os.Stderr, workspaceInfoUsageText(filepath.Base(os.Args[0]), args[0]))
 		return nil
 	}
@@ -248,7 +405,11 @@ func cmdWorkspaceInfo(args []string) error {
 	}
 	defer closeStore()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, args[2])
+	workspace := ""
+	if len(args) == 3 {
+		workspace = args[2]
+	}
+	selection, err := resolveCommandWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, workspace)
 	if err != nil {
 		return err
 	}
@@ -276,12 +437,9 @@ func cmdWorkspaceInfo(args []string) error {
 func workspaceSummaryTableRows(cfg config, items []workspaceSummary, mounts map[string]string) [][]string {
 	rows := make([][]string, 0, len(items))
 	for _, item := range items {
-		name := item.Name
-		if workspaceListSelected(cfg, item) {
-			name = workspaceListMarker(true) + " " + name
-		}
 		rows = append(rows, []string{
-			workspaceListName(name),
+			workspaceListMarker(workspaceListSelected(cfg, item)),
+			workspaceListName(item.Name),
 			workspaceListDatabase(item),
 			workspaceListID(item),
 			workspaceListUpdated(item),
@@ -606,7 +764,7 @@ func cmdWorkspaceFork(args []string) error {
 	} else {
 		newWorkspace = args[2]
 	}
-	sourceSelection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
+	sourceSelection, err := resolveCommandWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
 	if err != nil {
 		if sourceWorkspace == "" {
 			workspaces, listErr := service.ListWorkspaceSummaries(context.Background())
@@ -679,6 +837,17 @@ func loadStateForMountAtSource() (state, error) {
 	return st, nil
 }
 
+func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
+	targetDir, err := expandPath(targetDir)
+	if err != nil {
+		return err
+	}
+	_, err = materializeManifestToDirectory(targetDir, m, func(blobID string) ([]byte, error) {
+		return store.getBlob(ctx, workspace, blobID)
+	}, manifestMaterializeOptions{})
+	return err
+}
+
 func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
 	_, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
@@ -704,16 +873,6 @@ func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targ
 			return nil, fmt.Errorf("live workspace blob %q is missing during clone", blobID)
 		}
 		return data, nil
-	}, manifestMaterializeOptions{})
-	return err
-}
-func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
-	targetDir, err := expandPath(targetDir)
-	if err != nil {
-		return err
-	}
-	_, err = materializeManifestToDirectory(targetDir, m, func(blobID string) ([]byte, error) {
-		return store.getBlob(ctx, workspace, blobID)
 	}, manifestMaterializeOptions{})
 	return err
 }
@@ -770,22 +929,7 @@ func cmdCheckpointList(args []string) error {
 }
 
 func resolveCheckpointWorkspaceSelection(ctx context.Context, cfg config, service afsControlPlane, workspace string) (workspaceSelection, error) {
-	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
-	if err == nil {
-		return selection, nil
-	}
-	if strings.TrimSpace(workspace) != "" {
-		return workspaceSelection{}, err
-	}
-	workspaces, listErr := service.ListWorkspaceSummaries(ctx)
-	if listErr != nil {
-		return workspaceSelection{}, err
-	}
-	if len(workspaces.Items) == 1 {
-		only := workspaces.Items[0]
-		return workspaceSelection{ID: only.ID, Name: only.Name}, nil
-	}
-	return workspaceSelection{}, err
+	return resolveCommandWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
 }
 
 func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlPlane) (workspaceSelection, error) {
@@ -793,35 +937,7 @@ func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlP
 	if err != nil {
 		return workspaceSelection{}, err
 	}
-	if len(workspaces.Items) == 0 {
-		return workspaceSelection{}, fmt.Errorf("no workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
-	}
-
-	fmt.Println()
-	fmt.Println("Select workspace")
-	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces.Items, workspaceListMounts()))
-	fmt.Println()
-	fmt.Print("Workspace: ")
-
-	reader := bufio.NewReader(os.Stdin)
-	raw, err := reader.ReadString('\n')
-	if err != nil && strings.TrimSpace(raw) == "" {
-		fmt.Println()
-		return workspaceSelection{}, errors.New("workspace selection cancelled")
-	}
-	choiceText := strings.TrimSpace(raw)
-	if choiceText == "" {
-		fmt.Println()
-		return workspaceSelection{}, errors.New("workspace selection cancelled")
-	}
-	idx, err := strconv.Atoi(choiceText)
-	if err != nil || idx < 1 || idx > len(workspaces.Items) {
-		return workspaceSelection{}, fmt.Errorf("invalid selection %q", choiceText)
-	}
-	fmt.Println()
-	selected := workspaces.Items[idx-1]
-	return workspaceSelection{ID: selected.ID, Name: selected.Name}, nil
+	return promptWorkspaceSelectionFromSummaries(workspaces.Items)
 }
 
 func checkpointWorkspacePromptRows(workspaces []workspaceSummary, mounts map[string]string) [][]string {
@@ -1676,8 +1792,11 @@ Subcommands:
   create <workspace>                           Create an empty workspace
   list                                         List workspaces
   versioning <get|set>                         Show or update file versioning policy
-  clone [workspace] <directory>                Clone a workspace into a local directory
-  info <workspace>                             Show workspace details
+  clone [workspace] <directory>                Clone a workspace to a local folder
+  default                                      Show the effective default workspace
+  set-default <workspace>                      Save a default workspace for omitted args
+  unset-default                                Clear the saved default workspace
+  info [workspace]                             Show workspace details
   import [--force] [--mount-at-source] <workspace> <directory>
                                                 Import a local directory into a workspace
   fork [source-workspace] <new-workspace>      Fork a workspace from its current checkpoint
@@ -1688,10 +1807,12 @@ Examples:
   %s %s unmount demo
   %s %s create demo
   %s %s list
+  %s %s clone demo ~/demo-copy
+  %s %s set-default demo
   %s %s import demo ~/src/demo
 
 Run '%s %s <subcommand> --help' for details.
-`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
+`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
 }
 
 func workspaceCreateUsageText(bin string) string {
@@ -1717,16 +1838,47 @@ func workspaceCloneUsageText(bin string) string {
 Clone the current live workspace state into a local directory.
 The destination must not already contain files.
 
-If [workspace] is omitted, AFS uses the configured or actively mounted workspace
-when unambiguous.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 `, bin)
+}
+
+func workspaceDefaultUsageText(bin, group string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s %s default
+
+Show the saved default workspace and the effective workspace AFS will use when
+a command omits [workspace]. Mounted workspaces take precedence when the current
+directory is inside a mounted workspace, or when exactly one workspace is mounted.
+`, bin, group)
+}
+
+func workspaceSetDefaultUsageText(bin, group string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s %s set-default <workspace>
+
+Save a default workspace for commands that allow [workspace] to be omitted.
+In Cloud or Self-managed mode, pass a workspace id when duplicate workspace
+names exist.
+`, bin, group)
+}
+
+func workspaceUnsetDefaultUsageText(bin, group string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s %s unset-default
+
+Clear the saved default workspace. Mounted workspaces can still be used as an
+implicit workspace when they are unambiguous.
+`, bin, group)
 }
 
 func workspaceInfoUsageText(bin, group string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s %s info <workspace>
+  %s %s info [workspace]
 
 Show workspace metadata without mounting it locally.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 `, bin, group)
 }
 
@@ -1736,8 +1888,8 @@ func workspaceForkUsageText(bin string) string {
 
 Create a new workspace from the source workspace's current checkpoint.
 
-If [source-workspace] is omitted, AFS uses the mounted workspace when one is
-unambiguous.
+If source-workspace is omitted, AFS uses the default, the CWD (if a workspace is
+mounted there), the only mounted workspace, or prompts for one.
 `, bin)
 }
 
@@ -1781,7 +1933,8 @@ Subcommands:
   diff [workspace] <base> <target>     Compare two checkpoints
   restore [workspace] <checkpoint>     Restore a workspace to a checkpoint
 
-If workspace is omitted, AFS prompts for one.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 
 Examples:
   %s %s list demo
@@ -1799,7 +1952,8 @@ func checkpointListUsageText(bin string) string {
   %s cp list [workspace]
 
 List checkpoints for a workspace, newest first.
-If workspace is omitted, AFS prompts for one.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 `, bin)
 }
 
@@ -1809,8 +1963,9 @@ func checkpointCreateUsageText(bin string) string {
 
 Create a checkpoint from the workspace's active state.
 If [checkpoint] is omitted, AFS generates a timestamped name.
-If workspace is omitted, AFS prompts for one. With one positional argument,
-AFS treats it as the checkpoint name.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
+With one positional argument, AFS treats it as the checkpoint name.
 
 Options:
   --description <text>  Human-readable checkpoint description
@@ -1822,7 +1977,8 @@ func checkpointShowUsageText(bin string) string {
   %s cp show [workspace] <checkpoint> [--json]
 
 Show checkpoint metadata and the change summary from its parent checkpoint.
-If workspace is omitted, AFS prompts for one.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 
 Options:
   --json  Emit structured JSON
@@ -1836,7 +1992,8 @@ func checkpointDiffUsageText(bin string) string {
 
 Compare saved filesystem states. Use --active to compare a checkpoint to
 workspace state.
-If workspace is omitted, AFS prompts for one.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 
 Options:
   --json  Emit structured JSON, including text diff hunks when available
@@ -1848,6 +2005,7 @@ func checkpointRestoreUsageText(bin string) string {
   %s cp restore [workspace] <checkpoint>
 
 Restore workspace state to the selected checkpoint.
-If workspace is omitted, AFS prompts for one.
+If workspace is omitted, AFS uses the default, the CWD (if a workspace is mounted
+there), the only mounted workspace, or prompts for one.
 `, bin)
 }

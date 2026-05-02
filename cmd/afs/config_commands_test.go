@@ -72,7 +72,7 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 	}
 }
 
-func TestSaveConfigStripsRuntimeWorkspaceAndPathState(t *testing.T) {
+func TestSaveConfigPersistsDefaultWorkspaceOutsideLegacyRuntimeKeys(t *testing.T) {
 	t.Helper()
 
 	cfg := defaultConfig()
@@ -102,6 +102,20 @@ func TestSaveConfigStripsRuntimeWorkspaceAndPathState(t *testing.T) {
 			t.Fatalf("config should not persist runtime key %q: %s", key, string(raw))
 		}
 	}
+	workspace, ok := saved["workspace"].(map[string]any)
+	if !ok {
+		t.Fatalf("config should persist default workspace under workspace key: %s", string(raw))
+	}
+	if workspace["default"] != "demo" || workspace["defaultID"] != "ws_demo" {
+		t.Fatalf("workspace config = %#v, want demo/ws_demo", workspace)
+	}
+	loaded, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if loaded.CurrentWorkspace != "demo" || loaded.CurrentWorkspaceID != "ws_demo" {
+		t.Fatalf("loaded workspace = %q/%q, want demo/ws_demo", loaded.CurrentWorkspace, loaded.CurrentWorkspaceID)
+	}
 	if got, ok := saved["mode"].(string); !ok || got != modeMount {
 		t.Fatalf("config should persist mode %q, got %v in %s", modeMount, saved["mode"], string(raw))
 	}
@@ -130,21 +144,21 @@ func TestCmdConfigShowJSONIncludesConfiguredFields(t *testing.T) {
 		t.Fatalf("cmdConfig(show --json) returned error: %v", err)
 	}
 
-	var got config
+	var got persistedConfig
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("Unmarshal(config show json) returned error: %v", err)
 	}
-	if got.RedisAddr != "redis.example:6380" {
-		t.Fatalf("RedisAddr = %q, want %q", got.RedisAddr, "redis.example:6380")
+	if got.Redis.RedisAddr != "redis.example:6380" {
+		t.Fatalf("RedisAddr = %q, want %q", got.Redis.RedisAddr, "redis.example:6380")
 	}
-	if got.RedisDB != 7 {
-		t.Fatalf("RedisDB = %d, want %d", got.RedisDB, 7)
+	if got.Redis.RedisDB != 7 {
+		t.Fatalf("RedisDB = %d, want %d", got.Redis.RedisDB, 7)
 	}
-	if got.CurrentWorkspace != "demo" {
-		t.Fatalf("CurrentWorkspace = %q, want %q", got.CurrentWorkspace, "demo")
+	if got.Workspace.DefaultWorkspace != "demo" {
+		t.Fatalf("workspace.default = %q, want %q", got.Workspace.DefaultWorkspace, "demo")
 	}
-	if got.MountBackend != mountBackendNone {
-		t.Fatalf("MountBackend = %q, want %q", got.MountBackend, mountBackendNone)
+	if got.Workspace.DefaultWorkspaceID != "" {
+		t.Fatalf("workspace.defaultID = %q, want empty", got.Workspace.DefaultWorkspaceID)
 	}
 }
 
@@ -677,7 +691,7 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 		"--redis-url <redis://...|rediss://...>",
 		"--config-source local|self-hosted|cloud",
 		"--mount-backend auto|none|fuse|nfs",
-		"Current workspace is not configured here",
+		"Default workspace is managed with",
 		"runtime paths stay available in afs.config.json",
 	} {
 		if !strings.Contains(out, want) {
@@ -844,6 +858,10 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 
 	for _, want := range []string{
 		"workspace <subcommand>",
+		"versioning <get|set>",
+		"default",
+		"set-default <workspace>",
+		"unset-default",
 		"clone [workspace] <directory>",
 		"fork [source-workspace] <new-workspace>",
 		"import [--force] [--mount-at-source] <workspace> <directory>",

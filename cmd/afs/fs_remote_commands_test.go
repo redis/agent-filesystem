@@ -3,11 +3,52 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
 )
+
+func TestParseFSDispatchArgsDisambiguatesWorkspaceAndSubcommand(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want fsDispatchArgs
+	}{
+		{
+			name: "subcommand without workspace",
+			args: []string{"ls"},
+			want: fsDispatchArgs{subcommand: "ls", args: []string{}},
+		},
+		{
+			name: "workspace before subcommand",
+			args: []string{"repo", "ls", "/docs"},
+			want: fsDispatchArgs{workspace: "repo", subcommand: "ls", args: []string{"/docs"}},
+		},
+		{
+			name: "workspace named like subcommand",
+			args: []string{"ls", "cat", "README.md"},
+			want: fsDispatchArgs{workspace: "ls", subcommand: "cat", args: []string{"README.md"}},
+		},
+		{
+			name: "path named like subcommand remains command arg with inferred workspace",
+			args: []string{"ls", "./cat"},
+			want: fsDispatchArgs{subcommand: "ls", args: []string{"./cat"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseFSDispatchArgs(tt.args)
+			if err != nil {
+				t.Fatalf("parseFSDispatchArgs() returned error: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseFSDispatchArgs() = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	t.Helper()
@@ -36,7 +77,7 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	defer closeStore()
 
 	listOutput, err := captureStdout(t, func() error {
-		return cmdFS([]string{"fs", "-w", "repo", "ls", "/"})
+		return cmdFS([]string{"fs", "repo", "ls", "/"})
 	})
 	if err != nil {
 		t.Fatalf("cmdFS(ls) returned error: %v", err)
@@ -48,7 +89,7 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	}
 
 	catOutput, err := captureStdout(t, func() error {
-		return cmdFS([]string{"fs", "-w", "repo", "cat", "notes/todo.md"})
+		return cmdFS([]string{"fs", "repo", "cat", "notes/todo.md"})
 	})
 	if err != nil {
 		t.Fatalf("cmdFS(cat) returned error: %v", err)
@@ -58,7 +99,7 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	}
 
 	findOutput, err := captureStdout(t, func() error {
-		return cmdFS([]string{"fs", "-w", "repo", "find", ".", "-name", "*.md", "-print"})
+		return cmdFS([]string{"fs", "repo", "find", ".", "-name", "*.md", "-print"})
 	})
 	if err != nil {
 		t.Fatalf("cmdFS(find) returned error: %v", err)
@@ -71,7 +112,7 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	}
 
 	grepOutput, err := captureStdout(t, func() error {
-		return cmdFS([]string{"fs", "-w", "repo", "grep", "item"})
+		return cmdFS([]string{"fs", "repo", "grep", "item"})
 	})
 	if err != nil {
 		t.Fatalf("cmdFS(grep) returned error: %v", err)

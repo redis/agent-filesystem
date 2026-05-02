@@ -102,9 +102,10 @@ the selected cloud database when available.
 afs setup
 ```
 
-Guided configuration for connection basics. It does not select a persistent
-"current" workspace; use `afs ws mount <workspace> <directory>` to mount a
-workspace when you are ready to work.
+Guided configuration for connection basics. Use
+`afs ws mount <workspace> <directory>` to mount a workspace when you are ready
+to work, or `afs ws set-default <workspace>` to save a default for commands
+where the workspace argument is optional.
 
 ### `afs ws mount`
 
@@ -113,9 +114,11 @@ afs ws mount [--dry-run] [--verbose] [<workspace> <directory>]
 ```
 
 Mounts a durable workspace to a local directory using sync mode. The
-directory is created if needed. AFS no longer saves "current workspace" or
-"current local path" in `afs.config.json`; active mounts are runtime
-state keyed by local directory.
+directory is created if needed. AFS no longer saves a "current local path" in
+`afs.config.json`; active mounts are runtime state keyed by local directory.
+Commands that omit a workspace can use the saved default, the workspace
+mounted at the current directory, or the only mounted workspace when that is
+unambiguous.
 
 Mount safety rules:
 
@@ -234,7 +237,10 @@ Subcommands:
 | --- | --- |
 | `afs ws create [--database <database>] <workspace>` | Create an empty workspace with an initial checkpoint named `initial`. |
 | `afs ws list` | List workspaces. |
-| `afs ws info <workspace>` | Show workspace metadata without mounting it locally. |
+| `afs ws default` | Show the saved default and the effective workspace AFS will use for omitted workspace arguments. |
+| `afs ws set-default <workspace>` | Save a default workspace for commands that allow the workspace argument to be omitted. |
+| `afs ws unset-default` | Clear the saved default workspace. |
+| `afs ws info [workspace]` | Show workspace metadata without mounting it locally. |
 | `afs ws mount <workspace> [directory]` | Mount a workspace at a local directory. |
 | `afs ws unmount [--delete] [<workspace|directory>]` | Unmount a workspace from AFS. |
 | `afs ws fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current checkpoint. |
@@ -246,6 +252,8 @@ Examples:
 ```bash
 afs ws create demo
 afs ws list
+afs ws set-default demo
+afs ws default
 afs ws info demo
 afs ws import --mount-at-source demo ~/src/demo
 afs ws mount demo ~/src/demo
@@ -281,7 +289,8 @@ Subcommands:
 | `afs cp diff [workspace] <checkpoint> --active [--json]` | Compare a checkpoint to workspace state. |
 | `afs cp restore [workspace] <checkpoint>` | Restore workspace state to a checkpoint. |
 
-If `workspace` is omitted, AFS lists workspaces and prompts for a selection.
+If `workspace` is omitted, AFS uses the default, the CWD (if a workspace is
+mounted there), the only mounted workspace, or prompts for one.
 For `afs cp create <name>`, the single positional argument is treated as the
 checkpoint name.
 
@@ -314,36 +323,35 @@ Checkpoint rules:
 local directory. Pass the workspace before the subcommand:
 
 ```bash
-afs fs -w <workspace> <subcommand>
+afs fs [workspace] <subcommand>
 ```
 
 Subcommands:
 
 | Command | Meaning |
 | --- | --- |
-| `afs fs -w <workspace> ls [path]` | List files in a workspace directory. |
-| `afs fs -w <workspace> cat <path>` | Print a workspace file. |
-| `afs fs -w <workspace> find [path] [-name <pattern>] [-type f|d|l] [-print]` | Find workspace paths by basename pattern. |
-| `afs fs -w <workspace> grep [flags] <pattern>` | Search workspace file contents. |
+| `afs fs [workspace] ls [path]` | List files in a workspace directory. |
+| `afs fs [workspace] cat <path>` | Print a workspace file. |
+| `afs fs [workspace] find [path] [-name <pattern>] [-type f|d|l] [-print]` | Find workspace paths by basename pattern. |
+| `afs fs [workspace] grep [flags] <pattern>` | Search workspace file contents. |
 | `afs fs create-exclusive <path>` | Create a file through a mounted sync workspace only if it does not exist. |
 
 Examples:
 
 ```bash
-afs fs -w repo ls
-afs fs -w repo ls /src
-afs fs -w repo cat README.md
-afs fs -w repo find . -name '*.md' -print
-afs fs -w repo find /src -type f -name '*.go'
-afs fs -w repo grep "hello"
+afs fs repo ls
+afs fs repo ls /src
+afs fs repo cat README.md
+afs fs repo find . -name '*.md' -print
+afs fs repo find /src -type f -name '*.go'
+afs fs repo grep "hello"
 ```
 
 ### `afs fs grep`
 
 ```bash
-afs fs -w <workspace> grep [flags] <pattern>
-afs fs grep [flags] <pattern>
-afs fs grep [flags] -e <pattern>
+afs fs [workspace] grep [flags] <pattern>
+afs fs [workspace] grep [flags] -e <pattern>
 ```
 
 Searches the live Redis-backed AFS namespace for a workspace. Literal
@@ -354,7 +362,6 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--workspace <name>` | Search a specific workspace. |
 | `--path <path>` | Limit search to a file or directory. |
 | `-i`, `--ignore-case` | Case-insensitive matching. |
 | `-F` | Treat patterns as fixed strings. |
@@ -373,11 +380,11 @@ Flags:
 Examples:
 
 ```bash
-afs fs -w repo grep "hello"
-afs fs -w repo grep -E "error|warning"
-afs fs -w repo grep -w --path /logs token
-afs fs grep -l -i --workspace repo "disk full"
-afs fs -w repo grep --glob --path /src "*TODO*"
+afs fs repo grep "hello"
+afs fs repo grep -E "error|warning"
+afs fs repo grep -w --path /logs token
+afs fs repo grep -l -i "disk full"
+afs fs repo grep --glob --path /src "*TODO*"
 ```
 
 ## Databases

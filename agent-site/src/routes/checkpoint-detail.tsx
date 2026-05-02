@@ -3,6 +3,7 @@
 import { Link, useParams } from 'react-router-dom'
 import { Frame } from '../frame'
 import { ActionsInline } from '../actions-row'
+import { formatBytes, formatBytesDelta } from '../format'
 import { loadCheckpoint, loadCheckpoints } from '../loaders'
 
 export default function CheckpointDetail() {
@@ -30,7 +31,7 @@ export default function CheckpointDetail() {
     <Frame
       path="/checkpoints/:id"
       realPath={`/checkpoints/${cp.id}`}
-      meta={`${cp.workspace_id} · ${cp.file_count} files · ${cp.total_bytes.toLocaleString()}b · author=${cp.author}`}
+      meta={`${cp.workspace_id} · ${cp.file_count} files · ${formatBytes(cp.total_bytes)} · author=${cp.author}`}
       request={{ method: 'GET', path: `/checkpoints/${cp.id}`, headers: { etag: `w/"${cp.id}"`, cost_ms: 3 } }}
       json={{ checkpoint: cp, parent_chain: chain }}
       toolCall={{ name: 'checkpoint_get', args: { workspace_id: cp.workspace_id, checkpoint_id: cp.id } }}
@@ -53,10 +54,10 @@ export default function CheckpointDetail() {
         <dt>author</dt>         <dd>{cp.author}</dd>
         <dt>source</dt>         <dd>{cp.source}</dd>
         <dt>manifest hash</dt>  <dd className="strong">{cp.manifest_hash}</dd>
-        <dt>contents</dt>       <dd>{cp.file_count} files · {cp.folder_count} folders · {cp.total_bytes.toLocaleString()}b</dd>
+        <dt>contents</dt>       <dd>{cp.file_count} files · {cp.folder_count} folders · {formatBytes(cp.total_bytes)}</dd>
         <dt>delta vs parent</dt><dd>
           <span className={cp.delta_files >= 0 ? 'ok' : 'err'}>{cp.delta_files >= 0 ? '+' : ''}{cp.delta_files} files</span>{', '}
-          <span className={cp.delta_bytes >= 0 ? 'ok' : 'err'}>{cp.delta_bytes >= 0 ? '+' : ''}{cp.delta_bytes} bytes</span>
+          <span className={cp.delta_bytes >= 0 ? 'ok' : 'err'}>{formatBytesDelta(cp.delta_bytes)}</span>
         </dd>
         {cp.note && <><dt>note</dt><dd className="strong">{cp.note}</dd></>}
       </dl>

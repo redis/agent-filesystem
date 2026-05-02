@@ -46,6 +46,11 @@ type agentSettings struct {
 	Name string `json:"name,omitempty"`
 }
 
+type workspaceSettings struct {
+	DefaultWorkspace   string `json:"default,omitempty"`
+	DefaultWorkspaceID string `json:"defaultID,omitempty"`
+}
+
 // config captures the persisted CLI/runtime settings for the AFS surface.
 // The JSON tags define the on-disk format.
 type config struct {
