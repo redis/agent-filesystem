@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -203,6 +204,28 @@ func TestParseSyncDaemonPIDs(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("parseSyncDaemonPIDs() = %#v, want %#v", got, want)
 		}
+	}
+}
+
+func TestParseSyncDaemonPIDsForConfigRequiresMatchingImplicitConfig(t *testing.T) {
+	t.Helper()
+
+	out := strings.Join([]string{
+		"  101 /usr/local/bin/afs _sync-daemon",
+		"  102 /Users/example/git/agent-filesystem/afs --config /tmp/current/afs.config.json _sync-daemon",
+		"  103 /opt/afs/afs _sync-daemon",
+	}, "\n")
+
+	got := parseSyncDaemonPIDsForConfig(out, "/tmp/current/afs.config.json")
+	want := []int{102}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseSyncDaemonPIDsForConfig() = %#v, want %#v", got, want)
+	}
+
+	got = parseSyncDaemonPIDsForConfig(out, "/opt/afs/afs.config.json")
+	want = []int{103}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseSyncDaemonPIDsForConfig() = %#v, want %#v", got, want)
 	}
 }
 

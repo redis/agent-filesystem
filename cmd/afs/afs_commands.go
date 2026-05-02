@@ -134,6 +134,14 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	if exists && !replaceExisting {
 		return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
 	}
+	var preservedVersioningPolicy *controlplane.WorkspaceVersioningPolicy
+	if replaceExisting && exists {
+		policy, err := store.cp.GetWorkspaceVersioningPolicy(ctx, workspace)
+		if err != nil {
+			return err
+		}
+		preservedVersioningPolicy = &policy
+	}
 
 	lock, err := store.acquireImportLock(ctx, workspace)
 	if err != nil {
@@ -249,6 +257,12 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		step.fail(err.Error())
 		return err
 	}
+	if preservedVersioningPolicy != nil {
+		if err := store.cp.PutWorkspaceVersioningPolicy(ctx, workspaceID, *preservedVersioningPolicy); err != nil {
+			step.fail(err.Error())
+			return err
+		}
+	}
 	if err := store.putSavepoint(ctx, savepointMeta, manifest); err != nil {
 		step.fail(err.Error())
 		return err
@@ -270,6 +284,21 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 
 	// Drop the blob cache now that sync has consumed it.
 	sink.Drop()
+
+	if preservedVersioningPolicy != nil {
+		if _, err := store.cp.RecordManifestVersionChangesWithResults(
+			ctx,
+			workspaceID,
+			controlplane.Manifest{},
+			controlPlaneManifestFromAFS(manifest),
+			controlplane.FileVersionMutationMetadata{
+				Source:       controlplane.ChangeSourceImport,
+				CheckpointID: initialSavepoint,
+			},
+		); err != nil {
+			return err
+		}
+	}
 
 	if err := store.audit(ctx, workspaceID, "import", map[string]any{
 		"savepoint":   initialSavepoint,
@@ -328,6 +357,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	defer closeControlPlane()
 
 	exists := false
+	var preservedVersioningPolicy *controlplane.WorkspaceVersioningPolicy
 	_, err = service.GetWorkspace(ctx, workspace)
 	switch {
 	case err == nil:
@@ -335,6 +365,11 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 		if !replaceExisting {
 			return fmt.Errorf("workspace %q already exists; rerun with --force to replace it", workspace)
 		}
+		policy, err := service.GetWorkspaceVersioningPolicy(ctx, workspace)
+		if err != nil {
+			return err
+		}
+		preservedVersioningPolicy = &policy
 	case errors.Is(err, os.ErrNotExist):
 		// Importing a new workspace is fine.
 	default:
@@ -383,13 +418,14 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 
 	step = startStep("Uploading workspace")
 	response, err := service.ImportWorkspace(ctx, controlplane.ImportWorkspaceRequest{
-		Name:        workspace,
-		Description: fmt.Sprintf("Imported from %s.", sourceDir),
-		Manifest:    controlPlaneManifestFromAFS(manifest),
-		Blobs:       blobs,
-		FileCount:   stats.FileCount,
-		DirCount:    stats.DirCount,
-		TotalBytes:  stats.TotalBytes,
+		Name:             workspace,
+		Description:      fmt.Sprintf("Imported from %s.", sourceDir),
+		Manifest:         controlPlaneManifestFromAFS(manifest),
+		Blobs:            blobs,
+		FileCount:        stats.FileCount,
+		DirCount:         stats.DirCount,
+		TotalBytes:       stats.TotalBytes,
+		VersioningPolicy: preservedVersioningPolicy,
 	})
 	if err != nil {
 		step.fail(err.Error())

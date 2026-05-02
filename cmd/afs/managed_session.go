@@ -13,6 +13,11 @@ import (
 )
 
 func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSessionRequest {
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return controlplane.CreateWorkspaceSessionRequest{}
+	}
+
 	hostname, err := os.Hostname()
 	if err != nil {
 		hostname = ""
@@ -20,6 +25,9 @@ func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSess
 	clientKind := "sync"
 	if mode, err := effectiveMode(cfg); err == nil && mode == modeMount {
 		clientKind = "mount"
+	}
+	if productMode == productModeLocal {
+		clientKind = "sync"
 	}
 	return controlplane.CreateWorkspaceSessionRequest{
 		ClientKind:      clientKind,

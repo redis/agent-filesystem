@@ -350,7 +350,7 @@ func TestWorkspaceCreateSuggestsMountFirst(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
-	if !strings.Contains(output, "afs.test up demo <folder>") {
+	if !strings.Contains(output, "afs.test ws mount demo <directory>") {
 		t.Fatalf("cmdWorkspace(create) output = %q, want mount-first next hint", output)
 	}
 	if strings.Contains(output, "workspace run demo -- /bin/sh") {

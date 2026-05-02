@@ -76,6 +76,16 @@ type hostedMCPGrepTarget struct {
 	loaded  bool
 }
 
+type mcpWorkspaceVersioningPolicyPatch struct {
+	Mode                 *string
+	IncludeGlobs         *[]string
+	ExcludeGlobs         *[]string
+	MaxVersionsPerFile   *int
+	MaxAgeDays           *int
+	MaxTotalBytes        *int64
+	LargeFileCutoffBytes *int64
+}
+
 func mcpOptionalText(args map[string]any, key string) (string, error) {
 	value, ok := args[key]
 	if !ok || value == nil {
@@ -98,6 +108,119 @@ func mcpOptionalInt(args map[string]any, key string) (*int, error) {
 		return nil, err
 	}
 	return &intValue, nil
+}
+
+func mcpOptionalInt64(args map[string]any, key string) (*int64, error) {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return nil, nil
+	}
+	switch v := value.(type) {
+	case float64:
+		result := int64(v)
+		return &result, nil
+	case int:
+		result := int64(v)
+		return &result, nil
+	case int64:
+		return &v, nil
+	default:
+		return nil, fmt.Errorf("argument %q must be an integer", key)
+	}
+}
+
+func mcpOptionalStringSlice(args map[string]any, key string) (*[]string, error) {
+	value, ok := args[key]
+	if !ok || value == nil {
+		return nil, nil
+	}
+	switch typed := value.(type) {
+	case []string:
+		copied := append([]string(nil), typed...)
+		return &copied, nil
+	case []any:
+		values := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("argument %q must be an array of strings", key)
+			}
+			values = append(values, text)
+		}
+		return &values, nil
+	default:
+		return nil, fmt.Errorf("argument %q must be an array of strings", key)
+	}
+}
+
+func mcpWorkspaceVersioningPolicyPatchFromArgs(args map[string]any) (mcpWorkspaceVersioningPolicyPatch, error) {
+	var patch mcpWorkspaceVersioningPolicyPatch
+
+	if rawMode, ok := args["mode"]; ok && rawMode != nil {
+		mode, err := mcpOptionalString(args, "mode")
+		if err != nil {
+			return patch, err
+		}
+		patch.Mode = &mode
+	}
+	includeGlobs, err := mcpOptionalStringSlice(args, "include_globs")
+	if err != nil {
+		return patch, err
+	}
+	patch.IncludeGlobs = includeGlobs
+	excludeGlobs, err := mcpOptionalStringSlice(args, "exclude_globs")
+	if err != nil {
+		return patch, err
+	}
+	patch.ExcludeGlobs = excludeGlobs
+	maxVersionsPerFile, err := mcpOptionalInt(args, "max_versions_per_file")
+	if err != nil {
+		return patch, err
+	}
+	patch.MaxVersionsPerFile = maxVersionsPerFile
+	maxAgeDays, err := mcpOptionalInt(args, "max_age_days")
+	if err != nil {
+		return patch, err
+	}
+	patch.MaxAgeDays = maxAgeDays
+	maxTotalBytes, err := mcpOptionalInt64(args, "max_total_bytes")
+	if err != nil {
+		return patch, err
+	}
+	patch.MaxTotalBytes = maxTotalBytes
+	largeFileCutoffBytes, err := mcpOptionalInt64(args, "large_file_cutoff_bytes")
+	if err != nil {
+		return patch, err
+	}
+	patch.LargeFileCutoffBytes = largeFileCutoffBytes
+
+	return patch, nil
+}
+
+func applyMCPWorkspaceVersioningPolicyPatch(base WorkspaceVersioningPolicy, patch mcpWorkspaceVersioningPolicyPatch) WorkspaceVersioningPolicy {
+	next := base
+	if patch.Mode != nil {
+		next.Mode = *patch.Mode
+	}
+	if patch.IncludeGlobs != nil {
+		next.IncludeGlobs = append([]string(nil), (*patch.IncludeGlobs)...)
+	}
+	if patch.ExcludeGlobs != nil {
+		next.ExcludeGlobs = append([]string(nil), (*patch.ExcludeGlobs)...)
+	}
+	if patch.MaxVersionsPerFile != nil {
+		next.MaxVersionsPerFile = *patch.MaxVersionsPerFile
+	}
+	if patch.MaxAgeDays != nil {
+		next.MaxAgeDays = *patch.MaxAgeDays
+	}
+	if patch.MaxTotalBytes != nil {
+		next.MaxTotalBytes = *patch.MaxTotalBytes
+	}
+	if patch.LargeFileCutoffBytes != nil {
+		next.LargeFileCutoffBytes = *patch.LargeFileCutoffBytes
+	}
+	return next
 }
 
 func decodeMCPArgs(args map[string]any, target any) error {

@@ -44,6 +44,10 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceCreate(args)
 	case "list":
 		return cmdWorkspaceList(args)
+	case "clone":
+		return cmdWorkspaceClone(args)
+	case "versioning":
+		return cmdWorkspaceVersioning(args)
 	case "info":
 		return cmdWorkspaceInfo(args)
 	case "mount":
@@ -145,9 +149,6 @@ func cmdWorkspaceCreate(args []string) error {
 	}
 
 	next := filepath.Base(os.Args[0]) + " ws mount " + workspace + " <directory>"
-	if productMode, _ := effectiveProductMode(cfg); productMode != productModeLocal {
-		next = filepath.Base(os.Args[0]) + " ws mount " + workspace + " <directory>"
-	}
 
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace created"), []outputRow{
 		{Label: "workspace", Value: workspace},
@@ -217,7 +218,7 @@ func cmdWorkspaceList(args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("Workspaces")
+	fmt.Println(workspaceListTitle(cfg))
 	fmt.Println()
 	if len(workspaces.Items) == 0 {
 		fmt.Println("No workspaces found")
@@ -275,8 +276,12 @@ func cmdWorkspaceInfo(args []string) error {
 func workspaceSummaryTableRows(cfg config, items []workspaceSummary, mounts map[string]string) [][]string {
 	rows := make([][]string, 0, len(items))
 	for _, item := range items {
+		name := item.Name
+		if workspaceListSelected(cfg, item) {
+			name = workspaceListMarker(true) + " " + name
+		}
 		rows = append(rows, []string{
-			workspaceListName(item.Name),
+			workspaceListName(name),
 			workspaceListDatabase(item),
 			workspaceListID(item),
 			workspaceListUpdated(item),
@@ -452,6 +457,90 @@ func cmdWorkspaceDelete(args []string) error {
 	return nil
 }
 
+func cmdWorkspaceClone(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceCloneUsageText(filepath.Base(os.Args[0])))
+		return nil
+	}
+	if len(args) != 3 && len(args) != 4 {
+		return fmt.Errorf("%s", workspaceCloneUsageText(filepath.Base(os.Args[0])))
+	}
+
+	cfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	workspace := ""
+	targetDir := ""
+	if len(args) == 4 {
+		workspace = args[2]
+		targetDir = args[3]
+	} else {
+		targetDir = args[2]
+	}
+	workspace, err = resolveWorkspaceName(context.Background(), cfg, store, workspace)
+	if err != nil {
+		if workspace == "" {
+			workspaces, listErr := store.listWorkspaces(context.Background())
+			if listErr == nil && len(workspaces) == 1 {
+				workspace = workspaces[0].Name
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+	if err := validateAFSName("workspace", workspace); err != nil {
+		return err
+	}
+
+	clonedPath, err := prepareWorkspaceCloneTarget(targetDir)
+	if err != nil {
+		return err
+	}
+
+	if err := materializeWorkspaceToPath(context.Background(), cfg, workspace, clonedPath); err != nil {
+		return err
+	}
+
+	printSection(markerSuccess+" "+clr(ansiBold, "workspace cloned"), []outputRow{
+		{Label: "workspace", Value: workspace},
+		{Label: "database", Value: configRemoteLabel(cfg)},
+		{Label: "path", Value: clonedPath},
+		{Label: "next", Value: "cd " + clonedPath},
+	})
+	return nil
+}
+
+func prepareWorkspaceCloneTarget(targetDir string) (string, error) {
+	clonedPath, err := expandPath(targetDir)
+	if err != nil {
+		return "", err
+	}
+
+	info, err := os.Stat(clonedPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return clonedPath, nil
+		}
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("destination path %s already exists and is not a directory", clonedPath)
+	}
+	entries, err := os.ReadDir(clonedPath)
+	if err != nil {
+		return "", err
+	}
+	if len(entries) > 0 {
+		return "", fmt.Errorf("destination path %s already exists and is not an empty directory", clonedPath)
+	}
+	return clonedPath, nil
+}
+
 type workspaceDeleteOptions struct {
 	names          []string
 	noConfirmation bool
@@ -519,7 +608,17 @@ func cmdWorkspaceFork(args []string) error {
 	}
 	sourceSelection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, sourceWorkspace)
 	if err != nil {
-		return err
+		if sourceWorkspace == "" {
+			workspaces, listErr := service.ListWorkspaceSummaries(context.Background())
+			if listErr == nil && len(workspaces.Items) == 1 {
+				only := workspaces.Items[0]
+				sourceSelection = workspaceSelection{ID: only.ID, Name: only.Name}
+			} else {
+				return err
+			}
+		} else {
+			return err
+		}
 	}
 	if err := validateAFSName("workspace", newWorkspace); err != nil {
 		return err
@@ -557,6 +656,57 @@ func cmdWorkspaceImport(args []string) error {
 	return nil
 }
 
+func workspaceListTitle(cfg config) string {
+	return "workspaces on " + configRemoteLabel(cfg)
+}
+
+func loadStateForMountAtSource() (state, error) {
+	st, err := loadState()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return state{}, nil
+		}
+		return state{}, err
+	}
+
+	backendName := strings.TrimSpace(st.MountBackend)
+	if backendName == "" {
+		backendName = mountBackendNone
+	}
+	if backendName != mountBackendNone || strings.TrimSpace(st.ArchivePath) != "" {
+		return state{}, fmt.Errorf("AFS already has an active mounted filesystem state; run '%s ws unmount <workspace-or-directory>' first", filepath.Base(os.Args[0]))
+	}
+	return st, nil
+}
+
+func materializeWorkspaceToPath(ctx context.Context, cfg config, workspace, targetDir string) error {
+	_, store, closeStore, err := openAFSStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	workspaceMeta, err := store.getWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	m, blobs, err := liveWorkspaceManifest(ctx, store, workspace, workspaceMeta.HeadSavepoint)
+	if err != nil {
+		return err
+	}
+	targetDir, err = expandPath(targetDir)
+	if err != nil {
+		return err
+	}
+	_, err = materializeManifestToDirectory(targetDir, m, func(blobID string) ([]byte, error) {
+		data, ok := blobs[blobID]
+		if !ok {
+			return nil, fmt.Errorf("live workspace blob %q is missing during clone", blobID)
+		}
+		return data, nil
+	}, manifestMaterializeOptions{})
+	return err
+}
 func materializeManifestToPath(ctx context.Context, store *afsStore, workspace string, m manifest, targetDir string) error {
 	targetDir, err := expandPath(targetDir)
 	if err != nil {
@@ -620,10 +770,22 @@ func cmdCheckpointList(args []string) error {
 }
 
 func resolveCheckpointWorkspaceSelection(ctx context.Context, cfg config, service afsControlPlane, workspace string) (workspaceSelection, error) {
-	if strings.TrimSpace(workspace) != "" {
-		return resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
+	selection, err := resolveWorkspaceSelectionFromControlPlane(ctx, cfg, service, workspace)
+	if err == nil {
+		return selection, nil
 	}
-	return promptCheckpointWorkspaceSelection(ctx, service)
+	if strings.TrimSpace(workspace) != "" {
+		return workspaceSelection{}, err
+	}
+	workspaces, listErr := service.ListWorkspaceSummaries(ctx)
+	if listErr != nil {
+		return workspaceSelection{}, err
+	}
+	if len(workspaces.Items) == 1 {
+		only := workspaces.Items[0]
+		return workspaceSelection{ID: only.ID, Name: only.Name}, nil
+	}
+	return workspaceSelection{}, err
 }
 
 func promptCheckpointWorkspaceSelection(ctx context.Context, service afsControlPlane) (workspaceSelection, error) {
@@ -1513,6 +1675,8 @@ Subcommands:
   unmount [--delete] [<workspace|directory>]    Unmount a workspace
   create <workspace>                           Create an empty workspace
   list                                         List workspaces
+  versioning <get|set>                         Show or update file versioning policy
+  clone [workspace] <directory>                Clone a workspace into a local directory
   info <workspace>                             Show workspace details
   import [--force] [--mount-at-source] <workspace> <directory>
                                                 Import a local directory into a workspace
@@ -1543,6 +1707,18 @@ func workspaceListUsageText(bin string) string {
   %s ws list
 
 List workspaces stored in Redis, along with checkpoint counts and creation time.
+`, bin)
+}
+
+func workspaceCloneUsageText(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s ws clone [workspace] <directory>
+
+Clone the current live workspace state into a local directory.
+The destination must not already contain files.
+
+If [workspace] is omitted, AFS uses the configured or actively mounted workspace
+when unambiguous.
 `, bin)
 }
 

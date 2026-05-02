@@ -160,7 +160,7 @@ func (s *syncWatcher) handleEvent(ev fsnotify.Event) {
 		return
 	}
 	rel, err := filepath.Rel(s.root, abs)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil || strings.HasPrefix(rel, "..") {
 		return
 	}
 	rel = filepath.ToSlash(rel)

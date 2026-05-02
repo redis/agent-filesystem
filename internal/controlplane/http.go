@@ -36,6 +36,26 @@ type saveFromLiveRequest struct {
 	AllowUnchanged bool   `json:"allow_unchanged,omitempty"`
 }
 
+type restoreFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Ordinal   int64  `json:"ordinal,omitempty"`
+}
+
+type diffFileVersionsRequest struct {
+	Path string                 `json:"path"`
+	From FileVersionDiffOperand `json:"from"`
+	To   FileVersionDiffOperand `json:"to"`
+}
+
+type undeleteFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Ordinal   int64  `json:"ordinal,omitempty"`
+}
+
 type saveCheckpointRequest struct {
 	ExpectedHead          string            `json:"expected_head"`
 	CheckpointID          string            `json:"checkpoint_id"`
@@ -50,6 +70,72 @@ type saveCheckpointRequest struct {
 	TotalBytes            int64             `json:"total_bytes"`
 	SkipWorkspaceRootSync bool              `json:"skip_workspace_root_sync"`
 	AllowUnchanged        bool              `json:"allow_unchanged,omitempty"`
+}
+
+func httpHistoryDirectionNewestFirst(raw string) bool {
+	return !strings.EqualFold(strings.TrimSpace(raw), "asc")
+}
+
+func httpLookupFileVersionContent(ctx context.Context, manager *DatabaseManager, databaseID, workspace string, query map[string][]string) (FileVersionContentResponse, error) {
+	versionID := strings.TrimSpace(firstQueryValue(query, "version_id"))
+	if versionID != "" {
+		return manager.GetFileVersionContent(ctx, databaseID, workspace, versionID)
+	}
+	fileID := strings.TrimSpace(firstQueryValue(query, "file_id"))
+	ordinalRaw := strings.TrimSpace(firstQueryValue(query, "ordinal"))
+	if fileID == "" || ordinalRaw == "" {
+		return FileVersionContentResponse{}, fmt.Errorf("version_id or file_id+ordinal is required")
+	}
+	ordinal, err := strconv.ParseInt(ordinalRaw, 10, 64)
+	if err != nil {
+		return FileVersionContentResponse{}, fmt.Errorf("ordinal must be an integer")
+	}
+	return manager.GetFileVersionContentAtOrdinal(ctx, databaseID, workspace, fileID, ordinal)
+}
+
+func httpLookupResolvedFileVersionContent(ctx context.Context, manager *DatabaseManager, workspace string, query map[string][]string) (FileVersionContentResponse, error) {
+	versionID := strings.TrimSpace(firstQueryValue(query, "version_id"))
+	if versionID != "" {
+		return manager.GetResolvedFileVersionContent(ctx, workspace, versionID)
+	}
+	fileID := strings.TrimSpace(firstQueryValue(query, "file_id"))
+	ordinalRaw := strings.TrimSpace(firstQueryValue(query, "ordinal"))
+	if fileID == "" || ordinalRaw == "" {
+		return FileVersionContentResponse{}, fmt.Errorf("version_id or file_id+ordinal is required")
+	}
+	ordinal, err := strconv.ParseInt(ordinalRaw, 10, 64)
+	if err != nil {
+		return FileVersionContentResponse{}, fmt.Errorf("ordinal must be an integer")
+	}
+	return manager.GetResolvedFileVersionContentAtOrdinal(ctx, workspace, fileID, ordinal)
+}
+
+func firstQueryValue(query map[string][]string, key string) string {
+	values := query[key]
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
+}
+
+func fileVersionSelectorFromRestoreRequest(input restoreFileVersionRequest) FileVersionSelector {
+	return FileVersionSelector{
+		VersionID: strings.TrimSpace(input.VersionID),
+		FileID:    strings.TrimSpace(input.FileID),
+		Ordinal:   input.Ordinal,
+	}
+}
+
+func fileVersionDiffOperandsFromRequest(input diffFileVersionsRequest) (FileVersionDiffOperand, FileVersionDiffOperand) {
+	return input.From, input.To
+}
+
+func fileVersionSelectorFromUndeleteRequest(input undeleteFileVersionRequest) FileVersionSelector {
+	return FileVersionSelector{
+		VersionID: strings.TrimSpace(input.VersionID),
+		FileID:    strings.TrimSpace(input.FileID),
+		Ordinal:   input.Ordinal,
+	}
 }
 
 type HandlerOptions struct {
@@ -484,6 +570,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		}
 		response, err := manager.ListAllChangelog(r.Context(), ChangelogListRequest{
 			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 			Limit:     limit,
@@ -720,6 +807,7 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 			}
 			response, err := manager.ListGlobalChangelog(r.Context(), databaseID, ChangelogListRequest{
 				SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+				Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 				Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 				Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 				Limit:     limit,
@@ -1138,7 +1226,7 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
-	case strings.HasSuffix(workspacePath, "/diff"):
+	case strings.HasSuffix(workspacePath, "/diff") && !strings.HasSuffix(workspacePath, "/files/diff"):
 		workspace := strings.TrimSuffix(workspacePath, "/diff")
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -1151,6 +1239,28 @@ func handleWorkspaceRoute(
 			r.URL.Query().Get("base"),
 			r.URL.Query().Get("head"),
 		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/history"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/history")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 0)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.GetFileHistoryPage(r.Context(), databaseID, workspace, FileHistoryRequest{
+			Path:        r.URL.Query().Get("path"),
+			NewestFirst: httpHistoryDirectionNewestFirst(r.URL.Query().Get("direction")),
+			Limit:       limit,
+			Cursor:      r.URL.Query().Get("cursor"),
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1174,6 +1284,107 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/version-content"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/version-content")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := httpLookupFileVersionContent(r.Context(), manager, databaseID, workspace, r.URL.Query())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/diff"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/diff")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input diffFileVersionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		from, to := fileVersionDiffOperandsFromRequest(input)
+		response, err := manager.DiffFileVersions(r.Context(), databaseID, workspace, input.Path, from, to)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, ":restore-version"):
+		workspace := strings.TrimSuffix(workspacePath, ":restore-version")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input restoreFileVersionRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.RestoreFileVersion(
+			r.Context(),
+			databaseID,
+			workspace,
+			input.Path,
+			fileVersionSelectorFromRestoreRequest(input),
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, ":undelete"):
+		workspace := strings.TrimSuffix(workspacePath, ":undelete")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input undeleteFileVersionRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.UndeleteFileVersion(
+			r.Context(),
+			databaseID,
+			workspace,
+			input.Path,
+			fileVersionSelectorFromUndeleteRequest(input),
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/versioning"):
+		workspace := strings.TrimSuffix(workspacePath, "/versioning")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetWorkspaceVersioningPolicy(r.Context(), databaseID, workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input WorkspaceVersioningPolicy
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateWorkspaceVersioningPolicy(r.Context(), databaseID, workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
 	case strings.HasSuffix(workspacePath, "/activity"):
 		workspace := strings.TrimSuffix(workspacePath, "/activity")
 		if r.Method != http.MethodGet {
@@ -1236,6 +1447,7 @@ func handleWorkspaceRoute(
 		}
 		req := ChangelogListRequest{
 			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
 			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
 			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
 			Limit:     limit,
@@ -1515,7 +1727,7 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
-	case strings.HasSuffix(workspacePath, "/diff"):
+	case strings.HasSuffix(workspacePath, "/diff") && !strings.HasSuffix(workspacePath, "/files/diff"):
 		workspace := strings.TrimSuffix(workspacePath, "/diff")
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -1527,6 +1739,28 @@ func handleResolvedWorkspaceRoute(
 			r.URL.Query().Get("base"),
 			r.URL.Query().Get("head"),
 		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/history"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/history")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 0)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.GetResolvedFileHistoryPage(r.Context(), workspace, FileHistoryRequest{
+			Path:        r.URL.Query().Get("path"),
+			NewestFirst: httpHistoryDirectionNewestFirst(r.URL.Query().Get("direction")),
+			Limit:       limit,
+			Cursor:      r.URL.Query().Get("cursor"),
+		})
 		if err != nil {
 			writeError(w, err)
 			return
@@ -1549,6 +1783,105 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/version-content"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/version-content")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := httpLookupResolvedFileVersionContent(r.Context(), manager, workspace, r.URL.Query())
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/files/diff"):
+		workspace := strings.TrimSuffix(workspacePath, "/files/diff")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input diffFileVersionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		from, to := fileVersionDiffOperandsFromRequest(input)
+		response, err := manager.DiffResolvedFileVersions(r.Context(), workspace, input.Path, from, to)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, ":restore-version"):
+		workspace := strings.TrimSuffix(workspacePath, ":restore-version")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input restoreFileVersionRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.RestoreResolvedFileVersion(
+			r.Context(),
+			workspace,
+			input.Path,
+			fileVersionSelectorFromRestoreRequest(input),
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, ":undelete"):
+		workspace := strings.TrimSuffix(workspacePath, ":undelete")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input undeleteFileVersionRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, err)
+			return
+		}
+		response, err := manager.UndeleteResolvedFileVersion(
+			r.Context(),
+			workspace,
+			input.Path,
+			fileVersionSelectorFromUndeleteRequest(input),
+		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/versioning"):
+		workspace := strings.TrimSuffix(workspacePath, "/versioning")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetResolvedWorkspaceVersioningPolicy(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input WorkspaceVersioningPolicy
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateResolvedWorkspaceVersioningPolicy(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
 	case strings.HasSuffix(workspacePath, "/activity"):
 		workspace := strings.TrimSuffix(workspacePath, "/activity")
 		if r.Method != http.MethodGet {

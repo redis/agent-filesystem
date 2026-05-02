@@ -34,6 +34,26 @@ type httpRestoreCheckpointRequest struct {
 	CheckpointID string `json:"checkpoint_id"`
 }
 
+type httpRestoreFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Ordinal   int64  `json:"ordinal,omitempty"`
+}
+
+type httpDiffFileVersionsRequest struct {
+	Path string                              `json:"path"`
+	From controlplane.FileVersionDiffOperand `json:"from"`
+	To   controlplane.FileVersionDiffOperand `json:"to"`
+}
+
+type httpUndeleteFileVersionRequest struct {
+	Path      string `json:"path"`
+	VersionID string `json:"version_id,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	Ordinal   int64  `json:"ordinal,omitempty"`
+}
+
 type httpForkWorkspaceRequest struct {
 	NewWorkspace string `json:"new_workspace"`
 }
@@ -130,6 +150,86 @@ func (c *httpControlPlaneClient) GetWorkspace(ctx context.Context, workspace str
 	return out, err
 }
 
+func (c *httpControlPlaneClient) GetWorkspaceVersioningPolicy(ctx context.Context, workspace string) (controlplane.WorkspaceVersioningPolicy, error) {
+	var out controlplane.WorkspaceVersioningPolicy
+	err := c.doJSON(ctx, http.MethodGet, c.workspacePath(workspace, "versioning"), nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetFileHistory(ctx context.Context, workspace, rawPath string, newestFirst bool) (controlplane.FileHistoryResponse, error) {
+	return c.GetFileHistoryPage(ctx, workspace, controlplane.FileHistoryRequest{
+		Path:        rawPath,
+		NewestFirst: newestFirst,
+	})
+}
+
+func (c *httpControlPlaneClient) GetFileHistoryPage(ctx context.Context, workspace string, req controlplane.FileHistoryRequest) (controlplane.FileHistoryResponse, error) {
+	var out controlplane.FileHistoryResponse
+	params := url.Values{}
+	params.Set("path", req.Path)
+	params.Set("direction", ternaryString(req.NewestFirst, "desc", "asc"))
+	if req.Limit > 0 {
+		params.Set("limit", strconv.Itoa(req.Limit))
+	}
+	if strings.TrimSpace(req.Cursor) != "" {
+		params.Set("cursor", strings.TrimSpace(req.Cursor))
+	}
+	rel := c.workspacePath(workspace, "files", "history") + "?" + params.Encode()
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetFileVersionContent(ctx context.Context, workspace, versionID string) (controlplane.FileVersionContentResponse, error) {
+	var out controlplane.FileVersionContentResponse
+	params := url.Values{}
+	params.Set("version_id", versionID)
+	rel := c.workspacePath(workspace, "files", "version-content") + "?" + params.Encode()
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) GetFileVersionContentAtOrdinal(ctx context.Context, workspace, fileID string, ordinal int64) (controlplane.FileVersionContentResponse, error) {
+	var out controlplane.FileVersionContentResponse
+	params := url.Values{}
+	params.Set("file_id", fileID)
+	params.Set("ordinal", strconv.FormatInt(ordinal, 10))
+	rel := c.workspacePath(workspace, "files", "version-content") + "?" + params.Encode()
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) DiffFileVersions(ctx context.Context, workspace, rawPath string, from, to controlplane.FileVersionDiffOperand) (controlplane.FileVersionDiffResponse, error) {
+	var out controlplane.FileVersionDiffResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "files", "diff"), httpDiffFileVersionsRequest{
+		Path: rawPath,
+		From: from,
+		To:   to,
+	}, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) RestoreFileVersion(ctx context.Context, workspace, rawPath string, selector controlplane.FileVersionSelector) (controlplane.FileVersionRestoreResponse, error) {
+	var out controlplane.FileVersionRestoreResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":restore-version", httpRestoreFileVersionRequest{
+		Path:      rawPath,
+		VersionID: selector.VersionID,
+		FileID:    selector.FileID,
+		Ordinal:   selector.Ordinal,
+	}, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) UndeleteFileVersion(ctx context.Context, workspace, rawPath string, selector controlplane.FileVersionSelector) (controlplane.FileVersionUndeleteResponse, error) {
+	var out controlplane.FileVersionUndeleteResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace)+":undelete", httpUndeleteFileVersionRequest{
+		Path:      rawPath,
+		VersionID: selector.VersionID,
+		FileID:    selector.FileID,
+		Ordinal:   selector.Ordinal,
+	}, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
 	var out controlplane.WorkspaceDetail
 	databaseID, err := c.requireDatabaseID(ctx)
@@ -147,6 +247,12 @@ func (c *httpControlPlaneClient) ImportWorkspace(ctx context.Context, input cont
 		return out, err
 	}
 	err = c.doJSONWithClient(ctx, c.importer, http.MethodPost, c.scopedPathFor(databaseID, "workspaces:import"), input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error) {
+	var out controlplane.WorkspaceVersioningPolicy
+	err := c.doJSON(ctx, http.MethodPut, c.workspacePath(workspace, "versioning"), policy, &out, http.StatusOK)
 	return out, err
 }
 
@@ -184,6 +290,9 @@ func (c *httpControlPlaneClient) ListChangelog(ctx context.Context, workspace st
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
 		params.Set("session_id", req.SessionID)
+	}
+	if strings.TrimSpace(req.Path) != "" {
+		params.Set("path", req.Path)
 	}
 	if strings.TrimSpace(req.Since) != "" {
 		params.Set("since", req.Since)

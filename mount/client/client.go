@@ -18,6 +18,8 @@ type GrepMatch = internal.GrepMatch
 type InvalidateEvent = internal.InvalidateEvent
 type AttrUpdate = internal.AttrUpdate
 type ChangeStreamEntry = internal.ChangeStreamEntry
+type VersionedSnapshot = internal.VersionedSnapshot
+type MutationObserver = internal.MutationObserver
 
 var ErrStreamTrimmed = internal.ErrStreamTrimmed
 
@@ -39,4 +41,12 @@ func NewWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
 
 func PublishInvalidation(ctx context.Context, rdb *redis.Client, key string, ev InvalidateEvent) error {
 	return internal.PublishInvalidation(ctx, rdb, key, ev)
+}
+
+func NewWithObserver(rdb *redis.Client, key string, observer MutationObserver) Client {
+	return internal.NewWithObserver(rdb, key, observer)
+}
+
+func NewWithCacheAndObserver(rdb *redis.Client, key string, ttl time.Duration, observer MutationObserver) Client {
+	return internal.NewWithCacheAndObserver(rdb, key, ttl, observer)
 }

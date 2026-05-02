@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,15 @@ func TestAFSMCPServerInitializeAndToolsList(t *testing.T) {
 	}
 	if len(tools) == 0 {
 		t.Fatal("tools/list returned no tools")
+	}
+	for _, rawTool := range tools {
+		tool, ok := rawTool.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := tool["name"].(string); name == "file_delete_version" {
+			t.Fatalf("tools/list unexpectedly exposes %q", name)
+		}
 	}
 }
 
@@ -505,6 +515,341 @@ func TestAFSMCPStatusAndWorkspaceCurrentPreferActiveSyncWorkspace(t *testing.T) 
 	}
 	if got := currentMap["exists"]; got != true {
 		t.Fatalf("workspace_current exists = %#v, want true", got)
+	}
+}
+
+func TestAFSMCPWorkspaceVersioningPolicyToolsRoundTrip(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	getResult := server.callTool(context.Background(), "workspace_get_versioning_policy", map[string]any{})
+	if getResult.IsError {
+		t.Fatalf("workspace_get_versioning_policy returned error result: %+v", getResult)
+	}
+	var getPayload map[string]any
+	if err := decodeStructuredContent(getResult.StructuredContent, &getPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(get) returned error: %v", err)
+	}
+	policyMap, ok := getPayload["policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("get policy = %#v, want map", getPayload["policy"])
+	}
+	if got := policyMap["mode"]; got != controlplane.WorkspaceVersioningModeOff {
+		t.Fatalf("initial policy.mode = %#v, want %q", got, controlplane.WorkspaceVersioningModeOff)
+	}
+
+	setResult := server.callTool(context.Background(), "workspace_set_versioning_policy", map[string]any{
+		"mode":                    controlplane.WorkspaceVersioningModePaths,
+		"include_globs":           []any{"src/**", "docs/**"},
+		"exclude_globs":           []any{"**/*.tmp"},
+		"max_versions_per_file":   7,
+		"max_age_days":            30,
+		"max_total_bytes":         int64(2048),
+		"large_file_cutoff_bytes": int64(512),
+	})
+	if setResult.IsError {
+		t.Fatalf("workspace_set_versioning_policy returned error result: %+v", setResult)
+	}
+
+	var setPayload map[string]any
+	if err := decodeStructuredContent(setResult.StructuredContent, &setPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(set) returned error: %v", err)
+	}
+	if got := setPayload["workspace"]; got != "repo" {
+		t.Fatalf("set workspace = %#v, want %q", got, "repo")
+	}
+
+	getUpdated := server.callTool(context.Background(), "workspace_get_versioning_policy", map[string]any{})
+	if getUpdated.IsError {
+		t.Fatalf("workspace_get_versioning_policy(updated) returned error result: %+v", getUpdated)
+	}
+	var updatedPayload map[string]any
+	if err := decodeStructuredContent(getUpdated.StructuredContent, &updatedPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(updated) returned error: %v", err)
+	}
+	updatedPolicy, ok := updatedPayload["policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("updated policy = %#v, want map", updatedPayload["policy"])
+	}
+	if got := updatedPolicy["mode"]; got != controlplane.WorkspaceVersioningModePaths {
+		t.Fatalf("updated policy.mode = %#v, want %q", got, controlplane.WorkspaceVersioningModePaths)
+	}
+	if got := updatedPolicy["max_versions_per_file"]; got != float64(7) {
+		t.Fatalf("updated policy.max_versions_per_file = %#v, want 7", got)
+	}
+	if got := updatedPolicy["max_age_days"]; got != float64(30) {
+		t.Fatalf("updated policy.max_age_days = %#v, want 30", got)
+	}
+	if got := updatedPolicy["max_total_bytes"]; got != float64(2048) {
+		t.Fatalf("updated policy.max_total_bytes = %#v, want 2048", got)
+	}
+	if got := updatedPolicy["large_file_cutoff_bytes"]; got != float64(512) {
+		t.Fatalf("updated policy.large_file_cutoff_bytes = %#v, want 512", got)
+	}
+}
+
+func TestAFSMCPFileWriteCreatesVersionWhenPolicyEnabled(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if err := server.store.cp.PutWorkspaceVersioningPolicy(context.Background(), "repo", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/notes/history.txt",
+		"content": "hello history\n",
+	})
+	if result.IsError {
+		t.Fatalf("file_write returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent() returned error: %v", err)
+	}
+	if payload["file_id"] == nil || payload["version_id"] == nil {
+		t.Fatalf("payload missing version identifiers: %#v", payload)
+	}
+
+	lineage, err := server.store.cp.ResolveLiveFileLineageByPath(context.Background(), "repo", "/notes/history.txt")
+	if err != nil {
+		t.Fatalf("ResolveLiveFileLineageByPath() returned error: %v", err)
+	}
+	versions, err := server.store.cp.ListFileVersions(context.Background(), "repo", lineage.FileID, true)
+	if err != nil {
+		t.Fatalf("ListFileVersions() returned error: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("len(versions) = %d, want 1", len(versions))
+	}
+	if versions[0].ContentHash == "" {
+		t.Fatalf("versions[0].ContentHash = %q, want non-empty", versions[0].ContentHash)
+	}
+	if versions[0].BlobID == "" {
+		t.Fatalf("versions[0].BlobID = %q, want non-empty", versions[0].BlobID)
+	}
+	blob, err := server.store.cp.GetBlob(context.Background(), "repo", versions[0].BlobID)
+	if err != nil {
+		t.Fatalf("GetBlob() returned error: %v", err)
+	}
+	if string(blob) != "hello history\n" {
+		t.Fatalf("blob = %q, want %q", string(blob), "hello history\n")
+	}
+}
+
+func TestAFSMCPFileHistoryAndReadVersionTools(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if err := server.store.cp.PutWorkspaceVersioningPolicy(context.Background(), "repo", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("PutWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	writeResult := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/notes/history-tools.txt",
+		"content": "tool history\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	var writePayload map[string]any
+	if err := decodeStructuredContent(writeResult.StructuredContent, &writePayload); err != nil {
+		t.Fatalf("decodeStructuredContent(write) returned error: %v", err)
+	}
+	versionID, _ := writePayload["version_id"].(string)
+	if versionID == "" {
+		t.Fatalf("version_id = %#v, want non-empty", writePayload["version_id"])
+	}
+
+	updatedWrite := server.callTool(context.Background(), "file_write", map[string]any{
+		"path":    "/notes/history-tools.txt",
+		"content": "tool history updated\n",
+	})
+	if updatedWrite.IsError {
+		t.Fatalf("second file_write returned error result: %+v", updatedWrite)
+	}
+	var updatedWritePayload map[string]any
+	if err := decodeStructuredContent(updatedWrite.StructuredContent, &updatedWritePayload); err != nil {
+		t.Fatalf("decodeStructuredContent(updated write) returned error: %v", err)
+	}
+	secondVersionID, _ := updatedWritePayload["version_id"].(string)
+
+	historyResult := server.callTool(context.Background(), "file_history", map[string]any{
+		"path":      "/notes/history-tools.txt",
+		"direction": "asc",
+		"limit":     1,
+	})
+	if historyResult.IsError {
+		t.Fatalf("file_history returned error result: %+v", historyResult)
+	}
+	var historyPayload map[string]any
+	if err := decodeStructuredContent(historyResult.StructuredContent, &historyPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(history) returned error: %v", err)
+	}
+	history, ok := historyPayload["history"].(map[string]any)
+	if !ok {
+		t.Fatalf("history = %#v, want map", historyPayload["history"])
+	}
+	if got := history["order"]; got != "asc" {
+		t.Fatalf("history.order = %#v, want asc", got)
+	}
+	lineages, ok := history["lineages"].([]any)
+	if !ok || len(lineages) != 1 {
+		t.Fatalf("history.lineages = %#v, want one lineage", history["lineages"])
+	}
+	if history["next_cursor"] == nil || history["next_cursor"] == "" {
+		t.Fatalf("history.next_cursor = %#v, want non-empty", history["next_cursor"])
+	}
+	nextCursor, _ := history["next_cursor"].(string)
+
+	historyPage2Result := server.callTool(context.Background(), "file_history", map[string]any{
+		"path":      "/notes/history-tools.txt",
+		"direction": "asc",
+		"limit":     1,
+		"cursor":    nextCursor,
+	})
+	if historyPage2Result.IsError {
+		t.Fatalf("file_history page 2 returned error result: %+v", historyPage2Result)
+	}
+	var historyPage2Payload map[string]any
+	if err := decodeStructuredContent(historyPage2Result.StructuredContent, &historyPage2Payload); err != nil {
+		t.Fatalf("decodeStructuredContent(history page 2) returned error: %v", err)
+	}
+	historyPage2, ok := historyPage2Payload["history"].(map[string]any)
+	if !ok {
+		t.Fatalf("history page 2 = %#v, want map", historyPage2Payload["history"])
+	}
+	lineagesPage2, ok := historyPage2["lineages"].([]any)
+	if !ok || len(lineagesPage2) != 1 {
+		t.Fatalf("history page 2 lineages = %#v, want one lineage", historyPage2["lineages"])
+	}
+	lineagePage2, ok := lineagesPage2[0].(map[string]any)
+	if !ok {
+		t.Fatalf("history page 2 lineage = %#v, want map", lineagesPage2[0])
+	}
+	versionsPage2, ok := lineagePage2["versions"].([]any)
+	if !ok || len(versionsPage2) != 1 {
+		t.Fatalf("history page 2 versions = %#v, want one version", lineagePage2["versions"])
+	}
+	versionPage2, ok := versionsPage2[0].(map[string]any)
+	if !ok {
+		t.Fatalf("history page 2 version = %#v, want map", versionsPage2[0])
+	}
+	if got := versionPage2["version_id"]; got != secondVersionID {
+		t.Fatalf("history page 2 version_id = %#v, want %q", got, secondVersionID)
+	}
+
+	versionResult := server.callTool(context.Background(), "file_read_version", map[string]any{
+		"version_id": versionID,
+	})
+	if versionResult.IsError {
+		t.Fatalf("file_read_version returned error result: %+v", versionResult)
+	}
+	var versionPayload map[string]any
+	if err := decodeStructuredContent(versionResult.StructuredContent, &versionPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(version) returned error: %v", err)
+	}
+	version, ok := versionPayload["version"].(map[string]any)
+	if !ok {
+		t.Fatalf("version = %#v, want map", versionPayload["version"])
+	}
+	if got := version["content"]; got != "tool history\n" {
+		t.Fatalf("version.content = %#v, want written content", got)
+	}
+	fileID, _ := version["file_id"].(string)
+	if fileID == "" {
+		t.Fatalf("version.file_id = %#v, want non-empty", version["file_id"])
+	}
+
+	ordinalResult := server.callTool(context.Background(), "file_read_version", map[string]any{
+		"file_id": fileID,
+		"ordinal": 1,
+	})
+	if ordinalResult.IsError {
+		t.Fatalf("file_read_version by ordinal returned error result: %+v", ordinalResult)
+	}
+
+	diffResult := server.callTool(context.Background(), "file_diff_versions", map[string]any{
+		"path":            "/notes/history-tools.txt",
+		"from_version_id": versionID,
+		"to_ref":          "working-copy",
+	})
+	if diffResult.IsError {
+		t.Fatalf("file_diff_versions returned error result: %+v", diffResult)
+	}
+	var diffPayload map[string]any
+	if err := decodeStructuredContent(diffResult.StructuredContent, &diffPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(diff) returned error: %v", err)
+	}
+	diff, ok := diffPayload["diff"].(map[string]any)
+	if !ok {
+		t.Fatalf("diff = %#v, want map", diffPayload["diff"])
+	}
+	if got, _ := diff["binary"].(bool); got {
+		t.Fatalf("diff.binary = true, want false")
+	}
+	if got, _ := diff["diff"].(string); !strings.Contains(got, "tool history\n") || !strings.Contains(got, "tool history updated\n") {
+		t.Fatalf("diff.diff = %q, want historical and working-copy content", got)
+	}
+
+	restoreResult := server.callTool(context.Background(), "file_restore_version", map[string]any{
+		"path":       "/notes/history-tools.txt",
+		"version_id": versionID,
+	})
+	if restoreResult.IsError {
+		t.Fatalf("file_restore_version returned error result: %+v", restoreResult)
+	}
+
+	deletedVersion, err := server.store.cp.RecordFileVersionMutation(context.Background(), "repo", controlplane.VersionedFileSnapshot{Path: "/notes/deleted-tools.txt"}, controlplane.VersionedFileSnapshot{
+		Path:    "/notes/deleted-tools.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("deleted tool\n"),
+	}, controlplane.FileVersionMutationMetadata{Source: controlplane.ChangeSourceMCP})
+	if err != nil {
+		t.Fatalf("RecordFileVersionMutation(undelete create) returned error: %v", err)
+	}
+	if _, err := server.store.cp.RecordFileVersionMutation(context.Background(), "repo", controlplane.VersionedFileSnapshot{
+		Path:    "/notes/deleted-tools.txt",
+		Exists:  true,
+		Kind:    "file",
+		Mode:    0o644,
+		Content: []byte("deleted tool\n"),
+	}, controlplane.VersionedFileSnapshot{
+		Path: "/notes/deleted-tools.txt",
+	}, controlplane.FileVersionMutationMetadata{Source: controlplane.ChangeSourceMCP}); err != nil {
+		t.Fatalf("RecordFileVersionMutation(undelete delete) returned error: %v", err)
+	}
+
+	undeleteResult := server.callTool(context.Background(), "file_undelete", map[string]any{
+		"path": "/notes/deleted-tools.txt",
+	})
+	if undeleteResult.IsError {
+		t.Fatalf("file_undelete returned error result: %+v", undeleteResult)
+	}
+	var undeletePayload map[string]any
+	if err := decodeStructuredContent(undeleteResult.StructuredContent, &undeletePayload); err != nil {
+		t.Fatalf("decodeStructuredContent(undelete) returned error: %v", err)
+	}
+	undelete, ok := undeletePayload["undelete"].(map[string]any)
+	if !ok {
+		t.Fatalf("undelete = %#v, want map", undeletePayload["undelete"])
+	}
+	if got, _ := undelete["undeleted_from_version_id"].(string); got != deletedVersion.VersionID {
+		t.Fatalf("undelete.undeleted_from_version_id = %q, want %q", got, deletedVersion.VersionID)
 	}
 }
 

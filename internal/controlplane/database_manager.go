@@ -110,11 +110,12 @@ type DatabaseListResponse = databaseListResponse
 type UpsertDatabaseRequest = upsertDatabaseRequest
 
 type DatabaseManager struct {
-	mu       sync.Mutex
-	catalog  catalogStore
-	profiles map[string]databaseProfile
-	order    []string
-	runtimes map[string]*databaseRuntime
+	mu                 sync.Mutex
+	catalog            catalogStore
+	configPathOverride string
+	profiles           map[string]databaseProfile
+	order              []string
+	runtimes           map[string]*databaseRuntime
 
 	// Stats cache populated by the background poller. Keyed by database ID.
 	// Protected by statsMu so callers hitting ListDatabases don't contend
@@ -145,12 +146,13 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 	}
 
 	manager := &DatabaseManager{
-		catalog:    catalog,
-		profiles:   make(map[string]databaseProfile, len(loadedProfiles)),
-		order:      make([]string, 0, len(loadedProfiles)),
-		runtimes:   make(map[string]*databaseRuntime),
-		stats:      make(map[string]RedisStats),
-		pollerStop: make(chan struct{}),
+		catalog:            catalog,
+		configPathOverride: configPathOverride,
+		profiles:           make(map[string]databaseProfile, len(loadedProfiles)),
+		order:              make([]string, 0, len(loadedProfiles)),
+		runtimes:           make(map[string]*databaseRuntime),
+		stats:              make(map[string]RedisStats),
+		pollerStop:         make(chan struct{}),
 	}
 	for _, profile := range loadedProfiles {
 		if err := validateDatabaseProfile(profile); err != nil {
@@ -397,7 +399,7 @@ func (m *DatabaseManager) ensureBootstrapDatabase(ctx context.Context) error {
 }
 
 func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) error {
-	profile, ok := bootstrapDatabaseProfileFromContext(ctx)
+	profile, ok := m.bootstrapDatabaseProfile(ctx)
 	if !ok {
 		return nil
 	}
@@ -431,6 +433,16 @@ func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) err
 		return err
 	}
 	return nil
+}
+
+func (m *DatabaseManager) bootstrapDatabaseProfile(ctx context.Context) (databaseProfile, bool) {
+	if profile, ok := bootstrapDatabaseProfileFromContext(ctx); ok {
+		return profile, true
+	}
+	if len(m.order) > 0 {
+		return databaseProfile{}, false
+	}
+	return bootstrapDatabaseProfileFromConfigPath(m.configPathOverride)
 }
 
 func (m *DatabaseManager) normalizeBootstrapProfilesLocked(canonical databaseProfile) bool {
@@ -666,6 +678,14 @@ func (m *DatabaseManager) GetWorkspace(ctx context.Context, databaseID, workspac
 	return detail, nil
 }
 
+func (m *DatabaseManager) GetWorkspaceVersioningPolicy(ctx context.Context, databaseID, workspace string) (WorkspaceVersioningPolicy, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	return service.GetWorkspaceVersioningPolicy(ctx, route.WorkspaceID)
+}
+
 func (m *DatabaseManager) GetResolvedWorkspace(ctx context.Context, workspace string) (workspaceDetail, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -682,6 +702,14 @@ func (m *DatabaseManager) GetResolvedWorkspace(ctx context.Context, workspace st
 		return workspaceDetail{}, err
 	}
 	return detail, nil
+}
+
+func (m *DatabaseManager) GetResolvedWorkspaceVersioningPolicy(ctx context.Context, workspace string) (WorkspaceVersioningPolicy, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	return service.GetWorkspaceVersioningPolicy(ctx, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string, input createWorkspaceRequest) (workspaceDetail, error) {
@@ -772,6 +800,14 @@ func (m *DatabaseManager) UpdateWorkspace(ctx context.Context, databaseID, works
 	return detail, nil
 }
 
+func (m *DatabaseManager) UpdateWorkspaceVersioningPolicy(ctx context.Context, databaseID, workspace string, policy WorkspaceVersioningPolicy) (WorkspaceVersioningPolicy, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	return service.UpdateWorkspaceVersioningPolicy(ctx, route.WorkspaceID, policy)
+}
+
 func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -791,6 +827,14 @@ func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace
 		return workspaceDetail{}, err
 	}
 	return detail, nil
+}
+
+func (m *DatabaseManager) UpdateResolvedWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy WorkspaceVersioningPolicy) (WorkspaceVersioningPolicy, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceVersioningPolicy{}, err
+	}
+	return service.UpdateWorkspaceVersioningPolicy(ctx, route.WorkspaceID, policy)
 }
 
 func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, workspace string) error {
@@ -1582,6 +1626,38 @@ func (m *DatabaseManager) GetResolvedTree(ctx context.Context, workspace, rawVie
 	return service.GetTree(ctx, route.WorkspaceID, rawView, rawPath, depth)
 }
 
+func (m *DatabaseManager) GetFileHistory(ctx context.Context, databaseID, workspace, rawPath string, newestFirst bool) (FileHistoryResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileHistoryResponse{}, err
+	}
+	return service.GetFileHistory(ctx, route.WorkspaceID, rawPath, newestFirst)
+}
+
+func (m *DatabaseManager) GetFileHistoryPage(ctx context.Context, databaseID, workspace string, req FileHistoryRequest) (FileHistoryResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileHistoryResponse{}, err
+	}
+	return service.GetFileHistoryPage(ctx, route.WorkspaceID, req)
+}
+
+func (m *DatabaseManager) GetResolvedFileHistory(ctx context.Context, workspace, rawPath string, newestFirst bool) (FileHistoryResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileHistoryResponse{}, err
+	}
+	return service.GetFileHistory(ctx, route.WorkspaceID, rawPath, newestFirst)
+}
+
+func (m *DatabaseManager) GetResolvedFileHistoryPage(ctx context.Context, workspace string, req FileHistoryRequest) (FileHistoryResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileHistoryResponse{}, err
+	}
+	return service.GetFileHistoryPage(ctx, route.WorkspaceID, req)
+}
+
 func (m *DatabaseManager) GetFileContent(ctx context.Context, databaseID, workspace, rawView, rawPath string) (fileContentResponse, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
@@ -1590,12 +1666,92 @@ func (m *DatabaseManager) GetFileContent(ctx context.Context, databaseID, worksp
 	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
 }
 
+func (m *DatabaseManager) GetFileVersionContent(ctx context.Context, databaseID, workspace, versionID string) (FileVersionContentResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileVersionContentResponse{}, err
+	}
+	return service.GetFileVersionContent(ctx, route.WorkspaceID, versionID)
+}
+
+func (m *DatabaseManager) GetFileVersionContentAtOrdinal(ctx context.Context, databaseID, workspace, fileID string, ordinal int64) (FileVersionContentResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileVersionContentResponse{}, err
+	}
+	return service.GetFileVersionContentAtOrdinal(ctx, route.WorkspaceID, fileID, ordinal)
+}
+
 func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace, rawView, rawPath string) (fileContentResponse, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return fileContentResponse{}, err
 	}
 	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
+}
+
+func (m *DatabaseManager) GetResolvedFileVersionContent(ctx context.Context, workspace, versionID string) (FileVersionContentResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileVersionContentResponse{}, err
+	}
+	return service.GetFileVersionContent(ctx, route.WorkspaceID, versionID)
+}
+
+func (m *DatabaseManager) GetResolvedFileVersionContentAtOrdinal(ctx context.Context, workspace, fileID string, ordinal int64) (FileVersionContentResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileVersionContentResponse{}, err
+	}
+	return service.GetFileVersionContentAtOrdinal(ctx, route.WorkspaceID, fileID, ordinal)
+}
+
+func (m *DatabaseManager) DiffFileVersions(ctx context.Context, databaseID, workspace, rawPath string, from, to FileVersionDiffOperand) (FileVersionDiffResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileVersionDiffResponse{}, err
+	}
+	return service.DiffFileVersions(ctx, route.WorkspaceID, rawPath, from, to)
+}
+
+func (m *DatabaseManager) DiffResolvedFileVersions(ctx context.Context, workspace, rawPath string, from, to FileVersionDiffOperand) (FileVersionDiffResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileVersionDiffResponse{}, err
+	}
+	return service.DiffFileVersions(ctx, route.WorkspaceID, rawPath, from, to)
+}
+
+func (m *DatabaseManager) RestoreFileVersion(ctx context.Context, databaseID, workspace, rawPath string, selector FileVersionSelector) (FileVersionRestoreResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileVersionRestoreResponse{}, err
+	}
+	return service.RestoreFileVersion(ctx, route.WorkspaceID, rawPath, selector)
+}
+
+func (m *DatabaseManager) RestoreResolvedFileVersion(ctx context.Context, workspace, rawPath string, selector FileVersionSelector) (FileVersionRestoreResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileVersionRestoreResponse{}, err
+	}
+	return service.RestoreFileVersion(ctx, route.WorkspaceID, rawPath, selector)
+}
+
+func (m *DatabaseManager) UndeleteFileVersion(ctx context.Context, databaseID, workspace, rawPath string, selector FileVersionSelector) (FileVersionUndeleteResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return FileVersionUndeleteResponse{}, err
+	}
+	return service.UndeleteFileVersion(ctx, route.WorkspaceID, rawPath, selector)
+}
+
+func (m *DatabaseManager) UndeleteResolvedFileVersion(ctx context.Context, workspace, rawPath string, selector FileVersionSelector) (FileVersionUndeleteResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return FileVersionUndeleteResponse{}, err
+	}
+	return service.UndeleteFileVersion(ctx, route.WorkspaceID, rawPath, selector)
 }
 
 func (m *DatabaseManager) resolveWorkspace(ctx context.Context, workspace string) (*Service, databaseProfile, workspaceCatalogRoute, error) {

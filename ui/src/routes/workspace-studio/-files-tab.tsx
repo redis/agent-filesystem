@@ -1,6 +1,5 @@
 import { Button } from "@redis-ui/components";
-import { Check, ChevronDown, GitFork, History, Search, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styled, { keyframes } from "styled-components";
 import {
   EditorArea,
@@ -10,18 +9,14 @@ import {
 } from "../../components/afs-kit";
 import { formatBytes } from "../../foundation/api/afs";
 import {
-  useEvents,
   useUpdateWorkspaceFileMutation,
   useWorkspaceFileContent,
   useWorkspaceTree,
 } from "../../foundation/hooks/use-afs";
-import { PathHistoryPanel } from "../../foundation/tables/path-history-panel";
-import {
-  getActiveWorkspaceView,
-  getWorkspaceBrowserViewOptions,
-} from "../../foundation/workspace-browser-views";
+import { getWorkspaceBrowserViewOptions } from "../../foundation/workspace-browser-views";
 import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../../foundation/types/afs";
 import { displayWorkspaceName } from "../../foundation/workspace-display";
+import { FileHistoryDrawer } from "./-file-history-drawer";
 
 /* ─── Icons ─────────────────────────────────────────────────────────── */
 
@@ -41,43 +36,42 @@ function FileIcon() {
   );
 }
 
+function ChevronIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" style={{ color: "var(--afs-muted)" }}>
+      <path d="M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z" />
+    </svg>
+  );
+}
+
 /* ─── Props ──────────────────────────────────────────────────────────── */
 
 type Props = {
   workspace: AFSWorkspaceDetail;
   browserView: AFSWorkspaceView;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
-  onViewAllCheckpoints: () => void;
 };
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
-export function FilesTab({
-  workspace,
-  browserView,
-  onBrowserViewChange,
-  onViewAllCheckpoints,
-}: Props) {
+export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props) {
   const updateFile = useUpdateWorkspaceFileMutation();
 
   const [currentPath, setCurrentPath] = useState("/");
   const [selectedPath, setSelectedPath] = useState("");
+  const [historyPath, setHistoryPath] = useState("");
   const [draftContent, setDraftContent] = useState("");
-  const [pathHistoryOpen, setPathHistoryOpen] = useState(false);
-  const [checkpointMenuOpen, setCheckpointMenuOpen] = useState(false);
-  const [checkpointSearch, setCheckpointSearch] = useState("");
-  const checkpointMenuRef = useRef<HTMLDivElement | null>(null);
-  const checkpointSearchRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     setCurrentPath("/");
-    closeSelectedFile();
+    setSelectedPath("");
+    setHistoryPath("");
   }, [browserView]);
 
   useEffect(() => {
     if (selectedPath === "") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeSelectedFile();
+      if (e.key === "Escape") setSelectedPath("");
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -102,17 +96,6 @@ export function FilesTab({
     selectedPath !== "",
   );
 
-  const pathHistoryQuery = useEvents(
-    {
-      databaseId: workspace.databaseId,
-      workspaceId: workspace.id,
-      path: selectedPath,
-      limit: 25,
-      direction: "desc",
-    },
-    selectedPath !== "" && pathHistoryOpen,
-  );
-
   useEffect(() => {
     const file = selectedFileQuery.data;
     setDraftContent(file?.content ?? file?.target ?? "");
@@ -133,213 +116,43 @@ export function FilesTab({
   }, [treeQuery.data?.items]);
 
   const selectedFile = selectedFileQuery.data;
-  const activeBrowserView = getActiveWorkspaceView(workspace);
   const editable =
     workspace.capabilities.editWorkingCopy === true &&
-    browserView === activeBrowserView &&
+    browserView === "working-copy" &&
     selectedFile?.kind === "file";
 
   const pathSegments = useMemo(() => {
     if (currentPath === "/") return [];
     return currentPath.split("/").filter(Boolean);
   }, [currentPath]);
-  const currentFolderName = pathSegments.length === 0
-    ? displayWorkspaceName(workspace.name)
-    : pathSegments[pathSegments.length - 1];
 
   const viewOptions = useMemo(() => getWorkspaceBrowserViewOptions(workspace), [workspace]);
-  const checkpointOptions = useMemo(
-    () =>
-      viewOptions.map((option) => ({
-        ...option,
-      })),
-    [viewOptions],
-  );
-  const currentCheckpoint = checkpointOptions.find((option) => option.value === browserView)
-    ?? checkpointOptions[0];
-  const filteredCheckpointOptions = useMemo(() => {
-    const query = checkpointSearch.trim().toLowerCase();
-    if (query === "") {
-      return checkpointOptions;
-    }
-
-    return checkpointOptions.filter((option) =>
-      [option.label, option.value].some((value) =>
-        value.toLowerCase().includes(query),
-      ),
-    );
-  }, [checkpointOptions, checkpointSearch]);
-
-  useEffect(() => {
-    if (!checkpointMenuOpen) {
-      return;
-    }
-
-    const focusId = window.setTimeout(() => {
-      checkpointSearchRef.current?.focus();
-    }, 0);
-
-    function onPointerDown(event: PointerEvent) {
-      const target = event.target;
-      if (
-        target instanceof Node &&
-        checkpointMenuRef.current != null &&
-        !checkpointMenuRef.current.contains(target)
-      ) {
-        setCheckpointMenuOpen(false);
-      }
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setCheckpointMenuOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.clearTimeout(focusId);
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [checkpointMenuOpen]);
-
-  function switchCheckpoint(nextView: AFSWorkspaceView) {
-    onBrowserViewChange(nextView);
-    setCurrentPath("/");
-    closeSelectedFile();
-    setCheckpointMenuOpen(false);
-    setCheckpointSearch("");
-  }
-
-  function openAllCheckpoints() {
-    setCheckpointMenuOpen(false);
-    setCheckpointSearch("");
-    onViewAllCheckpoints();
-  }
-
-  function closeSelectedFile() {
-    setSelectedPath("");
-    setPathHistoryOpen(false);
-  }
-
-  function openPathHistoryEvent(event: { kind: string; checkpointId?: string }) {
-    if (event.kind === "checkpoint" || event.checkpointId) {
-      closeSelectedFile();
-      onViewAllCheckpoints();
-    }
-  }
-
-  function renderPathHistoryToggle() {
-    return (
-      <PathHistoryToggleButton
-        type="button"
-        aria-pressed={pathHistoryOpen}
-        $active={pathHistoryOpen}
-        onClick={() => setPathHistoryOpen((open) => !open)}
-      >
-        <History size={14} strokeWidth={1.8} aria-hidden="true" />
-        <span>History</span>
-      </PathHistoryToggleButton>
-    );
-  }
-
-  function renderPathHistoryPanel() {
-    if (!pathHistoryOpen || selectedPath === "") {
-      return null;
-    }
-
-    return (
-      <PathHistoryPanel
-        path={selectedPath}
-        rows={pathHistoryQuery.data?.items ?? []}
-        loading={pathHistoryQuery.isLoading}
-        error={pathHistoryQuery.isError}
-        errorMessage={
-          pathHistoryQuery.error instanceof Error ? pathHistoryQuery.error.message : undefined
-        }
-        onOpenEvent={openPathHistoryEvent}
-      />
-    );
-  }
 
   return (
     <RepoContainer>
       {/* ─── Toolbar: checkpoint selector + breadcrumb ─── */}
       <RepoToolbar>
         <ToolbarLeft>
-          <CheckpointDropdown ref={checkpointMenuRef}>
-            <CheckpointTrigger
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={checkpointMenuOpen}
-              onClick={() => setCheckpointMenuOpen((open) => !open)}
-            >
-              <GitFork size={15} strokeWidth={1.8} aria-hidden="true" />
-              <CheckpointTriggerText>{currentCheckpoint.label}</CheckpointTriggerText>
-              <ChevronDown size={14} strokeWidth={1.8} aria-hidden="true" />
-            </CheckpointTrigger>
-            {checkpointMenuOpen ? (
-              <CheckpointMenu role="menu" aria-label="Switch browser view">
-                <CheckpointMenuHeader>
-                  <CheckpointMenuTitle>Switch View</CheckpointMenuTitle>
-                  <CheckpointCloseButton
-                    type="button"
-                    aria-label="Close checkpoint switcher"
-                    onClick={() => setCheckpointMenuOpen(false)}
-                  >
-                    <X size={14} strokeWidth={1.8} aria-hidden="true" />
-                  </CheckpointCloseButton>
-                </CheckpointMenuHeader>
-                <CheckpointSearchWrap>
-                  <Search size={14} strokeWidth={1.8} aria-hidden="true" />
-                  <CheckpointSearchInput
-                    ref={checkpointSearchRef}
-                    value={checkpointSearch}
-                    onChange={(event) => setCheckpointSearch(event.target.value)}
-                    placeholder="Find a checkpoint"
-                  />
-                </CheckpointSearchWrap>
-                <CheckpointMenuList>
-                  {filteredCheckpointOptions.length === 0 ? (
-                    <CheckpointEmpty>No checkpoints match.</CheckpointEmpty>
-                  ) : (
-                    filteredCheckpointOptions.map((option) => {
-                      const selected = option.value === browserView;
-                      return (
-                        <Fragment key={option.value}>
-                          <CheckpointMenuItem
-                            type="button"
-                            role="menuitem"
-                            $selected={selected}
-                            onClick={() => switchCheckpoint(option.value)}
-                          >
-                            <CheckpointMenuItemName>{option.label}</CheckpointMenuItemName>
-                            <CheckpointSelectedIcon $visible={selected}>
-                              <Check size={14} strokeWidth={1.9} aria-hidden="true" />
-                            </CheckpointSelectedIcon>
-                          </CheckpointMenuItem>
-                          {option.value === activeBrowserView && filteredCheckpointOptions.length > 1 ? (
-                            <CheckpointMenuDivider role="separator" />
-                          ) : null}
-                        </Fragment>
-                      );
-                    })
-                  )}
-                </CheckpointMenuList>
-                <ViewAllCheckpointsButton type="button" role="menuitem" onClick={openAllCheckpoints}>
-                  View all checkpoints
-                </ViewAllCheckpointsButton>
-              </CheckpointMenu>
-            ) : null}
-          </CheckpointDropdown>
+          <BranchDropdown
+            value={browserView}
+            onChange={(e) => {
+              onBrowserViewChange(e.target.value as AFSWorkspaceView);
+              setCurrentPath("/");
+              setSelectedPath("");
+            }}
+          >
+            {viewOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </BranchDropdown>
 
           <Breadcrumb>
             <BreadcrumbLink
               onClick={() => {
                 setCurrentPath("/");
-                closeSelectedFile();
+                setSelectedPath("");
               }}
               $isRoot
             >
@@ -356,7 +169,7 @@ export function FilesTab({
                   ) : (
                     <BreadcrumbLink onClick={() => {
                       setCurrentPath(fullPath);
-                      closeSelectedFile();
+                      setSelectedPath("");
                     }}>
                       {segment}
                     </BreadcrumbLink>
@@ -377,83 +190,69 @@ export function FilesTab({
         ) : browserItems.length === 0 ? (
           <TableMessage>This directory is empty.</TableMessage>
         ) : (
-          <>
-            <FileStatsBar>
-              <FileStatsFolderTitle>{currentFolderName}</FileStatsFolderTitle>
-              <FileStatsLine>
-                <FileStatsValue>{workspace.fileCount.toLocaleString()}</FileStatsValue>
-                <span>{pluralize(workspace.fileCount, "file")}</span>
-                <FileStatsSeparator>·</FileStatsSeparator>
-                <FileStatsValue>{workspace.folderCount.toLocaleString()}</FileStatsValue>
-                <span>{pluralize(workspace.folderCount, "folder")}</span>
-                <FileStatsSeparator>·</FileStatsSeparator>
-                <FileStatsValue>{formatBytes(workspace.totalBytes)}</FileStatsValue>
-              </FileStatsLine>
-            </FileStatsBar>
-            <FileTable>
-              <thead>
-                <tr>
-                  <FileTableHeader $name>Name</FileTableHeader>
-                  <FileTableHeader $size>Size</FileTableHeader>
-                  <FileTableHeader $time>Last updated</FileTableHeader>
-                </tr>
-              </thead>
-              <tbody>
-                {currentPath !== "/" && (
-                  <FileRow
-                    onClick={() => {
-                      setCurrentPath(parentPath(currentPath));
-                      closeSelectedFile();
-                    }}
-                  >
-                    <FileCell $name>
-                      <FileNameContent>
-                        <IconWrap><FolderIcon /></IconWrap>
-                        <FileName>..</FileName>
-                      </FileNameContent>
-                    </FileCell>
-                    <FileCell $message />
-                    <FileCell $time />
-                  </FileRow>
-                )}
-                {browserItems.map((item) => (
-                  <FileRow
-                    key={item.path}
-                    $active={item.path === selectedPath}
-                    onClick={() => {
-                      if (item.kind === "dir") {
-                        setCurrentPath(item.path);
-                        closeSelectedFile();
-                      } else {
-                        setSelectedPath(item.path);
-                      }
-                    }}
-                  >
-                    <FileCell $name>
-                      <FileNameContent>
-                        <IconWrap>
-                          {item.kind === "dir" ? <FolderIcon /> : <FileIcon />}
-                        </IconWrap>
-                        <FileName $isDir={item.kind === "dir"}>{item.name}</FileName>
-                      </FileNameContent>
-                    </FileCell>
-                    <FileCell $message>
-                      {item.kind !== "dir" ? formatItemSize(item.size) : ""}
-                    </FileCell>
-                    <FileCell $time>
-                      {item.modifiedAt ? formatRelativeTime(item.modifiedAt) : ""}
-                    </FileCell>
-                  </FileRow>
-                ))}
-              </tbody>
-            </FileTable>
-          </>
+          <FileTable>
+            <thead>
+              <tr>
+                <FileTableHeader $name>Name</FileTableHeader>
+                <FileTableHeader $size>Size</FileTableHeader>
+                <FileTableHeader $time>Last updated</FileTableHeader>
+              </tr>
+            </thead>
+            <tbody>
+              {currentPath !== "/" && (
+                <FileRow
+                  onClick={() => {
+                    setCurrentPath(parentPath(currentPath));
+                    setSelectedPath("");
+                  }}
+                >
+                  <FileCell $name>
+                    <FileNameContent>
+                      <IconWrap><FolderIcon /></IconWrap>
+                      <FileName>..</FileName>
+                    </FileNameContent>
+                  </FileCell>
+                  <FileCell $message />
+                  <FileCell $time />
+                </FileRow>
+              )}
+              {browserItems.map((item) => (
+                <FileRow
+                  key={item.path}
+                  $active={item.path === selectedPath}
+                  onClick={() => {
+                    if (item.kind === "dir") {
+                      setCurrentPath(item.path);
+                      setSelectedPath("");
+                    } else {
+                      setSelectedPath(item.path);
+                    }
+                  }}
+                >
+                  <FileCell $name>
+                    <FileNameContent>
+                      <IconWrap>
+                        {item.kind === "dir" ? <FolderIcon /> : <FileIcon />}
+                      </IconWrap>
+                      <FileName $isDir={item.kind === "dir"}>{item.name}</FileName>
+                    </FileNameContent>
+                  </FileCell>
+                  <FileCell $message>
+                    {item.kind !== "dir" ? formatItemSize(item.size) : ""}
+                  </FileCell>
+                  <FileCell $time>
+                    {item.modifiedAt ? formatRelativeTime(item.modifiedAt) : ""}
+                  </FileCell>
+                </FileRow>
+              ))}
+            </tbody>
+          </FileTable>
         )}
       </FileTableContainer>
 
       {/* ─── File content viewer (slide-over drawer) ─── */}
       {selectedPath !== "" && (
-        <DrawerOverlay onClick={closeSelectedFile}>
+        <DrawerOverlay onClick={() => setSelectedPath("")}>
           <DrawerPanel onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
             {selectedFileQuery.isLoading ? (
               <>
@@ -461,13 +260,9 @@ export function FilesTab({
                   <DrawerTitleWrap>
                     <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
                   </DrawerTitleWrap>
-                  <DrawerHeaderActions>
-                    {renderPathHistoryToggle()}
-                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
-                  </DrawerHeaderActions>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
                 </DrawerHeader>
                 <ViewerMessage>Loading file content...</ViewerMessage>
-                {renderPathHistoryPanel()}
               </>
             ) : selectedFile == null ? (
               <>
@@ -475,13 +270,9 @@ export function FilesTab({
                   <DrawerTitleWrap>
                     <ViewerTitle>{selectedPath.split("/").pop()}</ViewerTitle>
                   </DrawerTitleWrap>
-                  <DrawerHeaderActions>
-                    {renderPathHistoryToggle()}
-                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
-                  </DrawerHeaderActions>
+                  <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
                 </DrawerHeader>
                 <ViewerMessage>Could not load file.</ViewerMessage>
-                {renderPathHistoryPanel()}
               </>
             ) : selectedFile.binary ? (
               <>
@@ -494,13 +285,14 @@ export function FilesTab({
                       <Tag>binary</Tag>
                     </MetaRow>
                   </DrawerTitleWrap>
-                  <DrawerHeaderActions>
-                    {renderPathHistoryToggle()}
-                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
-                  </DrawerHeaderActions>
+                  <InlineActions>
+                    <Button size="medium" variant="secondary-fill" onClick={() => setHistoryPath(selectedFile.path)}>
+                      History
+                    </Button>
+                    <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  </InlineActions>
                 </DrawerHeader>
-                <ViewerMessage>Binary file - content not shown.</ViewerMessage>
-                {renderPathHistoryPanel()}
+                <ViewerMessage>Binary file — content not shown.</ViewerMessage>
               </>
             ) : editable ? (
               <DrawerForm
@@ -521,18 +313,24 @@ export function FilesTab({
                     </ViewerMeta>
                   </DrawerTitleWrap>
                   <InlineActions>
-                    {renderPathHistoryToggle()}
+                    <Button
+                      size="medium"
+                      variant="secondary-fill"
+                      type="button"
+                      onClick={() => setHistoryPath(selectedFile.path)}
+                    >
+                      History
+                    </Button>
                     <Button size="medium" type="submit" disabled={updateFile.isPending}>
                       Save
                     </Button>
-                    <DrawerCloseButton type="button" onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
+                    <DrawerCloseButton type="button" onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
                   </InlineActions>
                 </DrawerHeader>
                 <DrawerCodeArea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
                 />
-                {renderPathHistoryPanel()}
               </DrawerForm>
             ) : (
               <>
@@ -543,21 +341,32 @@ export function FilesTab({
                       {selectedFile.language} · {formatItemSize(selectedFile.size)}
                     </ViewerMeta>
                   </DrawerTitleWrap>
-                  <DrawerHeaderActions>
-                    {renderPathHistoryToggle()}
-                    <DrawerCloseButton onClick={closeSelectedFile} aria-label="Close">×</DrawerCloseButton>
-                  </DrawerHeaderActions>
+                  <InlineActions>
+                    <Button size="medium" variant="secondary-fill" onClick={() => setHistoryPath(selectedFile.path)}>
+                      History
+                    </Button>
+                    <DrawerCloseButton onClick={() => setSelectedPath("")} aria-label="Close">×</DrawerCloseButton>
+                  </InlineActions>
                 </DrawerHeader>
                 <DrawerCodeArea
                   readOnly
                   value={selectedFile.content ?? selectedFile.target ?? ""}
                 />
-                {renderPathHistoryPanel()}
               </>
             )}
           </DrawerPanel>
         </DrawerOverlay>
       )}
+
+      {historyPath !== "" ? (
+        <FileHistoryDrawer
+          databaseId={workspace.databaseId}
+          workspaceId={workspace.id}
+          path={historyPath}
+          editable={workspace.capabilities.editWorkingCopy === true}
+          onClose={() => setHistoryPath("")}
+        />
+      ) : null}
     </RepoContainer>
   );
 }
@@ -573,10 +382,6 @@ function parentPath(value: string) {
 
 function formatItemSize(size: number) {
   return size === 0 ? "0 KB" : formatBytes(size);
-}
-
-function pluralize(value: number, singular: string) {
-  return value === 1 ? singular : `${singular}s`;
 }
 
 function formatRelativeTime(iso: string): string {
@@ -611,7 +416,7 @@ const RepoToolbar = styled.div`
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 0 12px;
+  padding: 12px 0;
   flex-wrap: wrap;
 `;
 
@@ -623,203 +428,32 @@ const ToolbarLeft = styled.div`
   min-width: 0;
 `;
 
-const CheckpointDropdown = styled.div`
-  position: relative;
-  flex: 0 0 auto;
-`;
-
-const CheckpointTrigger = styled.button`
+const BranchDropdown = styled.select`
+  appearance: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 260px;
-  height: 34px;
-  padding: 0 10px;
+  gap: 4px;
+  padding: 6px 28px 6px 12px;
   border: 1px solid var(--afs-line-strong);
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--afs-panel);
   color: var(--afs-ink);
-  font: inherit;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   cursor: pointer;
-  box-shadow: none;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease;
+  outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath fill='%23626b78' d='M4.427 7.427l3.396 3.396a.25.25 0 0 0 .354 0l3.396-3.396A.25.25 0 0 0 11.396 7H4.604a.25.25 0 0 0-.177.427z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
 
   &:hover {
-    background: var(--afs-panel-strong);
+    background-color: var(--afs-panel-strong);
+    border-color: var(--afs-line-strong);
   }
 
   &:focus-visible {
-    outline: none;
     border-color: var(--afs-accent);
     box-shadow: 0 0 0 2px var(--afs-accent-soft);
-  }
-`;
-
-const CheckpointTriggerText = styled.span`
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-`;
-
-const CheckpointMenu = styled.div`
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
-  z-index: 30;
-  width: min(360px, calc(100vw - 32px));
-  overflow: hidden;
-  border: 1px solid var(--afs-line-strong);
-  border-radius: 8px;
-  background: var(--afs-panel-strong);
-  box-shadow: 0 18px 48px rgba(8, 6, 13, 0.14);
-`;
-
-const CheckpointMenuHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 13px 14px 11px;
-  border-bottom: 1px solid var(--afs-line);
-`;
-
-const CheckpointMenuTitle = styled.div`
-  color: var(--afs-ink);
-  font-size: 13px;
-  font-weight: 700;
-`;
-
-const CheckpointCloseButton = styled.button`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--afs-muted);
-  cursor: pointer;
-
-  &:hover {
-    background: var(--afs-panel);
-    color: var(--afs-ink);
-  }
-`;
-
-const CheckpointSearchWrap = styled.label`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 12px 14px;
-  padding: 0 10px;
-  height: 34px;
-  border: 1px solid var(--afs-line);
-  border-radius: 7px;
-  background: var(--afs-panel);
-  color: var(--afs-muted);
-
-  &:focus-within {
-    border-color: var(--afs-accent);
-    box-shadow: 0 0 0 2px var(--afs-accent-soft);
-  }
-`;
-
-const CheckpointSearchInput = styled.input`
-  width: 100%;
-  min-width: 0;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--afs-ink);
-  font: inherit;
-  font-size: 13px;
-
-  &::placeholder {
-    color: var(--afs-muted);
-  }
-`;
-
-const CheckpointMenuList = styled.div`
-  max-height: 240px;
-  overflow-y: auto;
-  padding: 2px 6px 6px;
-`;
-
-const CheckpointMenuItem = styled.button<{ $selected?: boolean }>`
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 20px;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 34px;
-  padding: 7px 8px;
-  border: none;
-  border-radius: 6px;
-  background: ${({ $selected }) => ($selected ? "var(--afs-accent-soft)" : "transparent")};
-  color: var(--afs-ink);
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--afs-panel);
-  }
-`;
-
-const CheckpointMenuItemName = styled.span`
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-`;
-
-const CheckpointMenuDivider = styled.div`
-  height: 1px;
-  margin: 6px 2px;
-  background: var(--afs-line);
-`;
-
-const CheckpointSelectedIcon = styled.span<{ $visible?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--afs-accent);
-  opacity: ${({ $visible }) => ($visible ? 1 : 0)};
-`;
-
-const CheckpointEmpty = styled.div`
-  padding: 12px 8px;
-  color: var(--afs-muted);
-  font-size: 13px;
-`;
-
-const ViewAllCheckpointsButton = styled.button`
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 38px;
-  padding: 10px 14px;
-  border: none;
-  border-top: 1px solid var(--afs-line);
-  background: transparent;
-  color: var(--afs-accent);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 700;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--afs-panel);
   }
 `;
 
@@ -868,64 +502,6 @@ const FileTableContainer = styled.div`
   border: 1px solid var(--afs-line-strong);
   border-radius: 8px;
   overflow: hidden;
-`;
-
-const FileStatsBar = styled.div`
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
-  padding: 13px 16px;
-  background: var(--afs-panel-strong);
-  border-bottom: 1px solid var(--afs-line);
-
-  @media (max-width: 720px) {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 6px;
-  }
-`;
-
-const FileStatsFolderTitle = styled.div`
-  min-width: 0;
-  overflow: hidden;
-  color: var(--afs-ink);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-`;
-
-const FileStatsLine = styled.div`
-  display: flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 7px;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: auto;
-  text-align: right;
-  color: var(--afs-muted);
-  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 12px;
-  line-height: 1.25;
-  white-space: nowrap;
-
-  @media (max-width: 720px) {
-    justify-content: flex-start;
-    text-align: left;
-  }
-`;
-
-const FileStatsValue = styled.strong`
-  color: var(--afs-ink);
-  font-weight: 700;
-`;
-
-const FileStatsSeparator = styled.span`
-  color: var(--afs-muted);
 `;
 
 const FileTable = styled.table`
@@ -1110,41 +686,6 @@ const DrawerTitleWrap = styled.div`
   gap: 10px;
   min-width: 0;
   flex: 1;
-`;
-
-const DrawerHeaderActions = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
-`;
-
-const PathHistoryToggleButton = styled.button<{ $active?: boolean }>`
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 1px solid ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-line)")};
-  border-radius: 7px;
-  background: ${({ $active }) => ($active ? "var(--afs-accent-soft)" : "var(--afs-panel-strong)")};
-  color: ${({ $active }) => ($active ? "var(--afs-accent)" : "var(--afs-ink-soft)")};
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--afs-line-strong);
-    color: var(--afs-ink);
-  }
-
-  &:focus-visible {
-    outline: none;
-    border-color: var(--afs-focus);
-    box-shadow: 0 0 0 3px var(--afs-focus-soft);
-  }
 `;
 
 const DrawerCloseButton = styled.button`

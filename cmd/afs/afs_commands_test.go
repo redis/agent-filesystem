@@ -12,6 +12,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	mountclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,12 +28,48 @@ func (s stubAFSControlPlane) GetWorkspace(context.Context, string) (controlplane
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected GetWorkspace call")
 }
 
+func (s stubAFSControlPlane) GetWorkspaceVersioningPolicy(context.Context, string) (controlplane.WorkspaceVersioningPolicy, error) {
+	return controlplane.WorkspaceVersioningPolicy{}, fmt.Errorf("unexpected GetWorkspaceVersioningPolicy call")
+}
+
+func (s stubAFSControlPlane) GetFileHistory(context.Context, string, string, bool) (controlplane.FileHistoryResponse, error) {
+	return controlplane.FileHistoryResponse{}, fmt.Errorf("unexpected GetFileHistory call")
+}
+
+func (s stubAFSControlPlane) GetFileHistoryPage(context.Context, string, controlplane.FileHistoryRequest) (controlplane.FileHistoryResponse, error) {
+	return controlplane.FileHistoryResponse{}, fmt.Errorf("unexpected GetFileHistoryPage call")
+}
+
+func (s stubAFSControlPlane) GetFileVersionContent(context.Context, string, string) (controlplane.FileVersionContentResponse, error) {
+	return controlplane.FileVersionContentResponse{}, fmt.Errorf("unexpected GetFileVersionContent call")
+}
+
+func (s stubAFSControlPlane) GetFileVersionContentAtOrdinal(context.Context, string, string, int64) (controlplane.FileVersionContentResponse, error) {
+	return controlplane.FileVersionContentResponse{}, fmt.Errorf("unexpected GetFileVersionContentAtOrdinal call")
+}
+
+func (s stubAFSControlPlane) DiffFileVersions(context.Context, string, string, controlplane.FileVersionDiffOperand, controlplane.FileVersionDiffOperand) (controlplane.FileVersionDiffResponse, error) {
+	return controlplane.FileVersionDiffResponse{}, fmt.Errorf("unexpected DiffFileVersions call")
+}
+
+func (s stubAFSControlPlane) RestoreFileVersion(context.Context, string, string, controlplane.FileVersionSelector) (controlplane.FileVersionRestoreResponse, error) {
+	return controlplane.FileVersionRestoreResponse{}, fmt.Errorf("unexpected RestoreFileVersion call")
+}
+
+func (s stubAFSControlPlane) UndeleteFileVersion(context.Context, string, string, controlplane.FileVersionSelector) (controlplane.FileVersionUndeleteResponse, error) {
+	return controlplane.FileVersionUndeleteResponse{}, fmt.Errorf("unexpected UndeleteFileVersion call")
+}
+
 func (s stubAFSControlPlane) CreateWorkspace(context.Context, controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error) {
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected CreateWorkspace call")
 }
 
 func (s stubAFSControlPlane) ImportWorkspace(context.Context, controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error) {
 	return controlplane.ImportWorkspaceResponse{}, fmt.Errorf("unexpected ImportWorkspace call")
+}
+
+func (s stubAFSControlPlane) UpdateWorkspaceVersioningPolicy(context.Context, string, controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error) {
+	return controlplane.WorkspaceVersioningPolicy{}, fmt.Errorf("unexpected UpdateWorkspaceVersioningPolicy call")
 }
 
 func (s stubAFSControlPlane) DeleteWorkspace(context.Context, string) error {
@@ -402,10 +439,10 @@ func TestResolveWorkspaceSelectionFromControlPlaneCurrentWorkspaceAmbiguityInclu
 	if err == nil {
 		t.Fatal("resolveWorkspaceSelectionFromControlPlane() returned nil error, want current-workspace ambiguity guidance")
 	}
-	if !strings.Contains(err.Error(), `current workspace "getting-started" is ambiguous`) {
-		t.Fatalf("error = %q, want current workspace ambiguity preamble", err)
+	if !strings.Contains(err.Error(), `workspace "getting-started" is ambiguous`) {
+		t.Fatalf("error = %q, want workspace ambiguity preamble", err)
 	}
-	if !strings.Contains(err.Error(), "workspace use <workspace-id>") {
+	if !strings.Contains(err.Error(), "pass the workspace id explicitly") {
 		t.Fatalf("error = %q, want recovery command", err)
 	}
 }
@@ -482,12 +519,12 @@ func TestCurrentWorkspaceNameErrorsWhenConfiguredCurrentWorkspaceMissing(t *test
 	if err == nil {
 		t.Fatal("currentWorkspaceName() returned nil error, want missing current workspace error")
 	}
-	if !strings.Contains(err.Error(), `current workspace "missing" does not exist`) {
+	if !strings.Contains(err.Error(), `workspace "missing" does not exist`) {
 		t.Fatalf("currentWorkspaceName() error = %q, want missing configured current workspace", err)
 	}
 }
 
-func TestCurrentWorkspaceNameErrorsWhenNoWorkspaceSelected(t *testing.T) {
+func TestCurrentWorkspaceNameErrorsWhenNoWorkspaceCanBeInferred(t *testing.T) {
 	t.Helper()
 
 	mr := miniredis.RunT(t)
@@ -504,13 +541,16 @@ func TestCurrentWorkspaceNameErrorsWhenNoWorkspaceSelected(t *testing.T) {
 	if err := createEmptyWorkspace(ctx, cfg, store, "alpha"); err != nil {
 		t.Fatalf("createEmptyWorkspace(alpha) returned error: %v", err)
 	}
+	if err := createEmptyWorkspace(ctx, cfg, store, "beta"); err != nil {
+		t.Fatalf("createEmptyWorkspace(beta) returned error: %v", err)
+	}
 
 	_, err := currentWorkspaceName(ctx, cfg, store)
 	if err == nil {
-		t.Fatal("currentWorkspaceName() returned nil error, want no current workspace error")
+		t.Fatal("currentWorkspaceName() returned nil error, want explicit workspace error")
 	}
-	if !strings.Contains(err.Error(), "no current workspace is selected") {
-		t.Fatalf("currentWorkspaceName() error = %q, want no current workspace selected", err)
+	if !strings.Contains(err.Error(), "workspace is required; pass a workspace explicitly") {
+		t.Fatalf("currentWorkspaceName() error = %q, want explicit workspace guidance", err)
 	}
 }
 
@@ -603,7 +643,7 @@ func TestCmdImportSelfHostedCreatesWorkspace(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.ProductMode = productModeSelfHosted
 	cfg.URL = server.URL
-	cfg.DatabaseID = ""
+	cfg.DatabaseID = "primary"
 	cfg.WorkRoot = t.TempDir()
 	saveTempConfig(t, cfg)
 
@@ -633,6 +673,133 @@ func TestCmdImportSelfHostedCreatesWorkspace(t *testing.T) {
 	}
 	if detail.FolderCount != 1 {
 		t.Fatalf("FolderCount = %d, want %d", detail.FolderCount, 1)
+	}
+}
+
+func TestCmdImportDirectForceReplacePreservesVersioningHistory(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdImport([]string{"import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(initial) returned error: %v", err)
+	}
+
+	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	service := controlPlaneServiceFromStore(loadedCfg, store)
+	if _, err := service.UpdateWorkspaceVersioningPolicy(context.Background(), "repo", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main // v2\n")
+	if err := cmdImport([]string{"import", "--force", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(force) returned error: %v", err)
+	}
+
+	policy, err := service.GetWorkspaceVersioningPolicy(context.Background(), "repo")
+	if err != nil {
+		t.Fatalf("GetWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	if policy.Mode != controlplane.WorkspaceVersioningModeAll {
+		t.Fatalf("policy.Mode = %q, want %q", policy.Mode, controlplane.WorkspaceVersioningModeAll)
+	}
+
+	history, err := service.GetFileHistoryPage(context.Background(), "repo", controlplane.FileHistoryRequest{
+		Path:        "/main.go",
+		NewestFirst: false,
+	})
+	if err != nil {
+		t.Fatalf("GetFileHistoryPage() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 1 {
+		t.Fatalf("history lineages = %#v, want one lineage with one imported version", history.Lineages)
+	}
+	content, err := service.GetFileVersionContent(context.Background(), "repo", history.Lineages[0].Versions[0].VersionID)
+	if err != nil {
+		t.Fatalf("GetFileVersionContent() returned error: %v", err)
+	}
+	if content.Content != "package main // v2\n" {
+		t.Fatalf("version content = %q, want %q", content.Content, "package main // v2\n")
+	}
+}
+
+func TestCmdImportSelfHostedForceReplacePreservesVersioningHistory(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = ""
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main\n")
+
+	if err := cmdImport([]string{"import", "codex", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(initial) returned error: %v", err)
+	}
+
+	_, service, closeFn, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSControlPlane() returned error: %v", err)
+	}
+	defer closeFn()
+
+	if _, err := service.UpdateWorkspaceVersioningPolicy(context.Background(), "codex", controlplane.WorkspaceVersioningPolicy{
+		Mode: controlplane.WorkspaceVersioningModeAll,
+	}); err != nil {
+		t.Fatalf("UpdateWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+
+	writeTestFile(t, filepath.Join(sourceDir, "main.go"), "package main // hosted v2\n")
+	if err := cmdImport([]string{"import", "--force", "codex", sourceDir}); err != nil {
+		t.Fatalf("cmdImport(force) returned error: %v", err)
+	}
+
+	policy, err := service.GetWorkspaceVersioningPolicy(context.Background(), "codex")
+	if err != nil {
+		t.Fatalf("GetWorkspaceVersioningPolicy() returned error: %v", err)
+	}
+	if policy.Mode != controlplane.WorkspaceVersioningModeAll {
+		t.Fatalf("policy.Mode = %q, want %q", policy.Mode, controlplane.WorkspaceVersioningModeAll)
+	}
+
+	history, err := service.GetFileHistoryPage(context.Background(), "codex", controlplane.FileHistoryRequest{
+		Path:        "/main.go",
+		NewestFirst: false,
+	})
+	if err != nil {
+		t.Fatalf("GetFileHistoryPage() returned error: %v", err)
+	}
+	if len(history.Lineages) != 1 || len(history.Lineages[0].Versions) != 1 {
+		t.Fatalf("history lineages = %#v, want one lineage with one imported version", history.Lineages)
+	}
+	content, err := service.GetFileVersionContent(context.Background(), "codex", history.Lineages[0].Versions[0].VersionID)
+	if err != nil {
+		t.Fatalf("GetFileVersionContent() returned error: %v", err)
+	}
+	if content.Content != "package main // hosted v2\n" {
+		t.Fatalf("version content = %q, want %q", content.Content, "package main // hosted v2\n")
 	}
 }
 
@@ -742,6 +909,60 @@ func TestCmdWorkspaceCloneCreatesLocalCopy(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(clonedDir, "docs", "notes.md")); err != nil {
 		t.Fatalf("expected cloned workspace contents: %v", err)
+	}
+}
+
+func TestCmdWorkspaceCloneIncludesLiveWorkspaceChanges(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = "nfs"
+	cfg.NFSBin = "/usr/bin/true"
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "docs", "notes.md"), "checkpoint\n")
+
+	if err := cmdImport([]string{"import", "repo", sourceDir}); err != nil {
+		t.Fatalf("cmdImport() returned error: %v", err)
+	}
+
+	_, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	fsKey, _, _, err := controlplane.EnsureWorkspaceRoot(context.Background(), store.cp, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	fsClient := mountclient.New(store.rdb, fsKey)
+	if err := fsClient.Echo(context.Background(), "/docs/notes.md", []byte("live workspace change\n")); err != nil {
+		t.Fatalf("Echo(notes.md) returned error: %v", err)
+	}
+	if err := fsClient.EchoCreate(context.Background(), "/docs/live-only.md", []byte("live only\n"), 0o644); err != nil {
+		t.Fatalf("EchoCreate(live-only.md) returned error: %v", err)
+	}
+
+	clonedDir := filepath.Join(t.TempDir(), "repo-live-clone")
+	if err := cmdWorkspace([]string{"workspace", "clone", "repo", clonedDir}); err != nil {
+		t.Fatalf("cmdWorkspace(clone live) returned error: %v", err)
+	}
+
+	if got, err := os.ReadFile(filepath.Join(clonedDir, "docs", "notes.md")); err != nil {
+		t.Fatalf("ReadFile(notes.md) returned error: %v", err)
+	} else if string(got) != "live workspace change\n" {
+		t.Fatalf("notes.md content = %q, want %q", string(got), "live workspace change\n")
+	}
+	if got, err := os.ReadFile(filepath.Join(clonedDir, "docs", "live-only.md")); err != nil {
+		t.Fatalf("ReadFile(live-only.md) returned error: %v", err)
+	} else if string(got) != "live only\n" {
+		t.Fatalf("live-only.md content = %q, want %q", string(got), "live only\n")
 	}
 }
 

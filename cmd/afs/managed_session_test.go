@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-func TestManagedWorkspaceSessionRequestTracksLocalMode(t *testing.T) {
+func TestManagedWorkspaceSessionRequestIncludesLocalMetadata(t *testing.T) {
 	t.Helper()
 
 	req := managedWorkspaceSessionRequest(config{
@@ -10,13 +10,16 @@ func TestManagedWorkspaceSessionRequestTracksLocalMode(t *testing.T) {
 		LocalPath:   "/tmp/repo",
 	})
 	if req.ClientKind != "sync" {
-		t.Fatalf("ClientKind = %q, want sync", req.ClientKind)
+		t.Fatalf("managedWorkspaceSessionRequest(local).ClientKind = %q, want %q", req.ClientKind, "sync")
 	}
 	if req.LocalPath != "/tmp/repo" {
-		t.Fatalf("LocalPath = %q, want /tmp/repo", req.LocalPath)
+		t.Fatalf("managedWorkspaceSessionRequest(local).LocalPath = %q, want %q", req.LocalPath, "/tmp/repo")
 	}
 	if req.Hostname == "" {
-		t.Fatal("expected Hostname to be populated")
+		t.Fatal("expected Hostname to be populated for local mode")
+	}
+	if req.OperatingSystem == "" {
+		t.Fatal("expected OperatingSystem to be populated for local mode")
 	}
 }
 

@@ -146,11 +146,11 @@ afs ws versioning set [workspace] --mode off|all|paths \
   [--max-versions-per-file 100] \
   [--max-age-days 30]
 
-afs fs history [-w workspace] <path>
-afs fs cat [-w workspace] <path> --version <version-id>
-afs fs diff [-w workspace] <path> --from <version-id|head> --to <version-id|head>
-afs fs restore [-w workspace] <path> --version <version-id>
-afs fs undelete [-w workspace] <path> --version <version-id>
+afs fs [-w workspace] history <path>
+afs fs [-w workspace] cat <path> --version <version-id>
+afs fs [-w workspace] diff <path> --from <version-id|head> --to <version-id|head>
+afs fs [-w workspace] restore <path> --version <version-id>
+afs fs [-w workspace] undelete <path> --version <version-id>
 ```
 
 Notes:

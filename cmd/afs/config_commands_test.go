@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -630,10 +629,10 @@ func TestLoadConfigForUpRejectsMissingWorkspaceEvenWhenPromptingAllowed(t *testi
 	if err == nil {
 		t.Fatal("loadConfigForUpWithIO() returned nil error, want missing workspace error")
 	}
-	if !strings.Contains(err.Error(), "no current workspace is selected for 'up'") {
+	if !strings.Contains(err.Error(), "workspace is required") {
 		t.Fatalf("loadConfigForUpWithIO() error = %q, want missing workspace message", err)
 	}
-	if !strings.Contains(err.Error(), "workspace use <workspace>") {
+	if !strings.Contains(err.Error(), "ws mount <workspace> <directory>") {
 		t.Fatalf("loadConfigForUpWithIO() error = %q, want workspace selection guidance", err)
 	}
 }
@@ -845,8 +844,6 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 
 	for _, want := range []string{
 		"workspace <subcommand>",
-		"current",
-		"use <workspace>",
 		"clone [workspace] <directory>",
 		"fork [source-workspace] <new-workspace>",
 		"import [--force] [--mount-at-source] <workspace> <directory>",
@@ -858,6 +855,11 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 	}
 	if strings.Contains(out, "run [workspace]") {
 		t.Fatalf("workspace help output = %q, did not expect removed run subcommand", out)
+	}
+	for _, removed := range []string{"use <workspace>", "current                                      Show"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("workspace help output = %q, did not expect removed subcommand %q", out, removed)
+		}
 	}
 }
 
@@ -878,106 +880,17 @@ func TestCmdWorkspaceRunReportsRemovedCommand(t *testing.T) {
 	}
 }
 
-func TestCmdWorkspaceUseAndCurrentManageSelectionOutsideConfigCommand(t *testing.T) {
+func TestCmdWorkspaceUseAndCurrentAreNotSupported(t *testing.T) {
 	t.Helper()
 
-	mr := miniredis.RunT(t)
-	cfg := defaultConfig()
-	cfg.RedisAddr = mr.Addr()
-	cfg.MountBackend = mountBackendNone
-	saveTempConfig(t, cfg)
-
-	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		t.Fatalf("openAFSStore() returned error: %v", err)
-	}
-	defer closeStore()
-	if err := createEmptyWorkspace(context.Background(), loadedCfg, store, "demo"); err != nil {
-		t.Fatalf("createEmptyWorkspace(demo) returned error: %v", err)
-	}
-
-	if err := cmdWorkspace([]string{"workspace", "use", "demo"}); err != nil {
-		t.Fatalf("cmdWorkspace(use) returned error: %v", err)
-	}
-
-	saved, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig() returned error: %v", err)
-	}
-	if saved.CurrentWorkspace != "demo" {
-		t.Fatalf("CurrentWorkspace = %q, want %q", saved.CurrentWorkspace, "demo")
-	}
-
-	out, err := captureStdout(t, func() error {
-		return cmdWorkspace([]string{"workspace", "current"})
-	})
-	if err != nil {
-		t.Fatalf("cmdWorkspace(current) returned error: %v", err)
-	}
-	for _, want := range []string{"current workspace on redis://", "demo", "afs.config.json"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("workspace current output = %q, want substring %q", out, want)
+	for _, subcommand := range []string{"use", "current"} {
+		err := cmdWorkspace([]string{"workspace", subcommand})
+		if err == nil {
+			t.Fatalf("cmdWorkspace(%s) returned nil error, want unsupported-command error", subcommand)
 		}
-	}
-}
-
-func TestCmdWorkspaceUseRejectsSwitchWhileDifferentWorkspaceMounted(t *testing.T) {
-	t.Helper()
-
-	homeDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	if err := os.Setenv("HOME", homeDir); err != nil {
-		t.Fatalf("Setenv(HOME) returned error: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", origHome)
-	})
-
-	mr := miniredis.RunT(t)
-	cfg := defaultConfig()
-	cfg.RedisAddr = mr.Addr()
-	cfg.MountBackend = mountBackendNFS
-	cfg.NFSBin = "/usr/bin/true"
-	cfg.CurrentWorkspace = "alpha"
-	saveTempConfig(t, cfg)
-
-	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
-	if err != nil {
-		t.Fatalf("openAFSStore() returned error: %v", err)
-	}
-	defer closeStore()
-	for _, name := range []string{"alpha", "beta"} {
-		if err := createEmptyWorkspace(context.Background(), loadedCfg, store, name); err != nil {
-			t.Fatalf("createEmptyWorkspace(%s) returned error: %v", name, err)
+		if !strings.Contains(err.Error(), `unknown workspace subcommand "`+subcommand+`"`) {
+			t.Fatalf("cmdWorkspace(%s) error = %q, want unsupported-command error", subcommand, err)
 		}
-	}
-
-	if err := saveState(state{
-		StartedAt:        time.Now().UTC(),
-		CurrentWorkspace: "alpha",
-		MountBackend:     mountBackendNFS,
-		MountPID:         os.Getpid(),
-		LocalPath:        "/tmp/afs-alpha",
-	}); err != nil {
-		t.Fatalf("saveState() returned error: %v", err)
-	}
-
-	err = cmdWorkspace([]string{"workspace", "use", "beta"})
-	if err == nil {
-		t.Fatal("cmdWorkspace(use beta) returned nil error, want mounted workspace warning")
-	}
-	for _, want := range []string{`active workspace "alpha"`, "down' before selecting", `"beta"`} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("cmdWorkspace(use beta) error = %q, want substring %q", err, want)
-		}
-	}
-
-	saved, err := loadConfig()
-	if err != nil {
-		t.Fatalf("loadConfig() returned error: %v", err)
-	}
-	if saved.CurrentWorkspace != "alpha" {
-		t.Fatalf("CurrentWorkspace = %q, want %q after rejected switch", saved.CurrentWorkspace, "alpha")
 	}
 }
 

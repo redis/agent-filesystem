@@ -33,6 +33,7 @@ type nativeClient struct {
 	// publishInvalidate a no-op. Used by the --disable-cross-client-
 	// invalidation flag. Local cache state still tracks mutations.
 	publishDisabled atomic.Bool
+	observer        MutationObserver
 
 	// dirtyMu protects the markRootDirty throttle window.
 	//
@@ -77,22 +78,24 @@ type inodeData struct {
 	ContentRef string // "ext" means content lives in afs:{fs}:content:{id}
 }
 
-func newNativeClient(rdb *redis.Client, key string) Client {
+func newNativeClient(rdb *redis.Client, key string, observer MutationObserver) Client {
 	return &nativeClient{
 		rdb:      rdb,
 		key:      key,
 		keys:     newKeyBuilder(key),
 		originID: newOriginID(),
+		observer: observer,
 	}
 }
 
-func newNativeClientWithCache(rdb *redis.Client, key string, ttl time.Duration) Client {
+func newNativeClientWithCache(rdb *redis.Client, key string, ttl time.Duration, observer MutationObserver) Client {
 	return &nativeClient{
 		rdb:      rdb,
 		key:      key,
 		keys:     newKeyBuilder(key),
 		cache:    cache.New(ttl),
 		originID: newOriginID(),
+		observer: observer,
 	}
 }
 
@@ -491,6 +494,13 @@ func (c *nativeClient) CreateFile(ctx context.Context, p string, mode uint32, ex
 		if err := c.markRootDirty(ctx); err != nil {
 			return nil, false, err
 		}
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, p, inode)
+		if snapErr != nil {
+			return nil, false, snapErr
+		}
+		if err := c.recordVersionMutation(ctx, VersionedSnapshot{Path: p}, afterSnapshot); err != nil {
+			return nil, false, err
+		}
 	}
 	return inode.toStat(), created, nil
 }
@@ -528,6 +538,10 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	if err != nil {
 		return err
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
 	if inode.Type == "dir" {
 		children, err := c.loadDirEntries(ctx, inode.ID)
 		if err != nil {
@@ -562,7 +576,15 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	if err != nil {
 		return err
 	}
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	if inode.Type == "file" || inode.Type == "symlink" {
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, VersionedSnapshot{Path: resolved}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) Ls(ctx context.Context, p string) ([]string, error) {
@@ -627,6 +649,10 @@ func (c *nativeClient) Rename(ctx context.Context, src, dst string, flags uint32
 	if err != nil {
 		return err
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolvedSrc, srcInode)
+	if snapErr != nil {
+		return snapErr
+	}
 	if srcInode.Type == "dir" && (dst == resolvedSrc || strings.HasPrefix(dst, resolvedSrc+"/")) {
 		return errors.New("cannot move a directory into its own subtree")
 	}
@@ -642,7 +668,19 @@ func (c *nativeClient) Rename(ctx context.Context, src, dst string, flags uint32
 	if err := c.renamePath(ctx, resolvedSrc, srcInode, dst, newParent, flags); err != nil {
 		return err
 	}
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	if srcInode.Type == "file" || srcInode.Type == "symlink" {
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, dst, srcInode)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) Mv(ctx context.Context, src, dst string) error {
@@ -679,7 +717,17 @@ func (c *nativeClient) Ln(ctx context.Context, target, linkpath string) error {
 	if err := c.createInodeAtPath(ctx, linkpath, inode, false); err != nil {
 		return err
 	}
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, linkpath, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, VersionedSnapshot{Path: linkpath}, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) Readlink(ctx context.Context, p string) (string, error) {
@@ -698,12 +746,28 @@ func (c *nativeClient) Chmod(ctx context.Context, p string, mode uint32) error {
 	if err != nil {
 		return err
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
 	inode.Mode = mode
 	if err := c.saveInodeMeta(ctx, resolved, inode); err != nil {
 		return err
 	}
 	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	if inode.Type == "file" || inode.Type == "symlink" {
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) Chown(ctx context.Context, p string, uid, gid uint32) error {
@@ -727,6 +791,10 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 	resolved, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
 		return err
+	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
 	}
 	if inode.Type != "file" {
 		return errors.New("not a file")
@@ -764,7 +832,17 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 		return err
 	}
 	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) Utimens(ctx context.Context, p string, atimeMs, mtimeMs int64) error {
@@ -803,6 +881,11 @@ func (c *nativeClient) SetAttrs(ctx context.Context, p string, upd AttrUpdate) e
 	if err != nil {
 		return err
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	modeChanged := upd.Mode != nil && inode.Mode != *upd.Mode
 
 	// Mutate in-memory inode so the subsequent cachePath reflects the new
 	// state; also build a sparse HSet map of only the fields that changed.
@@ -833,7 +916,19 @@ func (c *nativeClient) SetAttrs(ctx context.Context, p string, upd AttrUpdate) e
 	}
 	c.cachePath(resolved, inode)
 	c.publishInvalidate(ctx, InvalidateOpInode, resolved)
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	if modeChanged && (inode.Type == "file" || inode.Type == "symlink") {
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) Info(ctx context.Context) (*InfoResult, error) {
@@ -875,6 +970,10 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	if inode.Type != "file" {
 		return errors.New("not a file")
 	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
 	inode.Content = string(data)
 	inode.Size = int64(len(inode.Content))
 	inode.Mode = mode
@@ -888,7 +987,17 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 		return err
 	}
 	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, appendMode bool) error {
@@ -908,6 +1017,10 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	}
 	if inode.Type != "file" {
 		return errors.New("not a file")
+	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
 	}
 
 	before := inode.Size
@@ -935,15 +1048,37 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 		return err
 	}
 	c.publishInvalidate(ctx, InvalidateOpContent, resolved)
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (c *nativeClient) createFile(ctx context.Context, p string, content string, mode uint32) error {
-	_, _, err := c.createFileIfMissing(ctx, p, content, mode, false)
+	inode, created, err := c.createFileIfMissing(ctx, p, content, mode, false)
 	if err != nil {
 		return err
 	}
-	return c.markRootDirty(ctx)
+	if err := c.markRootDirty(ctx); err != nil {
+		return err
+	}
+	if created {
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, p, inode)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, VersionedSnapshot{Path: p}, afterSnapshot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *nativeClient) createDir(ctx context.Context, p string, mode uint32) error {
@@ -1000,6 +1135,10 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 	}
 	if inode.Type != "file" {
 		return errors.New("not a file")
+	}
+	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
 	}
 	if inode.ContentRef != "ext" {
 		// Migrate to external content first.
@@ -1071,6 +1210,17 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 	}
 
 	c.invalidateInode(ctx, resolved)
+	inode.Size = newSize
+	inode.MtimeMs = now
+	inode.AtimeMs = now
+	inode.ContentRef = "ext"
+	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+	if snapErr != nil {
+		return snapErr
+	}
+	if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useState } from "react";
-import styled, { css, keyframes } from "styled-components";
+import styled from "styled-components";
 import { z } from "zod";
 import {
   DialogActions,
@@ -33,12 +33,13 @@ import { useDatabaseScope } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import { resolveWorkspaceBrowserView } from "../foundation/workspace-browser-views";
 import { displayWorkspaceName } from "../foundation/workspace-display";
-import { normalizeStudioTab, studioTabSchema } from "../foundation/workspace-tabs";
+import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
 import type { AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
-import { HistoryTab } from "./workspace-studio/-changes-tab";
+import { ActivityTab } from "./workspace-studio/-activity-tab";
+import { ChangesTab } from "./workspace-studio/-changes-tab";
 import { SettingsTab } from "./workspace-studio/-settings-tab";
 
 const workspaceStudioSearchSchema = z.object({
@@ -78,9 +79,8 @@ function WorkspaceStudioPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const workspace = workspaceQuery.data;
-  const tab = normalizeStudioTab(search.tab);
-  const agentCount = workspace?.agents.length ?? 0;
-  const hasAgents = agentCount > 0;
+  const tab = search.tab ?? "browse";
+  const hasAgents = (workspace?.agents.length ?? 0) > 0;
   const showBanner = workspace != null && !bannerDismissed && userRequestedBanner;
   const showWelcomeInterstitial =
     workspace != null && search.welcome === true && !userRequestedBanner;
@@ -189,7 +189,7 @@ function WorkspaceStudioPage() {
   }
 
   if (workspace == null) {
-    if (deleteWorkspace.isPending) {
+    if (deleteWorkspace.isPending || deleteWorkspace.isSuccess) {
       return <Loader data-testid="loader--spinner" />;
     }
     throw new Error("Workspace not found.");
@@ -305,20 +305,30 @@ function WorkspaceStudioPage() {
           <BreadcrumbCurrent>{workspaceLabel}</BreadcrumbCurrent>
         </BreadcrumbGroup>
         <StudioActions>
-          <AgentConnectionPill title={`${agentCount} connected agent${agentCount === 1 ? "" : "s"}`}>
-            <AgentLiveDot $active={hasAgents} />
-            {agentCount.toLocaleString()} connected agent{agentCount === 1 ? "" : "s"}
-          </AgentConnectionPill>
-          <ConnectAgentButton
-            kind="ghost"
-            size="large"
-            onClick={() => {
-              setUserRequestedBanner(true);
-              setBannerDismissed(false);
-            }}
-          >
-            Connect agent
-          </ConnectAgentButton>
+          {hasAgents ? (
+            <ViewAgentsButton
+              kind="ghost"
+              size="large"
+              onClick={() => {
+                void navigate({
+                  to: "/agents",
+                  search: {
+                    workspaceId,
+                  },
+                });
+              }}
+            >
+              View agents
+            </ViewAgentsButton>
+          ) : (
+            <ConnectAgentButton
+              kind="ghost"
+              size="large"
+              onClick={() => setBannerDismissed(false)}
+            >
+              Connect agent
+            </ConnectAgentButton>
+          )}
         </StudioActions>
       </StudioNavRow>
 
@@ -326,10 +336,13 @@ function WorkspaceStudioPage() {
         <TabButton $active={tab === "browse"} onClick={() => setStudioTab("browse")}>
           Browse Files
         </TabButton>
+        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
+          Changelog
+        </TabButton>
         <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
           Checkpoints
         </TabButton>
-        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
+        <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
           History
         </TabButton>
         <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
@@ -342,7 +355,6 @@ function WorkspaceStudioPage() {
           workspace={workspace}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
-          onViewAllCheckpoints={() => setStudioTab("checkpoints")}
         />
       ) : null}
 
@@ -354,10 +366,20 @@ function WorkspaceStudioPage() {
         />
       ) : null}
 
-      {tab === "changes" ? (
-        <HistoryTab
+      {tab === "activity" ? (
+        <ActivityTab
           databaseId={workspace.databaseId}
           workspaceId={workspaceId}
+          updatedAt={workspace.updatedAt}
+          onTabChange={setStudioTab}
+        />
+      ) : null}
+
+      {tab === "changes" ? (
+        <ChangesTab
+          databaseId={workspace.databaseId}
+          workspaceId={workspaceId}
+          editable={workspace.capabilities.editWorkingCopy === true}
         />
       ) : null}
 
@@ -451,11 +473,6 @@ const StudioNavRow = styled.div`
   justify-content: space-between;
   gap: 16px;
   min-height: 24px;
-
-  @media (max-width: 720px) {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
 `;
 
 const StudioActions = styled.div`
@@ -465,7 +482,7 @@ const StudioActions = styled.div`
 
   @media (max-width: 720px) {
     width: 100%;
-    justify-content: flex-start;
+    justify-content: flex-end;
     flex-wrap: wrap;
   }
 `;
@@ -511,46 +528,18 @@ const BreadcrumbCurrent = styled.span`
   font-weight: 700;
 `;
 
-const ConnectAgentButton = styled(Button)`
+const ViewAgentsButton = styled(Button)`
   && {
-    margin-left: auto;
     white-space: nowrap;
     box-shadow: none;
   }
 `;
 
-const agentPulse = keyframes`
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-`;
-
-const AgentConnectionPill = styled.div`
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--afs-ink-soft);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-`;
-
-const AgentLiveDot = styled.span<{ $active: boolean }>`
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: ${({ $active }) => ($active ? "#22c55e" : "#d1d5db")};
-  ${({ $active }) =>
-    $active &&
-    css`
-      box-shadow: 0 0 7px rgba(34, 197, 94, 0.65);
-      animation: ${agentPulse} 2s ease-in-out infinite;
-    `}
+const ConnectAgentButton = styled(Button)`
+  && {
+    white-space: nowrap;
+    box-shadow: none;
+  }
 `;
 
 const WelcomeInterstitial = styled.section`

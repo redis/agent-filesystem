@@ -391,9 +391,11 @@ List files in a workspace directory.
 func fsCatUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s fs -w <workspace> cat <path>
+  %s fs -w <workspace> cat <path> --version <version-id>
 
-Print a workspace file to stdout.
-`, bin)
+Print a workspace file to stdout. With --version or --file-id/--ordinal, print
+an exact historical file version.
+`, bin, bin)
 }
 
 func fsFindUsageText(bin string) string {

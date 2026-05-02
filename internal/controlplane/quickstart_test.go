@@ -2,6 +2,8 @@ package controlplane
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -177,5 +179,59 @@ func TestQuickstartWithEmptySubjectUsesFlatWorkspaceName(t *testing.T) {
 	}
 	if resp.Workspace.Name != quickstartWorkspaceName {
 		t.Fatalf("Quickstart(anonymous) workspace name = %q, want %q", resp.Workspace.Name, quickstartWorkspaceName)
+	}
+}
+
+func TestSeedGettingStartedFallsBackToConfigFileRedis(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+
+	t.Setenv("AFS_REDIS_ADDR", "")
+	t.Setenv("AFS_REDIS_USERNAME", "")
+	t.Setenv("AFS_REDIS_PASSWORD", "")
+	t.Setenv("AFS_REDIS_DB", "")
+	t.Setenv("AFS_REDIS_TLS", "")
+	t.Setenv("REDIS_URL", "")
+
+	data, err := json.Marshal(Config{
+		RedisConfig: RedisConfig{
+			RedisAddr: mr.Addr(),
+			RedisDB:   5,
+		},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal(config) returned error: %v", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	t.Cleanup(manager.Close)
+
+	if err := manager.SeedGettingStarted(context.Background()); err != nil {
+		t.Fatalf("SeedGettingStarted() returned error: %v", err)
+	}
+
+	response, err := manager.ListDatabases(context.Background())
+	if err != nil {
+		t.Fatalf("ListDatabases() returned error: %v", err)
+	}
+	if len(response.Items) != 1 {
+		t.Fatalf("len(ListDatabases().Items) = %d, want 1", len(response.Items))
+	}
+	if response.Items[0].RedisAddr != mr.Addr() {
+		t.Fatalf("database redis addr = %q, want %q", response.Items[0].RedisAddr, mr.Addr())
+	}
+	if response.Items[0].RedisDB != 5 {
+		t.Fatalf("database redis db = %d, want %d", response.Items[0].RedisDB, 5)
+	}
+
+	if _, err := manager.GetWorkspace(context.Background(), response.Items[0].ID, quickstartWorkspaceName); err != nil {
+		t.Fatalf("GetWorkspace(getting-started) returned error: %v", err)
 	}
 }

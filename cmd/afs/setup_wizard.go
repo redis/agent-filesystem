@@ -98,19 +98,22 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "  What would you like to change?")
 		fmt.Fprintln(out)
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change mode "+clr(ansiDim, "("+setupModeLabel(cfg)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change current workspace "+clr(ansiDim, "("+currentWorkspaceLabel(cfg.CurrentWorkspace)+")"))
+		fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Change "+setupSurfaceMenuLabel(cfg)+" "+clr(ansiDim, "("+setupLocalSurfaceLabel(cfg)+")"))
 		if showRedisConnection {
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "3")+"  Save and exit")
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change Redis connection "+clr(ansiDim, "("+setupRedisConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "6")+"  Save and exit")
 		} else {
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "1")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
-			fmt.Fprintln(out, "    "+clr(ansiCyan, "2")+"  Save and exit")
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "4")+"  Change configuration source "+clr(ansiDim, "("+setupConnectionLabel(cfg)+")"))
+			fmt.Fprintln(out, "    "+clr(ansiCyan, "5")+"  Save and exit")
 		}
 		fmt.Fprintln(out)
 
-		defaultChoice := "2"
+		defaultChoice := "5"
 		if showRedisConnection {
-			defaultChoice = "3"
+			defaultChoice = "6"
 		}
 		choice, err := promptString(r, out, "  Choose", defaultChoice)
 		if err != nil {
@@ -120,28 +123,55 @@ func runEditSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, err
 
 		switch strings.TrimSpace(choice) {
 		case "1":
-			if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+			if err := promptModeSetup(r, out, &cfg); err != nil {
 				return cfg, err
 			}
 		case "2":
+			if err := promptCurrentWorkspaceSetup(r, out, &cfg); err != nil {
+				return cfg, err
+			}
+		case "3":
+			mode, err := effectiveMode(cfg)
+			if err != nil {
+				return cfg, err
+			}
+			if mode == modeSync {
+				if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			} else {
+				if err := promptLocalFilesystemSetup(r, out, &cfg, false); err != nil {
+					return cfg, err
+				}
+			}
+		case "4":
 			if showRedisConnection {
 				if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
 					return cfg, err
 				}
 			} else {
+				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			}
+		case "5":
+			if showRedisConnection {
+				if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+					return cfg, err
+				}
+			} else {
 				return cfg, nil
 			}
-		case "3", "":
+		case "6", "":
 			if showRedisConnection {
 				return cfg, nil
 			}
-			fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1 or 2."))
-			fmt.Fprintln(out)
+			return cfg, nil
 		default:
 			if showRedisConnection {
-				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, or 3."))
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, 5, or 6."))
 			} else {
-				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1 or 2."))
+				fmt.Fprintln(out, "  "+clr(ansiYellow, "Unknown choice ")+clr(ansiBold, choice)+clr(ansiDim, "; pick 1, 2, 3, 4, or 5."))
 			}
 			fmt.Fprintln(out)
 		}
@@ -164,16 +194,39 @@ func needsLoginBeforeSetup(cfg config) bool {
 }
 
 func runFullSetupWizard(r *bufio.Reader, out io.Writer, cfg config) (config, error) {
-	if err := promptConfigurationSetupForEdit(r, out, &cfg); err != nil {
+	connection, err := effectiveProductMode(cfg)
+	if err != nil {
+		connection = productModeLocal
+	}
+	fmt.Fprintln(out, "  "+clr(ansiBold+ansiCyan, "▸")+" "+clr(ansiBold, "Configuration Source"))
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, "  "+clr(ansiDim, "Currently: ")+clr(ansiBold, productModeDisplayLabel(connection)))
+	fmt.Fprintln(out)
+
+	// First-run default is sync, so a user who just blows through with Enter
+	// ends up on the recommended path.
+	if strings.TrimSpace(cfg.Mode) == "" {
+		cfg.Mode = modeSync
+	}
+	if err := promptModeSetup(r, out, &cfg); err != nil {
 		return cfg, err
 	}
-
-	connection, err := effectiveProductMode(cfg)
+	// Configure the backend appropriate for this product mode. `afs login`
+	// already picked cloud vs self-hosted and set cfg.URL, so self-hosted /
+	// cloud modes only need a workspace; local mode still needs Redis details.
+	if err := setupWizardBackend(r, out, &cfg); err != nil {
+		return cfg, err
+	}
+	mode, err := effectiveMode(cfg)
 	if err != nil {
 		return cfg, err
 	}
-	if connection == productModeLocal {
-		if err := promptRedisConnectionSetup(r, out, &cfg); err != nil {
+	if mode == modeSync {
+		if err := promptSyncLocalPathSetup(r, out, &cfg); err != nil {
+			return cfg, err
+		}
+	} else {
+		if err := promptLocalFilesystemSetup(r, out, &cfg, true); err != nil {
 			return cfg, err
 		}
 	}
@@ -483,6 +536,9 @@ func promptChooseExistingWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *con
 			"  Choose workspace\n"+
 				"  "+clr(ansiDim, "Enter a number, workspace name, or 'create'"), defaultChoice)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
 		}
 		workspace, createNew, ok := resolveSetupWorkspaceChoice(choice, workspaces)
@@ -647,6 +703,9 @@ func promptCreateWorkspaceSetup(r *bufio.Reader, out io.Writer, cfg *config, ser
 	}
 	workspace, err := promptString(r, out, label+"\n"+hint, "")
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
 		return err
 	}
 	workspace = strings.TrimSpace(workspace)
@@ -728,6 +787,9 @@ func promptLocalFilesystemSetup(r *bufio.Reader, out io.Writer, cfg *config, fir
 	mp, err := promptString(r, out,
 		"  Choose local mount point\n"+promptHint, mountDefault)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
 		return err
 	}
 	mp = strings.TrimSpace(mp)
@@ -863,6 +925,9 @@ func promptSyncLocalPathSetup(r *bufio.Reader, out io.Writer, cfg *config) error
 
 	entered, err := promptString(r, out, "  Local path\n"+promptHint, defaultValue)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
 		return err
 	}
 	entered = strings.TrimSpace(entered)

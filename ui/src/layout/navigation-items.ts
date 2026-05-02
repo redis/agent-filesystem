@@ -47,7 +47,7 @@ export const navigationItems: ReadonlyArray<NavigationItem> = [
   { kind: "route", label: "Databases", path: "/databases", icon: DatabaseIcon },
   {
     kind: "route",
-    label: "Events",
+    label: "History",
     path: "/activity",
     icon: BellIcon,
   },
@@ -130,7 +130,7 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/activity")) {
-    return { page: "Events", subtitle: "Track workspace lifecycle, agent activity, and system events." };
+    return { page: "History", subtitle: "Track workspace lifecycle, agent activity, and system events." };
   }
 
   if (pathname.startsWith("/settings")) {

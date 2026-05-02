@@ -822,8 +822,8 @@ func TestCmdSetupDoesNotStartServices(t *testing.T) {
 		t.Fatalf("ReadFile(stdout) returned error: %v", err)
 	}
 	output := string(outputBytes)
-	if !strings.Contains(output, "Run ") || !strings.Contains(output, " up") {
-		t.Fatalf("cmdSetup() output should mention running 'afs up' afterward; got:\n%s", output)
+	if !strings.Contains(output, "Run ") || !strings.Contains(output, " ws mount") {
+		t.Fatalf("cmdSetup() output should mention mounting a workspace afterward; got:\n%s", output)
 	}
 }
 

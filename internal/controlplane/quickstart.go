@@ -196,6 +196,25 @@ func bootstrapDatabaseProfileFromContext(_ context.Context) (databaseProfile, bo
 	return databaseProfile{}, false
 }
 
+func bootstrapDatabaseProfileFromConfigPath(configPathOverride string) (databaseProfile, bool) {
+	cfg, present, err := LoadConfigWithPresence(configPathOverride)
+	if err != nil || !present || strings.TrimSpace(cfg.RedisAddr) == "" {
+		return databaseProfile{}, false
+	}
+	return databaseProfile{
+		ID:             "local-development",
+		Name:           quickstartLocalDBName,
+		Description:    "Configured from afs.config.json.",
+		ManagementType: databaseManagementUserManaged,
+		RedisAddr:      cfg.RedisAddr,
+		RedisUsername:  cfg.RedisUsername,
+		RedisPassword:  cfg.RedisPassword,
+		RedisDB:        cfg.RedisDB,
+		RedisTLS:       cfg.RedisTLS,
+		IsDefault:      true,
+	}, true
+}
+
 // quickstartWithDatabase creates the getting-started workspace on an existing database.
 func (m *DatabaseManager) quickstartWithDatabase(ctx context.Context, databaseID string) (QuickstartResponse, error) {
 	service, profile, err := m.serviceFor(ctx, databaseID)

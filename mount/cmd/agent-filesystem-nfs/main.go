@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-billy/v5"
+	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/agent-filesystem/mount/internal/nfsfs"
 	"github.com/redis/agent-filesystem/mount/internal/redisconn"
@@ -158,7 +159,7 @@ func main() {
 	if redisKey == "" {
 		redisKey = "myfs"
 	}
-	c := client.NewWithCache(rdb, redisKey, nfsClientCacheTTL)
+	c := client.NewWithCacheAndObserver(rdb, redisKey, nfsClientCacheTTL, controlplane.NewMountVersionObserver(rdb))
 	if err := c.Mkdir(ctx, "/"); err != nil {
 		log.Fatalf("failed to initialize key %q: %v", redisKey, err)
 	}

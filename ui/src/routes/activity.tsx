@@ -119,7 +119,7 @@ function ActivityPage() {
         <NoticeCard $tone="warning" role="status">
           <NoticeTitle>Some databases are unavailable</NoticeTitle>
           <NoticeBody>
-            {view === "changes" ? "Changelog" : "Events"} below are partial while these databases are disconnected:{" "}
+            {view === "changes" ? "Changelog" : "History"} below are partial while these databases are disconnected:{" "}
             {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
           </NoticeBody>
         </NoticeCard>
@@ -142,7 +142,7 @@ function ActivityPage() {
           $active={view === "events"}
           onClick={() => setView("events")}
         >
-          Events
+          History
         </TabButton>
       </Tabs>
 

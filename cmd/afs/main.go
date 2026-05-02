@@ -140,7 +140,7 @@ func printUsage() {
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sstatus%s             %sShow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sws%s (workspace)     %sMount, unmount, create, list, import, fork, delete%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %sMount, unmount, create, list, import, fork, versioning%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sRead, search, and safely write workspace files%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %scp%s (checkpoint)    %sCreate, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)

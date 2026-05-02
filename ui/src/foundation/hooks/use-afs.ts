@@ -11,13 +11,20 @@ import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../
 import type {
   CreateSavepointInput,
   CreateWorkspaceInput,
+  DiffFileVersionsInput,
+  GetFileHistoryInput,
+  GetFileVersionContentInput,
   GetWorkspaceFileContentInput,
   GetWorkspaceDiffInput,
   GetWorkspaceTreeInput,
+  GetWorkspaceVersioningPolicyInput,
   RestoreSavepointInput,
+  RestoreFileVersionInput,
   SaveDatabaseInput,
+  UndeleteFileVersionInput,
   UpdateWorkspaceInput,
   UpdateWorkspaceFileInput,
+  UpdateWorkspaceVersioningPolicyInput,
   QuickstartInput,
   ImportLocalInput,
   CreateMCPTokenInput,
@@ -36,6 +43,11 @@ type InfiniteChangelogInput = Omit<ListChangelogInput, "since" | "until">;
 export const afsKeys = {
   all: ["afs"] as const,
   account: () => [...afsKeys.all, "account"] as const,
+  adminOverview: () => [...afsKeys.all, "admin", "overview"] as const,
+  adminUsers: () => [...afsKeys.all, "admin", "users"] as const,
+  adminDatabases: () => [...afsKeys.all, "admin", "databases"] as const,
+  adminWorkspaceSummaries: () => [...afsKeys.all, "admin", "workspaces"] as const,
+  adminAgents: () => [...afsKeys.all, "admin", "agents"] as const,
   databases: () => [...afsKeys.all, "databases"] as const,
   workspaceSummaries: (databaseId: string | null) =>
     [...afsKeys.all, "workspaces", databaseId ?? "all", "summaries"] as const,
@@ -48,6 +60,7 @@ export const afsKeys = {
       ...afsKeys.all,
       "activity",
       input.databaseId ?? "all",
+      input.workspaceId ?? "all",
       input.limit ?? 50,
       input.until ?? "",
     ] as const,
@@ -59,7 +72,7 @@ export const afsKeys = {
       input.workspaceId ?? "all",
       input.kind ?? "all",
       input.sessionId ?? "all",
-      input.path ?? "all",
+      input.path ?? "",
       input.limit ?? 100,
       input.direction ?? "desc",
       input.since ?? "",
@@ -74,6 +87,7 @@ export const afsKeys = {
       input.workspaceId ?? "all",
       "changes",
       input.sessionId ?? "all",
+      input.path ?? "",
       input.limit ?? 100,
       input.direction ?? "desc",
       input.since ?? "",
@@ -88,6 +102,7 @@ export const afsKeys = {
       input.workspaceId ?? "all",
       "changes-feed",
       input.sessionId ?? "all",
+      input.path ?? "",
       input.limit ?? 100,
       input.direction ?? "desc",
     ] as const,
@@ -125,15 +140,43 @@ export const afsKeys = {
       input.base,
       input.head,
     ] as const,
+  workspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "versioning",
+    ] as const,
+  fileHistory: (input: GetFileHistoryInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "file-history",
+      input.path,
+      input.direction ?? "desc",
+      input.limit ?? 50,
+      input.cursor ?? "",
+    ] as const,
+  fileVersionContent: (input: GetFileVersionContentInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "file-version-content",
+      input.path,
+      "versionId" in input ? input.versionId : `${input.fileId}@${input.ordinal}`,
+    ] as const,
   mcpTokens: (databaseId: string | null, workspaceId: string) =>
     [...afsKeys.all, "databases", databaseId ?? "all", "workspaces", workspaceId, "mcp-tokens"] as const,
   allMcpTokens: () => [...afsKeys.all, "mcp-tokens", "all"] as const,
   controlPlaneTokens: () => [...afsKeys.all, "mcp-tokens", "control-plane"] as const,
-  adminOverview: () => [...afsKeys.all, "admin", "overview"] as const,
-  adminUsers: () => [...afsKeys.all, "admin", "users"] as const,
-  adminDatabases: () => [...afsKeys.all, "admin", "databases"] as const,
-  adminWorkspaces: () => [...afsKeys.all, "admin", "workspaces"] as const,
-  adminAgents: () => [...afsKeys.all, "admin", "agents"] as const,
 };
 
 export function databasesQueryOptions() {
@@ -151,6 +194,51 @@ export function accountQueryOptions() {
     queryFn: () => afsApi.getAccount(),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminOverviewQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminOverview(),
+    queryFn: () => afsApi.getAdminOverview(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminUsersQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminUsers(),
+    queryFn: () => afsApi.listAdminUsers(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminDatabasesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminDatabases(),
+    queryFn: () => afsApi.listAdminDatabases(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminWorkspaceSummariesQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminWorkspaceSummaries(),
+    queryFn: () => afsApi.listAdminWorkspaceSummaries(),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function adminAgentsQueryOptions() {
+  return queryOptions({
+    queryKey: afsKeys.adminAgents(),
+    queryFn: () => afsApi.listAdminAgents(),
+    staleTime: AGENT_QUERY_STALE_MS,
+    gcTime: AGENT_QUERY_GC_MS,
   });
 }
 
@@ -261,6 +349,33 @@ export function workspaceDiffQueryOptions(input: GetWorkspaceDiffInput) {
   });
 }
 
+export function workspaceVersioningPolicyQueryOptions(input: GetWorkspaceVersioningPolicyInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceVersioningPolicy(input),
+    queryFn: () => afsApi.getWorkspaceVersioningPolicy(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function fileHistoryQueryOptions(input: GetFileHistoryInput) {
+  return queryOptions({
+    queryKey: afsKeys.fileHistory(input),
+    queryFn: () => afsApi.getFileHistory(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
+export function fileVersionContentQueryOptions(input: GetFileVersionContentInput) {
+  return queryOptions({
+    queryKey: afsKeys.fileVersionContent(input),
+    queryFn: () => afsApi.getFileVersionContent(input),
+    staleTime: FILESYSTEM_QUERY_STALE_MS,
+    gcTime: FILESYSTEM_QUERY_GC_MS,
+  });
+}
+
 export function mcpTokensQueryOptions(databaseId: string | null, workspaceId: string) {
   return queryOptions({
     queryKey: afsKeys.mcpTokens(databaseId, workspaceId),
@@ -288,51 +403,6 @@ export function controlPlaneTokensQueryOptions() {
   });
 }
 
-export function adminOverviewQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminOverview(),
-    queryFn: () => afsApi.getAdminOverview(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminUsersQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminUsers(),
-    queryFn: () => afsApi.listAdminUsers(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminDatabasesQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminDatabases(),
-    queryFn: () => afsApi.listAdminDatabases(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminWorkspacesQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminWorkspaces(),
-    queryFn: () => afsApi.listAdminWorkspaceSummaries(),
-    staleTime: LIVE_QUERY_STALE_MS,
-    gcTime: LIVE_QUERY_GC_MS,
-  });
-}
-
-export function adminAgentsQueryOptions() {
-  return queryOptions({
-    queryKey: afsKeys.adminAgents(),
-    queryFn: () => afsApi.listAdminAgents(),
-    staleTime: AGENT_QUERY_STALE_MS,
-    gcTime: AGENT_QUERY_GC_MS,
-  });
-}
-
 export function useDatabases(enabled = true) {
   return useQuery({
     ...databasesQueryOptions(),
@@ -343,6 +413,41 @@ export function useDatabases(enabled = true) {
 export function useAccount(enabled = true) {
   return useQuery({
     ...accountQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminOverview(enabled = true) {
+  return useQuery({
+    ...adminOverviewQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminUsers(enabled = true) {
+  return useQuery({
+    ...adminUsersQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminDatabases(enabled = true) {
+  return useQuery({
+    ...adminDatabasesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminWorkspaceSummaries(enabled = true) {
+  return useQuery({
+    ...adminWorkspaceSummariesQueryOptions(),
+    enabled,
+  });
+}
+
+export function useAdminAgents(enabled = true) {
+  return useQuery({
+    ...adminAgentsQueryOptions(),
     enabled,
   });
 }
@@ -382,41 +487,6 @@ export function useAllMCPAccessTokens(enabled = true) {
 export function useControlPlaneTokens(enabled = true) {
   return useQuery({
     ...controlPlaneTokensQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminOverview(enabled = true) {
-  return useQuery({
-    ...adminOverviewQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminUsers(enabled = true) {
-  return useQuery({
-    ...adminUsersQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminDatabases(enabled = true) {
-  return useQuery({
-    ...adminDatabasesQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminWorkspaceSummaries(enabled = true) {
-  return useQuery({
-    ...adminWorkspacesQueryOptions(),
-    enabled,
-  });
-}
-
-export function useAdminAgents(enabled = true) {
-  return useQuery({
-    ...adminAgentsQueryOptions(),
     enabled,
   });
 }
@@ -498,6 +568,27 @@ export function useWorkspaceDiff(input: GetWorkspaceDiffInput, enabled = true) {
       enabled: enabled && input.workspaceId !== "",
     },
   );
+}
+
+export function useWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput, enabled = true) {
+  return useQuery({
+    ...workspaceVersioningPolicyQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "",
+  });
+}
+
+export function useFileHistory(input: GetFileHistoryInput, enabled = true) {
+  return useQuery({
+    ...fileHistoryQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "" && input.path.trim() !== "",
+  });
+}
+
+export function useFileVersionContent(input: GetFileVersionContentInput, enabled = true) {
+  return useQuery({
+    ...fileVersionContentQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "" && input.path.trim() !== "",
+  });
 }
 
 function useWorkspaceInvalidation() {
@@ -653,6 +744,45 @@ export function useUpdateWorkspaceFileMutation() {
 
   return useMutation({
     mutationFn: (input: UpdateWorkspaceFileInput) => afsApi.updateWorkspaceFile(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useUpdateWorkspaceVersioningPolicyMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UpdateWorkspaceVersioningPolicyInput) => afsApi.updateWorkspaceVersioningPolicy(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useDiffFileVersionsMutation() {
+  return useMutation({
+    mutationFn: (input: DiffFileVersionsInput) => afsApi.diffFileVersions(input),
+  });
+}
+
+export function useRestoreFileVersionMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: RestoreFileVersionInput) => afsApi.restoreFileVersion(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useUndeleteFileVersionMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UndeleteFileVersionInput) => afsApi.undeleteFileVersion(input),
     onSuccess: async () => {
       await invalidate();
     },

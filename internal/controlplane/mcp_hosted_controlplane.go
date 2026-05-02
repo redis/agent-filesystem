@@ -70,6 +70,35 @@ func (p *hostedMCPProvider) controlPlaneTools() []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "workspace_get_versioning_policy",
+			Description: "Fetch the workspace versioning policy for a workspace.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace": withDesc(stringType, "Workspace name"),
+				},
+				"required": []string{"workspace"},
+			},
+		},
+		{
+			Name:        "workspace_set_versioning_policy",
+			Description: "Update the workspace versioning policy for a workspace. Omitted fields keep their current values; array fields can be cleared with an empty array.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace":               withDesc(stringType, "Workspace name"),
+					"mode":                    withDesc(map[string]any{"type": "string", "enum": []string{WorkspaceVersioningModeOff, WorkspaceVersioningModeAll, WorkspaceVersioningModePaths}}, "Versioning mode"),
+					"include_globs":           withDesc(map[string]any{"type": "array", "items": stringType}, "Tracked path globs when mode=paths"),
+					"exclude_globs":           withDesc(map[string]any{"type": "array", "items": stringType}, "Excluded path globs"),
+					"max_versions_per_file":   withDesc(map[string]any{"type": "integer"}, "Optional per-file retention cap"),
+					"max_age_days":            withDesc(map[string]any{"type": "integer"}, "Optional age-based retention cap"),
+					"max_total_bytes":         withDesc(map[string]any{"type": "integer"}, "Optional workspace history byte budget"),
+					"large_file_cutoff_bytes": withDesc(map[string]any{"type": "integer"}, "Optional large-file guardrail"),
+				},
+				"required": []string{"workspace"},
+			},
+		},
+		{
 			Name:        "checkpoint_list",
 			Description: "List checkpoints for a specific workspace.",
 			InputSchema: map[string]any{
@@ -217,6 +246,42 @@ func (p *hostedMCPProvider) dispatchControlPlaneTool(ctx context.Context, name s
 		return map[string]any{
 			"workspace": workspace,
 			"deleted":   true,
+		}, nil
+
+	case "workspace_get_versioning_policy":
+		workspace, err := mcpRequiredString(args, "workspace")
+		if err != nil {
+			return nil, err
+		}
+		policy, err := p.manager.GetResolvedWorkspaceVersioningPolicy(ctx, workspace)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"workspace": workspace,
+			"policy":    policy,
+		}, nil
+
+	case "workspace_set_versioning_policy":
+		workspace, err := mcpRequiredString(args, "workspace")
+		if err != nil {
+			return nil, err
+		}
+		current, err := p.manager.GetResolvedWorkspaceVersioningPolicy(ctx, workspace)
+		if err != nil {
+			return nil, err
+		}
+		patch, err := mcpWorkspaceVersioningPolicyPatchFromArgs(args)
+		if err != nil {
+			return nil, err
+		}
+		updated, err := p.manager.UpdateResolvedWorkspaceVersioningPolicy(ctx, workspace, applyMCPWorkspaceVersioningPolicyPatch(current, patch))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"workspace": workspace,
+			"policy":    updated,
 		}, nil
 
 	case "checkpoint_list":
