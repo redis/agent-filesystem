@@ -27,10 +27,10 @@ import { HighlightedCode } from "./syntax-code";
 
 const docsReferenceBaseHref = "https://github.com/redis/agent-filesystem/blob/main/docs";
 const referenceDocHref = {
-  cli: `${docsReferenceBaseHref}/cli-reference.md`,
-  mcp: `${docsReferenceBaseHref}/mcp-reference.md`,
-  python: `${docsReferenceBaseHref}/python-reference.md`,
-  typescript: `${docsReferenceBaseHref}/typescript-reference.md`,
+  cli: `${docsReferenceBaseHref}/reference/cli.md`,
+  mcp: `${docsReferenceBaseHref}/reference/mcp.md`,
+  python: `${docsReferenceBaseHref}/reference/python.md`,
+  typescript: `${docsReferenceBaseHref}/reference/typescript.md`,
 } as const;
 
 export type DocsTopicId =

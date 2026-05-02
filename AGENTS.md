@@ -2,18 +2,20 @@
 
 This file provides guidance to Codex and other AI coding agents working in this repository.
 
-**This is a living document.** When you learn a new repo-specific sharp edge, workflow rule, or recurring mistake, add it to [docs/agents/lessons-learned.md](docs/agents/lessons-learned.md).
+**This is a living document.** When you learn a new repo-specific sharp edge,
+workflow rule, or recurring mistake, add it here under the most relevant
+section. Do not create a separate lessons file.
 
 ## Quick Links
 
 - [README.md](README.md)
 - [docs/README.md](docs/README.md)
-- [docs/repo-walkthrough.md](docs/repo-walkthrough.md)
-- [docs/afs-control-plane-api.md](docs/afs-control-plane-api.md)
+- [docs/internals/repo-walkthrough.md](docs/internals/repo-walkthrough.md)
+- [docs/reference/control-plane-api.md](docs/reference/control-plane-api.md)
 - [ui/README.md](ui/README.md)
-- [docs/afs-cloud-control-plane-design.md](docs/afs-cloud-control-plane-design.md)
-- [docs/backlog/storage-and-sync.md](docs/backlog/storage-and-sync.md)
-- [docs/agents/lessons-learned.md](docs/agents/lessons-learned.md)
+- [docs/internals/cloud.md](docs/internals/cloud.md)
+- [plans/README.md](plans/README.md)
+- [plans/future-work.md](plans/future-work.md)
 
 ## Critical Invariants
 
@@ -88,6 +90,45 @@ cd ui && npm run lint
 - Keep browser UI behavior in `ui/`.
 - If a change introduces a distinct concern, prefer a focused colocated file over growing an already-mixed file.
 
+## Documentation Organization
+
+- Keep `docs/` simple: `guides/`, `reference/`, and `internals/`.
+- `docs/` is for current app/repo truth only. Do not use it for active plans,
+  stale proposals, backlog trackers, or "maybe later" notes.
+- Current user-facing and agent-facing docs live in `docs/guides/`.
+- Current CLI/API/SDK/MCP contracts live in `docs/reference/`.
+- Current architecture, repo map, and performance notes live in
+  `docs/internals/`.
+- Future work and active implementation planning live under root `plans/`.
+- Do not reintroduce `docs/plans/`, `docs/proposals/`, `docs/backlog/`, or
+  top-level `tasks/`.
+- When work lands, update the current docs and remove stale notes from
+  `plans/future-work.md` or the relevant active plan.
+- Accepted architecture decisions belong in `docs/internals/decisions/` as
+  short ADRs with status, context, decision, and consequences.
+- Raw benchmark output belongs outside the repo, usually under `/tmp`; summarize
+  durable conclusions in `docs/internals/performance.md`.
+- If UI docs links point at GitHub markdown files, keep them in sync with the
+  `docs/guides/` and `docs/reference/` paths.
+
+## Planning Artifacts
+
+- Root `plans/` is the canonical place for Codex, Claude, and human
+  implementation plans.
+- Active plans live directly under `plans/<slug>.md`.
+- Completed, cancelled, and superseded plans move to
+  `plans/archive/YYYY-MM-DD-<slug>.md`.
+- Keep `plans/future-work.md` for known work that is not actively being
+  implemented.
+- Active plans must track status, owner, created/updated dates, goal, scope,
+  checklist, what is in flight, what remains, decisions/blockers, and
+  verification.
+- Update the active plan as work progresses. It should be possible to resume the
+  task from the plan without replaying the chat.
+- Before archiving a completed plan, add the result and verification evidence.
+- Plans are not product documentation. If a plan changes current behavior,
+  update `docs/` separately.
+
 ## Current Repo Map
 
 This repo has two active product layers:
@@ -103,10 +144,11 @@ Useful supporting areas:
 - `skills/`: installable skill docs for agent use.
 - `tests/`: benchmark helpers and fixtures for the active workspace-first surfaces.
 
-Active backlog notes and longer design proposals live under `docs/backlog/`
-and `docs/plans/`. Raw benchmark outputs should stay outside the repo.
+Future work and active plans live under root `plans/`. Raw benchmark outputs
+should stay outside the repo.
 
-For a file-by-file walkthrough of the current tree, read `docs/repo-walkthrough.md`.
+For a file-by-file walkthrough of the current tree, read
+`docs/internals/repo-walkthrough.md`.
 
 The old Redis module, its Python integration suite, and RedisClaw have been retired and should not be treated as active architecture.
 
@@ -120,3 +162,36 @@ The most important implementation seams are:
 - `internal/worktree/`: manifest scanning and local materialization helpers.
 - `mount/internal/client/`: Redis-backed filesystem client used by FUSE/NFS.
 - `ui/`: TanStack Router + React control-plane UI.
+
+## Lessons Learned
+
+- Tenant-scoped client routes must run through the same auth middleware as admin
+  routes before they resolve workspace names. Otherwise bearer tokens do not
+  attach an auth subject and duplicate workspace-name errors can expose
+  cross-tenant identifiers.
+- Auth commands belong under `afs auth`; keep login/logout/status under that
+  family in help text, docs, and install scripts.
+- Plain `afs auth login` should ask Cloud vs Self-managed before opening a
+  browser login. Keep `--cloud`, `--self-hosted`, and token handoff
+  noninteractive for scripted install paths.
+- Benchmark helpers that open the Redis filesystem client directly must resolve
+  the workspace storage ID after import. New imports use opaque workspace IDs,
+  so using the human workspace name can silently point at an empty namespace.
+- Build versions must use the AFS product tag namespace. Keep SDK tag names out
+  of `git describe` paths for CLI/control-plane releases.
+- Sync-mode file writes only reach the user-facing changelog when the daemon has
+  a tracked workspace session id. If the UI shows no active agents, inspect
+  session creation before debugging uploader logic.
+- Local mount state and control-plane agent sessions are different views:
+  `~/.afs/mounts.json` is what `afs status` and `afs ws unmount` can manage
+  locally; `/v1/agents` shows fresh session heartbeats.
+- Browser/UI `draft_state` must come from the live workspace root dirty marker
+  when it exists, not only `WorkspaceMeta.DirtyHint`.
+- Remounting a workspace to an empty path with prior sync state is ambiguous.
+  Treat a missing local root as a fresh mount; require explicit destructive
+  confirmation before propagating local absence as remote deletes.
+- TanStack route files should only export their `Route`. Move shared route UI
+  into `ui/src/features/` instead of importing from another route file.
+- Template source files live under `templates/<template-id>/`. After changing
+  template manifests, seed files, skills, or commands, run
+  `npm run templates:generate` from `ui/` or `make templates-generate`.

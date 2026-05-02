@@ -29,10 +29,12 @@ Supporting areas:
 
 - `cmd/`: Go command binaries for `afs` and `afs-control-plane`.
 - `deploy/`: deployment helpers and platform-specific notes.
-- `docs/`: current architecture, API, and repo-organization notes.
+- `docs/`: current user docs, API contracts, architecture notes, operations
+  notes, and repo reference material.
 - `examples/`: example configs and migration guides.
 - `internal/`: shared workspace/control-plane packages used by the top-level commands.
 - `mount/`: Go mount and NFS serving stack.
+- `plans/`: active implementation plans, future-work notes, and archived plans.
 - `sandbox/`: HTTP and MCP process sandbox.
 - `scripts/`: helper scripts for web-dev and benchmarks.
 - `skills/`: installable agent skill docs and assets.
@@ -90,18 +92,18 @@ Supporting areas:
 
 ### `docs/`
 
-- `docs/README.md`: index of current docs and where non-current material belongs.
-- `docs/afs-control-plane-api.md`: current shared HTTP contract for the CLI and web UI.
-- `docs/backlog/`: active implementation backlog notes.
-- `docs/performance.md`: consolidated benchmark and performance notes.
-- `docs/plans/`: longer-lived design proposals that are not yet canonical contracts.
-- `docs/repo-walkthrough.md`: this file.
+- `docs/README.md`: index of current docs.
+- `docs/guides/`: how to use AFS.
+- `docs/reference/`: CLI, API, SDK, and MCP contracts.
+- `docs/internals/`: current architecture, repo map, and performance notes.
 
-### Planning Material
+### `plans/`
 
-- Active backlog notes live under `docs/backlog/`.
-- Design proposals that may or may not be implemented yet live under `docs/plans/`.
-- Treat both as helpful context, not as authoritative product contracts.
+- Active implementation plans live directly under `plans/<slug>.md`.
+- Completed, cancelled, and superseded plans live under `plans/archive/`.
+- `plans/future-work.md` tracks known work that is not actively being
+  implemented.
+- Treat plans as workflow context, not as authoritative product contracts.
 - Raw benchmark CSV/JSON outputs should be rerun into `/tmp` or another external artifact directory.
 
 ### `tests/`

@@ -52,6 +52,7 @@ cd ~/demo
 ## Read Next
 
 - `README.md` for the current product story and setup flow
-- `docs/README.md` for the current documentation, backlog, and plan index
-- `docs/repo-walkthrough.md` for the current tree layout
+- `docs/README.md` for the current documentation index
+- `plans/README.md` for active and archived planning artifacts
+- `docs/internals/repo-walkthrough.md` for the current tree layout
 - `skills/agent-filesystem/SKILL.md` for the installable agent skill

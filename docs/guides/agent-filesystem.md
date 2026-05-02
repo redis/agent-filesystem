@@ -14,10 +14,10 @@ SDKs, and MCP tools are all surfaces over that same workspace model.
 
 Related command references:
 
-- [CLI command reference](cli-reference.md)
-- [TypeScript command reference](typescript-reference.md)
-- [Python command reference](python-reference.md)
-- [MCP tool reference](mcp-reference.md)
+- [CLI command reference](../reference/cli.md)
+- [TypeScript command reference](../reference/typescript.md)
+- [Python command reference](../reference/python.md)
+- [MCP tool reference](../reference/mcp.md)
 
 Remember these rules:
 

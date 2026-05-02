@@ -6,13 +6,13 @@ import { HighlightedCode } from "./syntax-code";
 import type { CodeLanguage } from "./syntax-code";
 
 const docsReferenceBaseHref = "https://github.com/redis/agent-filesystem/blob/main/docs";
-const agentGuideHref = `${docsReferenceBaseHref}/agent-filesystem.md`;
+const agentGuideHref = `${docsReferenceBaseHref}/guides/agent-filesystem.md`;
 
 const referenceDocs = [
-  { label: "CLI Reference", href: `${docsReferenceBaseHref}/cli-reference.md` },
-  { label: "TypeScript SDK Reference", href: `${docsReferenceBaseHref}/typescript-reference.md` },
-  { label: "Python SDK Reference", href: `${docsReferenceBaseHref}/python-reference.md` },
-  { label: "MCP Reference", href: `${docsReferenceBaseHref}/mcp-reference.md` },
+  { label: "CLI Reference", href: `${docsReferenceBaseHref}/reference/cli.md` },
+  { label: "TypeScript SDK Reference", href: `${docsReferenceBaseHref}/reference/typescript.md` },
+  { label: "Python SDK Reference", href: `${docsReferenceBaseHref}/reference/python.md` },
+  { label: "MCP Reference", href: `${docsReferenceBaseHref}/reference/mcp.md` },
 ] as const;
 
 const tocItems = [
@@ -54,7 +54,7 @@ export function DocsDocumentPage() {
         <ArticleHeader>
           <AgentDocLink href={agentGuideHref} rel="noreferrer" target="_blank">
             <Bot aria-hidden="true" size={16} strokeWidth={2.25} />
-            For Agents -&gt; <span>Docs/agent-filesystem.md</span>
+            For Agents -&gt; <span>Docs/guides/agent-filesystem.md</span>
           </AgentDocLink>
           <h1>Agent Filesystem</h1>
           <Lead>

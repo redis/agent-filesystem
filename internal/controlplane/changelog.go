@@ -13,8 +13,8 @@ import (
 )
 
 // Per-session file-change log. Append-only Redis Stream per workspace plus
-// companion hashes for session rollups and last-writer lookups. See
-// docs/plans/observability.md §0 for the full design.
+// companion hashes for session rollups and last-writer lookups. Keep this
+// aligned with docs/internals/versioned-filesystem.md.
 
 // Change source tags. One value per origin so session logs can tell a
 // live-sync FS write apart from an explicit checkpoint save, a restore, or

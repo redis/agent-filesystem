@@ -39,9 +39,8 @@ ENV/
 .coverage
 htmlcov/
 
-# Retired root note/artifact folders; use docs/backlog and docs/plans.
+# Retired root task folder; use plans/ for working plans.
 /tasks/
-/plans/
 
 .DS_Store
 
