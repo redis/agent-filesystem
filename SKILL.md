@@ -5,7 +5,7 @@ canonical store, but the active user surfaces are:
 
 - `afs mcp` for agent clients
 - `afs ws mount <workspace> <directory>` for a normal local working directory
-- `afs config set --mode mount` before attach for a live Redis-backed mount
+- `afs config set --mode mount` before mount for a live Redis-backed mount
 - explicit checkpoints via `afs cp ...`
 
 The old direct-command storage surface is retired and should not be used as the

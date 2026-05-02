@@ -71,16 +71,16 @@ logs/
 EOF
 ```
 
-Import the existing directory into the `.codex` workspace and attach it in place:
+Import the existing directory into the `.codex` workspace and mount it in place:
 
 ```bash
-./afs ws import --attach-at-source .codex ~/.codex
+./afs ws import --mount-at-source .codex ~/.codex
 ```
 
 What that does:
 
 - imports `~/.codex` into the workspace `.codex`
-- attaches the imported workspace at `~/.codex`
+- mounts the imported workspace at `~/.codex`
 
 Verify:
 
@@ -121,7 +121,7 @@ If you want an agent to perform this, the agent should:
 2. Recommend creating `~/.codex/.afsignore` before import.
 3. Suggest excluding `worktrees/` by default, unless the user explicitly wants local checkout state shared.
 4. Build `agent-filesystem` with `make`.
-5. On the first machine, connect AFS, then run `./afs ws import --attach-at-source .codex ~/.codex`.
+5. On the first machine, connect AFS, then run `./afs ws import --mount-at-source .codex ~/.codex`.
 6. On later machines, back up any existing `~/.codex`, connect AFS, then run `./afs ws mount .codex ~/.codex`.
 7. Verify that the same Codex files appear on every machine.
 

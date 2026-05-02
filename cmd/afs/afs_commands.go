@@ -1331,8 +1331,6 @@ func parseAFSArgs(args []string, allowForce, allowReadonly bool) (afsParsedArgs,
 			parsed.readonly = true
 		case "--mount-at-source":
 			parsed.mountAtSource = true
-		case "--attach-at-source":
-			return parsed, fmt.Errorf("unknown flag %q; use --mount-at-source instead", args[i])
 		default:
 			if strings.HasPrefix(args[i], "--database=") {
 				parsed.database = strings.TrimSpace(strings.TrimPrefix(args[i], "--database="))

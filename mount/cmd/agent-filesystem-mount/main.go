@@ -51,7 +51,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Optional daemon mode: re-exec detached and return in parent.
+	// Optional daemon mode: re-exec in the background and return in parent.
 	if !*foreground && os.Getenv(afsDaemonEnv) != "1" {
 		args := make([]string, 0, len(os.Args))
 		for i := 1; i < len(os.Args); i++ {
