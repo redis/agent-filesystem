@@ -4,7 +4,7 @@ Agent Filesystem is now a workspace-first system for agents. Redis is still the
 canonical store, but the active user surfaces are:
 
 - `afs mcp` for agent clients
-- `afs ws attach <workspace> <directory>` for a normal local working directory
+- `afs ws mount <workspace> <directory>` for a normal local working directory
 - `afs config set --mode mount` before attach for a live Redis-backed mount
 - explicit checkpoints via `afs cp ...`
 
@@ -17,7 +17,7 @@ mental model for this repo.
 make commands
 ./afs auth login
 ./afs ws create demo
-./afs ws attach demo ~/demo
+./afs ws mount demo ~/demo
 cd ~/demo
 ```
 
@@ -26,8 +26,8 @@ cd ~/demo
 ```bash
 ./afs ws create <workspace>
 ./afs ws import <workspace> <directory>
-./afs ws attach <workspace> <directory>
-./afs ws detach <workspace-or-directory>
+./afs ws mount <workspace> <directory>
+./afs ws unmount <workspace-or-directory>
 ./afs ws list
 ./afs ws fork <workspace> <new-workspace>
 ./afs cp create <workspace> <name>

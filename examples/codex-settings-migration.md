@@ -108,7 +108,7 @@ mkdir -p ~/.codex
 Then mount the shared workspace:
 
 ```bash
-./afs ws attach .codex ~/.codex
+./afs ws mount .codex ~/.codex
 ./afs status
 ls -la ~/.codex
 ```
@@ -122,7 +122,7 @@ If you want an agent to perform this, the agent should:
 3. Suggest excluding `worktrees/` by default, unless the user explicitly wants local checkout state shared.
 4. Build `agent-filesystem` with `make`.
 5. On the first machine, connect AFS, then run `./afs ws import --attach-at-source .codex ~/.codex`.
-6. On later machines, back up any existing `~/.codex`, connect AFS, then run `./afs ws attach .codex ~/.codex`.
+6. On later machines, back up any existing `~/.codex`, connect AFS, then run `./afs ws mount .codex ~/.codex`.
 7. Verify that the same Codex files appear on every machine.
 
 ## Rollback
@@ -130,13 +130,13 @@ If you want an agent to perform this, the agent should:
 Undo on the first computer:
 
 ```bash
-./afs ws detach ~/.codex
+./afs ws unmount ~/.codex
 ```
 
 Undo on a later computer:
 
 ```bash
-./afs ws detach ~/.codex
+./afs ws unmount ~/.codex
 rm -rf ~/.codex
 mv ~/.codex.local-backup ~/.codex
 ```
