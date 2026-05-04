@@ -284,7 +284,7 @@ const HeroStrike = styled.s`
 `;
 
 const HeroAccent = styled.span`
-  color: var(--afs-accent);
+  color: var(--afs-redis-red);
 `;
 
 const HeroLead = styled.p`
