@@ -190,6 +190,9 @@ The most important implementation seams are:
 - Remounting a workspace to an empty path with prior sync state is ambiguous.
   Treat a missing local root as a fresh mount; require explicit destructive
   confirmation before propagating local absence as remote deletes.
+- When a mount error names a path like `rm remote docs`, that path is a
+  workspace-relative entry under the selected mount root, not a separate local
+  mount target.
 - TanStack route files should only export their `Route`. Move shared route UI
   into `ui/src/features/` instead of importing from another route file.
 - Template source files live under `templates/<template-id>/`. After changing

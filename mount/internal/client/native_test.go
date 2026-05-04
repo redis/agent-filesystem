@@ -649,6 +649,49 @@ func TestDirectoryTimestampsChangeOnMutation(t *testing.T) {
 	}
 }
 
+func TestRmDirectoryPrunesStaleChildReferences(t *testing.T) {
+	t.Parallel()
+	rdb, ctx := setupTestRedis(t)
+	raw := New(rdb, "rm-stale-dirents")
+	c, ok := raw.(*nativeClient)
+	if !ok {
+		t.Fatalf("client type = %T, want *nativeClient", raw)
+	}
+
+	if err := c.Mkdir(ctx, "/docs"); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	if err := c.Echo(ctx, "/docs/readme.md", []byte("hello")); err != nil {
+		t.Fatalf("echo docs/readme.md: %v", err)
+	}
+	resolved, docs, err := c.resolvePath(ctx, "/docs", true)
+	if err != nil {
+		t.Fatalf("resolve docs: %v", err)
+	}
+	if err := c.Rm(ctx, "/docs/readme.md"); err != nil {
+		t.Fatalf("remove docs/readme.md: %v", err)
+	}
+	if err := rdb.HSet(ctx, c.keys.dirents(docs.ID), "stale.md", "missing-inode").Err(); err != nil {
+		t.Fatalf("seed stale dirent: %v", err)
+	}
+	entries, err := c.LsLong(ctx, resolved)
+	if err != nil {
+		t.Fatalf("ls docs: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("LsLong(/docs) returned %d live entries, want 0", len(entries))
+	}
+
+	if err := c.Rm(ctx, "/docs"); err != nil {
+		t.Fatalf("remove docs with stale child reference: %v", err)
+	}
+	if stat, err := c.Stat(ctx, "/docs"); err != nil {
+		t.Fatalf("stat docs after remove: %v", err)
+	} else if stat != nil {
+		t.Fatalf("Stat(/docs) after remove = %#v, want nil", stat)
+	}
+}
+
 func TestRenameTouchesBothParentDirectories(t *testing.T) {
 	t.Parallel()
 	rdb, ctx := setupTestRedis(t)

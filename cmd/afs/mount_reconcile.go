@@ -180,6 +180,16 @@ func buildKnownMountReconcilePlan(ctx context.Context, d *syncDaemon, local, rem
 			plan.addKnownUpload(path, l, d.cfg.MaxFileBytes)
 		case !lok && rok:
 			if hasStored && stored.Deleted {
+				if r.kind == "dir" && mountRemoteDirHasLiveDescendants(path, remote, st.Entries) {
+					plan.DownloadCount++
+					plan.Operations = append(plan.Operations, mountReconcileOperation{
+						Code:    "D",
+						Path:    path,
+						Kind:    r.kind,
+						Details: "remote directory has live children; keep local folder for downloads",
+					})
+					continue
+				}
 				plan.DeleteRemoteCount++
 				plan.Operations = append(plan.Operations, mountReconcileOperation{
 					Code:    "DR",
@@ -289,8 +299,29 @@ func mountPlanDeletesRemoteFromEmptyLocal(plan mountReconcilePlan, local mountLo
 	return local.EntryCount == 0 &&
 		plan.LocalCount == 0 &&
 		plan.RemoteCount > 0 &&
-		plan.StateLiveCount > 0 &&
+		plan.StateCount > 0 &&
 		plan.DeleteRemoteCount > 0
+}
+
+func mountPlanShouldResetEmptyLocalState(plan mountReconcilePlan, local mountLocalSnapshot) bool {
+	if !mountPlanDeletesRemoteFromEmptyLocal(plan, local) {
+		return false
+	}
+	return !local.Exists || plan.StateLiveCount == 0
+}
+
+func mountRemoteDirHasLiveDescendants(path string, remote map[string]observedMeta, entries map[string]SyncEntry) bool {
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	for child := range remote {
+		if !strings.HasPrefix(child, prefix) {
+			continue
+		}
+		if entry, ok := entries[child]; ok && entry.Deleted {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func resetMountSyncState(d *syncDaemon) {

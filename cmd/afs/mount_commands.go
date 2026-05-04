@@ -245,7 +245,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
 		return err
 	}
-	if mountPlanDeletesRemoteFromEmptyLocal(plan, localSnapshot) && !localSnapshot.Exists {
+	if mountPlanShouldResetEmptyLocalState(plan, localSnapshot) {
 		resetMountSyncState(daemon)
 		plan, err = buildMountReconcilePlan(ctx, daemon)
 		if err != nil {

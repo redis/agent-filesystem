@@ -244,7 +244,7 @@ Subcommands:
 | `afs ws mount <workspace> [directory]` | Mount a workspace at a local directory. |
 | `afs ws unmount [--delete] [<workspace|directory>]` | Unmount a workspace from AFS. |
 | `afs ws fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current checkpoint. |
-| `afs ws delete [--no-confirmation] <workspace>...` | Delete one or more workspaces and local materialized state. Prompts before deleting unless `--no-confirmation` is set. |
+| `afs ws delete [--no-confirmation] [workspace]...` | Delete one or more workspaces and local materialized state. If omitted, prompts for a workspace. Prompts before deleting unless `--no-confirmation` is set. |
 | `afs ws import [--force] [--mount-at-source] [--database <database>] <workspace> <directory>` | Import a local directory into a workspace. `--mount-at-source` mounts the source folder after import. |
 
 Examples:

@@ -145,6 +145,65 @@ func TestParseWorkspaceDeleteArgsSupportsConfirmationBypass(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDeletePromptsWhenWorkspaceOmitted(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	if err := cmdWorkspace([]string{"workspace", "create", "repo-delete"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() returned error: %v", err)
+	}
+	if _, err := input.WriteString("1\ny\n"); err != nil {
+		t.Fatalf("WriteString() returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "delete"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(delete) returned error: %v", err)
+	}
+	if !strings.Contains(out, "Select workspace") {
+		t.Fatalf("cmdWorkspace(delete) output = %q, want workspace selection prompt", out)
+	}
+	if !strings.Contains(out, "Are you sure you want to delete repo-delete? [y/N]") {
+		t.Fatalf("cmdWorkspace(delete) output = %q, want delete confirmation", out)
+	}
+
+	_, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	exists, err := store.workspaceExists(context.Background(), "repo-delete")
+	if err != nil {
+		t.Fatalf("workspaceExists(repo-delete) returned error: %v", err)
+	}
+	if exists {
+		t.Fatal("expected prompted workspace to be deleted")
+	}
+}
+
 func TestConfirmWorkspaceDeleteDefaultsNo(t *testing.T) {
 	t.Helper()
 

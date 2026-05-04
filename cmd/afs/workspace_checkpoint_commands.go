@@ -558,12 +558,33 @@ func cmdWorkspaceDelete(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(opts.names) == 0 {
-		return fmt.Errorf("%s", workspaceDeleteUsageText(filepath.Base(os.Args[0])))
+	ctx := context.Background()
+	targets := workspaceDeleteTargetsFromNames(opts.names)
+	var cfg config
+	var service afsControlPlane
+	var closeStore func()
+	var stdin *bufio.Reader
+	if len(targets) == 0 {
+		var err error
+		cfg, service, closeStore, err = openAFSControlPlane(ctx)
+		if err != nil {
+			return err
+		}
+		defer closeStore()
+		stdin = bufio.NewReader(os.Stdin)
+		target, err := promptWorkspaceDeleteTarget(ctx, service, stdin)
+		if err != nil {
+			return err
+		}
+		targets = []workspaceDeleteTarget{target}
 	}
-	names := opts.names
+
+	names := workspaceDeleteTargetNames(targets)
 	if !opts.noConfirmation {
-		ok, err := confirmWorkspaceDelete(names)
+		if stdin == nil {
+			stdin = bufio.NewReader(os.Stdin)
+		}
+		ok, err := confirmWorkspaceDeleteWithReader(names, stdin)
 		if err != nil {
 			return err
 		}
@@ -575,34 +596,36 @@ func cmdWorkspaceDelete(args []string) error {
 		}
 	}
 
-	cfg, service, closeStore, err := openAFSControlPlane(context.Background())
-	if err != nil {
-		return err
+	if service == nil {
+		var err error
+		cfg, service, closeStore, err = openAFSControlPlane(ctx)
+		if err != nil {
+			return err
+		}
+		defer closeStore()
 	}
-	defer closeStore()
 
-	ctx := context.Background()
-	deleted := make([]string, 0, len(names))
-	for _, name := range names {
-		if err := validateAFSName("workspace", name); err != nil {
+	deleted := make([]string, 0, len(targets))
+	for _, target := range targets {
+		if err := validateAFSName("workspace", target.ref); err != nil {
 			return err
 		}
 
-		step := startStep("Deleting workspace " + name)
-		if err := service.DeleteWorkspace(ctx, name); err != nil {
+		step := startStep("Deleting workspace " + target.name)
+		if err := service.DeleteWorkspace(ctx, target.ref); err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				step.fail("does not exist")
-				return fmt.Errorf("workspace %q does not exist", name)
+				return fmt.Errorf("workspace %q does not exist", target.name)
 			}
 			step.fail(err.Error())
 			return err
 		}
-		if err := removeLocalWorkspace(cfg, name); err != nil {
+		if err := removeLocalWorkspace(cfg, target.name); err != nil {
 			step.fail(err.Error())
 			return err
 		}
-		step.succeed(name)
-		deleted = append(deleted, name)
+		step.succeed(target.name)
+		deleted = append(deleted, target.name)
 	}
 
 	rows := make([]outputRow, 0, len(deleted)+1)
@@ -704,6 +727,40 @@ type workspaceDeleteOptions struct {
 	noConfirmation bool
 }
 
+type workspaceDeleteTarget struct {
+	ref  string
+	name string
+}
+
+func workspaceDeleteTargetsFromNames(names []string) []workspaceDeleteTarget {
+	targets := make([]workspaceDeleteTarget, 0, len(names))
+	for _, name := range names {
+		targets = append(targets, workspaceDeleteTarget{ref: name, name: name})
+	}
+	return targets
+}
+
+func promptWorkspaceDeleteTarget(ctx context.Context, service afsControlPlane, reader *bufio.Reader) (workspaceDeleteTarget, error) {
+	workspaces, err := service.ListWorkspaceSummaries(ctx)
+	if err != nil {
+		return workspaceDeleteTarget{}, err
+	}
+	selection, err := promptWorkspaceSelectionFromSummariesWithReader(workspaces.Items, reader)
+	if err != nil {
+		return workspaceDeleteTarget{}, err
+	}
+	name := strings.TrimSpace(selection.Name)
+	return workspaceDeleteTarget{ref: name, name: name}, nil
+}
+
+func workspaceDeleteTargetNames(targets []workspaceDeleteTarget) []string {
+	names := make([]string, 0, len(targets))
+	for _, target := range targets {
+		names = append(names, target.name)
+	}
+	return names
+}
+
 func parseWorkspaceDeleteArgs(args []string) (workspaceDeleteOptions, error) {
 	var opts workspaceDeleteOptions
 	for _, arg := range args {
@@ -721,6 +778,10 @@ func parseWorkspaceDeleteArgs(args []string) (workspaceDeleteOptions, error) {
 }
 
 func confirmWorkspaceDelete(names []string) (bool, error) {
+	return confirmWorkspaceDeleteWithReader(names, bufio.NewReader(os.Stdin))
+}
+
+func confirmWorkspaceDeleteWithReader(names []string, reader *bufio.Reader) (bool, error) {
 	if len(names) == 0 {
 		return false, nil
 	}
@@ -730,7 +791,6 @@ func confirmWorkspaceDelete(names []string) (bool, error) {
 	}
 	fmt.Println()
 	fmt.Printf("Are you sure you want to delete %s? [y/N] ", target)
-	reader := bufio.NewReader(os.Stdin)
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()
@@ -1800,7 +1860,7 @@ Subcommands:
   import [--force] [--mount-at-source] <workspace> <directory>
                                                 Import a local directory into a workspace
   fork [source-workspace] <new-workspace>      Fork a workspace from its current checkpoint
-  delete [--no-confirmation] <workspace>...    Delete workspaces and local materialized state
+  delete [--no-confirmation] [workspace]...    Delete workspaces and local materialized state
 
 Examples:
   %s %s mount demo ~/demo
@@ -1895,10 +1955,11 @@ mounted there), the only mounted workspace, or prompts for one.
 
 func workspaceDeleteUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws delete [--no-confirmation] <workspace>...
+  %s ws delete [--no-confirmation] [workspace]...
 
 Delete one or more workspaces from Redis and remove their local materialized state.
 By default, asks for confirmation before deleting.
+If workspace is omitted, AFS lists workspaces and prompts for one.
 `, bin)
 }
 
