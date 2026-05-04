@@ -17,6 +17,30 @@ import { databasesQueryOptions } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
 import { DatabaseTable, DatabaseSummaryStrip } from "../foundation/tables/database-table";
 import { useDatabaseScope } from "../foundation/database-scope";
+import { useDrawerCommands } from "../foundation/drawer-context";
+import type { CommandsDrawerConfig } from "../foundation/drawer-context";
+
+const DATABASE_COMMANDS: CommandsDrawerConfig = {
+  title: "Manage databases",
+  subline: "Switch the active Redis database for new workspaces.",
+  sections: [
+    {
+      title: "List databases",
+      description: "Every database your control plane knows about.",
+      command: "afs database list",
+    },
+    {
+      title: "Switch active database",
+      description: "Pick which database new workspaces land in.",
+      command: "afs database use my-database",
+    },
+    {
+      title: "Reset to default",
+      description: "Clear local override; fall back to the control-plane default.",
+      command: "afs database use auto",
+    },
+  ],
+};
 
 export const Route = createFileRoute("/databases")({
   loader: () =>
@@ -27,6 +51,7 @@ export const Route = createFileRoute("/databases")({
 type DialogMode = "create" | "edit" | null;
 
 function DatabasesPage() {
+  useDrawerCommands(DATABASE_COMMANDS);
   const { databases, saveDatabase, setDefaultDatabase, removeDatabase, reconcileCatalog, isLoading, errorMessage } = useDatabaseScope();
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [editingDatabaseId, setEditingDatabaseId] = useState<string | null>(null);

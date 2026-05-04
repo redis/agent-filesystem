@@ -20,6 +20,7 @@ import { useDatabaseScope } from "../foundation/database-scope";
 import {
   useActivity,
   useAgents,
+  useWorkspaceSummaries,
 } from "../foundation/hooks/use-afs";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import { AgentsTable } from "../foundation/tables/agents-table";
@@ -49,6 +50,7 @@ function AgentsPage() {
   const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const agentsQuery = useAgents(null, queriesEnabled);
   const activityQuery = useActivity(search.databaseId ?? null, 100, queriesEnabled);
+  const workspacesQuery = useWorkspaceSummaries(null, queriesEnabled);
 
   const tab: AgentsTab = search.tab ?? "active";
   const workspaceId = search.workspaceId;
@@ -193,13 +195,13 @@ function AgentsPage() {
       {tab === "active" ? (
         <AgentsTable
           rows={currentConnections}
+          workspaces={workspacesQuery.data}
           loading={agentsQuery.isLoading}
           error={agentsQuery.isError}
-          toolbarAction={(
-            <Button size="medium" onClick={() => void navigate({ to: "/agents/add" })}>
-              Add agent
-            </Button>
-          )}
+          // intentionally no toolbarAction — agents register themselves over MCP
+          // (Claude Code, Codex, etc.). The empty state below explains the
+          // setup path; once any agent is connected, this table is observable
+          // only.
           onOpenWorkspace={openWorkspace}
         />
       ) : null}

@@ -1,8 +1,23 @@
-// snippets — renderers that emit code in a given format.
-// every page calls these to produce equivalent client snippets for the same call.
-// one source of truth: a RequestShape.
+// snippets — render an HTTP RequestShape (or a CLI / MCP / SDK call) as
+// equivalent code in any format. lifted from agent-site/src/snippets.ts.
+//
+// every detail page that wants a "do this from your terminal" panel calls into
+// these functions to produce the canonical CLI form. they're also wired into
+// the format-toggle component for switching the visible code on the page.
 
-import type { RequestShape } from './types'
+export type RequestShape = {
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
+  path: string
+  query?: Record<string, string>
+  body?: unknown
+  headers?: {
+    etag?: string
+    cost_ms?: number
+    cost_bytes?: number
+    cost_tokens?: number
+    idempotency_key?: string
+  }
+}
 
 const BASE = 'https://afs.cloud'
 
@@ -24,13 +39,14 @@ export const curl = (req: RequestShape): string => {
     lines.push(`  -H 'idempotency-key: $(uuidgen)' \\`)
     lines.push(`  -d '${JSON.stringify(req.body)}'`)
   } else {
-    // remove the trailing backslash of last line
+    // strip the trailing backslash off the last line
     lines[lines.length - 1] = lines[lines.length - 1].replace(/ \\$/, '')
   }
   return lines.join('\n')
 }
 
-// MCP tool-call shape. Only meaningful for endpoints that map to a tool.
+// MCP JSON-RPC tools/call envelope. Only meaningful for endpoints that map to
+// an MCP tool; pages that don't have one should hide the mcp tab.
 export const mcp = (toolName: string, args: Record<string, unknown> = {}): string => {
   const payload = {
     jsonrpc: '2.0',
@@ -61,8 +77,7 @@ export const ts = (call: string): string => {
   ].join('\n')
 }
 
-// json renders the canonical body the endpoint would return.
 export const json = (data: unknown): string => JSON.stringify(data, null, 2)
 
-// jsonl renders an array as newline-delimited JSON, the canonical agent-friendly form.
-export const jsonl = (items: unknown[]): string => items.map((i) => JSON.stringify(i)).join('\n')
+export const jsonl = (items: unknown[]): string =>
+  items.map((i) => JSON.stringify(i)).join('\n')

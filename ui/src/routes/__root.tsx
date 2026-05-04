@@ -14,6 +14,8 @@ import {
   FlexColItem,
   MainContainer,
 } from "../layout/layout.styles";
+import { DrawerProvider } from "../foundation/drawer-context";
+import { GlobalDrawer } from "../components/global-drawer";
 
 const AppSidebar = lazy(() => import("../layout/sidebar").then((module) => ({ default: module.AppSidebar })));
 
@@ -101,27 +103,30 @@ function RootLayout() {
     <BackgroundPatternProvider>
       <BgFx />
       <RouteWarmup />
-      <FlexRow>
-        <Suspense fallback={<SidebarPlaceholder aria-hidden="true" />}>
-          <AppSidebar />
-        </Suspense>
-        <FlexColItem>
-          <AppBar />
-          <MainContainer>
-            {auth.isLoading && !isPublicAppPath ? (
-              <CenteredState>
-                <LoadingSpinner data-testid="loader--spinner" />
-              </CenteredState>
-            ) : auth.isSignedOut && !isPublicAppPath ? (
-              <CenteredState>
-                <LoadingSpinner data-testid="loader--spinner" />
-              </CenteredState>
-            ) : (
-              <Outlet />
-            )}
-          </MainContainer>
-        </FlexColItem>
-      </FlexRow>
+      <DrawerProvider>
+        <FlexRow>
+          <Suspense fallback={<SidebarPlaceholder aria-hidden="true" />}>
+            <AppSidebar />
+          </Suspense>
+          <FlexColItem>
+            <AppBar />
+            <MainContainer>
+              {auth.isLoading && !isPublicAppPath ? (
+                <CenteredState>
+                  <LoadingSpinner data-testid="loader--spinner" />
+                </CenteredState>
+              ) : auth.isSignedOut && !isPublicAppPath ? (
+                <CenteredState>
+                  <LoadingSpinner data-testid="loader--spinner" />
+                </CenteredState>
+              ) : (
+                <Outlet />
+              )}
+            </MainContainer>
+          </FlexColItem>
+        </FlexRow>
+        <GlobalDrawer />
+      </DrawerProvider>
     </BackgroundPatternProvider>
   );
 }

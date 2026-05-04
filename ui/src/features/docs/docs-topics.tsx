@@ -22,8 +22,36 @@ import {
   Step,
 } from "../../components/doc-kit";
 import { searchBenchmark } from "../../foundation/performance-data";
+import { getControlPlaneURL } from "../../foundation/api/afs";
 import { pythonSdkSample, typescriptSdkSample } from "./afs-samples";
 import { HighlightedCode } from "./syntax-code";
+
+// Install block — surfaced as the first section on /docs/cli so users land
+// on the download command, not on `afs auth login` (which assumes the CLI
+// is already installed).
+function CliInstallBlock() {
+  const controlPlaneUrl = getControlPlaneURL();
+  const downloadCmd = `curl -fsSL "${controlPlaneUrl}/v1/cli?os=$(uname -s)&arch=$(uname -m)" -o afs && chmod +x afs`;
+  return (
+    <>
+      <DocProse>
+        The <InlineCode>afs</InlineCode> CLI is the primary way to use AFS. Run
+        the command below to download a binary matched to your OS and CPU
+        architecture from this control plane.
+      </DocProse>
+      <CodeBlock>
+        <code>{downloadCmd}</code>
+      </CodeBlock>
+      <CalloutBox $tone="tip">
+        <DocProse>
+          Move the binary to a directory on your PATH (e.g.{" "}
+          <InlineCode>sudo mv afs /usr/local/bin/</InlineCode>) so you can run{" "}
+          <InlineCode>afs</InlineCode> from anywhere.
+        </DocProse>
+      </CalloutBox>
+    </>
+  );
+}
 
 const docsReferenceBaseHref = "https://github.com/redis/agent-filesystem/blob/main/docs";
 const referenceDocHref = {
@@ -284,16 +312,19 @@ const cliTopic: DocsTopic = {
   eyebrow: "CLI Docs",
   title: "AFS CLI Workflow",
   summary:
-    "Install, sign in, create or import a workspace, mount it locally, and use the daily commands.",
+    "Install the CLI, sign in, create or import a workspace, mount it locally, and use the daily commands.",
   sections: [
     {
-      heading: "Fresh Setup",
+      heading: "Install the CLI",
+      body: <CliInstallBlock />,
+    },
+    {
+      heading: "Sign In And Mount",
       body: (
         <>
           <DocProse>
-            Start with the CLI. It is the primary way to authenticate, mount a
-            workspace, configure sync or mount mode, create checkpoints, and
-            launch the MCP server.
+            Once the CLI is installed, sign in and mount a workspace locally.
+            From there everything works through normal files and folders.
           </DocProse>
           <DocProse>
             <ReferenceDocLink href={referenceDocHref.cli} rel="noreferrer" target="_blank">

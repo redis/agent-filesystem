@@ -58,8 +58,10 @@ type Props = {
   onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
   onPreviewWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: StudioTab) => void;
-  onEditWorkspace: (workspace: AFSWorkspaceSummary) => void;
-  onDeleteWorkspace: (workspace: AFSWorkspaceSummary) => void;
+  // optional. when omitted the inline actions column is hidden — workspaces
+  // are managed via the CLI (`afs ws delete <name>`) and the detail page.
+  onEditWorkspace?: (workspace: AFSWorkspaceSummary) => void;
+  onDeleteWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   deletingWorkspaceKey?: string | null;
 };
 
@@ -140,6 +142,8 @@ export function WorkspaceTable({
     [sortBy, sortDirection],
   );
   const isFiltering = search.trim() !== "";
+
+  const showActionsColumn = !!onDeleteWorkspace;
 
   const columns = useMemo(
     () =>
@@ -260,34 +264,36 @@ export function WorkspaceTable({
             </UpdatedStack>
           ),
         },
-        {
-          id: "actions",
-          header: "",
-          size: 48,
-          enableSorting: false,
-          cell: ({ row }) => {
-            const rowKey = workspaceRowKey(row.original);
-            const isDeleting = deletingWorkspaceKey === rowKey;
-            return (
-              <ActionsCell>
-                <DeleteRowButton
-                  type="button"
-                  aria-label={`Remove workspace ${row.original.name}`}
-                  title="Remove workspace"
-                  disabled={isDeleting}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteWorkspace(row.original);
-                  }}
-                >
-                  <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
-                </DeleteRowButton>
-              </ActionsCell>
-            );
-          },
-        },
+        ...(showActionsColumn
+          ? [{
+              id: "actions",
+              header: "",
+              size: 48,
+              enableSorting: false,
+              cell: ({ row }) => {
+                const rowKey = workspaceRowKey(row.original);
+                const isDeleting = deletingWorkspaceKey === rowKey;
+                return (
+                  <ActionsCell>
+                    <DeleteRowButton
+                      type="button"
+                      aria-label={`Remove workspace ${row.original.name}`}
+                      title="Remove workspace"
+                      disabled={isDeleting}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteWorkspace?.(row.original);
+                      }}
+                    >
+                      <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
+                    </DeleteRowButton>
+                  </ActionsCell>
+                );
+              },
+            }]
+          : []),
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onPreviewWorkspace],
+    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onPreviewWorkspace, showActionsColumn],
   );
 
   return (
