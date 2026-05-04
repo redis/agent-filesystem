@@ -16,7 +16,7 @@
 
 import { createFileRoute, Outlet, useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { Loader } from "@redis-ui/components";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { PageStack } from "../components/afs-kit";
 import {
@@ -124,16 +124,45 @@ function WorkspacesPage() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// CLICreatePanel — the "create from CLI" hint that replaces the old
-// "Add workspace" toolbar button. Single line, copyable command, no modal.
+// CLICreatePanel — compact CLI-command picker for the workspaces page.
+// Title + segmented op selector + copyable command. Replaces the old
+// "Add workspace" toolbar button; reinforces that workspace operations
+// belong to the CLI/MCP, with the web UI as the viewport.
 //
 // On free-tier accounts we surface the quota inline ("1 / 3 free") so the
 // user knows the limit without needing to attempt a create and get blocked.
 // ──────────────────────────────────────────────────────────────────────
 
+type WorkspaceOp = {
+  key: "create" | "mount" | "fork" | "delete";
+  label: string;
+  command: string;
+};
+
+const WORKSPACE_OPS: WorkspaceOp[] = [
+  { key: "create", label: "Create", command: "afs ws create my-workspace" },
+  {
+    key: "mount",
+    label: "Mount",
+    command: "afs ws mount my-workspace ~/afs/my-workspace",
+  },
+  {
+    key: "fork",
+    label: "Fork",
+    command: "afs ws fork my-workspace my-experiment",
+  },
+  { key: "delete", label: "Delete", command: "afs ws delete my-workspace" },
+];
+
 function CLICreatePanel({ workspaces }: { workspaces: AFSWorkspaceSummary[] }) {
-  const command = "afs ws create my-workspace";
+  const [opKey, setOpKey] = useState<WorkspaceOp["key"]>("create");
   const [copied, setCopied] = useState(false);
+  const activeOp = WORKSPACE_OPS.find((o) => o.key === opKey) ?? WORKSPACE_OPS[0];
+
+  // Reset the "copied" indicator whenever the user picks a different op.
+  useEffect(() => {
+    setCopied(false);
+  }, [opKey]);
 
   // Free-tier quota chip is purely informational here (no UI path can mutate).
   const onboardingDb = workspaces.find((ws) => ws.databaseId)?.databaseId; // any ws
@@ -144,7 +173,7 @@ function CLICreatePanel({ workspaces }: { workspaces: AFSWorkspaceSummary[] }) {
 
   async function copyCommand() {
     try {
-      await navigator.clipboard.writeText(command);
+      await navigator.clipboard.writeText(activeOp.command);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -154,16 +183,26 @@ function CLICreatePanel({ workspaces }: { workspaces: AFSWorkspaceSummary[] }) {
 
   return (
     <PanelRoot>
-      <PanelHead>
-        <PanelEyebrow>create a workspace</PanelEyebrow>
-        <PanelBody>
-          Workspaces in AFS are created from the CLI. The web UI is for
-          watching what your CLI and agents are doing, not provisioning.
-        </PanelBody>
-      </PanelHead>
+      <PanelTopRow>
+        <PanelEyebrow>Work with workspaces</PanelEyebrow>
+        <OpToggle role="tablist" aria-label="Workspace operation">
+          {WORKSPACE_OPS.map((op) => (
+            <OpTab
+              key={op.key}
+              type="button"
+              role="tab"
+              aria-selected={op.key === opKey}
+              $active={op.key === opKey}
+              onClick={() => setOpKey(op.key)}
+            >
+              {op.label}
+            </OpTab>
+          ))}
+        </OpToggle>
+      </PanelTopRow>
       <PanelCommandRow>
         <PanelCommandPrompt>$</PanelCommandPrompt>
-        <PanelCommand>{command}</PanelCommand>
+        <PanelCommand>{activeOp.command}</PanelCommand>
         <CopyButton type="button" onClick={copyCommand} aria-label="Copy command">
           {copied ? "copied" : "copy"}
         </CopyButton>
@@ -198,10 +237,12 @@ const PanelRoot = styled.section`
   background: var(--afs-panel);
 `;
 
-const PanelHead = styled.div`
+const PanelTopRow = styled.div`
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 `;
 
 const PanelEyebrow = styled.div`
@@ -212,12 +253,37 @@ const PanelEyebrow = styled.div`
   text-transform: uppercase;
 `;
 
-const PanelBody = styled.p`
-  margin: 0;
-  max-width: 64ch;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.55;
+const OpToggle = styled.div`
+  display: inline-flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  background: var(--afs-bg-soft);
+`;
+
+const OpTab = styled.button<{ $active: boolean }>`
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: none;
+  background: ${(p) => (p.$active ? "var(--afs-panel-strong)" : "transparent")};
+  color: ${(p) => (p.$active ? "var(--afs-ink)" : "var(--afs-muted)")};
+  font-size: 12px;
+  font-weight: ${(p) => (p.$active ? 700 : 600)};
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: ${(p) => (p.$active ? "0 1px 2px rgba(0,0,0,0.06)" : "none")};
+  transition: background 120ms ease, color 120ms ease;
+
+  &:hover {
+    color: var(--afs-ink);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent);
+    outline-offset: 1px;
+  }
 `;
 
 const PanelCommandRow = styled.div`
@@ -225,24 +291,26 @@ const PanelCommandRow = styled.div`
   align-items: center;
   gap: 0;
   padding: 10px 14px;
-  background: var(--afs-bg-soft);
-  border: 1px solid var(--afs-line);
+  background: #0d1117;
+  border: 1px solid #1f2937;
   border-radius: 8px;
   font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
   font-size: 13px;
 `;
 
 const PanelCommandPrompt = styled.span`
-  color: var(--afs-muted);
+  color: #4ade80;
   margin-right: 1ch;
   user-select: none;
+  opacity: 0.8;
 `;
 
 const PanelCommand = styled.code`
   flex: 1;
-  color: var(--afs-ink);
+  color: #4ade80;
   white-space: pre;
   overflow-x: auto;
+  text-shadow: 0 0 6px rgba(74, 222, 128, 0.25);
 `;
 
 const CopyButton = styled.button`
@@ -252,15 +320,17 @@ const CopyButton = styled.button`
   letter-spacing: 0.06em;
   text-transform: uppercase;
   background: transparent;
-  color: var(--afs-accent);
-  border: 1px solid var(--afs-accent);
+  color: #9ca3af;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 4px;
   padding: 3px 9px;
   cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 
   &:hover {
-    background: var(--afs-accent);
-    color: var(--afs-ink-on-accent);
+    background: rgba(74, 222, 128, 0.12);
+    color: #4ade80;
+    border-color: #4ade80;
   }
 `;
 
