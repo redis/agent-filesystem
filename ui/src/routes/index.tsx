@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Loader } from "@redis-ui/components";
+import { Button, Loader } from "@redis-ui/components";
 import { Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
 import {
@@ -358,16 +358,6 @@ function CliQuickstartCard() {
 
 function GettingStartedView({ hasDatabase }: { hasDatabase: boolean }) {
   const quickstartMutation = useQuickstartMutation();
-  const [autoTried, setAutoTried] = useState(false);
-
-  // Auto-provision the getting-started workspace once. Errors surface inline;
-  // we don't auto-retry.
-  useEffect(() => {
-    if (!hasDatabase || autoTried) return;
-    if (quickstartMutation.isPending || quickstartMutation.isSuccess) return;
-    setAutoTried(true);
-    void quickstartMutation.mutateAsync({}).catch(() => undefined);
-  }, [hasDatabase, autoTried, quickstartMutation]);
 
   const errorMessage = quickstartMutation.isError
     ? quickstartMutation.error.message || "Something went wrong."
@@ -377,13 +367,15 @@ function GettingStartedView({ hasDatabase }: { hasDatabase: boolean }) {
       ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database, then retry."
       : errorMessage;
 
-  async function retry() {
+  async function handleQuickstart() {
     try {
       await quickstartMutation.mutateAsync({});
     } catch {
       /* error stored in mutation */
     }
   }
+
+  const isReady = quickstartMutation.isSuccess;
 
   return (
     <PageStack>
@@ -400,45 +392,39 @@ function GettingStartedView({ hasDatabase }: { hasDatabase: boolean }) {
           Point your agent here. It&rsquo;ll do the rest.
         </Description>
 
-        <SetupBadge>
-          {!hasDatabase ? (
-            <SetupBadgeRow $tone="warn">
-              <SetupDot $tone="warn" />
-              <span>
-                Redis isn&rsquo;t reachable on <Mono>localhost:6379</Mono>.
-                Start it, or add a remote database to continue.
-              </span>
-            </SetupBadgeRow>
-          ) : quickstartMutation.isPending ? (
-            <SetupBadgeRow $tone="info">
-              <SetupDot $tone="info" />
-              <span>
-                Creating your <Mono>getting-started</Mono> workspace{"\u2026"}
-              </span>
-            </SetupBadgeRow>
-          ) : quickstartMutation.isSuccess ? (
-            <SetupBadgeRow $tone="ok">
-              <SetupDot $tone="ok" />
-              <span>
-                Workspace <Mono>getting-started</Mono> is ready. Paste the
-                prompt below into your agent.
-              </span>
-            </SetupBadgeRow>
-          ) : friendlyError ? (
-            <SetupBadgeRow $tone="warn">
+        <CTABlock>
+          <PrimaryCTA
+            size="large"
+            onClick={handleQuickstart}
+            disabled={
+              !hasDatabase ||
+              quickstartMutation.isPending ||
+              quickstartMutation.isSuccess
+            }
+          >
+            {quickstartMutation.isPending
+              ? "Setting up\u2026"
+              : isReady
+                ? "Workspace ready \u2713"
+                : "Get started \u2192"}
+          </PrimaryCTA>
+          <CTAHint>
+            {!hasDatabase
+              ? "Requires Redis running on localhost:6379."
+              : isReady
+                ? "Paste the prompt below into your agent."
+                : "Creates a sample workspace called \u201cgetting-started\u201d. Then point your agent here."}
+          </CTAHint>
+          {friendlyError ? (
+            <SetupBadgeRow $tone="warn" role="alert">
               <SetupDot $tone="warn" />
               <span>{friendlyError}</span>
-              <RetryLink type="button" onClick={retry}>
+              <RetryLink type="button" onClick={handleQuickstart}>
                 retry
               </RetryLink>
             </SetupBadgeRow>
-          ) : (
-            <SetupBadgeRow $tone="info">
-              <SetupDot $tone="info" />
-              <span>Setting things up{"\u2026"}</span>
-            </SetupBadgeRow>
-          )}
-        </SetupBadge>
+          ) : null}
+        </CTABlock>
 
         <BlockStack>
           <AgentPromptCard
@@ -620,10 +606,28 @@ const Mono = styled.code`
   color: var(--afs-ink);
 `;
 
-const SetupBadge = styled.div`
-  margin: 22px 0 4px;
+const CTABlock = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin: 28px 0 8px;
   width: 100%;
-  max-width: 640px;
+`;
+
+const PrimaryCTA = styled(Button)`
+  && {
+    padding-left: 28px;
+    padding-right: 28px;
+    font-size: 15px;
+    box-shadow: 0 10px 28px color-mix(in srgb, var(--afs-accent) 30%, transparent);
+  }
+`;
+
+const CTAHint = styled.div`
+  color: var(--afs-muted);
+  font-size: 13px;
+  max-width: 56ch;
 `;
 
 const setupTone = (tone: "info" | "ok" | "warn") => {
