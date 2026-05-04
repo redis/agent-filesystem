@@ -1141,6 +1141,105 @@ func TestMCPTokenFlowWorksWithoutAuth(t *testing.T) {
 	}
 }
 
+func TestHostedControlPlaneTokenCanIssueWorkspaceTokenWithoutAuth(t *testing.T) {
+	t.Helper()
+
+	manager, _ := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	createReq, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/v1/mcp-tokens",
+		strings.NewReader(`{"name":"Control plane token"}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(create control-plane token) returned error: %v", err)
+	}
+	createReq.Header.Set("Content-Type", "application/json")
+	createResp, err := http.DefaultClient.Do(createReq)
+	if err != nil {
+		t.Fatalf("POST control-plane mcp token returned error: %v", err)
+	}
+	defer createResp.Body.Close()
+	if createResp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(createResp.Body)
+		t.Fatalf("POST control-plane mcp token status = %d, want %d, body=%s", createResp.StatusCode, http.StatusCreated, body)
+	}
+
+	var controlPlaneToken mcpAccessTokenResponse
+	if err := json.NewDecoder(createResp.Body).Decode(&controlPlaneToken); err != nil {
+		t.Fatalf("Decode(control-plane mcp token) returned error: %v", err)
+	}
+	if controlPlaneToken.Token == "" {
+		t.Fatal("expected created control-plane mcp token secret")
+	}
+	if controlPlaneToken.Scope != mcpScopeControlPlane {
+		t.Fatalf("control-plane token scope = %q, want %q", controlPlaneToken.Scope, mcpScopeControlPlane)
+	}
+
+	callBody := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"mcp_token_issue","arguments":{"workspace":"repo","name":"Mounted FS","profile":"workspace-rw"}}}`
+	callReq, err := http.NewRequest(http.MethodPost, server.URL+"/mcp", strings.NewReader(callBody))
+	if err != nil {
+		t.Fatalf("NewRequest(mcp_token_issue) returned error: %v", err)
+	}
+	callReq.Header.Set("Content-Type", "application/json")
+	callReq.Header.Set("Authorization", "Bearer "+controlPlaneToken.Token)
+	callReq.Header.Set("Accept", "application/json, text/event-stream")
+	callResp, err := http.DefaultClient.Do(callReq)
+	if err != nil {
+		t.Fatalf("POST /mcp mcp_token_issue returned error: %v", err)
+	}
+	defer callResp.Body.Close()
+	if callResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(callResp.Body)
+		t.Fatalf("POST /mcp mcp_token_issue status = %d, want %d, body=%s", callResp.StatusCode, http.StatusOK, body)
+	}
+
+	var issuePayload struct {
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(callResp.Body).Decode(&issuePayload); err != nil {
+		t.Fatalf("Decode(mcp_token_issue response) returned error: %v", err)
+	}
+	issuedToken, _ := issuePayload.Result.StructuredContent["token"].(string)
+	if issuedToken == "" {
+		t.Fatalf("mcp_token_issue token = %#v, want non-empty", issuePayload.Result.StructuredContent["token"])
+	}
+	if got := issuePayload.Result.StructuredContent["workspace"]; got != "repo" {
+		t.Fatalf("mcp_token_issue workspace = %#v, want %q", got, "repo")
+	}
+	if got := issuePayload.Result.StructuredContent["profile"]; got != MCPProfileWorkspaceRW {
+		t.Fatalf("mcp_token_issue profile = %#v, want %q", got, MCPProfileWorkspaceRW)
+	}
+	if got, _ := issuePayload.Result.StructuredContent["scope"].(string); !strings.HasPrefix(got, mcpScopeWorkspacePrefix) {
+		t.Fatalf("mcp_token_issue scope = %#v, want workspace scope", issuePayload.Result.StructuredContent["scope"])
+	}
+
+	toolsReq, err := http.NewRequest(
+		http.MethodPost,
+		server.URL+"/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`),
+	)
+	if err != nil {
+		t.Fatalf("NewRequest(workspace-token tools/list) returned error: %v", err)
+	}
+	toolsReq.Header.Set("Content-Type", "application/json")
+	toolsReq.Header.Set("Authorization", "Bearer "+issuedToken)
+	toolsReq.Header.Set("Accept", "application/json, text/event-stream")
+	toolsResp, err := http.DefaultClient.Do(toolsReq)
+	if err != nil {
+		t.Fatalf("POST /mcp workspace-token tools/list returned error: %v", err)
+	}
+	defer toolsResp.Body.Close()
+	if toolsResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(toolsResp.Body)
+		t.Fatalf("POST /mcp workspace-token tools/list status = %d, want %d, body=%s", toolsResp.StatusCode, http.StatusOK, body)
+	}
+}
+
 func TestHTTPResolvedOnboardingTokenExchange(t *testing.T) {
 	t.Helper()
 

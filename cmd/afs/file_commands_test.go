@@ -195,6 +195,7 @@ func TestCmdFSHistoryReportsExistingFileWithoutRecordedHistory(t *testing.T) {
 	cfg := defaultConfig()
 	cfg.RedisAddr = mr.Addr()
 	cfg.MountBackend = mountBackendNone
+	cfg.CurrentWorkspace = "repo"
 	saveTempConfig(t, cfg)
 
 	loadedCfg, store, closeStore, err := openAFSStore(context.Background())
@@ -214,7 +215,7 @@ func TestCmdFSHistoryReportsExistingFileWithoutRecordedHistory(t *testing.T) {
 	}
 
 	output, err := captureStdout(t, func() error {
-		return cmdFS([]string{"fs", "-w", "repo", "history", "helloworld.txt"})
+		return cmdFS([]string{"fs", "history", "helloworld.txt"})
 	})
 	if err != nil {
 		t.Fatalf("cmdFS(history) returned error: %v", err)
