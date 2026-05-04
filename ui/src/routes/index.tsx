@@ -315,6 +315,7 @@ function computeOpsPerMin(events: AFSActivityEvent[]) {
 }
 
 function CliQuickstartCard() {
+  const [mode, setMode] = useState<"agent" | "human">("agent");
   const [activeHintIndex, setActiveHintIndex] = useState(0);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const activeHint = gettingStartedSamples[activeHintIndex];
@@ -329,30 +330,96 @@ function CliQuickstartCard() {
   }
 
   return (
-    <CliQuickstart>
-      <CliQuickstartCopy>
+    <GettingStartedShell>
+      <GettingStartedHeader>
         <CliQuickstartEyebrow>Getting Started</CliQuickstartEyebrow>
-        <CliQuickstartTitle>Start from the AFS CLI or an SDK.</CliQuickstartTitle>
-        <CliLessonTabs role="tablist" aria-label="Getting started examples">
-          {gettingStartedSamples.map((hint, index) => (
-            <CliLessonTab
-              key={hint.label}
-              type="button"
-              role="tab"
-              aria-selected={activeHintIndex === index}
-              $active={activeHintIndex === index}
-              onClick={() => setActiveHintIndex(index)}
-            >
-              {hint.label}
-            </CliLessonTab>
-          ))}
-        </CliLessonTabs>
-        <CliLessonDetail>
-          <CliLessonTitle>{activeHint.title}</CliLessonTitle>
-        </CliLessonDetail>
-      </CliQuickstartCopy>
-      <OverviewTerminal sample={activeHint} copiedKey={copiedKey} onCopy={copySnippet} />
-    </CliQuickstart>
+        <CliQuickstartTitle>Connect your first agent.</CliQuickstartTitle>
+      </GettingStartedHeader>
+
+      <ModeToggle role="tablist" aria-label="Onboarding path">
+        <ModeChoice
+          type="button"
+          role="tab"
+          aria-selected={mode === "agent"}
+          $active={mode === "agent"}
+          $tone="primary"
+          onClick={() => setMode("agent")}
+        >
+          <ModeEyebrow>Recommended</ModeEyebrow>
+          <ModeTitle>Have your agent do it</ModeTitle>
+          <ModeHint>
+            Paste a prompt; the agent installs the CLI and connects.
+          </ModeHint>
+        </ModeChoice>
+        <ModeChoice
+          type="button"
+          role="tab"
+          aria-selected={mode === "human"}
+          $active={mode === "human"}
+          $tone="secondary"
+          onClick={() => setMode("human")}
+        >
+          <ModeEyebrow>For humans</ModeEyebrow>
+          <ModeTitle>Do it myself</ModeTitle>
+          <ModeHint>Install the CLI or SDK from my shell.</ModeHint>
+        </ModeChoice>
+      </ModeToggle>
+
+      {mode === "agent" ? (
+        <AgentModePanel>
+          <AgentPromptCard
+            tone="primary"
+            eyebrow="Step 1 — Paste this into your agent"
+            title="Claude, Cursor, Codex, or any agent CLI."
+            description="Your agent installs the AFS CLI, signs in, and mounts the getting-started workspace. About 30 seconds."
+            prompt={agentBootstrapPrompt}
+          />
+          <AgentPromptCard
+            eyebrow="Or — connect via MCP"
+            title="Wire AFS into your agent over MCP."
+            description={
+              <>
+                No CLI install needed. Replace <Mono>&lt;YOUR_TOKEN&gt;</Mono>{" "}
+                with a token from MCP access.
+              </>
+            }
+            prompt={agentMcpPrompt}
+            footer={
+              <>
+                Generate a token at{" "}
+                <InlineLink as={Link} to="/mcp">
+                  /mcp
+                </InlineLink>
+                .
+              </>
+            }
+          />
+        </AgentModePanel>
+      ) : (
+        <HumanModePanel>
+          <CliQuickstartCopy>
+            <CliLessonTabs role="tablist" aria-label="Getting started examples">
+              {gettingStartedSamples.map((hint, index) => (
+                <CliLessonTab
+                  key={hint.label}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeHintIndex === index}
+                  $active={activeHintIndex === index}
+                  onClick={() => setActiveHintIndex(index)}
+                >
+                  {hint.label}
+                </CliLessonTab>
+              ))}
+            </CliLessonTabs>
+            <CliLessonDetail>
+              <CliLessonTitle>{activeHint.title}</CliLessonTitle>
+            </CliLessonDetail>
+          </CliQuickstartCopy>
+          <OverviewTerminal sample={activeHint} copiedKey={copiedKey} onCopy={copySnippet} />
+        </HumanModePanel>
+      )}
+    </GettingStartedShell>
   );
 }
 
@@ -425,69 +492,6 @@ function GettingStartedView({ hasDatabase }: { hasDatabase: boolean }) {
             </SetupBadgeRow>
           ) : null}
         </CTABlock>
-
-        <BlockStack>
-          <AgentPromptCard
-            tone="primary"
-            eyebrow="Step 1 \u2014 Point your agent here"
-            title="Paste this into Claude, Cursor, Codex, or any agent CLI."
-            description="Your agent installs the AFS CLI, signs in, and mounts the getting-started workspace locally. Takes about 30 seconds."
-            prompt={agentBootstrapPrompt}
-          />
-
-          <AgentPromptCard
-            eyebrow="Or \u2014 connect via MCP"
-            title="Wire AFS into your agent over MCP."
-            description={
-              <>
-                No CLI install needed. Replace <Mono>&lt;YOUR_TOKEN&gt;</Mono>{" "}
-                with a token from MCP access, then paste this into your
-                client&rsquo;s MCP config.
-              </>
-            }
-            prompt={agentMcpPrompt}
-            footer={
-              <>
-                Generate a token at{" "}
-                <InlineLink as={Link} to="/mcp">
-                  /mcp
-                </InlineLink>
-                .
-              </>
-            }
-          />
-
-          <HumansDetails>
-            <HumansSummary>
-              <HumansChevron aria-hidden>\u203a</HumansChevron>
-              <HumansSummaryText>
-                For humans &mdash; if you&rsquo;d rather drive it yourself
-              </HumansSummaryText>
-            </HumansSummary>
-            <HumansBody>
-              <HumansP>
-                Install the CLI manually and create workspaces from your shell.
-              </HumansP>
-              <HumansCode>
-                <HumansCodeLine>
-                  <HumansPrompt>$</HumansPrompt> curl -fsSL
-                  https://afs.cloud/install.sh | bash
-                </HumansCodeLine>
-                <HumansCodeLine>
-                  <HumansPrompt>$</HumansPrompt> afs auth login
-                </HumansCodeLine>
-                <HumansCodeLine>
-                  <HumansPrompt>$</HumansPrompt> afs ws create my-repo
-                </HumansCodeLine>
-              </HumansCode>
-              <HumansP>
-                <InlineLink as={Link} to="/docs/cli">
-                  Read the full CLI guide &rarr;
-                </InlineLink>
-              </HumansP>
-            </HumansBody>
-          </HumansDetails>
-        </BlockStack>
 
         <BenefitsGrid>
           <Benefit>
@@ -696,15 +700,6 @@ const RetryLink = styled.button`
   }
 `;
 
-const BlockStack = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: 100%;
-  margin-top: 22px;
-  text-align: left;
-`;
-
 const InlineLink = styled.a`
   color: var(--afs-accent);
   text-decoration: none;
@@ -713,93 +708,6 @@ const InlineLink = styled.a`
   &:hover {
     text-decoration: underline;
   }
-`;
-
-const HumansDetails = styled.details`
-  border: 1px dashed var(--afs-line);
-  border-radius: 12px;
-  background: var(--afs-bg-soft, transparent);
-  padding: 0;
-
-  &[open] {
-    background: var(--afs-panel);
-    border-style: solid;
-  }
-`;
-
-const HumansSummary = styled.summary`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  cursor: pointer;
-  list-style: none;
-  color: var(--afs-muted);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-
-  &::-webkit-details-marker {
-    display: none;
-  }
-
-  &:hover {
-    color: var(--afs-ink);
-  }
-`;
-
-const HumansChevron = styled.span`
-  display: inline-block;
-  font-size: 18px;
-  line-height: 1;
-  transition: transform 140ms ease;
-  color: var(--afs-muted);
-
-  ${HumansDetails}[open] & {
-    transform: rotate(90deg);
-  }
-`;
-
-const HumansSummaryText = styled.span`
-  flex: 1;
-`;
-
-const HumansBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 4px 18px 18px;
-`;
-
-const HumansP = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 13.5px;
-  line-height: 1.55;
-`;
-
-const HumansCode = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: #0f1720;
-  color: #e6edf3;
-  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
-  font-size: 12.5px;
-  line-height: 1.5;
-  overflow-x: auto;
-`;
-
-const HumansCodeLine = styled.span`
-  white-space: pre;
-`;
-
-const HumansPrompt = styled.span`
-  color: #6b7785;
-  margin-right: 0.6ch;
-  user-select: none;
 `;
 
 const BenefitsGrid = styled.div`
@@ -1322,28 +1230,123 @@ function highlightClass(
   return "code-token-keyword";
 }
 
-const CliQuickstart = styled.section`
-  display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-  gap: 20px;
-  align-items: stretch;
+const GettingStartedShell = styled.section`
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
   border: 1px solid var(--afs-line);
   border-radius: 16px;
   background: var(--afs-panel-strong);
-  padding: 20px;
-
-  @media (max-width: 980px) {
-    grid-template-columns: 1fr;
-  }
+  padding: 22px 22px 24px;
 
   @media (max-width: 640px) {
-    padding: 16px;
+    padding: 18px;
   }
 
   [data-skin="situation-room"] && {
     border-radius: var(--afs-r-2);
     border-color: var(--afs-line-strong);
     background: var(--afs-bg-1);
+  }
+`;
+
+const GettingStartedHeader = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+const ModeToggle = styled.div`
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ModeChoice = styled.button<{ $active: boolean; $tone: "primary" | "secondary" }>`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  border: 1px solid
+    ${(p) =>
+      p.$active
+        ? p.$tone === "primary"
+          ? "var(--afs-accent)"
+          : "var(--afs-ink)"
+        : "var(--afs-line)"};
+  background: ${(p) =>
+    p.$active
+      ? p.$tone === "primary"
+        ? "color-mix(in srgb, var(--afs-accent) 8%, var(--afs-panel))"
+        : "var(--afs-panel)"
+      : "var(--afs-panel)"};
+  box-shadow: ${(p) =>
+    p.$active && p.$tone === "primary"
+      ? "0 6px 18px color-mix(in srgb, var(--afs-accent) 14%, transparent)"
+      : "none"};
+
+  &:hover {
+    border-color: ${(p) =>
+      p.$tone === "primary"
+        ? "var(--afs-accent)"
+        : "var(--afs-ink)"};
+    transform: translateY(-1px);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-accent);
+    outline-offset: 2px;
+  }
+`;
+
+const ModeEyebrow = styled.span<{ $tone?: "primary" | "secondary" }>`
+  color: var(--afs-accent);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+
+  ${ModeChoice}[aria-selected="false"] & {
+    color: var(--afs-muted);
+  }
+`;
+
+const ModeTitle = styled.span`
+  color: var(--afs-ink);
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+`;
+
+const ModeHint = styled.span`
+  color: var(--afs-muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+`;
+
+const AgentModePanel = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+`;
+
+const HumanModePanel = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 20px;
+  align-items: stretch;
+
+  @media (max-width: 980px) {
+    grid-template-columns: 1fr;
   }
 `;
 
