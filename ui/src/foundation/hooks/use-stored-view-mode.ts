@@ -1,22 +1,33 @@
 import { useEffect, useState } from "react";
 
-export type ViewMode = "table" | "cards";
+// Generic over the set of valid view modes a caller cares about.
+// Existing callers used "table" | "cards"; the agents page uses "table" | "map".
+// The hook just persists whatever string the caller hands it; readers
+// validate by passing a fallback.
 
-function readStored(key: string, fallback: ViewMode): ViewMode {
+export type ViewMode = string;
+
+function readStored<T extends ViewMode>(
+  key: string,
+  fallback: T,
+  isValid: (v: string) => v is T,
+): T {
   try {
     const stored = localStorage.getItem(key);
-    if (stored === "table" || stored === "cards") return stored;
+    if (stored != null && isValid(stored)) return stored;
   } catch {
     // ignore
   }
   return fallback;
 }
 
-export function useStoredViewMode(
+export function useStoredViewMode<T extends ViewMode = "table" | "cards">(
   key: string,
-  fallback: ViewMode = "cards",
-): [ViewMode, (mode: ViewMode) => void] {
-  const [viewMode, setViewMode] = useState<ViewMode>(() => readStored(key, fallback));
+  fallback: T = "cards" as T,
+  validModes: readonly T[] = ["table" as T, "cards" as T],
+): [T, (mode: T) => void] {
+  const isValid = (v: string): v is T => (validModes as readonly string[]).includes(v);
+  const [viewMode, setViewMode] = useState<T>(() => readStored(key, fallback, isValid));
 
   useEffect(() => {
     try {

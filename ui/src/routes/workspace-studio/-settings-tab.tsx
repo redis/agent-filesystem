@@ -361,14 +361,39 @@ export function SettingsTab({
 
       <DangerZoneCard>
         <DangerZoneHeader>
-          <DangerZoneTitle>Danger zone</DangerZoneTitle>
+          <DangerZoneTitle>Delete workspace</DangerZoneTitle>
           <DangerZoneDesc>
-            Permanently delete this workspace and remove it from the registry.
+            Workspaces are deleted from the CLI. Run the command below to
+            permanently remove <strong>{workspace.name}</strong> from the
+            registry.
           </DangerZoneDesc>
         </DangerZoneHeader>
-        <DeleteWorkspaceButton size="large" disabled={isDeleting} onClick={onDelete}>
-          {isDeleting ? "Deleting..." : "Delete workspace"}
-        </DeleteWorkspaceButton>
+        <CliDeleteRow>
+          <CliDeletePrompt>$</CliDeletePrompt>
+          <CliDeleteCode>afs ws delete {workspace.name}</CliDeleteCode>
+          <CliDeleteCopy
+            type="button"
+            onClick={() => {
+              void navigator.clipboard
+                .writeText(`afs ws delete ${workspace.name}`)
+                .catch(() => undefined);
+            }}
+          >
+            copy
+          </CliDeleteCopy>
+        </CliDeleteRow>
+        <ManualOverride>
+          <ManualOverrideSummary>manual override (browser)</ManualOverrideSummary>
+          <ManualOverrideBody>
+            <ManualOverrideHint>
+              The button below issues a delete request from this browser
+              session. Use only when CLI access isn't available.
+            </ManualOverrideHint>
+            <DeleteWorkspaceButton size="large" disabled={isDeleting} onClick={onDelete}>
+              {isDeleting ? "Deleting..." : "Delete workspace"}
+            </DeleteWorkspaceButton>
+          </ManualOverrideBody>
+        </ManualOverride>
       </DangerZoneCard>
     </SectionGrid>
   );
@@ -633,6 +658,97 @@ const DeleteWorkspaceButton = styled(Button)`
     color: ${({ theme }) => theme.semantic.color.text.inverse};
     box-shadow: none;
   }
+`;
+
+// CLI hint row inside the danger zone — primary path for delete.
+const CliDeleteRow = styled.div`
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--afs-bg-soft);
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 13px;
+`;
+
+const CliDeletePrompt = styled.span`
+  color: var(--afs-muted);
+  margin-right: 1ch;
+  user-select: none;
+`;
+
+const CliDeleteCode = styled.code`
+  flex: 1;
+  color: var(--afs-ink);
+  white-space: pre;
+  overflow-x: auto;
+`;
+
+const CliDeleteCopy = styled.button`
+  flex: 0 0 auto;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--afs-accent);
+  border: 1px solid var(--afs-accent);
+  border-radius: 4px;
+  padding: 3px 9px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--afs-accent);
+    color: var(--afs-ink-on-accent);
+  }
+`;
+
+// Manual-override disclosure — collapsed by default. The actual destructive
+// button only appears once the user explicitly opens it.
+const ManualOverride = styled.details`
+  margin-top: 12px;
+
+  &[open] > summary {
+    color: var(--afs-ink);
+  }
+`;
+
+const ManualOverrideSummary = styled.summary`
+  cursor: pointer;
+  color: var(--afs-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+  list-style: none;
+  user-select: none;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &::before {
+    content: "▸ ";
+  }
+
+  ${ManualOverride}[open] > &::before {
+    content: "▾ ";
+  }
+`;
+
+const ManualOverrideBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+`;
+
+const ManualOverrideHint = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.5;
 `;
 
 function formatProfile(profile: AFSMCPToken["profile"]) {

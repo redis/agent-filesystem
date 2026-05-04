@@ -21,6 +21,7 @@ import {
   Tabs,
 } from "../components/afs-kit";
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
+import { FormatToggle } from "../components/format-toggle";
 import { useAuthSession } from "../foundation/auth-context";
 import {
   useDeleteWorkspaceMutation,
@@ -35,7 +36,7 @@ import { resolveWorkspaceBrowserView } from "../foundation/workspace-browser-vie
 import { displayWorkspaceName } from "../foundation/workspace-display";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
-import type { AFSWorkspaceView } from "../foundation/types/afs";
+import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
@@ -349,6 +350,8 @@ function WorkspaceStudioPage() {
           Settings
         </TabButton>
       </Tabs>
+
+      <FormatToggle {...formatToggleFor(tab, workspace)} />
 
       {tab === "browse" ? (
         <BrowseTab
@@ -679,3 +682,57 @@ const DeleteConfirmButton = styled(Button)`
     box-shadow: none;
   }
 `;
+
+// formatToggleFor — per-tab CLI/MCP/HTTP form for the workspace detail page.
+// Each tab corresponds to a different shape of "what would I run from a
+// terminal to get this view." That makes the FormatToggle teach the CLI
+// surface contextually, not just abstractly.
+function formatToggleFor(tab: StudioTab, workspace: AFSWorkspaceDetail) {
+  const name = workspace.name;
+  switch (tab) {
+    case "browse":
+      return {
+        request: { method: "POST" as const, path: `/v1/workspaces/${workspace.id}:mount` },
+        json: { workspace_id: workspace.id, mount_path: `~/${name}` },
+        cliCommand: ["afs", "ws", "mount", name, `~/${name}`],
+        toolCall: { name: "workspace_mount", args: { workspace_id: workspace.id, path: `~/${name}` } },
+        pyCall: `with afs.workspaces.get('${name}').mount() as fs:\n    fs.list('/')`,
+        tsCall: `const fs = await afs.workspaces.get('${name}').mount()\nawait fs.list('/')`,
+      };
+    case "changes":
+      return {
+        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/changes` },
+        json: { workspace_id: workspace.id },
+        cliCommand: ["afs", "log", name, "--json"],
+        pyCall: `for change in afs.workspaces.get('${name}').changes():\n    print(change)`,
+        tsCall: `for await (const c of afs.workspaces.get('${name}').changes()) console.log(c)`,
+      };
+    case "checkpoints":
+      return {
+        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/checkpoints` },
+        json: { workspace_id: workspace.id },
+        cliCommand: ["afs", "cp", "list", name, "--json"],
+        toolCall: { name: "checkpoint_list", args: { workspace_id: workspace.id } },
+        pyCall: `for cp in afs.workspaces.get('${name}').checkpoints.list():\n    print(cp.id, cp.name)`,
+        tsCall: `(await afs.workspaces.get('${name}').checkpoints.list()).forEach(cp => console.log(cp.id))`,
+      };
+    case "activity":
+      return {
+        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/activity` },
+        json: { workspace_id: workspace.id },
+        cliCommand: ["afs", "log", name, "--follow"],
+        pyCall: `for ev in afs.workspaces.get('${name}').activity.tail():\n    print(ev)`,
+        tsCall: `for await (const ev of afs.workspaces.get('${name}').activity.tail()) console.log(ev)`,
+      };
+    case "settings":
+    default:
+      return {
+        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}` },
+        json: workspace,
+        cliCommand: ["afs", "ws", "info", name, "--json"],
+        toolCall: { name: "workspace_get", args: { workspace_id: workspace.id } },
+        pyCall: `afs.workspaces.get('${name}').summary()`,
+        tsCall: `await afs.workspaces.get('${name}').summary()`,
+      };
+  }
+}

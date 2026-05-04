@@ -26,7 +26,9 @@ import {
 } from "../features/docs/afs-samples";
 import { afsApi, formatBytes } from "../foundation/api/afs";
 import { useAuthSession } from "../foundation/auth-context";
-import { useDatabaseScope, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
+import { useDatabaseScope, useScopedActivity, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
+import { ActivityTable } from "../foundation/tables/activity-table";
+import type { AFSActivityEvent } from "../foundation/types/afs";
 import { queryClient } from "../foundation/query-client";
 import {
   agentsQueryOptions,
@@ -34,7 +36,7 @@ import {
   useQuickstartMutation,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
-import type { AFSWorkspaceDetail, AFSWorkspaceSummary } from "../foundation/types/afs";
+import type { AFSAgentSession, AFSWorkspaceDetail, AFSWorkspaceSummary } from "../foundation/types/afs";
 
 const gettingStartedSamples = [
   {
@@ -122,20 +124,11 @@ function OverviewPage() {
   } else if (workspaces.length === 0) {
     content = <GettingStartedView hasDatabase={true} onQuickstartCreated={setOnboardingWorkspace} />;
   } else {
-    /* ── Dashboard ── */
-    const workspacesWithCheckpoints = workspaces.filter((workspace) => workspace.checkpointCount > 0).length;
-    const checkpointCount = workspaces.reduce((sum, workspace) => sum + workspace.checkpointCount, 0);
-    const totalBytes = workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0);
-    const checkpointCoverage = workspaces.length === 0 ? 0 : Math.round((workspacesWithCheckpoints / workspaces.length) * 100);
-
+    /* ── Inspector ── */
     content = (
-      <DashboardView
-        databases={databases}
+      <InspectorView
         workspaces={workspaces}
         agents={agentsQuery.data}
-        checkpointCount={checkpointCount}
-        checkpointCoverage={checkpointCoverage}
-        totalBytes={totalBytes}
       />
     );
   }
@@ -158,57 +151,63 @@ function OverviewPage() {
   );
 }
 
-function DashboardView({ databases, workspaces, agents, checkpointCount, checkpointCoverage, totalBytes }: {
-  databases: { length: number };
+// InspectorView — the new home page when you have at least one workspace.
+//
+// Replaces the old "Dashboard" of stat cards. The headline content is a live
+// activity stream — what your CLI and agents are *currently doing*. Stats are
+// reduced to a slim StatusHeader so the page reads as observability, not as
+// a control surface.
+function InspectorView({ workspaces, agents }: {
   workspaces: AFSWorkspaceSummary[];
-  agents: unknown[];
-  checkpointCount: number;
-  checkpointCoverage: number;
-  totalBytes: number;
+  agents: AFSAgentSession[];
 }) {
   const navigate = useNavigate();
+  const activityQuery = useScopedActivity(50);
   const connectedAgents = agents.length;
+  const opsPerMin = computeOpsPerMin(activityQuery.data);
+
+  function openActivity(event: AFSActivityEvent) {
+    if (!event.workspaceId) return;
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId: event.workspaceId },
+      search: {
+        ...(event.databaseId ? { databaseId: event.databaseId } : {}),
+        tab: "activity",
+      },
+    });
+  }
 
   return (
     <PageStack>
-      <OverviewStatGrid>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Workspaces</StatLabel>
-            <StatValue>{workspaces.length}</StatValue>
-          </div>
-          <StatDetail>
-            Across {databases.length} database{databases.length === 1 ? "" : "s"}.
-          </StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Stored Data</StatLabel>
-            <StatValue>{formatBytes(totalBytes)}</StatValue>
-          </div>
-          <StatDetail>Durable content in Redis.</StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/workspaces" })}>
-          <div>
-            <StatLabel>Checkpoints</StatLabel>
-            <StatValue>{checkpointCount}</StatValue>
-          </div>
-          <StatDetail>{checkpointCoverage}% with history.</StatDetail>
-        </ClickableStatCard>
-        <ClickableStatCard onClick={() => navigate({ to: "/agents" })}>
-          <div>
-            <StatLabel>Agents</StatLabel>
-            <StatValue>{connectedAgents}</StatValue>
-          </div>
-          <StatDetail>
-            {connectedAgents === 0
-              ? "No live agents."
-              : `${connectedAgents} live ${connectedAgents === 1 ? "session" : "sessions"}.`}
-          </StatDetail>
-        </ClickableStatCard>
-      </OverviewStatGrid>
-      <LiveTopologyCard agents={agents as any} workspaces={workspaces as any} />
+      <StatusHeader
+        workspaces={workspaces.length}
+        activeSessions={connectedAgents}
+        opsPerMin={opsPerMin}
+        loading={activityQuery.isLoading}
+      />
+
+      <ActiveAgentsPanel agents={agents} onOpenAgents={() => void navigate({ to: "/agents" })} />
+
+      <ActivityCard>
+        <ActivityCardHeader>
+          <ActivityCardEyebrow>Live activity</ActivityCardEyebrow>
+          <ActivityCardSub>
+            What your CLI and agents are doing right now. Tail the full stream
+            on any workspace.
+          </ActivityCardSub>
+        </ActivityCardHeader>
+        <ActivityTable
+          rows={activityQuery.data}
+          loading={activityQuery.isLoading}
+          error={activityQuery.isError}
+          errorMessage={activityQuery.error instanceof Error ? activityQuery.error.message : undefined}
+          onOpenActivity={openActivity}
+        />
+      </ActivityCard>
+
       <CliQuickstartCard />
+
       <TemplatesLinkCard as={Link} to="/templates">
         <TemplatesLinkCopy>
           <TemplatesLinkEyebrow>Templates</TemplatesLinkEyebrow>
@@ -222,6 +221,120 @@ function DashboardView({ databases, workspaces, agents, checkpointCount, checkpo
       </TemplatesLinkCard>
     </PageStack>
   );
+}
+
+// ActiveAgentsPanel — compact list of currently-connected agents and the
+// workspace each is on. This is the "watch your CLI/agents work" cue for the
+// Inspector page: dense, no animation, per-row state dot for at-a-glance
+// activity. Replaces the old animated topology graph.
+function ActiveAgentsPanel({ agents, onOpenAgents }: {
+  agents: AFSAgentSession[];
+  onOpenAgents: () => void;
+}) {
+  if (agents.length === 0) return null;
+  // sort: most recently active first
+  const ordered = [...agents].sort((a, b) =>
+    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt),
+  );
+  const showCount = Math.min(6, ordered.length);
+  const overflow = ordered.length - showCount;
+  const visible = ordered.slice(0, showCount);
+
+  return (
+    <AgentsPanelCard>
+      <AgentsPanelHeader>
+        <AgentsPanelEyebrow>Active agents ({agents.length})</AgentsPanelEyebrow>
+        <AgentsPanelLink type="button" onClick={onOpenAgents}>
+          all agents &rarr;
+        </AgentsPanelLink>
+      </AgentsPanelHeader>
+      <AgentsPanelList>
+        {visible.map((agent) => (
+          <AgentRow key={agent.sessionId}>
+            <AgentDot $idle={isAgentIdle(agent)} />
+            <AgentLabel>{agentDisplayLabel(agent)}</AgentLabel>
+            <AgentArrow>&rarr;</AgentArrow>
+            <AgentWorkspace>{agent.workspaceName}</AgentWorkspace>
+            <AgentMeta>
+              <AgentTag>{agent.clientKind}</AgentTag>
+              <AgentTag>{agent.readonly ? "RO" : "RW"}</AgentTag>
+              <AgentTag>{agent.operatingSystem}</AgentTag>
+            </AgentMeta>
+            <AgentSeen>{relativeAgentSeen(agent.lastSeenAt)}</AgentSeen>
+          </AgentRow>
+        ))}
+        {overflow > 0 ? (
+          <AgentRow>
+            <AgentMore type="button" onClick={onOpenAgents}>
+              + {overflow} more &rarr;
+            </AgentMore>
+          </AgentRow>
+        ) : null}
+      </AgentsPanelList>
+    </AgentsPanelCard>
+  );
+}
+
+function agentDisplayLabel(agent: AFSAgentSession) {
+  return agent.label || agent.agentId || agent.hostname || agent.sessionId.slice(0, 12);
+}
+
+function isAgentIdle(agent: AFSAgentSession) {
+  const last = Date.parse(agent.lastSeenAt);
+  if (!Number.isFinite(last)) return true;
+  return Date.now() - last > 30_000;
+}
+
+function relativeAgentSeen(iso: string) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+// Compact inline status. Replaces the four stat cards with a single line that
+// reads like a process header: live indicator, key counts, current op rate.
+function StatusHeader({ workspaces, activeSessions, opsPerMin, loading }: {
+  workspaces: number;
+  activeSessions: number;
+  opsPerMin: number;
+  loading: boolean;
+}) {
+  return (
+    <StatusBar>
+      <StatusLive>
+        <StatusDot $live={!loading} />
+        <StatusLiveText>{loading ? "loading" : "live"}</StatusLiveText>
+      </StatusLive>
+      <StatusSep>·</StatusSep>
+      <StatusItem>
+        <StatusValue>{workspaces}</StatusValue>
+        <StatusLabel>workspace{workspaces === 1 ? "" : "s"}</StatusLabel>
+      </StatusItem>
+      <StatusSep>·</StatusSep>
+      <StatusItem>
+        <StatusValue>{activeSessions}</StatusValue>
+        <StatusLabel>active session{activeSessions === 1 ? "" : "s"}</StatusLabel>
+      </StatusItem>
+      <StatusSep>·</StatusSep>
+      <StatusItem>
+        <StatusValue>{opsPerMin}</StatusValue>
+        <StatusLabel>ops/min</StatusLabel>
+      </StatusItem>
+    </StatusBar>
+  );
+}
+
+// Count activity events whose createdAt falls within the last 60s.
+function computeOpsPerMin(events: AFSActivityEvent[]) {
+  const cutoff = Date.now() - 60_000;
+  return events.reduce((count, e) => {
+    const t = Date.parse(e.createdAt);
+    return Number.isFinite(t) && t >= cutoff ? count + 1 : count;
+  }, 0);
 }
 
 function CliQuickstartCard() {
@@ -263,6 +376,43 @@ function CliQuickstartCard() {
       </CliQuickstartCopy>
       <OverviewTerminal sample={activeHint} copiedKey={copiedKey} onCopy={copySnippet} />
     </CliQuickstart>
+  );
+}
+
+// FirstRunCliHint — shown alongside the "Create my first workspace" CTA on
+// the getting-started view. The web button is the easy first-time path
+// (auto-provisions a sample workspace); this block plants the seed that
+// from here on, workspace creation belongs to the CLI.
+function FirstRunCliHint() {
+  const command = "afs ws create my-repo";
+  const [copied, setCopied] = useState(false);
+
+  async function copyCommand() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <FirstRunCliWrap>
+      <FirstRunCliEyebrow>or, from the CLI</FirstRunCliEyebrow>
+      <FirstRunCliCommand>
+        <FirstRunCliPrompt>$</FirstRunCliPrompt>
+        <FirstRunCliCode>{command}</FirstRunCliCode>
+        <FirstRunCliCopy type="button" onClick={copyCommand} aria-label="Copy command">
+          {copied ? "copied" : "copy"}
+        </FirstRunCliCopy>
+      </FirstRunCliCommand>
+      <FirstRunCliFootnote>
+        From here on, workspaces are created from the CLI &mdash; the web UI is
+        for watching what your terminal and agents are doing.{" "}
+        <FirstRunCliLink to="/docs/cli">install the CLI &rarr;</FirstRunCliLink>
+      </FirstRunCliFootnote>
+    </FirstRunCliWrap>
   );
 }
 
@@ -326,6 +476,8 @@ function GettingStartedView({
             </QuickstartError>
           ) : null}
         </CTABlock>
+
+        <FirstRunCliHint />
 
         <BenefitsGrid>
           <Benefit>
@@ -460,6 +612,89 @@ const QuickstartError = styled.div`
   max-width: 480px;
 `;
 
+// ──────────────────────────────────────────────────────────────────────
+// FirstRunCliHint styles
+// ──────────────────────────────────────────────────────────────────────
+
+const FirstRunCliWrap = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 auto;
+  padding: 14px 18px;
+  max-width: 540px;
+  width: 100%;
+  border: 1px solid var(--afs-line);
+  border-radius: 12px;
+  background: var(--afs-bg-soft);
+`;
+
+const FirstRunCliEyebrow = styled.div`
+  color: var(--afs-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+`;
+
+const FirstRunCliCommand = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 8px 12px;
+  background: var(--afs-panel-strong);
+  border: 1px solid var(--afs-line);
+  border-radius: 6px;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 13px;
+`;
+
+const FirstRunCliPrompt = styled.span`
+  color: var(--afs-muted);
+  margin-right: 1ch;
+  user-select: none;
+`;
+
+const FirstRunCliCode = styled.code`
+  flex: 1;
+  color: var(--afs-ink);
+  white-space: pre;
+  overflow-x: auto;
+`;
+
+const FirstRunCliCopy = styled.button`
+  flex: 0 0 auto;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--afs-accent);
+  border: 1px solid var(--afs-accent);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--afs-accent);
+    color: var(--afs-ink-on-accent);
+  }
+`;
+
+const FirstRunCliFootnote = styled.div`
+  color: var(--afs-muted);
+  font-size: 12px;
+  line-height: 1.5;
+`;
+
+const FirstRunCliLink = styled(Link)`
+  color: var(--afs-accent);
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
 const BenefitsGrid = styled.div`
   display: grid;
   gap: 16px;
@@ -525,6 +760,234 @@ const FooterLink = styled.a`
   &:hover {
     text-decoration: underline;
   }
+`;
+
+// ──────────────────────────────────────────────────────────────────────
+// StatusHeader + ActivityCard styles (Inspector home)
+// ──────────────────────────────────────────────────────────────────────
+
+const StatusBar = styled.div`
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  border: 1px solid var(--afs-line);
+  border-radius: 12px;
+  background: var(--afs-bg-soft);
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 13px;
+`;
+
+const StatusLive = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const StatusDot = styled.span<{ $live?: boolean }>`
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: ${(p) => (p.$live ? "var(--afs-accent)" : "var(--afs-muted)")};
+  box-shadow: ${(p) => (p.$live ? "0 0 8px var(--afs-accent)" : "none")};
+  animation: ${(p) => (p.$live ? "afs-status-pulse 2s ease-in-out infinite" : "none")};
+
+  @keyframes afs-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+`;
+
+const StatusLiveText = styled.span`
+  color: var(--afs-accent);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 11px;
+`;
+
+const StatusSep = styled.span`
+  color: var(--afs-line-strong);
+`;
+
+const StatusItem = styled.span`
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+`;
+
+const StatusValue = styled.span`
+  color: var(--afs-ink);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+`;
+
+const StatusLabel = styled.span`
+  color: var(--afs-muted);
+  font-size: 12px;
+`;
+
+const ActivityCard = styled.section`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px 22px;
+  border: 1px solid var(--afs-line);
+  border-radius: 14px;
+  background: var(--afs-panel);
+`;
+
+// ──────────────────────────────────────────────────────────────────────
+// ActiveAgentsPanel styles
+// ──────────────────────────────────────────────────────────────────────
+
+const AgentsPanelCard = styled.section`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 18px;
+  border: 1px solid var(--afs-line);
+  border-radius: 12px;
+  background: var(--afs-panel);
+`;
+
+const AgentsPanelHeader = styled.div`
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+`;
+
+const AgentsPanelEyebrow = styled.h3`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+`;
+
+const AgentsPanelLink = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--afs-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const AgentsPanelList = styled.ul`
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const AgentRow = styled.li`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--afs-line);
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 12px;
+
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
+const AgentDot = styled.span<{ $idle?: boolean }>`
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: ${(p) => (p.$idle ? "var(--afs-muted)" : "var(--afs-accent)")};
+  box-shadow: ${(p) => (p.$idle ? "none" : "0 0 6px var(--afs-accent)")};
+`;
+
+const AgentLabel = styled.span`
+  flex: 0 0 auto;
+  min-width: 14ch;
+  color: var(--afs-ink);
+  font-weight: 600;
+`;
+
+const AgentArrow = styled.span`
+  color: var(--afs-line-strong);
+`;
+
+const AgentWorkspace = styled.span`
+  flex: 0 0 auto;
+  color: var(--afs-accent);
+`;
+
+const AgentMeta = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+`;
+
+const AgentTag = styled.span`
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--afs-line);
+  color: var(--afs-muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+`;
+
+const AgentSeen = styled.span`
+  flex: 0 0 8ch;
+  text-align: right;
+  color: var(--afs-muted);
+  font-size: 11px;
+`;
+
+const AgentMore = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: var(--afs-accent);
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 12px;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const ActivityCardHeader = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+`;
+
+const ActivityCardEyebrow = styled.h2`
+  margin: 0;
+  color: var(--afs-ink);
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+`;
+
+const ActivityCardSub = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.5;
 `;
 
 const OverviewStatGrid = styled(StatGrid)`
