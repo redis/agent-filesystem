@@ -45,3 +45,35 @@ export const mcpGettingStartedSample = `{
     }
   }
 }`;
+
+export const agentBootstrapPrompt = `I want you to use Agent Filesystem (AFS) — a persistent, checkpointed workspace backed by Redis.
+
+Please do the following:
+
+1. Install the AFS CLI:
+   curl -fsSL https://afs.cloud/install.sh | bash
+
+2. Authenticate (this will open a browser):
+   afs auth login
+
+3. Mount the "getting-started" workspace locally:
+   afs ws mount getting-started ~/afs/getting-started
+
+4. From now on, treat ~/afs/getting-started as your persistent home for files, notes, and project state. Use \`afs cp create\` to checkpoint before risky changes.
+
+Confirm when you're connected and tell me what's in the workspace.`;
+
+export const agentMcpPrompt = `Connect to Agent Filesystem (AFS) via MCP.
+
+Add this server to your MCP configuration:
+
+{
+  "mcpServers": {
+    "agent-filesystem": {
+      "url": "https://afs.cloud/mcp",
+      "headers": { "Authorization": "Bearer <YOUR_TOKEN>" }
+    }
+  }
+}
+
+Once connected, call list_workspaces, then read the contents of the "getting-started" workspace and summarize what's there.`;

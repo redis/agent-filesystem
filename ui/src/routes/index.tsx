@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Button, Loader } from "@redis-ui/components";
+import { Loader } from "@redis-ui/components";
 import { Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
 import {
@@ -15,10 +15,12 @@ import {
   Tabs,
 } from "../components/afs-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
-import { GettingStartedOnboardingDialog } from "../components/getting-started-onboarding-dialog";
+import { AgentPromptCard } from "../components/agent-prompt-card";
 import { LiveTopologyCard } from "../components/live-topology-card";
 import { PublicLandingPage } from "../features/landing/PublicLandingPage";
 import {
+  agentBootstrapPrompt,
+  agentMcpPrompt,
   cliGettingStartedSample,
   mcpGettingStartedSample,
   pythonSdkSample,
@@ -36,7 +38,7 @@ import {
   useQuickstartMutation,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
-import type { AFSAgentSession, AFSWorkspaceDetail, AFSWorkspaceSummary } from "../foundation/types/afs";
+import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
 
 const gettingStartedSamples = [
   {
@@ -109,46 +111,21 @@ function OverviewPage() {
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
   const { databases, isLoading: databasesLoading } = useDatabaseScope();
-  const [onboardingWorkspace, setOnboardingWorkspace] = useState<AFSWorkspaceDetail | null>(null);
 
   if (databasesLoading || workspacesQuery.isLoading || agentsQuery.isLoading) {
     return <Loader data-testid="loader--spinner" />;
   }
 
   const hasDatabase = databases.length > 0;
-
   const workspaces = workspacesQuery.data;
-  let content;
-  if (!hasDatabase) {
-    content = <GettingStartedView hasDatabase={false} onQuickstartCreated={setOnboardingWorkspace} />;
-  } else if (workspaces.length === 0) {
-    content = <GettingStartedView hasDatabase={true} onQuickstartCreated={setOnboardingWorkspace} />;
-  } else {
-    /* ── Inspector ── */
-    content = (
-      <InspectorView
-        workspaces={workspaces}
-        agents={agentsQuery.data}
-      />
-    );
-  }
 
-  return (
-    <>
-      {content}
-      {onboardingWorkspace ? (
-        <GettingStartedOnboardingDialog
-          open
-          workspaceId={onboardingWorkspace.id}
-          workspaceName={onboardingWorkspace.name}
-          databaseName={onboardingWorkspace.databaseName}
-          fileCount={onboardingWorkspace.fileCount}
-          folderCount={onboardingWorkspace.folderCount}
-          onClose={() => setOnboardingWorkspace(null)}
-        />
-      ) : null}
-    </>
-  );
+  if (!hasDatabase) {
+    return <GettingStartedView hasDatabase={false} />;
+  }
+  if (workspaces.length === 0) {
+    return <GettingStartedView hasDatabase={true} />;
+  }
+  return <InspectorView workspaces={workspaces} agents={agentsQuery.data} />;
 }
 
 // InspectorView — the new home page when you have at least one workspace.
@@ -379,63 +356,34 @@ function CliQuickstartCard() {
   );
 }
 
-// FirstRunCliHint — shown alongside the "Create my first workspace" CTA on
-// the getting-started view. The web button is the easy first-time path
-// (auto-provisions a sample workspace); this block plants the seed that
-// from here on, workspace creation belongs to the CLI.
-function FirstRunCliHint() {
-  const command = "afs ws create my-repo";
-  const [copied, setCopied] = useState(false);
-
-  async function copyCommand() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* ignore */
-    }
-  }
-
-  return (
-    <FirstRunCliWrap>
-      <FirstRunCliEyebrow>or, from the CLI</FirstRunCliEyebrow>
-      <FirstRunCliCommand>
-        <FirstRunCliPrompt>$</FirstRunCliPrompt>
-        <FirstRunCliCode>{command}</FirstRunCliCode>
-        <FirstRunCliCopy type="button" onClick={copyCommand} aria-label="Copy command">
-          {copied ? "copied" : "copy"}
-        </FirstRunCliCopy>
-      </FirstRunCliCommand>
-      <FirstRunCliFootnote>
-        From here on, workspaces are created from the CLI &mdash; the web UI is
-        for watching what your terminal and agents are doing.{" "}
-        <FirstRunCliLink to="/docs/cli">install the CLI &rarr;</FirstRunCliLink>
-      </FirstRunCliFootnote>
-    </FirstRunCliWrap>
-  );
-}
-
-function GettingStartedView({
-  hasDatabase,
-  onQuickstartCreated,
-}: {
-  hasDatabase: boolean;
-  onQuickstartCreated: (workspace: AFSWorkspaceDetail) => void;
-}) {
+function GettingStartedView({ hasDatabase }: { hasDatabase: boolean }) {
   const quickstartMutation = useQuickstartMutation();
-  const quickstartErrorMessage = quickstartMutation.isError
+  const [autoTried, setAutoTried] = useState(false);
+
+  // Auto-provision the getting-started workspace once. Errors surface inline;
+  // we don't auto-retry.
+  useEffect(() => {
+    if (!hasDatabase || autoTried) return;
+    if (quickstartMutation.isPending || quickstartMutation.isSuccess) return;
+    setAutoTried(true);
+    void quickstartMutation.mutateAsync({}).catch(() => undefined);
+  }, [hasDatabase, autoTried, quickstartMutation]);
+
+  const errorMessage = quickstartMutation.isError
     ? quickstartMutation.error.message || "Something went wrong."
     : null;
+  const friendlyError =
+    errorMessage && errorMessage.includes("cannot connect")
+      ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database, then retry."
+      : errorMessage;
 
-  const handleQuickstart = async () => {
+  async function retry() {
     try {
-      const result = await quickstartMutation.mutateAsync({});
-      onQuickstartCreated(result.workspace);
+      await quickstartMutation.mutateAsync({});
     } catch {
-      // Error is stored in quickstartMutation.error
+      /* error stored in mutation */
     }
-  };
+  }
 
   return (
     <PageStack>
@@ -445,53 +393,128 @@ function GettingStartedView({
           <AgentHeroAnimation />
         </HeroAnimationWrap>
         <Headline>
-          A filesystem your AI agents can trust.
+          A filesystem for <Strike>humans</Strike> agents.
         </Headline>
         <Description>
-          Give every agent a persistent, checkpointed workspace backed by
-          Redis. Edit files, snapshot state, and replay history &mdash; all
-          from one place.
+          Built for AI agents &mdash; not a dashboard for you to click around.
+          Point your agent here. It&rsquo;ll do the rest.
         </Description>
 
-        <CTABlock>
-          <PrimaryCTA
-            size="large"
-            onClick={handleQuickstart}
-            disabled={quickstartMutation.isPending}
-          >
-            {quickstartMutation.isPending
-              ? "Setting up\u2026"
-              : "Create my first workspace \u2192"}
-          </PrimaryCTA>
-          <CTAHint>
-            {hasDatabase
-              ? "We'll preload sample files so you can explore in seconds."
-              : "Requires Redis running on localhost:6379"}
-          </CTAHint>
-          {quickstartErrorMessage ? (
-            <QuickstartError>
-              {quickstartErrorMessage.includes("cannot connect")
-                ? "Could not connect to Redis at localhost:6379. Start Redis locally or add a remote database instead."
-                : quickstartErrorMessage}
-            </QuickstartError>
-          ) : null}
-        </CTABlock>
+        <SetupBadge>
+          {!hasDatabase ? (
+            <SetupBadgeRow $tone="warn">
+              <SetupDot $tone="warn" />
+              <span>
+                Redis isn&rsquo;t reachable on <Mono>localhost:6379</Mono>.
+                Start it, or add a remote database to continue.
+              </span>
+            </SetupBadgeRow>
+          ) : quickstartMutation.isPending ? (
+            <SetupBadgeRow $tone="info">
+              <SetupDot $tone="info" />
+              <span>
+                Creating your <Mono>getting-started</Mono> workspace{"\u2026"}
+              </span>
+            </SetupBadgeRow>
+          ) : quickstartMutation.isSuccess ? (
+            <SetupBadgeRow $tone="ok">
+              <SetupDot $tone="ok" />
+              <span>
+                Workspace <Mono>getting-started</Mono> is ready. Paste the
+                prompt below into your agent.
+              </span>
+            </SetupBadgeRow>
+          ) : friendlyError ? (
+            <SetupBadgeRow $tone="warn">
+              <SetupDot $tone="warn" />
+              <span>{friendlyError}</span>
+              <RetryLink type="button" onClick={retry}>
+                retry
+              </RetryLink>
+            </SetupBadgeRow>
+          ) : (
+            <SetupBadgeRow $tone="info">
+              <SetupDot $tone="info" />
+              <span>Setting things up{"\u2026"}</span>
+            </SetupBadgeRow>
+          )}
+        </SetupBadge>
 
-        <FirstRunCliHint />
+        <BlockStack>
+          <AgentPromptCard
+            tone="primary"
+            eyebrow="Step 1 \u2014 Point your agent here"
+            title="Paste this into Claude, Cursor, Codex, or any agent CLI."
+            description="Your agent installs the AFS CLI, signs in, and mounts the getting-started workspace locally. Takes about 30 seconds."
+            prompt={agentBootstrapPrompt}
+          />
+
+          <AgentPromptCard
+            eyebrow="Or \u2014 connect via MCP"
+            title="Wire AFS into your agent over MCP."
+            description={
+              <>
+                No CLI install needed. Replace <Mono>&lt;YOUR_TOKEN&gt;</Mono>{" "}
+                with a token from MCP access, then paste this into your
+                client&rsquo;s MCP config.
+              </>
+            }
+            prompt={agentMcpPrompt}
+            footer={
+              <>
+                Generate a token at{" "}
+                <InlineLink as={Link} to="/mcp">
+                  /mcp
+                </InlineLink>
+                .
+              </>
+            }
+          />
+
+          <HumansDetails>
+            <HumansSummary>
+              <HumansChevron aria-hidden>\u203a</HumansChevron>
+              <HumansSummaryText>
+                For humans &mdash; if you&rsquo;d rather drive it yourself
+              </HumansSummaryText>
+            </HumansSummary>
+            <HumansBody>
+              <HumansP>
+                Install the CLI manually and create workspaces from your shell.
+              </HumansP>
+              <HumansCode>
+                <HumansCodeLine>
+                  <HumansPrompt>$</HumansPrompt> curl -fsSL
+                  https://afs.cloud/install.sh | bash
+                </HumansCodeLine>
+                <HumansCodeLine>
+                  <HumansPrompt>$</HumansPrompt> afs auth login
+                </HumansCodeLine>
+                <HumansCodeLine>
+                  <HumansPrompt>$</HumansPrompt> afs ws create my-repo
+                </HumansCodeLine>
+              </HumansCode>
+              <HumansP>
+                <InlineLink as={Link} to="/docs/cli">
+                  Read the full CLI guide &rarr;
+                </InlineLink>
+              </HumansP>
+            </HumansBody>
+          </HumansDetails>
+        </BlockStack>
 
         <BenefitsGrid>
           <Benefit>
             <BenefitIcon>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <ellipse cx="12" cy="5" rx="9" ry="3" />
-                <path d="M3 5v14a9 3 0 0 0 18 0V5" />
-                <path d="M3 12a9 3 0 0 0 18 0" />
+                <polyline points="16 18 22 12 16 6" />
+                <polyline points="8 6 2 12 8 18" />
               </svg>
             </BenefitIcon>
-            <BenefitTitle>Persistent by default</BenefitTitle>
+            <BenefitTitle>MCP-native</BenefitTitle>
             <BenefitDesc>
-              Workspaces live in Redis &mdash; no local state to sync,
-              restore, or lose when you switch machines.
+              Every workspace operation is an MCP tool call. Plug AFS into
+              Claude, Cursor, Windsurf, or any MCP-capable runtime.
             </BenefitDesc>
           </Benefit>
           <Benefit>
@@ -501,23 +524,24 @@ function GettingStartedView({
                 <polyline points="3 4 3 12 11 12" />
               </svg>
             </BenefitIcon>
-            <BenefitTitle>Checkpoint &amp; rollback</BenefitTitle>
+            <BenefitTitle>Checkpoints your agent can roll back to</BenefitTitle>
             <BenefitDesc>
-              Snapshot before risky changes. Restore the workspace to any
-              previous state in seconds when an agent goes off the rails.
+              Agents snapshot before risky changes. Restore to any prior state
+              when something goes off the rails.
             </BenefitDesc>
           </Benefit>
           <Benefit>
             <BenefitIcon>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="16 18 22 12 16 6" />
-                <polyline points="8 6 2 12 8 18" />
+                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+                <path d="M3 12a9 3 0 0 0 18 0" />
               </svg>
             </BenefitIcon>
-            <BenefitTitle>CLI &amp; MCP ready</BenefitTitle>
+            <BenefitTitle>Persistent across sessions</BenefitTitle>
             <BenefitDesc>
-              Mount workspaces locally with one command, or plug them into
-              any MCP-capable agent &mdash; Claude, Cursor, Windsurf.
+              State lives in Redis. Switch machines, swap agents, resume
+              tomorrow &mdash; the workspace is right where you left it.
             </BenefitDesc>
           </Benefit>
         </BenefitsGrid>
@@ -579,123 +603,204 @@ const Description = styled.p`
   max-width: 56ch;
 `;
 
-const CTABlock = styled.div`
+const Strike = styled.s`
+  color: var(--afs-muted);
+  text-decoration-thickness: 2px;
+  text-decoration-color: color-mix(in srgb, var(--afs-accent) 70%, transparent);
+  margin-right: 0.18em;
+  font-weight: 600;
+`;
+
+const Mono = styled.code`
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--afs-line) 60%, transparent);
+  color: var(--afs-ink);
+`;
+
+const SetupBadge = styled.div`
+  margin: 22px 0 4px;
+  width: 100%;
+  max-width: 640px;
+`;
+
+const setupTone = (tone: "info" | "ok" | "warn") => {
+  switch (tone) {
+    case "ok":
+      return { border: "#10b981", text: "#047857", bg: "#ecfdf5", dot: "#10b981" };
+    case "warn":
+      return { border: "#f59e0b", text: "#92400e", bg: "#fffbeb", dot: "#f59e0b" };
+    default:
+      return {
+        border: "color-mix(in srgb, var(--afs-accent) 35%, var(--afs-line))",
+        text: "var(--afs-ink)",
+        bg: "color-mix(in srgb, var(--afs-accent) 6%, var(--afs-panel))",
+        dot: "var(--afs-accent)",
+      };
+  }
+};
+
+const SetupBadgeRow = styled.div<{ $tone: "info" | "ok" | "warn" }>`
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 10px;
-  margin: 28px 0 8px;
-  width: 100%;
-`;
-
-const PrimaryCTA = styled(Button)`
-  && {
-    padding-left: 28px;
-    padding-right: 28px;
-    font-size: 15px;
-    box-shadow: 0 10px 28px color-mix(in srgb, var(--afs-accent) 30%, transparent);
-  }
-`;
-
-const CTAHint = styled.div`
-  color: var(--afs-muted);
-  font-size: 13px;
-`;
-
-const QuickstartError = styled.div`
-  color: #dc2626;
-  font-size: 13px;
-  line-height: 1.5;
   padding: 10px 14px;
-  background: #fef2f2;
   border-radius: 10px;
-  max-width: 480px;
-`;
-
-// ──────────────────────────────────────────────────────────────────────
-// FirstRunCliHint styles
-// ──────────────────────────────────────────────────────────────────────
-
-const FirstRunCliWrap = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0 auto;
-  padding: 14px 18px;
-  max-width: 540px;
-  width: 100%;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  background: var(--afs-bg-soft);
-`;
-
-const FirstRunCliEyebrow = styled.div`
-  color: var(--afs-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-`;
-
-const FirstRunCliCommand = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 8px 12px;
-  background: var(--afs-panel-strong);
-  border: 1px solid var(--afs-line);
-  border-radius: 6px;
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  border: 1px solid ${(p) => setupTone(p.$tone).border};
+  background: ${(p) => setupTone(p.$tone).bg};
+  color: ${(p) => setupTone(p.$tone).text};
   font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
 `;
 
-const FirstRunCliPrompt = styled.span`
-  color: var(--afs-muted);
-  margin-right: 1ch;
-  user-select: none;
-`;
-
-const FirstRunCliCode = styled.code`
-  flex: 1;
-  color: var(--afs-ink);
-  white-space: pre;
-  overflow-x: auto;
-`;
-
-const FirstRunCliCopy = styled.button`
+const SetupDot = styled.span<{ $tone: "info" | "ok" | "warn" }>`
+  width: 8px;
+  height: 8px;
   flex: 0 0 auto;
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  background: transparent;
-  color: var(--afs-accent);
-  border: 1px solid var(--afs-accent);
-  border-radius: 4px;
-  padding: 2px 8px;
-  cursor: pointer;
+  border-radius: 50%;
+  background: ${(p) => setupTone(p.$tone).dot};
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, ${(p) => setupTone(p.$tone).dot} 22%, transparent);
+  ${(p) =>
+    p.$tone === "info"
+      ? "animation: afs-setup-pulse 1.6s ease-in-out infinite;"
+      : ""}
 
-  &:hover {
-    background: var(--afs-accent);
-    color: var(--afs-ink-on-accent);
+  @keyframes afs-setup-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
   }
 `;
 
-const FirstRunCliFootnote = styled.div`
-  color: var(--afs-muted);
-  font-size: 12px;
-  line-height: 1.5;
-`;
-
-const FirstRunCliLink = styled(Link)`
+const RetryLink = styled.button`
+  margin-left: auto;
+  background: transparent;
+  border: none;
   color: var(--afs-accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
 
   &:hover {
     text-decoration: underline;
   }
 `;
 
+const BlockStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  margin-top: 22px;
+  text-align: left;
+`;
+
+const InlineLink = styled.a`
+  color: var(--afs-accent);
+  text-decoration: none;
+  font-weight: 600;
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const HumansDetails = styled.details`
+  border: 1px dashed var(--afs-line);
+  border-radius: 12px;
+  background: var(--afs-bg-soft, transparent);
+  padding: 0;
+
+  &[open] {
+    background: var(--afs-panel);
+    border-style: solid;
+  }
+`;
+
+const HumansSummary = styled.summary`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--afs-muted);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+
+  &::-webkit-details-marker {
+    display: none;
+  }
+
+  &:hover {
+    color: var(--afs-ink);
+  }
+`;
+
+const HumansChevron = styled.span`
+  display: inline-block;
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 140ms ease;
+  color: var(--afs-muted);
+
+  ${HumansDetails}[open] & {
+    transform: rotate(90deg);
+  }
+`;
+
+const HumansSummaryText = styled.span`
+  flex: 1;
+`;
+
+const HumansBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 18px;
+`;
+
+const HumansP = styled.p`
+  margin: 0;
+  color: var(--afs-muted);
+  font-size: 13.5px;
+  line-height: 1.55;
+`;
+
+const HumansCode = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #0f1720;
+  color: #e6edf3;
+  font-family: var(--afs-mono, "SF Mono", "Fira Code", monospace);
+  font-size: 12.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+`;
+
+const HumansCodeLine = styled.span`
+  white-space: pre;
+`;
+
+const HumansPrompt = styled.span`
+  color: #6b7785;
+  margin-right: 0.6ch;
+  user-select: none;
+`;
+
 const BenefitsGrid = styled.div`
+  display: grid;
+  gap: 16px;
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
