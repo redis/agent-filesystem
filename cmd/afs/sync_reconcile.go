@@ -511,6 +511,17 @@ func (f *fullReconciler) buildPlan(ctx context.Context, local, remote map[string
 			}
 		case !lok && rok:
 			if hasStored && stored.Deleted {
+				hasLiveRemoteDescendants := false
+				if r.kind == "dir" {
+					f.r.state.mu.Lock()
+					hasLiveRemoteDescendants = mountRemoteDirHasLiveDescendants(path, remote, f.r.state.state.Entries)
+					f.r.state.mu.Unlock()
+				}
+				if hasLiveRemoteDescendants {
+					f.r.log.Info(fmt.Sprintf("buildPlan %s: !lok && rok, tombstoned dir has live remote descendants -> download", path))
+					plan = append(plan, f.planDownload(path, abs, r, stored, hasStored, false))
+					continue
+				}
 				// Tombstone: user intentionally deleted → propagate to remote.
 				f.r.log.Info(fmt.Sprintf("buildPlan %s: !lok && rok, tombstone -> delete-remote", path))
 				plan = append(plan, syncAction{kind: "delete-remote", path: path, absPath: abs})

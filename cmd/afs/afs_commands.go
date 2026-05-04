@@ -1100,6 +1100,10 @@ func workspaceSummariesFromMetas(metas []workspaceMeta) []workspaceSummary {
 }
 
 func promptWorkspaceSelectionFromSummaries(workspaces []workspaceSummary) (workspaceSelection, error) {
+	return promptWorkspaceSelectionFromSummariesWithReader(workspaces, bufio.NewReader(os.Stdin))
+}
+
+func promptWorkspaceSelectionFromSummariesWithReader(workspaces []workspaceSummary, reader *bufio.Reader) (workspaceSelection, error) {
 	if len(workspaces) == 0 {
 		return workspaceSelection{}, fmt.Errorf("no workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
 	}
@@ -1111,7 +1115,6 @@ func promptWorkspaceSelectionFromSummaries(workspaces []workspaceSummary) (works
 	fmt.Println()
 	fmt.Print("Workspace: ")
 
-	reader := bufio.NewReader(os.Stdin)
 	raw, err := reader.ReadString('\n')
 	if err != nil && strings.TrimSpace(raw) == "" {
 		fmt.Println()

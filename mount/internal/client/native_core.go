@@ -548,7 +548,32 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 			return err
 		}
 		if len(children) > 0 {
-			return errors.New("directory not empty")
+			ids := make([]string, 0, len(children))
+			for _, id := range children {
+				ids = append(ids, id)
+			}
+			childrenByID, err := c.loadInodesByID(ctx, ids)
+			if err != nil {
+				return err
+			}
+			staleNames := make([]string, 0)
+			liveChildren := 0
+			for name, id := range children {
+				if childrenByID[id] == nil {
+					staleNames = append(staleNames, name)
+					continue
+				}
+				liveChildren++
+			}
+			if len(staleNames) > 0 {
+				if err := c.rdb.HDel(ctx, c.keys.dirents(inode.ID), staleNames...).Err(); err != nil {
+					return err
+				}
+				c.invalidateInode(ctx, resolved)
+			}
+			if liveChildren > 0 {
+				return errors.New("directory not empty")
+			}
 		}
 	}
 
