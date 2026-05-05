@@ -120,9 +120,13 @@ func saveLiveWorkspaceCheckpoint(ctx context.Context, store *afsStore, workspace
 	if err != nil {
 		return false, err
 	}
+	var metadata controlplane.SaveCheckpointFromLiveOptions
+	if len(options) > 0 {
+		metadata = options[0]
+	}
 	if dirty, known, err := store.workspaceRootDirtyState(ctx, workspace); err != nil {
 		return false, err
-	} else if known && !dirty {
+	} else if known && !dirty && !metadata.AllowUnchanged {
 		if printResult {
 			fmt.Println("No changes to save")
 		}
