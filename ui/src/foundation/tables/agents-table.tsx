@@ -468,14 +468,13 @@ export function AgentsTable({
     () =>
       [
         {
-          accessorKey: "sessionName",
-          header: "Session",
-          size: 240,
+          accessorKey: "agentName",
+          header: "Agent Name",
+          size: 180,
           enableSorting: true,
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
-            const sessionTitle = displaySessionTitle(row.original);
-            const sessionId = row.original.sessionId.trim();
+            const agentName = displayAgentName(row.original);
             return (
               <StatusNameCell
                 active={active}
@@ -484,46 +483,33 @@ export function AgentsTable({
                 statusTitle={active ? "Active" : "Inactive"}
               >
                 <StatusNameLine>
-                  <TablePrimaryText title={sessionTitle}>
-                    {sessionTitle}
+                  <TablePrimaryText title={agentName || "Agent name not set"}>
+                    {agentName || "—"}
                   </TablePrimaryText>
                 </StatusNameLine>
-                {sessionId && sessionId !== sessionTitle ? (
-                  <TableSecondaryText title={sessionId}>
-                    {sessionId}
-                  </TableSecondaryText>
-                ) : null}
               </StatusNameCell>
             );
           },
         },
         {
-          accessorKey: "agentName",
-          header: "Agent Name",
-          size: 180,
+          accessorKey: "sessionName",
+          header: "Session",
+          size: 240,
           enableSorting: true,
           cell: ({ row }) => {
-            const agentName = displayAgentName(row.original);
-            return agentName ? (
-              <S.SingleLineText title={agentName}>{agentName}</S.SingleLineText>
-            ) : (
-              <Typography.Body component="span" color="secondary">
-                &mdash;
-              </Typography.Body>
-            );
-          },
-        },
-        {
-          accessorKey: "hostname",
-          header: "System Name",
-          size: 180,
-          enableSorting: true,
-          cell: ({ row }) => {
-            const systemName = displaySystemName(row.original);
+            const sessionTitle = displaySessionTitle(row.original);
+            const sessionId = row.original.sessionId.trim();
             return (
-              <S.SingleLineText title={systemName}>
-                {systemName}
-              </S.SingleLineText>
+              <>
+                <S.SingleLineText title={sessionTitle}>
+                  {sessionTitle}
+                </S.SingleLineText>
+                {sessionId && sessionId !== sessionTitle ? (
+                  <TableSecondaryText title={sessionId}>
+                    {sessionId}
+                  </TableSecondaryText>
+                ) : null}
+              </>
             );
           },
         },
@@ -556,6 +542,20 @@ export function AgentsTable({
             return (
               <S.SingleLineText title={mountPath}>
                 {displayPath}
+              </S.SingleLineText>
+            );
+          },
+        },
+        {
+          accessorKey: "hostname",
+          header: "System Name",
+          size: 180,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const systemName = displaySystemName(row.original);
+            return (
+              <S.SingleLineText title={systemName}>
+                {systemName}
               </S.SingleLineText>
             );
           },
