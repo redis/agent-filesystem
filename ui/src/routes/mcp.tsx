@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import {
   DialogError,
@@ -91,14 +91,6 @@ function MCPPage() {
   const databaseId = search.databaseId;
   const allWorkspaces = workspacesQuery.data ?? [];
   const databases = databasesQuery.data ?? [];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void workspaceTokensQuery.refetch();
-      void controlPlaneTokensQuery.refetch();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [workspaceTokensQuery, controlPlaneTokensQuery]);
 
   const workspaceNameById = useMemo(
     () => new Map(allWorkspaces.map((workspace) => [workspace.id, workspace.name])),

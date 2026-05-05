@@ -6,9 +6,11 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { afsApi } from "../api/afs";
+import { useEffect, useRef } from "react";
+import { afsApi, getAFSClientMode, monitorStreamURL } from "../api/afs";
 import type { ListActivityInput, ListChangelogInput, ListEventsInput } from "../api/afs";
 import type {
+  AFSAgentSession,
   CreateSavepointInput,
   CreateWorkspaceInput,
   DiffFileVersionsInput,
@@ -39,6 +41,13 @@ const FILESYSTEM_QUERY_STALE_MS = 30_000;
 const FILESYSTEM_QUERY_GC_MS = 5 * 60 * 1000;
 
 type InfiniteChangelogInput = Omit<ListChangelogInput, "since" | "until">;
+
+type MonitorStreamEvent = {
+  type?: string;
+  reason?: string;
+};
+
+const MONITOR_INVALIDATION_DEBOUNCE_MS = 250;
 
 export const afsKeys = {
   all: ["afs"] as const,
@@ -525,6 +534,140 @@ export function useEvents(input: ListEventsInput, enabled = true) {
       enabled,
     },
   );
+}
+
+export function useMonitorStreamInvalidation(enabled = true) {
+  const queryClient = useQueryClient();
+  const pendingFamiliesRef = useRef<Set<string>>(new Set());
+  const invalidateTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!enabled || getAFSClientMode() !== "http" || typeof EventSource === "undefined") {
+      return;
+    }
+
+    const familiesForMonitorEvent = (event: MessageEvent): Set<string> => {
+      const families = new Set<string>();
+      let payload: MonitorStreamEvent | null = null;
+      try {
+        payload = JSON.parse(event.data) as MonitorStreamEvent;
+      } catch {
+        payload = null;
+      }
+
+      const eventType = payload?.type ?? "";
+      const reason = payload?.reason ?? "";
+      if (eventType === "workspaces" || eventType.startsWith("workspaces/")) {
+        families.add("workspaces");
+        families.add("databases");
+        if (reason === "deleted" || eventType === "workspaces/deleted") {
+          families.add("agents");
+        }
+      } else if (eventType === "agents" || eventType.startsWith("agents/")) {
+        families.add("agents");
+        families.add("databases");
+      } else if (eventType === "activity" || eventType.startsWith("activity/")) {
+        families.add("activity");
+        families.add("events");
+      } else if (eventType === "changes" || eventType.startsWith("changes/")) {
+        families.add("events");
+        families.add("databases");
+        families.add("workspaces");
+      } else if (eventType === "mcp-tokens" || eventType.startsWith("mcp-tokens/")) {
+        families.add("mcp-tokens");
+      } else {
+        families.add("agents");
+        families.add("activity");
+        families.add("events");
+        families.add("workspaces");
+        families.add("databases");
+        families.add("mcp-tokens");
+      }
+
+      return families;
+    };
+
+    const source = new EventSource(monitorStreamURL());
+    const flushInvalidation = () => {
+      invalidateTimerRef.current = null;
+      const pendingFamilies = pendingFamiliesRef.current;
+      if (pendingFamilies.size === 0) {
+        return;
+      }
+      pendingFamiliesRef.current = new Set();
+
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          if (!Array.isArray(query.queryKey) || query.queryKey[0] !== "afs") {
+            return false;
+          }
+          const family = query.queryKey[1];
+          return typeof family === "string" && pendingFamilies.has(family);
+        },
+      });
+    };
+
+    const invalidateMonitorData = (event: MessageEvent) => {
+      familiesForMonitorEvent(event).forEach((family) => {
+        pendingFamiliesRef.current.add(family);
+      });
+
+      if (invalidateTimerRef.current != null) {
+        return;
+      }
+      invalidateTimerRef.current = window.setTimeout(
+        flushInvalidation,
+        MONITOR_INVALIDATION_DEBOUNCE_MS,
+      );
+    };
+
+    source.addEventListener("monitor", invalidateMonitorData);
+    return () => {
+      source.removeEventListener("monitor", invalidateMonitorData);
+      source.close();
+      if (invalidateTimerRef.current != null) {
+        window.clearTimeout(invalidateTimerRef.current);
+        invalidateTimerRef.current = null;
+      }
+      pendingFamiliesRef.current = new Set();
+    };
+  }, [enabled, queryClient]);
+}
+
+export function useAgentLeaseExpiryInvalidation(agents: AFSAgentSession[], enabled = true) {
+  const queryClient = useQueryClient();
+  const leaseKey = agents.map((agent) => `${agent.sessionId}:${agent.leaseExpiresAt}`).join("|");
+
+  useEffect(() => {
+    if (!enabled || agents.length === 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const nextExpiry = agents
+      .filter((agent) => agent.state === "active")
+      .map((agent) => Date.parse(agent.leaseExpiresAt))
+      .filter((value) => Number.isFinite(value) && value > now)
+      .sort((left, right) => left - right)[0];
+
+    if (!Number.isFinite(nextExpiry)) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void queryClient.invalidateQueries({
+        predicate: (query) => {
+          if (!Array.isArray(query.queryKey) || query.queryKey[0] !== "afs") {
+            return false;
+          }
+          const family = query.queryKey[1];
+          return family === "agents" || family === "workspaces" || family === "databases";
+        },
+      });
+    }, Math.max(1_000, nextExpiry - now + 1_000));
+
+    return () => window.clearTimeout(timeout);
+  }, [agents, enabled, leaseKey, queryClient]);
 }
 
 export function useChangelog(input: ListChangelogInput, enabled = true) {

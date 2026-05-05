@@ -614,6 +614,7 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 		"client_kind": defaultString(record.ClientKind, "sync"),
 		"hostname":    record.Hostname,
 	})
+	s.publishSessionMonitorEvent(ctx, workspace, record, "started")
 
 	session.SessionID = record.SessionID
 	session.HeartbeatIntervalSeconds = int(workspaceSessionHeartbeatInterval / time.Second)
@@ -666,6 +667,7 @@ func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, session
 	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
 		return WorkspaceSessionInfo{}, err
 	}
+	s.publishSessionMonitorEvent(ctx, workspace, record, "upserted")
 	return workspaceSessionInfoFromRecord(record), nil
 }
 
@@ -714,6 +716,7 @@ func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sess
 	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
 		return WorkspaceSessionInfo{}, err
 	}
+	s.publishSessionMonitorEvent(ctx, workspace, record, "heartbeat")
 	return workspaceSessionInfoFromRecord(record), nil
 }
 
@@ -743,6 +746,7 @@ func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionI
 		"client_kind": defaultString(record.ClientKind, "sync"),
 		"hostname":    record.Hostname,
 	})
+	s.publishSessionMonitorEvent(ctx, workspace, record, "closed")
 	return nil
 }
 
@@ -871,6 +875,7 @@ func (s *Service) reapExpiredWorkspaceSessions(ctx context.Context, workspace st
 			"client_kind": defaultString(record.ClientKind, "sync"),
 			"hostname":    record.Hostname,
 		})
+		s.publishSessionMonitorEvent(ctx, workspace, record, "stale")
 	}
 	return nil
 }

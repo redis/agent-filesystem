@@ -86,14 +86,6 @@ function WorkspaceStudioPage() {
   const showWelcomeInterstitial =
     workspace != null && search.welcome === true && !userRequestedBanner;
 
-  // Always poll while on this page so we detect agent connections promptly.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void workspaceQuery.refetch();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
   useEffect(() => {
     if (workspace == null) {
       setBrowserView("head");

@@ -695,6 +695,10 @@ const HTTP_BASE_URL = (
   inferLocalHTTPBaseURL()
 ).trim();
 
+export function monitorStreamURL() {
+  return `${HTTP_BASE_URL}/v1/monitor/stream`;
+}
+
 function clone<T>(value: T) {
   return JSON.parse(JSON.stringify(value)) as T;
 }

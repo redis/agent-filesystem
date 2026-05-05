@@ -741,6 +741,7 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	if err := m.attachWorkspaceDetailIdentity(ctx, &detail, profile); err != nil {
 		return workspaceDetail{}, err
 	}
+	m.publishWorkspaceMonitorEvent(ctx, service, profile, detail, "created")
 	return detail, nil
 }
 
@@ -838,31 +839,47 @@ func (m *DatabaseManager) UpdateResolvedWorkspaceVersioningPolicy(ctx context.Co
 }
 
 func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, workspace string) error {
-	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	service, profile, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+			if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+				return err
+			}
+			m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+			return nil
 		}
 		return err
 	}
-	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+	if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+		return err
+	}
+	m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+	return nil
 }
 
 func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace string) error {
-	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+			if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+				return err
+			}
+			m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+			return nil
 		}
 		return err
 	}
-	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+	if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+		return err
+	}
+	m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+	return nil
 }
 
 func (m *DatabaseManager) ListGlobalActivity(ctx context.Context, databaseID string, req activityListRequest) (activityListResponse, error) {

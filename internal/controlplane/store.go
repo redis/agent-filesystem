@@ -674,7 +674,8 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 	if err != nil {
 		return err
 	}
-	ts := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+	now := time.Now().UTC()
+	ts := strconv.FormatInt(now.UnixMilli(), 10)
 	fields := map[string]any{
 		"ts_ms":     ts,
 		"workspace": meta.Name,
@@ -690,6 +691,11 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 	})
 	enqueueEventFields(ctx, pipe, storageID, auditEventFields(fields))
 	_, err = pipe.Exec(ctx)
+	if err == nil {
+		event := newMonitorEvent("activity", op, meta)
+		event.CreatedAt = now.Format(time.RFC3339Nano)
+		s.publishMonitorEvent(ctx, event)
+	}
 	return err
 }
 

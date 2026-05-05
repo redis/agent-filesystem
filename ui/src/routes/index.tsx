@@ -943,4 +943,3 @@ const TemplatesLinkArrow = styled.span`
   line-height: 1;
   flex: 0 0 auto;
 `;
-

@@ -188,6 +188,10 @@ rather than a standalone `PUT /files/content` route.
 - `GET /activity`
 - `GET /events`
 - `GET /agents`
+- `GET /monitor/stream` opens a Server-Sent Events stream. The stream emits
+  `monitor` events when workspace, activity, file-change, MCP-token, or
+  agent-session state changes, so browser views can refresh live data without
+  polling.
 - `GET /workspaces/{workspace_id}/activity`
 - `GET /workspaces/{workspace_id}/events`
 - `GET /workspaces/{workspace_id}/changes`

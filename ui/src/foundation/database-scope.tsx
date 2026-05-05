@@ -9,7 +9,9 @@ import {
   useSaveDatabaseMutation,
   useSetDefaultDatabaseMutation,
   useActivity,
+  useAgentLeaseExpiryInvalidation,
   useAgents,
+  useMonitorStreamInvalidation,
   useWorkspaceSummaries,
 } from "./hooks/use-afs";
 import type { AFSClientMode, SaveDatabaseInput } from "./types/afs";
@@ -109,9 +111,12 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const auth = useAuthSession();
   const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const databasesQuery = useDatabases(queriesEnabled);
+  const agentsQuery = useAgents(null, queriesEnabled);
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const setDefaultDatabaseMutation = useSetDefaultDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
+  useMonitorStreamInvalidation(queriesEnabled);
+  useAgentLeaseExpiryInvalidation(agentsQuery.data ?? [], queriesEnabled);
 
   const databases = useMemo(
     () => (databasesQuery.data ?? []).map(mapDatabaseRecord),

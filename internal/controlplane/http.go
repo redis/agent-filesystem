@@ -519,6 +519,10 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/monitor/stream", func(w http.ResponseWriter, r *http.Request) {
+		handleMonitorStream(w, r, manager)
+	})
+
 	mux.HandleFunc("/v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))

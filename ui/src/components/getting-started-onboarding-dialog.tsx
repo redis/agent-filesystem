@@ -37,15 +37,6 @@ export function GettingStartedOnboardingDialog({
     }
   }, [initialStage, open, workspaceId]);
 
-  // Poll for agent connections while the connect stage is active.
-  useEffect(() => {
-    if (!open || stage !== "connect") return;
-    const interval = setInterval(() => {
-      void agentsQuery.refetch();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [open, stage, agentsQuery]);
-
   if (!open) {
     return null;
   }

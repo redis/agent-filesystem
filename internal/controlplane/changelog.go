@@ -177,7 +177,14 @@ func writeChangeEntries(ctx context.Context, rdb redis.Cmdable, storageID string
 			"workspace", storageID,
 			"entries", len(entries),
 			"err", err)
+		return
 	}
+	publishMonitorEvent(ctx, rdb, monitorEvent{
+		Type:        "changes",
+		WorkspaceID: strings.TrimSpace(storageID),
+		Reason:      "changed",
+		CreatedAt:   time.Now().UTC().Format(time.RFC3339Nano),
+	})
 }
 
 // manifestDiff computes the set of change entries that represent the

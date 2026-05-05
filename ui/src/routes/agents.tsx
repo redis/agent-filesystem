@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
@@ -56,14 +55,6 @@ function AgentsPage() {
   const workspaceId = search.workspaceId;
   const databaseId = search.databaseId;
   const allAgents = agentsQuery.data ?? [];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void agentsQuery.refetch();
-      void activityQuery.refetch();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [activityQuery, agentsQuery]);
 
   const currentConnections = allAgents.filter((agent) => {
     if (workspaceId != null && agent.workspaceId !== workspaceId) {
