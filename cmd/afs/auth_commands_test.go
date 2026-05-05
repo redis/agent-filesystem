@@ -254,6 +254,8 @@ func TestCmdAuthStatusShowsSignedInCloudState(t *testing.T) {
 func TestCmdStatusShowsSignedInCloudState(t *testing.T) {
 	t.Helper()
 
+	withTempHome(t)
+
 	cfg := defaultConfig()
 	cfg.ProductMode = productModeCloud
 	cfg.URL = "https://afs.example.com"

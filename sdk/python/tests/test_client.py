@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from redis_afs.client import MCPHttpClient, AFSError, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
+from redis_afs.client import AFSError, FSClient, MCPHttpClient, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
 
 
 class FakeMCP:
@@ -22,6 +23,64 @@ class FakeMCP:
             path = arguments.get("path", "/")
             entries = []
             for file_path in sorted(self.files):
+                if path == "/" and "/" not in file_path.strip("/"):
+                    entries.append({"path": file_path, "name": file_path.strip("/"), "kind": "file"})
+                elif file_path.startswith(path.rstrip("/") + "/"):
+                    remainder = file_path[len(path.rstrip("/")) + 1 :]
+                    if "/" not in remainder:
+                        entries.append({"path": file_path, "name": remainder, "kind": "file"})
+            return {"entries": entries}
+        if name == "checkpoint_create":
+            return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+        raise AssertionError(f"unexpected tool {name}")
+
+
+class FakeControlPlane:
+    def __init__(self):
+        self.issued = []
+        self.timeout = 30.0
+        self.endpoint = "https://afs.example/mcp"
+
+    def call_tool(self, name, arguments=None):
+        arguments = arguments or {}
+        if name != "mcp_token_issue":
+            raise AssertionError(f"unexpected tool {name}")
+        token = f"workspace-token-{arguments['workspace']}"
+        self.issued.append({"name": name, "arguments": dict(arguments), "token": token})
+        return {
+            "token": token,
+            "url": "https://afs.example/mcp",
+            "workspace": arguments["workspace"],
+            "profile": arguments["profile"],
+            "scope": f"workspace:{arguments['workspace']}",
+        }
+
+
+class FakeMountedMCPHttpClient:
+    files_by_token = {}
+
+    def __init__(self, *, api_key, base_url=None, timeout=30.0, headers=None):
+        self.api_key = api_key
+        self.endpoint = base_url or "https://afs.example/mcp"
+        self.timeout = timeout
+        self.headers = dict(headers or {})
+
+    def call_tool(self, name, arguments=None):
+        arguments = arguments or {}
+        files = self.files_by_token.setdefault(self.api_key, {})
+        if name == "file_write":
+            files[arguments["path"]] = arguments["content"]
+            return {"path": arguments["path"], "operation": "write"}
+        if name == "file_read":
+            return {
+                "path": arguments["path"],
+                "kind": "file",
+                "content": files.get(arguments["path"], ""),
+            }
+        if name == "file_list":
+            path = arguments.get("path", "/")
+            entries = []
+            for file_path in sorted(files):
                 if path == "/" and "/" not in file_path.strip("/"):
                     entries.append({"path": file_path, "name": file_path.strip("/"), "kind": "file"})
                 elif file_path.startswith(path.rstrip("/") + "/"):
@@ -67,6 +126,21 @@ class MountedFSTest(unittest.TestCase):
 
         self.assertIn(root, mapped)
         self.assertNotEqual(mapped, "cat /foobar/README.md")
+
+    def test_fs_mount_issues_workspace_token_and_reads_and_writes_files(self):
+        control_plane = FakeControlPlane()
+
+        with patch("redis_afs.client.MCPHttpClient", FakeMountedMCPHttpClient):
+            fs = FSClient(control_plane).mount(workspaces=[{"name": "repo"}], mode="rw", token_name="Mounted FS")
+            self.addCleanup(fs.close)
+
+            fs.write_file("/repo/README.md", "hello from mounted fs")
+
+            self.assertEqual(fs.read_file("/repo/README.md"), "hello from mounted fs")
+            self.assertEqual(fs.workspace_names, ["repo"])
+            self.assertEqual(control_plane.issued[0]["arguments"]["workspace"], "repo")
+            self.assertEqual(control_plane.issued[0]["arguments"]["profile"], "workspace-rw")
+            self.assertEqual(control_plane.issued[0]["arguments"]["name"], "Mounted FS")
 
 
 class EndpointTest(unittest.TestCase):

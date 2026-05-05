@@ -473,6 +473,12 @@ func (m *DatabaseManager) requireOwnedSubject(ctx context.Context) (string, stri
 		return "", "", nil
 	}
 	if strings.TrimSpace(identity.Subject) == "" {
+		// Self-managed no-auth installs can reach this path with an ownerless
+		// control-plane MCP token. Those tokens are intentionally allowed to mint
+		// workspace-scoped MCP tokens within the self-managed policy surface.
+		if strings.TrimSpace(identity.Provider) == "mcp-token" && isControlPlaneScope(identity.Scope) {
+			return "", "", nil
+		}
 		if strings.TrimSpace(identity.Provider) == "" || strings.TrimSpace(identity.Provider) == string(AuthModeNone) {
 			return "", "", nil
 		}
