@@ -229,9 +229,11 @@ func cmdWorkspaceList(args []string) error {
 	if len(workspaces.Items) == 0 {
 		fmt.Println("No workspaces found")
 	} else {
-		printPlainTable(
-			[]string{"", "Workspace", "Database", "ID", "Updated", "Mounted"},
-			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts()),
+		headers := []string{"", "Workspace", "Database", "ID", "Updated", "Mounted"}
+		printPlainTableWithOptions(
+			headers,
+			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts(workspaces.Items)),
+			plainTableOptions{NoTruncateColumns: map[int]bool{len(headers) - 1: true}},
 		)
 	}
 	fmt.Println()
@@ -464,6 +466,9 @@ func workspaceListDatabase(summary workspaceSummary) string {
 	if databaseName := strings.TrimSpace(summary.DatabaseName); databaseName != "" {
 		return databaseName
 	}
+	if databaseID := strings.TrimSpace(summary.DatabaseID); databaseID != "" {
+		return databaseID
+	}
 	return "Direct Redis"
 }
 
@@ -487,10 +492,16 @@ func workspaceListUpdated(summary workspaceSummary) string {
 	return parsed.Local().Format("2006-01-02 15:04")
 }
 
-func workspaceListMounts() map[string]string {
+func workspaceListMounts(items []workspaceSummary) map[string]string {
 	reg, err := loadMountRegistry()
 	if err != nil || len(reg.Mounts) == 0 {
 		return nil
+	}
+	nameCounts := make(map[string]int)
+	for _, item := range items {
+		if name := strings.TrimSpace(item.Name); name != "" {
+			nameCounts[name]++
+		}
 	}
 	paths := make(map[string][]string)
 	for _, rec := range sortedMountRecords(reg.Mounts) {
@@ -501,8 +512,18 @@ func workspaceListMounts() map[string]string {
 		display := workspaceListMountedPath(path)
 		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
 			paths["id:"+id] = append(paths["id:"+id], display)
+			continue
 		}
-		if name := strings.TrimSpace(rec.Workspace); name != "" {
+		name := strings.TrimSpace(rec.Workspace)
+		if name == "" {
+			continue
+		}
+		if databaseID := strings.TrimSpace(rec.ControlPlaneDatabase); databaseID != "" {
+			key := workspaceListDatabaseNameMountKey(databaseID, name)
+			paths[key] = append(paths[key], display)
+			continue
+		}
+		if nameCounts[name] <= 1 {
 			paths["name:"+name] = append(paths["name:"+name], display)
 		}
 	}
@@ -522,12 +543,22 @@ func workspaceListMounted(summary workspaceSummary, mounts map[string]string) st
 			return path
 		}
 	}
-	if name := strings.TrimSpace(summary.Name); name != "" {
+	name := strings.TrimSpace(summary.Name)
+	if databaseID := strings.TrimSpace(summary.DatabaseID); databaseID != "" && name != "" {
+		if path := strings.TrimSpace(mounts[workspaceListDatabaseNameMountKey(databaseID, name)]); path != "" {
+			return path
+		}
+	}
+	if name != "" {
 		if path := strings.TrimSpace(mounts["name:"+name]); path != "" {
 			return path
 		}
 	}
 	return "-"
+}
+
+func workspaceListDatabaseNameMountKey(databaseID, workspaceName string) string {
+	return "database-name:" + strings.TrimSpace(databaseID) + "\x00" + strings.TrimSpace(workspaceName)
 }
 
 func workspaceListMountedPath(path string) string {
@@ -1006,6 +1037,8 @@ func checkpointWorkspacePromptRows(workspaces []workspaceSummary, mounts map[str
 		rows = append(rows, []string{
 			strconv.Itoa(i + 1),
 			workspace.Name,
+			workspaceListID(workspace),
+			workspaceListDatabase(workspace),
 			workspaceListUpdated(workspace),
 			workspaceListMounted(workspace, mounts),
 		})

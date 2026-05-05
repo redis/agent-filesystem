@@ -118,8 +118,15 @@ const CardSubtitle = styled.p`
 
 /* ---- 3-column layout ---- */
 const Topology = styled.div`
+  --topology-node-min: 180px;
+  --topology-node-max: 240px;
+  --topology-hub-size: 80px;
+
   display: grid;
-  grid-template-columns: minmax(180px, 240px) 1fr minmax(180px, 240px);
+  grid-template-columns:
+    fit-content(var(--topology-node-max))
+    minmax(var(--topology-hub-size), 1fr)
+    fit-content(var(--topology-node-max));
   align-items: stretch;
   gap: 0;
   min-height: 160px;
@@ -158,7 +165,9 @@ const AgentNode = styled.button<{ $i: number; $presence: NodePresence; $highligh
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: fit-content;
+  min-width: var(--topology-node-min);
+  max-width: var(--topology-node-max);
   box-sizing: border-box;
   padding: 8px 12px;
   border: 1px solid var(--afs-line, #e4e4e7);
@@ -207,6 +216,11 @@ const AgentNode = styled.button<{ $i: number; $presence: NodePresence; $highligh
   &:disabled {
     cursor: default;
   }
+
+  @media (max-width: 720px) {
+    width: 100%;
+    max-width: none;
+  }
 `;
 
 const NodeIconBox = styled.div<{ $active?: boolean }>`
@@ -222,32 +236,37 @@ const NodeIconBox = styled.div<{ $active?: boolean }>`
 `;
 
 const AgentLabel = styled.span`
+  display: block;
   font-size: 12px;
   font-weight: 800;
   color: var(--afs-ink, #18181b);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 130px;
+  max-width: 100%;
 `;
 
 const AgentText = styled.div`
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
 `;
 
 const AgentMeta = styled.span`
+  display: block;
   font-size: 10px;
   color: var(--afs-muted, #71717a);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 130px;
+  max-width: 100%;
 `;
 
 const AgentPath = styled.span`
-  max-width: 130px;
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   color: var(--afs-muted, #71717a);
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
@@ -297,7 +316,9 @@ const WorkspaceNode = styled.button<{ $i: number; $presence: NodePresence; $high
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  width: fit-content;
+  min-width: var(--topology-node-min);
+  max-width: var(--topology-node-max);
   box-sizing: border-box;
   padding: 8px 12px;
   border: 1px solid var(--afs-line, #e4e4e7);
@@ -346,21 +367,30 @@ const WorkspaceNode = styled.button<{ $i: number; $presence: NodePresence; $high
   &:disabled {
     cursor: default;
   }
+
+  @media (max-width: 720px) {
+    width: 100%;
+    max-width: none;
+  }
 `;
 
 const WorkspaceMeta = styled.div`
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
 `;
 
 const WorkspaceName = styled.span`
+  display: block;
   font-size: 12px;
   font-weight: 700;
   color: var(--afs-ink, #18181b);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 `;
 
 const WorkspaceFiles = styled.span`
@@ -427,16 +457,41 @@ function displayLocalPath(path: string): string {
   return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
 }
 
-function displaySystemName(agent: AFSAgentSession): string {
-  return agent.hostname.trim() || "unknown host";
-}
-
-function displayAgentId(agent: AFSAgentSession): string {
+function displayAgentPrimaryName(agent: AFSAgentSession): string {
+  const sessionName = agent.sessionName?.trim();
+  if (sessionName) {
+    return sessionName;
+  }
   return (
+    agent.agentName?.trim() ||
+    agent.label?.trim() ||
+    agent.hostname.trim() ||
     agent.agentId?.trim() ||
     agent.sessionId.trim() ||
-    "id not reported"
+    "unknown agent"
   );
+}
+
+function displayAgentMeta(agent: AFSAgentSession, primaryName: string): string {
+  const sessionName = agent.sessionName?.trim();
+  const agentName = agent.agentName?.trim();
+  const hostname = agent.hostname.trim();
+  const agentId = agent.agentId?.trim();
+  const parts: string[] = [];
+  if (sessionName && agentName) {
+    parts.push(agentName);
+  } else if (sessionName && !agentName && agentId) {
+    parts.push(agentId);
+  } else if (agentName && agentName !== primaryName) {
+    parts.push(agentName);
+  }
+  if (hostname && hostname !== primaryName && !parts.includes(hostname)) {
+    parts.push(hostname);
+  }
+  if (agentId && agentId !== primaryName && !parts.includes(agentId)) {
+    parts.push(agentId);
+  }
+  return parts.join(" · ") || agent.sessionId.trim() || "id not reported";
 }
 
 function getAgentTopologyId(agent: AFSAgentSession): string {
@@ -817,8 +872,8 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
             <EmptyColumn>No agents connected</EmptyColumn>
           ) : (
             visibleAgents.map(({ item: agent, presence }, i) => {
-              const systemName = displaySystemName(agent);
-              const agentId = displayAgentId(agent);
+              const agentName = displayAgentPrimaryName(agent);
+              const agentMeta = displayAgentMeta(agent, agentName);
               const mountedPath = displayLocalPath(agent.localPath);
               const methodLabel = agent.clientKind.trim() || "agent";
               const active = agent.state === "active";
@@ -831,8 +886,8 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
                   $highlighted={highlighted}
                   data-highlighted={highlighted}
                   type="button"
-                  aria-label={`Open details for ${systemName}`}
-                  title={`Open details for ${systemName}`}
+                  aria-label={`Open details for ${agentName}`}
+                  title={`Open details for ${agentName}`}
                   onMouseEnter={() => {
                     setHoveredItem({
                       kind: "agent",
@@ -864,8 +919,8 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
                     <BotIcon customSize={18} />
                   </NodeIconBox>
                   <AgentText>
-                    <AgentLabel title={systemName}>{systemName}</AgentLabel>
-                    <AgentMeta title={agentId}>{agentId}</AgentMeta>
+                    <AgentLabel title={agentName}>{agentName}</AgentLabel>
+                    <AgentMeta title={agentMeta}>{agentMeta}</AgentMeta>
                     {mountedPath ? (
                       <AgentPath title={agent.localPath}>{mountedPath}</AgentPath>
                     ) : null}

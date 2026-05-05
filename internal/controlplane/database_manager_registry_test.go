@@ -113,6 +113,15 @@ func TestListDatabasesBootstrapsManagedRedisProfile(t *testing.T) {
 	if record.OwnerLabel != "Starter Database" {
 		t.Fatalf("record.OwnerLabel = %q, want %q", record.OwnerLabel, "Starter Database")
 	}
+	if record.SupportsArrays == nil {
+		t.Fatal("record.SupportsArrays = nil, want false for miniredis")
+	}
+	if *record.SupportsArrays {
+		t.Fatal("record.SupportsArrays = true, want false for miniredis")
+	}
+	if len(record.WorkspaceStorage) != 0 {
+		t.Fatalf("len(record.WorkspaceStorage) = %d, want 0 for empty database", len(record.WorkspaceStorage))
+	}
 
 	profiles, err := manager.catalog.ListDatabaseProfiles(context.Background())
 	if err != nil {

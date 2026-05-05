@@ -1,35 +1,13 @@
-import { Card, Typography } from "@redis-ui/components";
+import { Typography } from "@redis-ui/components";
 import styled, { css } from "styled-components";
 import type {
   AFSActivityEvent,
   AFSWorkspaceSource,
 } from "../foundation/types/afs";
+import { cardSurface, SurfaceCard } from "./card-shell";
 
-const panelSurface = css`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
-  box-shadow: none;
-
-  [data-skin="situation-room"] && {
-    border-radius: var(--afs-r-2);
-    background: var(--afs-bg-1);
-    border-color: var(--afs-line-strong);
-  }
-`;
-
-const insetSurface = css`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
-  box-shadow: none;
-
-  [data-skin="situation-room"] && {
-    border-radius: var(--afs-r-2);
-    background: var(--afs-bg);
-    border-color: var(--afs-line);
-  }
-`;
+const panelSurface = cardSurface;
+const insetSurface = cardSurface;
 
 export const PageStack = styled.div`
   display: flex;
@@ -65,7 +43,7 @@ export const StatGrid = styled.div`
   }
 `;
 
-export const StatCard = styled(Card)`
+export const StatCard = styled(SurfaceCard)`
   ${panelSurface}
   display: flex;
   flex-direction: column;
@@ -125,7 +103,7 @@ export const SectionGrid = styled.div`
   grid-template-columns: repeat(12, minmax(0, 1fr));
 `;
 
-export const SectionCard = styled(Card)<{ $span?: number }>`
+export const SectionCard = styled(SurfaceCard)<{ $span?: number }>`
   ${panelSurface}
   grid-column: span ${({ $span = 6 }) => $span};
   padding: 24px;
@@ -165,7 +143,7 @@ export const WorkspaceGrid = styled.div`
   }
 `;
 
-export const WorkspaceCard = styled(Card)`
+export const WorkspaceCard = styled(SurfaceCard)`
   ${panelSurface}
   padding: 22px;
   transition: border-color 180ms ease;
@@ -399,7 +377,7 @@ export const EmptyState = styled.div`
   padding: 18px;
 `;
 
-export const NoticeCard = styled.div<{ $tone?: "warning" | "danger" | "neutral" }>`
+export const NoticeCard = styled(SurfaceCard)<{ $tone?: "warning" | "danger" | "neutral" }>`
   ${insetSurface}
   padding: 16px 18px;
   border-color: ${({ $tone = "neutral" }) =>
@@ -413,7 +391,7 @@ export const NoticeCard = styled.div<{ $tone?: "warning" | "danger" | "neutral" 
       ? "rgba(245, 158, 11, 0.08)"
       : $tone === "danger"
         ? "rgba(239, 68, 68, 0.08)"
-        : "var(--afs-panel-strong)"};
+        : "var(--afs-panel)"};
 `;
 
 export const NoticeTitle = styled.div`
@@ -548,7 +526,7 @@ export const FileButton = styled.button<{ $active?: boolean }>`
   }
 `;
 
-export const EditorPanel = styled(Card)`
+export const EditorPanel = styled(SurfaceCard)`
   ${panelSurface}
   min-height: 520px;
   padding: 20px;
@@ -574,7 +552,7 @@ export const ActivityList = styled.div`
   gap: 12px;
 `;
 
-export const ActivityCard = styled.div`
+export const ActivityCard = styled(SurfaceCard)`
   ${insetSurface}
   padding: 16px 18px;
 `;
@@ -632,21 +610,15 @@ export const DialogOverlay = styled.div`
   }
 `;
 
-export const DialogCard = styled.div`
+export const DialogCard = styled(SurfaceCard)`
   width: min(720px, 100%);
   max-height: min(88vh, 760px);
   overflow: auto;
-  border: 1px solid var(--afs-line);
-  border-radius: 24px;
   padding: 24px;
-  background: var(--afs-panel-strong);
-  box-shadow: 0 18px 40px rgba(8, 6, 13, 0.12);
+  border-radius: 16px;
 
   [data-skin="situation-room"] && {
     border-radius: var(--afs-r-2);
-    border-color: var(--afs-line-strong);
-    background: var(--afs-bg-1);
-    box-shadow: var(--afs-shadow-2);
   }
 `;
 
@@ -672,7 +644,7 @@ export const DialogFooter = styled.div`
   margin: 20px -24px 0;
   padding: 18px 24px 24px;
   border-top: 1px solid var(--afs-line);
-  background: var(--afs-panel-strong);
+  background: var(--afs-panel);
 
   @media (max-width: 720px) {
     flex-direction: column;

@@ -5,8 +5,11 @@ import (
 )
 
 func TestParseRedisInfo_Memory(t *testing.T) {
-	raw := "# Memory\r\nused_memory:104857600\r\nmaxmemory:524288000\r\nmem_fragmentation_ratio:1.23\r\n"
+	raw := "# Server\r\nredis_version:8.0.0-array\r\n# Memory\r\nused_memory:104857600\r\nmaxmemory:524288000\r\nmem_fragmentation_ratio:1.23\r\n"
 	stats := parseRedisInfo(raw)
+	if stats.RedisVersion != "8.0.0-array" {
+		t.Fatalf("RedisVersion = %q, want 8.0.0-array", stats.RedisVersion)
+	}
 	if stats.UsedMemoryBytes != 104857600 {
 		t.Fatalf("UsedMemoryBytes = %d, want 104857600", stats.UsedMemoryBytes)
 	}

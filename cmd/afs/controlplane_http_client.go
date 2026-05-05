@@ -267,10 +267,14 @@ func (c *httpControlPlaneClient) CreateWorkspaceSession(ctx context.Context, wor
 	return out, err
 }
 
-func (c *httpControlPlaneClient) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error) {
+func (c *httpControlPlaneClient) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string, input ...controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSessionInfo, error) {
 	var out controlplane.WorkspaceSessionInfo
 	path := c.clientWorkspaceSessionPath(workspace, "sessions", sessionID, "heartbeat")
-	err := c.doJSON(ctx, http.MethodPost, path, nil, &out, http.StatusOK)
+	var body any
+	if len(input) > 0 {
+		body = input[0]
+	}
+	err := c.doJSON(ctx, http.MethodPost, path, body, &out, http.StatusOK)
 	return out, err
 }
 

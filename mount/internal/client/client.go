@@ -154,7 +154,9 @@ type PathCacheWarmer interface {
 }
 
 // New creates a filesystem client for the given Redis key.
-// It uses the native HASH/SET backend that works with any Redis instance.
+// It uses the native inode/hash backend plus whichever external content backend
+// the connected Redis server supports (`ext` strings everywhere, or `array`
+// content keys when Redis Array is available).
 func New(rdb *redis.Client, key string) Client {
 	return newNativeClient(rdb, key, nil)
 }

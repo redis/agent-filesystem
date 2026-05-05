@@ -1111,7 +1111,7 @@ func promptWorkspaceSelectionFromSummariesWithReader(workspaces []workspaceSumma
 	fmt.Println()
 	fmt.Println("Select workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces, workspaceListMounts()))
+	printPlainTable([]string{"#", "Workspace", "Workspace ID", "Database", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces, workspaceListMounts(workspaces)))
 	fmt.Println()
 	fmt.Print("Workspace: ")
 
@@ -1235,8 +1235,8 @@ func workspaceSelectionLabels(matches []workspaceSummary) []string {
 	labels := make([]string, 0, len(matches))
 	for _, workspace := range matches {
 		label := workspace.ID
-		if databaseName := strings.TrimSpace(workspace.DatabaseName); databaseName != "" {
-			label = fmt.Sprintf("%s (%s)", workspace.ID, databaseName)
+		if database := workspaceListDatabase(workspace); database != "" {
+			label = fmt.Sprintf("%s (%s)", workspace.ID, database)
 		}
 		if _, ok := seen[label]; ok {
 			continue

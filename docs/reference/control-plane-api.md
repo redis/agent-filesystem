@@ -221,6 +221,10 @@ The client/daemon surface is mounted under `/v1/client`.
 
 Database-scoped equivalents are available under
 `/v1/client/databases/{database_id}/workspaces/{workspace_id}/sessions`.
+Session create payloads accept `agent_name` for the stable readable agent name
+and `session_name` for the current task/run name. The legacy `label` field is
+still accepted as a display fallback. Heartbeat payloads may include the same
+metadata fields to refresh existing session records.
 
 ### Catalog Health
 

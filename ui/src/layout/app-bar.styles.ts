@@ -16,8 +16,19 @@ export const HeaderContainer = styled.header.attrs({ "data-afs-app-bar": "" })`
   @media (max-width: 720px) {
     height: auto;
     padding: 1rem 1.4rem 1rem 1.8rem;
-    flex-direction: column;
-    align-items: stretch;
+    flex-direction: row;
+    align-items: center;
+
+    > button {
+      flex: 0 0 auto;
+      width: max-content;
+      max-width: max-content;
+      position: absolute;
+      top: 50%;
+      right: 1.4rem;
+      transform: translateY(-50%);
+      z-index: 1;
+    }
   }
 `;
 

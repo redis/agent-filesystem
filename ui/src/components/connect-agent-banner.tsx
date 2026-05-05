@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@redis-ui/components";
 import { Link } from "@tanstack/react-router";
 import styled, { keyframes } from "styled-components";
+import { SurfaceCard } from "./card-shell";
 import { getControlPlaneURL } from "../foundation/api/afs";
 import { canonicalWorkspaceName, displayWorkspaceName } from "../foundation/workspace-display";
 
@@ -631,7 +632,7 @@ const ConnectedOverlay = styled.div`
   z-index: 5;
 `;
 
-const ConnectedCard = styled.div`
+const ConnectedCard = styled(SurfaceCard)`
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -639,9 +640,6 @@ const ConnectedCard = styled.div`
   text-align: center;
   max-width: 360px;
   padding: 28px 28px 24px;
-  border-radius: 18px;
-  background: var(--afs-panel);
-  border: 1px solid var(--afs-line);
   box-shadow: 0 20px 44px rgba(8, 6, 13, 0.18);
   animation: ${popIn} 220ms cubic-bezier(0.2, 0.9, 0.32, 1.18);
 `;

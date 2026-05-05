@@ -66,7 +66,9 @@ const STORAGE_KEY = "afs-ui-demo-state-v1";
 const DATABASE_STORAGE_KEY = "afs-ui-demo-databases-v1";
 const VERSIONING_POLICY_STORAGE_KEY = "afs-ui-demo-versioning-policies-v1";
 const DEMO_DELAY_MS = 120;
-const CLIENT_MODE_OVERRIDE = String(import.meta.env.VITE_AFS_CLIENT_MODE ?? "").trim().toLowerCase();
+const CLIENT_MODE_OVERRIDE = String(import.meta.env.VITE_AFS_CLIENT_MODE ?? "")
+  .trim()
+  .toLowerCase();
 const HTTP_REQUEST_TIMEOUT_MS = 8000;
 
 type AFSClient = {
@@ -76,37 +78,85 @@ type AFSClient = {
   saveDatabase: (input: SaveDatabaseInput) => Promise<AFSDatabase>;
   setDefaultDatabase: (databaseId: string) => Promise<AFSDatabase>;
   deleteDatabase: (databaseId: string) => Promise<void>;
-  listWorkspaceSummaries: (databaseId?: string) => Promise<AFSWorkspaceSummary[]>;
-  getWorkspace: (databaseId: string | undefined, workspaceId: string) => Promise<AFSWorkspaceDetail | null>;
+  listWorkspaceSummaries: (
+    databaseId?: string,
+  ) => Promise<AFSWorkspaceSummary[]>;
+  getWorkspace: (
+    databaseId: string | undefined,
+    workspaceId: string,
+  ) => Promise<AFSWorkspaceDetail | null>;
   listAgents: (databaseId?: string) => Promise<AFSAgentSession[]>;
   createWorkspace: (input: CreateWorkspaceInput) => Promise<AFSWorkspaceDetail>;
   deleteWorkspace: (databaseId: string, workspaceId: string) => Promise<void>;
-  updateWorkspace: (input: UpdateWorkspaceInput) => Promise<AFSWorkspaceDetail | null>;
-  updateWorkspaceFile: (input: UpdateWorkspaceFileInput) => Promise<AFSWorkspaceDetail | null>;
-  getWorkspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) => Promise<AFSWorkspaceVersioningPolicy>;
-  updateWorkspaceVersioningPolicy: (input: UpdateWorkspaceVersioningPolicyInput) => Promise<AFSWorkspaceVersioningPolicy>;
-  getFileHistory: (input: GetFileHistoryInput) => Promise<AFSFileHistoryResponse>;
-  getFileVersionContent: (input: GetFileVersionContentInput) => Promise<AFSFileVersionContent | null>;
-  diffFileVersions: (input: DiffFileVersionsInput) => Promise<AFSFileVersionDiff>;
-  restoreFileVersion: (input: RestoreFileVersionInput) => Promise<AFSFileVersionRestoreResponse>;
-  undeleteFileVersion: (input: UndeleteFileVersionInput) => Promise<AFSFileVersionUndeleteResponse>;
-  createSavepoint: (input: CreateSavepointInput) => Promise<AFSWorkspaceDetail | null>;
-  restoreSavepoint: (input: RestoreSavepointInput) => Promise<AFSWorkspaceDetail | null>;
-  listActivity: (databaseId?: string, limit?: number) => Promise<AFSActivityEvent[]>;
-  listActivityPage: (input: ListActivityInput) => Promise<AFSActivityListResponse>;
+  updateWorkspace: (
+    input: UpdateWorkspaceInput,
+  ) => Promise<AFSWorkspaceDetail | null>;
+  updateWorkspaceFile: (
+    input: UpdateWorkspaceFileInput,
+  ) => Promise<AFSWorkspaceDetail | null>;
+  getWorkspaceVersioningPolicy: (
+    input: GetWorkspaceVersioningPolicyInput,
+  ) => Promise<AFSWorkspaceVersioningPolicy>;
+  updateWorkspaceVersioningPolicy: (
+    input: UpdateWorkspaceVersioningPolicyInput,
+  ) => Promise<AFSWorkspaceVersioningPolicy>;
+  getFileHistory: (
+    input: GetFileHistoryInput,
+  ) => Promise<AFSFileHistoryResponse>;
+  getFileVersionContent: (
+    input: GetFileVersionContentInput,
+  ) => Promise<AFSFileVersionContent | null>;
+  diffFileVersions: (
+    input: DiffFileVersionsInput,
+  ) => Promise<AFSFileVersionDiff>;
+  restoreFileVersion: (
+    input: RestoreFileVersionInput,
+  ) => Promise<AFSFileVersionRestoreResponse>;
+  undeleteFileVersion: (
+    input: UndeleteFileVersionInput,
+  ) => Promise<AFSFileVersionUndeleteResponse>;
+  createSavepoint: (
+    input: CreateSavepointInput,
+  ) => Promise<AFSWorkspaceDetail | null>;
+  restoreSavepoint: (
+    input: RestoreSavepointInput,
+  ) => Promise<AFSWorkspaceDetail | null>;
+  listActivity: (
+    databaseId?: string,
+    limit?: number,
+  ) => Promise<AFSActivityEvent[]>;
+  listActivityPage: (
+    input: ListActivityInput,
+  ) => Promise<AFSActivityListResponse>;
   listEvents: (input: ListEventsInput) => Promise<AFSEventListResponse>;
   listChangelog: (input: ListChangelogInput) => Promise<AFSChangelogResponse>;
   getWorkspaceTree: (input: GetWorkspaceTreeInput) => Promise<AFSTreeResponse>;
-  getWorkspaceFileContent: (input: GetWorkspaceFileContentInput) => Promise<AFSFileContent | null>;
-  getWorkspaceDiff: (input: GetWorkspaceDiffInput) => Promise<AFSWorkspaceDiffResponse>;
+  getWorkspaceFileContent: (
+    input: GetWorkspaceFileContentInput,
+  ) => Promise<AFSFileContent | null>;
+  getWorkspaceDiff: (
+    input: GetWorkspaceDiffInput,
+  ) => Promise<AFSWorkspaceDiffResponse>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
-  createOnboardingToken: (databaseId: string | undefined, workspaceId: string) => Promise<OnboardingTokenResponse>;
+  createOnboardingToken: (
+    databaseId: string | undefined,
+    workspaceId: string,
+  ) => Promise<OnboardingTokenResponse>;
   listAllMCPAccessTokens: () => Promise<AFSMCPToken[]>;
-  listMCPAccessTokens: (databaseId: string | undefined, workspaceId: string) => Promise<AFSMCPToken[]>;
+  listMCPAccessTokens: (
+    databaseId: string | undefined,
+    workspaceId: string,
+  ) => Promise<AFSMCPToken[]>;
   createMCPAccessToken: (input: CreateMCPTokenInput) => Promise<AFSMCPToken>;
-  revokeMCPAccessToken: (databaseId: string | undefined, workspaceId: string, tokenId: string) => Promise<void>;
+  revokeMCPAccessToken: (
+    databaseId: string | undefined,
+    workspaceId: string,
+    tokenId: string,
+  ) => Promise<void>;
   listControlPlaneTokens: () => Promise<AFSMCPToken[]>;
-  createControlPlaneToken: (input: CreateControlPlaneTokenInput) => Promise<AFSMCPToken>;
+  createControlPlaneToken: (
+    input: CreateControlPlaneTokenInput,
+  ) => Promise<AFSMCPToken>;
   revokeControlPlaneToken: (tokenId: string) => Promise<void>;
   importLocal: (input: ImportLocalInput) => Promise<ImportLocalResponse>;
   getAuthConfig: () => Promise<AFSAuthConfig>;
@@ -184,6 +234,7 @@ type HTTPChangelogResponse = {
 };
 
 type HTTPRedisStats = {
+  redis_version?: string;
   used_memory_bytes?: number;
   max_memory_bytes?: number;
   fragmentation_ratio?: number;
@@ -192,6 +243,13 @@ type HTTPRedisStats = {
   cache_hit_rate?: number;
   connected_clients?: number;
   sampled_at?: string;
+};
+
+type HTTPDatabaseWorkspaceStorage = {
+  workspace_id: string;
+  workspace_name: string;
+  redis_key: string;
+  content_storage: HTTPWorkspaceContentStorage;
 };
 
 type HTTPDatabase = {
@@ -219,6 +277,9 @@ type HTTPDatabase = {
   last_session_reconcile_error?: string;
   afs_total_bytes?: number;
   afs_file_count?: number;
+  supports_arrays?: boolean;
+  supports_search?: boolean;
+  workspace_storage?: HTTPDatabaseWorkspaceStorage[] | null;
   stats?: HTTPRedisStats;
 };
 
@@ -281,6 +342,23 @@ type HTTPWorkspaceCapabilities = {
   restore_checkpoint: boolean;
 };
 
+type HTTPWorkspaceContentStorage = {
+  profile: "none" | "legacy" | "array" | "mixed";
+  file_count: number;
+  array_file_count: number;
+  legacy_file_count: number;
+};
+
+type HTTPWorkspaceSearchIndex = {
+  name: string;
+  present: boolean;
+  ready: boolean;
+  status: "ready" | "building" | "missing" | "unavailable" | "error";
+  document_count?: number;
+  percent_indexed?: number;
+  error?: string;
+};
+
 type HTTPWorkspaceDetail = {
   id: string;
   name: string;
@@ -288,6 +366,7 @@ type HTTPWorkspaceDetail = {
   cloud_account: string;
   database_id: string;
   database_name: string;
+  database_supports_arrays?: boolean;
   owner_subject?: string;
   owner_label?: string;
   database_management_type?: string;
@@ -305,6 +384,8 @@ type HTTPWorkspaceDetail = {
   file_count: number;
   folder_count: number;
   total_bytes: number;
+  content_storage?: HTTPWorkspaceContentStorage;
+  search_index?: HTTPWorkspaceSearchIndex;
   checkpoint_count: number;
   checkpoints: HTTPCheckpoint[];
   activity: HTTPActivity[];
@@ -356,6 +437,8 @@ type HTTPWorkspaceSessionInfo = {
   database_id?: string;
   database_name?: string;
   agent_id?: string;
+  agent_name?: string;
+  session_name?: string;
   client_kind?: string;
   afs_version?: string;
   hostname?: string;
@@ -607,7 +690,8 @@ function mapHTTPMCPToken(
     databaseId: item.database_id ?? "",
     workspaceId: item.workspace_id ?? "",
     workspaceName: item.workspace_name,
-    profile: (item.profile?.trim() || profileFallback) as AFSMCPToken["profile"],
+    profile: (item.profile?.trim() ||
+      profileFallback) as AFSMCPToken["profile"],
     readonly: Boolean(item.readonly),
     token: item.token,
     createdAt: item.created_at,
@@ -716,7 +800,10 @@ function makeId(prefix: string) {
 }
 
 function slugify(value: string) {
-  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
 }
 
 function bytesCount(files: AFSFile[]) {
@@ -755,7 +842,10 @@ function folderCount(files: AFSFile[]) {
 
 function lastCheckpointAt(workspace: AFSWorkspace) {
   const values = workspace.savepoints.map((savepoint) => savepoint.createdAt);
-  return values.sort((left, right) => right.localeCompare(left))[0] ?? workspace.updatedAt;
+  return (
+    values.sort((left, right) => right.localeCompare(left))[0] ??
+    workspace.updatedAt
+  );
 }
 
 function demoCapabilities(): AFSWorkspaceCapabilities {
@@ -776,6 +866,8 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
   normalized.folderCount = workspace.folderCount;
   normalized.totalBytes = workspace.totalBytes;
   normalized.checkpointCount = workspace.checkpointCount;
+  normalized.contentStorage =
+    workspace.contentStorage ?? demoWorkspaceContentStorage(workspace);
   normalized.capabilities = workspace.capabilities;
   normalized.savepoints = workspace.savepoints.map((savepoint) => ({
     ...savepoint,
@@ -798,6 +890,24 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
     databaseName: agent.databaseName || workspace.databaseName,
   }));
   return normalized;
+}
+
+function demoWorkspaceContentStorage(workspace: AFSWorkspace) {
+  const fileCount = workspace.fileCount ?? workspace.files.length;
+  if (fileCount <= 0) {
+    return {
+      profile: "none" as const,
+      fileCount: 0,
+      arrayFileCount: 0,
+      legacyFileCount: 0,
+    };
+  }
+  return {
+    profile: "legacy" as const,
+    fileCount,
+    arrayFileCount: 0,
+    legacyFileCount: fileCount,
+  };
 }
 
 function createActivity(
@@ -927,14 +1037,19 @@ function requireWorkspace(state: AFSState, workspaceId: string) {
 }
 
 function requireSavepoint(workspace: AFSWorkspace, savepointId: string) {
-  const savepoint = workspace.savepoints.find((item) => item.id === savepointId);
+  const savepoint = workspace.savepoints.find(
+    (item) => item.id === savepointId,
+  );
   if (savepoint == null) {
     throw new Error(`Savepoint ${savepointId} was not found.`);
   }
   return savepoint;
 }
 
-function matchesOptionalDatabase(databaseId: string | undefined, workspace: AFSWorkspace) {
+function matchesOptionalDatabase(
+  databaseId: string | undefined,
+  workspace: AFSWorkspace,
+) {
   const resolved = databaseId?.trim() ?? "";
   return resolved === "" || workspace.databaseId === resolved;
 }
@@ -948,24 +1063,35 @@ function touchWorkspace(workspace: AFSWorkspace) {
 }
 
 function sortWorkspaces(items: AFSWorkspace[]) {
-  return [...items].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  return [...items].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
 }
 
 function deriveDemoDatabases(state: AFSState) {
   const grouped = new Map<string, AFSDatabase>();
 
   for (const workspace of state.workspaces) {
+    const normalizedWorkspace = normalizeWorkspace(workspace);
+    const nextWorkspaceStorage = {
+      workspaceId: normalizedWorkspace.id,
+      workspaceName: normalizedWorkspace.name,
+      redisKey: normalizedWorkspace.redisKey,
+      contentStorage:
+        normalizedWorkspace.contentStorage ??
+        demoWorkspaceContentStorage(normalizedWorkspace),
+    };
     const existing = grouped.get(workspace.databaseId);
     if (existing == null) {
       grouped.set(workspace.databaseId, {
-        id: workspace.databaseId,
-        name: workspace.databaseName,
+        id: normalizedWorkspace.databaseId,
+        name: normalizedWorkspace.databaseName,
         description: "",
         purpose: "general",
         canEdit: true,
         canDelete: true,
         canCreateWorkspaces: true,
-        redisAddr: workspace.databaseName,
+        redisAddr: normalizedWorkspace.databaseName,
         redisUsername: "",
         redisPassword: "",
         redisDB: 0,
@@ -973,10 +1099,19 @@ function deriveDemoDatabases(state: AFSState) {
         isDefault: false,
         workspaceCount: 1,
         activeSessionCount: 0,
+        supportsArrays: true,
+        supportsSearch: true,
+        workspaceStorage: [nextWorkspaceStorage],
       });
       continue;
     }
     existing.workspaceCount += 1;
+    existing.supportsArrays = existing.supportsArrays ?? true;
+    existing.supportsSearch = existing.supportsSearch ?? true;
+    existing.workspaceStorage = [
+      ...(existing.workspaceStorage ?? []),
+      nextWorkspaceStorage,
+    ];
   }
 
   const saved = loadDatabaseState();
@@ -985,11 +1120,20 @@ function deriveDemoDatabases(state: AFSState) {
     grouped.set(database.id, {
       ...database,
       workspaceCount: existing?.workspaceCount ?? database.workspaceCount,
-      activeSessionCount: existing?.activeSessionCount ?? database.activeSessionCount,
+      activeSessionCount:
+        existing?.activeSessionCount ?? database.activeSessionCount,
+      supportsArrays:
+        existing?.supportsArrays ?? database.supportsArrays ?? true,
+      supportsSearch:
+        existing?.supportsSearch ?? database.supportsSearch ?? true,
+      workspaceStorage:
+        existing?.workspaceStorage ?? database.workspaceStorage ?? [],
     });
   }
 
-  const items = [...grouped.values()].sort((left, right) => left.name.localeCompare(right.name));
+  const items = [...grouped.values()].sort((left, right) =>
+    left.name.localeCompare(right.name),
+  );
   if (items.length > 0 && !items.some((item) => item.isDefault)) {
     items[0] = { ...items[0], isDefault: true };
   }
@@ -999,11 +1143,16 @@ function deriveDemoDatabases(state: AFSState) {
 function requireDemoDatabase(databaseId?: string) {
   const databases = deriveDemoDatabases(loadState());
   const resolvedID = databaseId?.trim() ?? "";
-  const database = resolvedID === ""
-    ? databases.find((item) => item.isDefault) ?? databases[0]
-    : databases.find((item) => item.id === resolvedID);
+  const database =
+    resolvedID === ""
+      ? (databases.find((item) => item.isDefault) ?? databases[0])
+      : databases.find((item) => item.id === resolvedID);
   if (database == null) {
-    throw new Error(resolvedID === "" ? "No database was found." : `Database ${resolvedID} was not found.`);
+    throw new Error(
+      resolvedID === ""
+        ? "No database was found."
+        : `Database ${resolvedID} was not found.`,
+    );
   }
   return database;
 }
@@ -1016,7 +1165,10 @@ function normalizeFilePath(value: string) {
   return `/${trimmed.replace(/^\/+/, "")}`;
 }
 
-function demoFilesForView(workspace: AFSWorkspace, view: AFSWorkspaceView): AFSFile[] {
+function demoFilesForView(
+  workspace: AFSWorkspace,
+  view: AFSWorkspaceView,
+): AFSFile[] {
   if (view === "working-copy") {
     return workspace.files.map((file) => ({
       ...file,
@@ -1025,7 +1177,9 @@ function demoFilesForView(workspace: AFSWorkspace, view: AFSWorkspaceView): AFSF
   }
 
   const checkpointId =
-    view === "head" ? workspace.headSavepointId : view.replace(/^checkpoint:/, "");
+    view === "head"
+      ? workspace.headSavepointId
+      : view.replace(/^checkpoint:/, "");
   const savepoint = requireSavepoint(workspace, checkpointId);
   return savepoint.filesSnapshot.map((file) => ({
     ...file,
@@ -1068,11 +1222,15 @@ function contentTypeForPath(path: string) {
   const lower = path.toLowerCase();
   if (lower.endsWith(".md")) return "text/markdown";
   if (lower.endsWith(".json")) return "application/json";
-  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "application/yaml";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml"))
+    return "application/yaml";
   return "text/plain";
 }
 
-function treeItemsForFiles(files: AFSFile[], currentPath: string): AFSTreeItem[] {
+function treeItemsForFiles(
+  files: AFSFile[],
+  currentPath: string,
+): AFSTreeItem[] {
   const normalizedPath = normalizeFilePath(currentPath);
   const items = new Map<string, AFSTreeItem>();
 
@@ -1151,7 +1309,10 @@ function fileSizeBytes(file: AFSFile) {
   return new TextEncoder().encode(file.content).length;
 }
 
-function demoTextDiff(previous: AFSFile | undefined, next: AFSFile | undefined): AFSTextDiff {
+function demoTextDiff(
+  previous: AFSFile | undefined,
+  next: AFSFile | undefined,
+): AFSTextDiff {
   const previousLines = previous?.content.split("\n") ?? [];
   const nextLines = next?.content.split("\n") ?? [];
   return {
@@ -1165,16 +1326,33 @@ function demoTextDiff(previous: AFSFile | undefined, next: AFSFile | undefined):
         newStart: 1,
         newLines: nextLines.length,
         lines: [
-          ...previousLines.map((text, index) => ({ kind: "delete" as const, oldLine: index + 1, text })),
-          ...nextLines.map((text, index) => ({ kind: "insert" as const, newLine: index + 1, text })),
+          ...previousLines.map((text, index) => ({
+            kind: "delete" as const,
+            oldLine: index + 1,
+            text,
+          })),
+          ...nextLines.map((text, index) => ({
+            kind: "insert" as const,
+            newLine: index + 1,
+            text,
+          })),
         ],
       },
     ],
   };
 }
 
-function demoDiffState(workspace: AFSWorkspace, view: AFSWorkspaceView, files: AFSFile[]) {
-  const checkpointId = view === "head" ? workspace.headSavepointId : view.startsWith("checkpoint:") ? view.slice("checkpoint:".length) : undefined;
+function demoDiffState(
+  workspace: AFSWorkspace,
+  view: AFSWorkspaceView,
+  files: AFSFile[],
+) {
+  const checkpointId =
+    view === "head"
+      ? workspace.headSavepointId
+      : view.startsWith("checkpoint:")
+        ? view.slice("checkpoint:".length)
+        : undefined;
   return {
     view,
     checkpointId,
@@ -1194,8 +1372,10 @@ function summarizeDiffEntries(entries: AFSDiffEntry[]) {
       if (entry.op === "delete") summary.deleted += 1;
       if (entry.op === "rename") summary.renamed += 1;
       if (entry.op === "metadata") summary.metadataChanged += 1;
-      if ((entry.deltaBytes ?? 0) > 0) summary.bytesAdded += entry.deltaBytes ?? 0;
-      if ((entry.deltaBytes ?? 0) < 0) summary.bytesRemoved += Math.abs(entry.deltaBytes ?? 0);
+      if ((entry.deltaBytes ?? 0) > 0)
+        summary.bytesAdded += entry.deltaBytes ?? 0;
+      if ((entry.deltaBytes ?? 0) < 0)
+        summary.bytesRemoved += Math.abs(entry.deltaBytes ?? 0);
       return summary;
     },
     {
@@ -1218,8 +1398,12 @@ function compareDemoFiles(
 ): AFSWorkspaceDiffResponse {
   const baseFiles = demoFilesForView(workspace, baseView);
   const headFiles = demoFilesForView(workspace, headView);
-  const baseByPath = new Map(baseFiles.map((file) => [normalizeFilePath(file.path), file]));
-  const headByPath = new Map(headFiles.map((file) => [normalizeFilePath(file.path), file]));
+  const baseByPath = new Map(
+    baseFiles.map((file) => [normalizeFilePath(file.path), file]),
+  );
+  const headByPath = new Map(
+    headFiles.map((file) => [normalizeFilePath(file.path), file]),
+  );
   const entries: AFSDiffEntry[] = [];
   const allPaths = new Set([...baseByPath.keys(), ...headByPath.keys()]);
 
@@ -1228,18 +1412,42 @@ function compareDemoFiles(
     const next = headByPath.get(path);
     if (previous == null && next != null) {
       const sizeBytes = fileSizeBytes(next);
-      entries.push({ op: "create", path, kind: "file", sizeBytes, deltaBytes: sizeBytes, textDiff: demoTextDiff(undefined, next) });
+      entries.push({
+        op: "create",
+        path,
+        kind: "file",
+        sizeBytes,
+        deltaBytes: sizeBytes,
+        textDiff: demoTextDiff(undefined, next),
+      });
       continue;
     }
     if (previous != null && next == null) {
       const previousSizeBytes = fileSizeBytes(previous);
-      entries.push({ op: "delete", path, previousPath: path, previousKind: "file", previousSizeBytes, deltaBytes: previousSizeBytes * -1, textDiff: demoTextDiff(previous, undefined) });
+      entries.push({
+        op: "delete",
+        path,
+        previousPath: path,
+        previousKind: "file",
+        previousSizeBytes,
+        deltaBytes: previousSizeBytes * -1,
+        textDiff: demoTextDiff(previous, undefined),
+      });
       continue;
     }
     if (previous != null && next != null && previous.content !== next.content) {
       const previousSizeBytes = fileSizeBytes(previous);
       const sizeBytes = fileSizeBytes(next);
-      entries.push({ op: "update", path, kind: "file", previousKind: "file", sizeBytes, previousSizeBytes, deltaBytes: sizeBytes - previousSizeBytes, textDiff: demoTextDiff(previous, next) });
+      entries.push({
+        op: "update",
+        path,
+        kind: "file",
+        previousKind: "file",
+        sizeBytes,
+        previousSizeBytes,
+        deltaBytes: sizeBytes - previousSizeBytes,
+        textDiff: demoTextDiff(previous, next),
+      });
     }
   }
 
@@ -1268,8 +1476,11 @@ const demoAFSClient: AFSClient = {
   async saveDatabase(input: SaveDatabaseInput) {
     await wait();
     const current = loadDatabaseState();
-    const id = input.id?.trim() || slugify(`${input.name}-${input.redisAddr}-${input.redisDB}`);
-    const wasDefault = current.find((item) => item.id === id)?.isDefault ?? false;
+    const id =
+      input.id?.trim() ||
+      slugify(`${input.name}-${input.redisAddr}-${input.redisDB}`);
+    const wasDefault =
+      current.find((item) => item.id === id)?.isDefault ?? false;
     const nextRecord: AFSDatabase = {
       id,
       name: input.name.trim(),
@@ -1284,12 +1495,17 @@ const demoAFSClient: AFSClient = {
       redisDB: input.redisDB,
       redisTLS: input.redisTLS,
       isDefault: wasDefault || current.length === 0,
-      workspaceCount: deriveDemoDatabases(loadState()).find((item) => item.id === id)?.workspaceCount ?? 0,
+      workspaceCount:
+        deriveDemoDatabases(loadState()).find((item) => item.id === id)
+          ?.workspaceCount ?? 0,
       activeSessionCount: 0,
     };
     const next = current
       .filter((item) => item.id !== id)
-      .map((item) => ({ ...item, isDefault: nextRecord.isDefault ? false : item.isDefault }));
+      .map((item) => ({
+        ...item,
+        isDefault: nextRecord.isDefault ? false : item.isDefault,
+      }));
     next.unshift(nextRecord);
     saveDatabaseState(next);
     return nextRecord;
@@ -1298,7 +1514,10 @@ const demoAFSClient: AFSClient = {
   async setDefaultDatabase(databaseId: string) {
     await wait();
     const current = deriveDemoDatabases(loadState());
-    const next = current.map((item) => ({ ...item, isDefault: item.id === databaseId }));
+    const next = current.map((item) => ({
+      ...item,
+      isDefault: item.id === databaseId,
+    }));
     saveDatabaseState(next);
     const updated = next.find((item) => item.id === databaseId);
     if (updated == null) {
@@ -1321,7 +1540,9 @@ const demoAFSClient: AFSClient = {
     const state = loadState();
     const workspaces = state.workspaces
       .map(normalizeWorkspace)
-      .filter((workspace) => databaseId === "" || workspace.databaseId === databaseId);
+      .filter(
+        (workspace) => databaseId === "" || workspace.databaseId === databaseId,
+      );
 
     return sortWorkspaces(workspaces).map(workspaceToSummary);
   },
@@ -1330,7 +1551,9 @@ const demoAFSClient: AFSClient = {
     await wait();
     const state = loadState();
     const workspace = state.workspaces.find(
-      (item) => item.id === workspaceId && (databaseId === "" || item.databaseId === databaseId),
+      (item) =>
+        item.id === workspaceId &&
+        (databaseId === "" || item.databaseId === databaseId),
     );
     return workspace == null ? null : normalizeWorkspace(workspace);
   },
@@ -1339,7 +1562,9 @@ const demoAFSClient: AFSClient = {
     await wait();
     const state = loadState();
     return sortWorkspaces(state.workspaces)
-      .filter((workspace) => databaseId === "" || workspace.databaseId === databaseId)
+      .filter(
+        (workspace) => databaseId === "" || workspace.databaseId === databaseId,
+      )
       .flatMap((workspace) => normalizeWorkspace(workspace).agents)
       .sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
   },
@@ -1387,7 +1612,7 @@ This workspace was created from the AFS Web UI.
         updatedAt: createdAt,
         draftState: "clean",
         headSavepointId: initialSavepoint.id,
-        tags: [(input.region?.trim() || ""), sourceLabel(input.source)],
+        tags: [input.region?.trim() || "", sourceLabel(input.source)],
         files: baseFiles,
         savepoints: [initialSavepoint],
         activity: [
@@ -1419,7 +1644,11 @@ This workspace was created from the AFS Web UI.
     await wait();
     updateState((draft) => {
       draft.workspaces = draft.workspaces.filter(
-        (workspace) => !(workspace.id === workspaceId && matchesOptionalDatabase(databaseId, workspace)),
+        (workspace) =>
+          !(
+            workspace.id === workspaceId &&
+            matchesOptionalDatabase(databaseId, workspace)
+          ),
       );
     });
   },
@@ -1429,7 +1658,9 @@ This workspace was created from the AFS Web UI.
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+        throw new Error(
+          `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+        );
       }
       if (input.name !== undefined) {
         workspace.name = input.name.trim();
@@ -1437,10 +1668,14 @@ This workspace was created from the AFS Web UI.
       if (input.description !== undefined) {
         workspace.description = input.description.trim();
       }
-      workspace.cloudAccount = input.cloudAccount?.trim() || workspace.cloudAccount;
-      workspace.databaseName = input.databaseName?.trim() || workspace.databaseName;
+      workspace.cloudAccount =
+        input.cloudAccount?.trim() || workspace.cloudAccount;
+      workspace.databaseName =
+        input.databaseName?.trim() || workspace.databaseName;
       workspace.region = input.region?.trim() || workspace.region;
-      workspace.tags = [workspace.region, sourceLabel(workspace.source)].filter(Boolean);
+      workspace.tags = [workspace.region, sourceLabel(workspace.source)].filter(
+        Boolean,
+      );
       touchWorkspace(workspace);
       workspace.activity.unshift(
         createActivity(
@@ -1463,12 +1698,15 @@ This workspace was created from the AFS Web UI.
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+        throw new Error(
+          `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+        );
       }
       const modifiedAt = nowISO();
       const normalizedPath = normalizeFilePath(input.path).replace(/^\//, "");
       const file = workspace.files.find(
-        (item) => normalizeFilePath(item.path).replace(/^\//, "") === normalizedPath,
+        (item) =>
+          normalizeFilePath(item.path).replace(/^\//, "") === normalizedPath,
       );
       if (file == null) {
         workspace.files.unshift({
@@ -1503,18 +1741,22 @@ This workspace was created from the AFS Web UI.
   async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
     await wait();
     const policies = loadDemoVersioningPolicies();
-    return policies[input.workspaceId] ?? {
-      mode: "off",
-      includeGlobs: [],
-      excludeGlobs: [],
-      maxVersionsPerFile: 0,
-      maxAgeDays: 0,
-      maxTotalBytes: 0,
-      largeFileCutoffBytes: 0,
-    };
+    return (
+      policies[input.workspaceId] ?? {
+        mode: "off",
+        includeGlobs: [],
+        excludeGlobs: [],
+        maxVersionsPerFile: 0,
+        maxAgeDays: 0,
+        maxTotalBytes: 0,
+        largeFileCutoffBytes: 0,
+      }
+    );
   },
 
-  async updateWorkspaceVersioningPolicy(input: UpdateWorkspaceVersioningPolicyInput) {
+  async updateWorkspaceVersioningPolicy(
+    input: UpdateWorkspaceVersioningPolicyInput,
+  ) {
     await wait();
     const policies = loadDemoVersioningPolicies();
     policies[input.workspaceId] = input.policy;
@@ -1561,7 +1803,9 @@ This workspace was created from the AFS Web UI.
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+        throw new Error(
+          `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+        );
       }
       const savepoint = createSavepointRecord(
         input.name.trim(),
@@ -1595,7 +1839,9 @@ This workspace was created from the AFS Web UI.
     const state = updateState((draft) => {
       const workspace = requireWorkspace(draft, input.workspaceId);
       if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-        throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+        throw new Error(
+          `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+        );
       }
       const savepoint = requireSavepoint(workspace, input.savepointId);
       workspace.files = clone(savepoint.filesSnapshot);
@@ -1621,9 +1867,9 @@ This workspace was created from the AFS Web UI.
   async listActivity(databaseId = "", limit = 50) {
     await wait();
     const state = loadState();
-    return allActivityForState(state).filter((event) =>
-      databaseId === "" || event.databaseId === databaseId,
-    ).slice(0, limit);
+    return allActivityForState(state)
+      .filter((event) => databaseId === "" || event.databaseId === databaseId)
+      .slice(0, limit);
   },
 
   async listActivityPage(input: ListActivityInput) {
@@ -1631,8 +1877,16 @@ This workspace was created from the AFS Web UI.
     const state = loadState();
     const limit = input.limit != null && input.limit > 0 ? input.limit : 50;
     const events = allActivityForState(state)
-      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
-      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
+      .filter(
+        (event) =>
+          input.databaseId == null ||
+          input.databaseId === "" ||
+          event.databaseId === input.databaseId,
+      )
+      .filter(
+        (event) =>
+          input.until == null || input.until === "" || event.id < input.until,
+      );
     const page = events.slice(0, limit);
     return {
       items: page,
@@ -1645,12 +1899,36 @@ This workspace was created from the AFS Web UI.
     const state = loadState();
     const limit = input.limit != null && input.limit > 0 ? input.limit : 100;
     const events = allEventsForState(state)
-      .filter((event) => input.databaseId == null || input.databaseId === "" || event.databaseId === input.databaseId)
-      .filter((event) => input.workspaceId == null || input.workspaceId === "" || event.workspaceId === input.workspaceId)
-      .filter((event) => input.kind == null || input.kind === "" || event.kind === input.kind)
-      .filter((event) => input.sessionId == null || input.sessionId === "" || event.sessionId === input.sessionId)
-      .filter((event) => input.path == null || input.path === "" || event.path === input.path)
-      .filter((event) => input.until == null || input.until === "" || event.id < input.until);
+      .filter(
+        (event) =>
+          input.databaseId == null ||
+          input.databaseId === "" ||
+          event.databaseId === input.databaseId,
+      )
+      .filter(
+        (event) =>
+          input.workspaceId == null ||
+          input.workspaceId === "" ||
+          event.workspaceId === input.workspaceId,
+      )
+      .filter(
+        (event) =>
+          input.kind == null || input.kind === "" || event.kind === input.kind,
+      )
+      .filter(
+        (event) =>
+          input.sessionId == null ||
+          input.sessionId === "" ||
+          event.sessionId === input.sessionId,
+      )
+      .filter(
+        (event) =>
+          input.path == null || input.path === "" || event.path === input.path,
+      )
+      .filter(
+        (event) =>
+          input.until == null || input.until === "" || event.id < input.until,
+      );
     const page = events.slice(0, limit);
     return {
       items: page,
@@ -1658,7 +1936,9 @@ This workspace was created from the AFS Web UI.
     };
   },
 
-  async listChangelog(_input: ListChangelogInput): Promise<AFSChangelogResponse> {
+  async listChangelog(
+    _input: ListChangelogInput,
+  ): Promise<AFSChangelogResponse> {
     await wait();
     return { entries: [] };
   },
@@ -1666,9 +1946,13 @@ This workspace was created from the AFS Web UI.
   async getWorkspaceTree(input: GetWorkspaceTreeInput) {
     await wait();
     const state = loadState();
-    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    const workspace = normalizeWorkspace(
+      requireWorkspace(state, input.workspaceId),
+    );
     if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      throw new Error(
+        `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+      );
     }
     const files = demoFilesForView(workspace, input.view);
 
@@ -1683,13 +1967,19 @@ This workspace was created from the AFS Web UI.
   async getWorkspaceFileContent(input: GetWorkspaceFileContentInput) {
     await wait();
     const state = loadState();
-    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    const workspace = normalizeWorkspace(
+      requireWorkspace(state, input.workspaceId),
+    );
     if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      throw new Error(
+        `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+      );
     }
     const files = demoFilesForView(workspace, input.view);
     const normalizedPath = normalizeFilePath(input.path);
-    const file = files.find((item) => normalizeFilePath(item.path) === normalizedPath);
+    const file = files.find(
+      (item) => normalizeFilePath(item.path) === normalizedPath,
+    );
     if (file == null) {
       return null;
     }
@@ -1713,9 +2003,13 @@ This workspace was created from the AFS Web UI.
   async getWorkspaceDiff(input: GetWorkspaceDiffInput) {
     await wait();
     const state = loadState();
-    const workspace = normalizeWorkspace(requireWorkspace(state, input.workspaceId));
+    const workspace = normalizeWorkspace(
+      requireWorkspace(state, input.workspaceId),
+    );
     if (!matchesOptionalDatabase(input.databaseId, workspace)) {
-      throw new Error(`Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`);
+      throw new Error(
+        `Workspace ${input.workspaceId} was not found in database ${input.databaseId}.`,
+      );
     }
     return compareDemoFiles(workspace, input.base, input.head);
   },
@@ -1724,7 +2018,10 @@ This workspace was created from the AFS Web UI.
     throw new Error("Quickstart is not available in demo mode.");
   },
 
-  async createOnboardingToken(_databaseId: string | undefined, _workspaceId: string) {
+  async createOnboardingToken(
+    _databaseId: string | undefined,
+    _workspaceId: string,
+  ) {
     throw new Error("Onboarding tokens are not available in demo mode.");
   },
 
@@ -1796,17 +2093,29 @@ This workspace was created from the AFS Web UI.
   async getAdminOverview() {
     const databases = deriveDemoDatabases(loadState());
     const state = loadState();
-    const agents = sortWorkspaces(state.workspaces).flatMap((workspace) => normalizeWorkspace(workspace).agents);
+    const agents = sortWorkspaces(state.workspaces).flatMap(
+      (workspace) => normalizeWorkspace(workspace).agents,
+    );
     return {
       userCount: 0,
       databaseCount: databases.length,
       workspaceCount: state.workspaces.length,
       agentCount: agents.length,
-      activeAgentCount: agents.filter((agent) => agent.state === "active").length,
-      staleAgentCount: agents.filter((agent) => agent.state !== "active").length,
-      unavailableDatabaseCount: databases.filter((database) => Boolean(database.connectionError)).length,
-      totalBytes: state.workspaces.reduce((sum, workspace) => sum + workspace.totalBytes, 0),
-      fileCount: state.workspaces.reduce((sum, workspace) => sum + workspace.fileCount, 0),
+      activeAgentCount: agents.filter((agent) => agent.state === "active")
+        .length,
+      staleAgentCount: agents.filter((agent) => agent.state !== "active")
+        .length,
+      unavailableDatabaseCount: databases.filter((database) =>
+        Boolean(database.connectionError),
+      ).length,
+      totalBytes: state.workspaces.reduce(
+        (sum, workspace) => sum + workspace.totalBytes,
+        0,
+      ),
+      fileCount: state.workspaces.reduce(
+        (sum, workspace) => sum + workspace.fileCount,
+        0,
+      ),
     };
   },
 
@@ -1836,7 +2145,10 @@ This workspace was created from the AFS Web UI.
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${HTTP_BASE_URL}/v1${path}`;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), HTTP_REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(
+    () => controller.abort(),
+    HTTP_REQUEST_TIMEOUT_MS,
+  );
   let response: Response;
   try {
     response = await fetch(url, {
@@ -1849,7 +2161,9 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error(`Request to ${path} timed out after ${HTTP_REQUEST_TIMEOUT_MS / 1000}s.`);
+      throw new Error(
+        `Request to ${path} timed out after ${HTTP_REQUEST_TIMEOUT_MS / 1000}s.`,
+      );
     }
     throw error;
   } finally {
@@ -1893,7 +2207,10 @@ function hasHTTPBackend() {
   return HTTP_BASE_URL !== "";
 }
 
-function workspaceBasePath(databaseId: string | undefined, workspaceId: string) {
+function workspaceBasePath(
+  databaseId: string | undefined,
+  workspaceId: string,
+) {
   const resolvedDatabaseID = databaseId?.trim() ?? "";
   if (resolvedDatabaseID === "") {
     return `/workspaces/${workspaceId}`;
@@ -1901,7 +2218,10 @@ function workspaceBasePath(databaseId: string | undefined, workspaceId: string) 
   return `/databases/${resolvedDatabaseID}/workspaces/${workspaceId}`;
 }
 
-function loadDemoVersioningPolicies(): Record<string, AFSWorkspaceVersioningPolicy> {
+function loadDemoVersioningPolicies(): Record<
+  string,
+  AFSWorkspaceVersioningPolicy
+> {
   if (typeof window === "undefined") {
     return {};
   }
@@ -1916,11 +2236,16 @@ function loadDemoVersioningPolicies(): Record<string, AFSWorkspaceVersioningPoli
   }
 }
 
-function saveDemoVersioningPolicies(policies: Record<string, AFSWorkspaceVersioningPolicy>) {
+function saveDemoVersioningPolicies(
+  policies: Record<string, AFSWorkspaceVersioningPolicy>,
+) {
   if (typeof window === "undefined") {
     return;
   }
-  window.localStorage.setItem(VERSIONING_POLICY_STORAGE_KEY, JSON.stringify(policies));
+  window.localStorage.setItem(
+    VERSIONING_POLICY_STORAGE_KEY,
+    JSON.stringify(policies),
+  );
 }
 
 function resolveAFSClient() {
@@ -1930,7 +2255,9 @@ function resolveAFSClient() {
   return httpAFSClient;
 }
 
-function mapCapabilities(input: HTTPWorkspaceCapabilities): AFSWorkspaceCapabilities {
+function mapCapabilities(
+  input: HTTPWorkspaceCapabilities,
+): AFSWorkspaceCapabilities {
   return {
     browseHead: input.browse_head,
     browseCheckpoints: input.browse_checkpoints,
@@ -1968,8 +2295,25 @@ function mapDatabase(input: HTTPDatabase): AFSDatabase {
     lastSessionReconcileError: input.last_session_reconcile_error,
     afsTotalBytes: input.afs_total_bytes ?? 0,
     afsFileCount: input.afs_file_count ?? 0,
+    supportsArrays: input.supports_arrays,
+    supportsSearch: input.supports_search,
+    workspaceStorage:
+      input.workspace_storage == null
+        ? undefined
+        : input.workspace_storage.map((workspace) => ({
+            workspaceId: workspace.workspace_id,
+            workspaceName: workspace.workspace_name,
+            redisKey: workspace.redis_key,
+            contentStorage: {
+              profile: workspace.content_storage.profile,
+              fileCount: workspace.content_storage.file_count,
+              arrayFileCount: workspace.content_storage.array_file_count,
+              legacyFileCount: workspace.content_storage.legacy_file_count,
+            },
+          })),
     stats: input.stats
       ? {
+          redisVersion: input.stats.redis_version,
           usedMemoryBytes: input.stats.used_memory_bytes ?? 0,
           maxMemoryBytes: input.stats.max_memory_bytes ?? 0,
           fragmentationRatio: input.stats.fragmentation_ratio ?? 0,
@@ -2180,6 +2524,8 @@ function mapAgentSession(
     databaseId: input.database_id ?? databaseId,
     databaseName: input.database_name ?? databaseName,
     agentId: input.agent_id,
+    agentName: input.agent_name,
+    sessionName: input.session_name,
     clientKind: input.client_kind ?? "",
     afsVersion: input.afs_version ?? "",
     hostname: input.hostname ?? "",
@@ -2254,6 +2600,7 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     cloudAccount: input.cloud_account,
     databaseId: input.database_id,
     databaseName: input.database_name,
+    databaseSupportsArrays: input.database_supports_arrays,
     ownerSubject: input.owner_subject,
     ownerLabel: input.owner_label,
     databaseManagementType: input.database_management_type,
@@ -2271,6 +2618,27 @@ function mapWorkspaceDetail(input: HTTPWorkspaceDetail): AFSWorkspaceDetail {
     fileCount: input.file_count,
     folderCount: input.folder_count,
     totalBytes: input.total_bytes,
+    contentStorage:
+      input.content_storage == null
+        ? undefined
+        : {
+            profile: input.content_storage.profile,
+            fileCount: input.content_storage.file_count,
+            arrayFileCount: input.content_storage.array_file_count,
+            legacyFileCount: input.content_storage.legacy_file_count,
+          },
+    searchIndex:
+      input.search_index == null
+        ? undefined
+        : {
+            name: input.search_index.name,
+            present: input.search_index.present,
+            ready: input.search_index.ready,
+            status: input.search_index.status,
+            documentCount: input.search_index.document_count ?? 0,
+            percentIndexed: input.search_index.percent_indexed ?? 0,
+            error: input.search_index.error,
+          },
     checkpointCount: input.checkpoint_count,
     files: [],
     savepoints: input.checkpoints.map(mapCheckpoint),
@@ -2319,7 +2687,9 @@ function mapFileContent(input: HTTPFileContent): AFSFileContent {
   };
 }
 
-function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffResponse {
+function mapWorkspaceDiff(
+  input: HTTPWorkspaceDiffResponse,
+): AFSWorkspaceDiffResponse {
   return {
     workspaceId: input.workspace_id,
     workspaceName: input.workspace_name,
@@ -2358,30 +2728,33 @@ function mapWorkspaceDiff(input: HTTPWorkspaceDiffResponse): AFSWorkspaceDiffRes
       sizeBytes: entry.size_bytes,
       previousSizeBytes: entry.previous_size_bytes,
       deltaBytes: entry.delta_bytes,
-      textDiff: entry.text_diff == null
-        ? undefined
-        : {
-            language: entry.text_diff.language,
-            previousExists: entry.text_diff.previous_exists,
-            nextExists: entry.text_diff.next_exists,
-            hunks: entry.text_diff.hunks?.map((hunk) => ({
-              oldStart: hunk.old_start,
-              oldLines: hunk.old_lines,
-              newStart: hunk.new_start,
-              newLines: hunk.new_lines,
-              lines: hunk.lines.map((line) => ({
-                kind: line.kind,
-                oldLine: line.old_line,
-                newLine: line.new_line,
-                text: line.text,
+      textDiff:
+        entry.text_diff == null
+          ? undefined
+          : {
+              language: entry.text_diff.language,
+              previousExists: entry.text_diff.previous_exists,
+              nextExists: entry.text_diff.next_exists,
+              hunks: entry.text_diff.hunks?.map((hunk) => ({
+                oldStart: hunk.old_start,
+                oldLines: hunk.old_lines,
+                newStart: hunk.new_start,
+                newLines: hunk.new_lines,
+                lines: hunk.lines.map((line) => ({
+                  kind: line.kind,
+                  oldLine: line.old_line,
+                  newLine: line.new_line,
+                  text: line.text,
+                })),
               })),
-            })),
-          },
+            },
     })),
   };
 }
 
-function mapWorkspaceVersioningPolicy(input: HTTPWorkspaceVersioningPolicy): AFSWorkspaceVersioningPolicy {
+function mapWorkspaceVersioningPolicy(
+  input: HTTPWorkspaceVersioningPolicy,
+): AFSWorkspaceVersioningPolicy {
   return {
     mode: input.mode ?? "off",
     includeGlobs: input.include_globs ?? [],
@@ -2418,7 +2791,9 @@ function mapFileVersion(input: HTTPFileVersion) {
   };
 }
 
-function mapFileHistoryResponse(input: HTTPFileHistoryResponse): AFSFileHistoryResponse {
+function mapFileHistoryResponse(
+  input: HTTPFileHistoryResponse,
+): AFSFileHistoryResponse {
   return {
     workspaceId: input.workspace_id,
     path: input.path,
@@ -2433,7 +2808,9 @@ function mapFileHistoryResponse(input: HTTPFileHistoryResponse): AFSFileHistoryR
   };
 }
 
-function mapFileVersionContent(input: HTTPFileVersionContent): AFSFileVersionContent {
+function mapFileVersionContent(
+  input: HTTPFileVersionContent,
+): AFSFileVersionContent {
   return {
     workspaceId: input.workspace_id,
     fileId: input.file_id,
@@ -2453,7 +2830,9 @@ function mapFileVersionContent(input: HTTPFileVersionContent): AFSFileVersionCon
   };
 }
 
-function mapFileVersionSelector(input: DiffFileVersionsInput["from"]): HTTPFileVersionSelector {
+function mapFileVersionSelector(
+  input: DiffFileVersionsInput["from"],
+): HTTPFileVersionSelector {
   if ("ref" in input) {
     return { ref: input.ref };
   }
@@ -2473,7 +2852,9 @@ function mapFileVersionDiff(input: HTTPFileVersionDiff): AFSFileVersionDiff {
   };
 }
 
-function mapFileVersionRestoreResponse(input: HTTPFileVersionRestoreResponse): AFSFileVersionRestoreResponse {
+function mapFileVersionRestoreResponse(
+  input: HTTPFileVersionRestoreResponse,
+): AFSFileVersionRestoreResponse {
   return {
     workspaceId: input.workspace_id,
     path: input.path,
@@ -2485,7 +2866,9 @@ function mapFileVersionRestoreResponse(input: HTTPFileVersionRestoreResponse): A
   };
 }
 
-function mapFileVersionUndeleteResponse(input: HTTPFileVersionUndeleteResponse): AFSFileVersionUndeleteResponse {
+function mapFileVersionUndeleteResponse(
+  input: HTTPFileVersionUndeleteResponse,
+): AFSFileVersionUndeleteResponse {
   return {
     workspaceId: input.workspace_id,
     path: input.path,
@@ -2515,7 +2898,9 @@ const httpAFSClient: AFSClient = {
   mode: "http",
 
   async listDatabases() {
-    const response = await requestJSON<AFSDatabaseListResponse & { items: HTTPDatabase[] }>("/databases");
+    const response = await requestJSON<
+      AFSDatabaseListResponse & { items: HTTPDatabase[] }
+    >("/databases");
     return response.items.map(mapDatabase);
   },
 
@@ -2527,18 +2912,21 @@ const httpAFSClient: AFSClient = {
 
   async saveDatabase(input: SaveDatabaseInput) {
     return mapDatabase(
-      await requestJSON<HTTPDatabase>(input.id ? `/databases/${input.id}` : "/databases", {
-        method: input.id ? "PUT" : "POST",
-        body: JSON.stringify({
-          name: input.name,
-          description: input.description,
-          redis_addr: input.redisAddr,
-          redis_username: input.redisUsername,
-          redis_password: input.redisPassword,
-          redis_db: input.redisDB,
-          redis_tls: input.redisTLS,
-        }),
-      }),
+      await requestJSON<HTTPDatabase>(
+        input.id ? `/databases/${input.id}` : "/databases",
+        {
+          method: input.id ? "PUT" : "POST",
+          body: JSON.stringify({
+            name: input.name,
+            description: input.description,
+            redis_addr: input.redisAddr,
+            redis_username: input.redisUsername,
+            redis_password: input.redisPassword,
+            redis_db: input.redisDB,
+            redis_tls: input.redisTLS,
+          }),
+        },
+      ),
     );
   },
 
@@ -2559,7 +2947,9 @@ const httpAFSClient: AFSClient = {
   async listWorkspaceSummaries(databaseId = "") {
     const response = await requestJSON<{
       items: HTTPWorkspaceSummary[];
-    }>(databaseId === "" ? "/workspaces" : `/databases/${databaseId}/workspaces`);
+    }>(
+      databaseId === "" ? "/workspaces" : `/databases/${databaseId}/workspaces`,
+    );
     return response.items.map(mapWorkspaceSummary);
   },
 
@@ -2574,11 +2964,20 @@ const httpAFSClient: AFSClient = {
         throw detailResult.reason;
       }
       const detail = detailResult.value;
-      const sessions = sessionsResult.status === "fulfilled" ? sessionsResult.value : { items: [] };
+      const sessions =
+        sessionsResult.status === "fulfilled"
+          ? sessionsResult.value
+          : { items: [] };
       return {
         ...mapWorkspaceDetail(detail),
         agents: sessions.items.map((item) =>
-          mapAgentSession(item, workspaceId, detail.name, detail.database_id, detail.database_name),
+          mapAgentSession(
+            item,
+            workspaceId,
+            detail.name,
+            detail.database_id,
+            detail.database_name,
+          ),
         ),
       };
     } catch (error) {
@@ -2609,21 +3008,26 @@ const httpAFSClient: AFSClient = {
 
   async createWorkspace(input: CreateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>(input.databaseId?.trim() ? `/databases/${input.databaseId}/workspaces` : "/workspaces", {
-        method: "POST",
-        body: JSON.stringify({
-          name: input.name,
-          description: input.description,
-          database_id: input.databaseId,
-          database_name: input.databaseName,
-          cloud_account: input.cloudAccount,
-          region: input.region,
-          source: {
-            kind: input.source,
-          },
-          template_slug: input.templateSlug,
-        }),
-      }),
+      await requestJSON<HTTPWorkspaceDetail>(
+        input.databaseId?.trim()
+          ? `/databases/${input.databaseId}/workspaces`
+          : "/workspaces",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: input.name,
+            description: input.description,
+            database_id: input.databaseId,
+            database_name: input.databaseName,
+            cloud_account: input.cloudAccount,
+            region: input.region,
+            source: {
+              kind: input.source,
+            },
+            template_slug: input.templateSlug,
+          }),
+        },
+      ),
     );
   },
 
@@ -2635,43 +3039,55 @@ const httpAFSClient: AFSClient = {
 
   async updateWorkspace(input: UpdateWorkspaceInput) {
     return mapWorkspaceDetail(
-      await requestJSON<HTTPWorkspaceDetail>(workspaceBasePath(input.databaseId, input.workspaceId), {
-        method: "PUT",
-        body: JSON.stringify({
-          name: input.name,
-          description: input.description,
-          database_name: input.databaseName,
-          cloud_account: input.cloudAccount,
-          region: input.region,
-        }),
-      }),
+      await requestJSON<HTTPWorkspaceDetail>(
+        workspaceBasePath(input.databaseId, input.workspaceId),
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            name: input.name,
+            description: input.description,
+            database_name: input.databaseName,
+            cloud_account: input.cloudAccount,
+            region: input.region,
+          }),
+        },
+      ),
     );
   },
 
   async updateWorkspaceFile() {
-    throw new Error("Working-copy editing is not available in the hosted HTTP control plane yet.");
+    throw new Error(
+      "Working-copy editing is not available in the hosted HTTP control plane yet.",
+    );
   },
 
   async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
     return mapWorkspaceVersioningPolicy(
-      await requestJSON<HTTPWorkspaceVersioningPolicy>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`),
+      await requestJSON<HTTPWorkspaceVersioningPolicy>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`,
+      ),
     );
   },
 
-  async updateWorkspaceVersioningPolicy(input: UpdateWorkspaceVersioningPolicyInput) {
+  async updateWorkspaceVersioningPolicy(
+    input: UpdateWorkspaceVersioningPolicyInput,
+  ) {
     return mapWorkspaceVersioningPolicy(
-      await requestJSON<HTTPWorkspaceVersioningPolicy>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`, {
-        method: "PUT",
-        body: JSON.stringify({
-          mode: input.policy.mode,
-          include_globs: input.policy.includeGlobs,
-          exclude_globs: input.policy.excludeGlobs,
-          max_versions_per_file: input.policy.maxVersionsPerFile,
-          max_age_days: input.policy.maxAgeDays,
-          max_total_bytes: input.policy.maxTotalBytes,
-          large_file_cutoff_bytes: input.policy.largeFileCutoffBytes,
-        }),
-      }),
+      await requestJSON<HTTPWorkspaceVersioningPolicy>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/versioning`,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            mode: input.policy.mode,
+            include_globs: input.policy.includeGlobs,
+            exclude_globs: input.policy.excludeGlobs,
+            max_versions_per_file: input.policy.maxVersionsPerFile,
+            max_age_days: input.policy.maxAgeDays,
+            max_total_bytes: input.policy.maxTotalBytes,
+            large_file_cutoff_bytes: input.policy.largeFileCutoffBytes,
+          }),
+        },
+      ),
     );
   },
 
@@ -2688,7 +3104,9 @@ const httpAFSClient: AFSClient = {
       params.set("cursor", input.cursor);
     }
     return mapFileHistoryResponse(
-      await requestJSON<HTTPFileHistoryResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/history?${params.toString()}`),
+      await requestJSON<HTTPFileHistoryResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/files/history?${params.toString()}`,
+      ),
     );
   },
 
@@ -2703,7 +3121,9 @@ const httpAFSClient: AFSClient = {
     }
     try {
       return mapFileVersionContent(
-        await requestJSON<HTTPFileVersionContent>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/version-content?${params.toString()}`),
+        await requestJSON<HTTPFileVersionContent>(
+          `${workspaceBasePath(input.databaseId, input.workspaceId)}/files/version-content?${params.toString()}`,
+        ),
       );
     } catch (error) {
       if (error instanceof HTTPError && error.status === 404) {
@@ -2715,14 +3135,17 @@ const httpAFSClient: AFSClient = {
 
   async diffFileVersions(input: DiffFileVersionsInput) {
     return mapFileVersionDiff(
-      await requestJSON<HTTPFileVersionDiff>(`${workspaceBasePath(input.databaseId, input.workspaceId)}/files/diff`, {
-        method: "POST",
-        body: JSON.stringify({
-          path: input.path,
-          from: mapFileVersionSelector(input.from),
-          to: input.to ? mapFileVersionSelector(input.to) : { ref: "head" },
-        }),
-      }),
+      await requestJSON<HTTPFileVersionDiff>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/files/diff`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            path: input.path,
+            from: mapFileVersionSelector(input.from),
+            to: input.to ? mapFileVersionSelector(input.to) : { ref: "head" },
+          }),
+        },
+      ),
     );
   },
 
@@ -2735,10 +3158,13 @@ const httpAFSClient: AFSClient = {
       body.ordinal = input.ordinal;
     }
     return mapFileVersionRestoreResponse(
-      await requestJSON<HTTPFileVersionRestoreResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:restore-version`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      await requestJSON<HTTPFileVersionRestoreResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}:restore-version`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      ),
     );
   },
 
@@ -2751,30 +3177,44 @@ const httpAFSClient: AFSClient = {
       body.ordinal = input.ordinal;
     }
     return mapFileVersionUndeleteResponse(
-      await requestJSON<HTTPFileVersionUndeleteResponse>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:undelete`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
+      await requestJSON<HTTPFileVersionUndeleteResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}:undelete`,
+        {
+          method: "POST",
+          body: JSON.stringify(body),
+        },
+      ),
     );
   },
 
   async createSavepoint() {
-    throw new Error("Checkpoint creation requires a connected working copy and is not available in the hosted HTTP control plane yet.");
+    throw new Error(
+      "Checkpoint creation requires a connected working copy and is not available in the hosted HTTP control plane yet.",
+    );
   },
 
   async restoreSavepoint(input: RestoreSavepointInput) {
-    await requestJSON<void>(`${workspaceBasePath(input.databaseId, input.workspaceId)}:restore`, {
-      method: "POST",
-      body: JSON.stringify({
-        checkpoint_id: input.savepointId,
-      }),
-    });
+    await requestJSON<void>(
+      `${workspaceBasePath(input.databaseId, input.workspaceId)}:restore`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          checkpoint_id: input.savepointId,
+        }),
+      },
+    );
 
-    return httpAFSClient.getWorkspace(input.databaseId ?? "", input.workspaceId);
+    return httpAFSClient.getWorkspace(
+      input.databaseId ?? "",
+      input.workspaceId,
+    );
   },
 
   async listActivity(databaseId = "", limit = 50) {
-    const response = await httpAFSClient.listActivityPage({ databaseId, limit });
+    const response = await httpAFSClient.listActivityPage({
+      databaseId,
+      limit,
+    });
     return response.items;
   },
 
@@ -2791,15 +3231,21 @@ const httpAFSClient: AFSClient = {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId !== "") {
       const base = `${workspaceBasePath(input.databaseId, workspaceId)}/activity`;
-      const response = await requestJSON<HTTPActivityList>(query ? `${base}?${query}` : base);
+      const response = await requestJSON<HTTPActivityList>(
+        query ? `${base}?${query}` : base,
+      );
       return mapActivityList(response, {
         databaseId: input.databaseId,
       });
     }
     if (databaseId !== "") {
-      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
+      const database = (await httpAFSClient.listDatabases()).find(
+        (item) => item.id === databaseId,
+      );
       const response = await requestJSON<HTTPActivityList>(
-        query ? `/databases/${databaseId}/activity?${query}` : `/databases/${databaseId}/activity`,
+        query
+          ? `/databases/${databaseId}/activity?${query}`
+          : `/databases/${databaseId}/activity`,
       );
       return mapActivityList(response, {
         databaseId,
@@ -2807,7 +3253,9 @@ const httpAFSClient: AFSClient = {
       });
     }
 
-    const response = await requestJSON<HTTPActivityList>(query ? `/activity?${query}` : "/activity");
+    const response = await requestJSON<HTTPActivityList>(
+      query ? `/activity?${query}` : "/activity",
+    );
     return mapActivityList(response);
   },
 
@@ -2817,7 +3265,9 @@ const httpAFSClient: AFSClient = {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId !== "") {
       const base = `${workspaceBasePath(input.databaseId, workspaceId)}/events`;
-      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      const response = await requestJSON<HTTPEventList>(
+        query ? `${base}?${query}` : base,
+      );
       return mapEventList(response, {
         workspaceId,
         databaseId: input.databaseId,
@@ -2826,27 +3276,38 @@ const httpAFSClient: AFSClient = {
 
     const databaseId = input.databaseId?.trim() ?? "";
     if (databaseId !== "") {
-      const database = (await httpAFSClient.listDatabases()).find((item) => item.id === databaseId);
+      const database = (await httpAFSClient.listDatabases()).find(
+        (item) => item.id === databaseId,
+      );
       const base = `/databases/${databaseId}/events`;
-      const response = await requestJSON<HTTPEventList>(query ? `${base}?${query}` : base);
+      const response = await requestJSON<HTTPEventList>(
+        query ? `${base}?${query}` : base,
+      );
       return mapEventList(response, {
         databaseId,
         databaseName: database?.name,
       });
     }
 
-    const response = await requestJSON<HTTPEventList>(query ? `/events?${query}` : "/events");
+    const response = await requestJSON<HTTPEventList>(
+      query ? `/events?${query}` : "/events",
+    );
     return mapEventList(response);
   },
 
-  async listChangelog(input: ListChangelogInput): Promise<AFSChangelogResponse> {
+  async listChangelog(
+    input: ListChangelogInput,
+  ): Promise<AFSChangelogResponse> {
     const workspaceId = input.workspaceId?.trim() ?? "";
     if (workspaceId === "") {
       const params = changelogSearchParams(input);
       const query = params.toString();
       const databaseId = input.databaseId?.trim() ?? "";
-      const base = databaseId === "" ? "/changes" : `/databases/${databaseId}/changes`;
-      const response = await requestJSON<HTTPChangelogResponse>(query ? `${base}?${query}` : base);
+      const base =
+        databaseId === "" ? "/changes" : `/databases/${databaseId}/changes`;
+      const response = await requestJSON<HTTPChangelogResponse>(
+        query ? `${base}?${query}` : base,
+      );
       return {
         entries: response.entries.map((entry) => mapChangelogEntry(entry)),
         nextCursor: response.next_cursor,
@@ -2927,7 +3388,10 @@ const httpAFSClient: AFSClient = {
     } as QuickstartResponse;
   },
 
-  async createOnboardingToken(databaseId: string | undefined, workspaceId: string) {
+  async createOnboardingToken(
+    databaseId: string | undefined,
+    workspaceId: string,
+  ) {
     const response = await requestJSON<HTTPOnboardingTokenResponse>(
       `${workspaceBasePath(databaseId, workspaceId)}/onboarding-token`,
       { method: "POST" },
@@ -2942,12 +3406,16 @@ const httpAFSClient: AFSClient = {
   },
 
   async listAllMCPAccessTokens() {
-    const response = await requestJSON<{ items: HTTPMCPToken[] }>("/mcp-tokens");
+    const response = await requestJSON<{ items: HTTPMCPToken[] }>(
+      "/mcp-tokens",
+    );
     return response.items.map(mapHTTPMCPToken);
   },
 
   async listControlPlaneTokens() {
-    const response = await requestJSON<{ items: HTTPMCPToken[] }>("/mcp-tokens?scope=control-plane");
+    const response = await requestJSON<{ items: HTTPMCPToken[] }>(
+      "/mcp-tokens?scope=control-plane",
+    );
     return response.items.map(mapHTTPMCPToken);
   },
 
@@ -2968,7 +3436,10 @@ const httpAFSClient: AFSClient = {
     });
   },
 
-  async listMCPAccessTokens(databaseId: string | undefined, workspaceId: string) {
+  async listMCPAccessTokens(
+    databaseId: string | undefined,
+    workspaceId: string,
+  ) {
     const response = await requestJSON<{ items: HTTPMCPToken[] }>(
       `${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens`,
     );
@@ -2991,10 +3462,17 @@ const httpAFSClient: AFSClient = {
     return mapHTTPMCPToken(response, { profileFallback: input.profile });
   },
 
-  async revokeMCPAccessToken(databaseId: string | undefined, workspaceId: string, tokenId: string) {
-    await requestJSON<void>(`${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens/${encodeURIComponent(tokenId)}`, {
-      method: "DELETE",
-    });
+  async revokeMCPAccessToken(
+    databaseId: string | undefined,
+    workspaceId: string,
+    tokenId: string,
+  ) {
+    await requestJSON<void>(
+      `${workspaceBasePath(databaseId, workspaceId)}/mcp-tokens/${encodeURIComponent(tokenId)}`,
+      {
+        method: "DELETE",
+      },
+    );
   },
 
   async importLocal(input: ImportLocalInput) {
@@ -3004,15 +3482,20 @@ const httpAFSClient: AFSClient = {
       file_count: number;
       dir_count: number;
       total_bytes: number;
-    }>(input.databaseId?.trim() ? `/databases/${input.databaseId}/workspaces:import-local` : "/workspaces:import-local", {
-      method: "POST",
-      body: JSON.stringify({
-        database_id: input.databaseId,
-        name: input.name,
-        path: input.path,
-        description: input.description,
-      }),
-    });
+    }>(
+      input.databaseId?.trim()
+        ? `/databases/${input.databaseId}/workspaces:import-local`
+        : "/workspaces:import-local",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          database_id: input.databaseId,
+          name: input.name,
+          path: input.path,
+          description: input.description,
+        }),
+      },
+    );
     return {
       workspaceId: response.workspace_id,
       workspace: mapWorkspaceDetail(response.workspace),
@@ -3032,17 +3515,24 @@ const httpAFSClient: AFSClient = {
       authenticated: response.authenticated,
       productMode: response.product_mode === "cloud" ? "cloud" : "self-hosted",
       clerkPublishableKey: response.clerk_publishable_key,
-      user: response.user == null ? undefined : {
-        subject: response.user.subject,
-        name: response.user.name,
-        email: response.user.email,
-        groups: response.user.groups ?? [],
-      },
+      user:
+        response.user == null
+          ? undefined
+          : {
+              subject: response.user.subject,
+              name: response.user.name,
+              email: response.user.email,
+              groups: response.user.groups ?? [],
+            },
     } as AFSAuthConfig;
   },
 
   async getServerVersion() {
-    const response = await requestJSON<{ version: string; commit?: string; build_date?: string }>("/version");
+    const response = await requestJSON<{
+      version: string;
+      commit?: string;
+      build_date?: string;
+    }>("/version");
     return {
       version: response.version,
       commit: response.commit,
@@ -3055,38 +3545,51 @@ const httpAFSClient: AFSClient = {
   },
 
   async resetAccountData() {
-    return mapAccount(await requestJSON<HTTPAccount>("/account/developer/reset", {
-      method: "POST",
-    }));
+    return mapAccount(
+      await requestJSON<HTTPAccount>("/account/developer/reset", {
+        method: "POST",
+      }),
+    );
   },
 
   async deleteAccount() {
-    return mapAccount(await requestJSON<HTTPAccount>("/account", {
-      method: "DELETE",
-    }));
+    return mapAccount(
+      await requestJSON<HTTPAccount>("/account", {
+        method: "DELETE",
+      }),
+    );
   },
 
   async getAdminOverview() {
-    return mapAdminOverview(await requestJSON<HTTPAdminOverview>("/admin/overview"));
+    return mapAdminOverview(
+      await requestJSON<HTTPAdminOverview>("/admin/overview"),
+    );
   },
 
   async listAdminUsers() {
-    const response = await requestJSON<{ items: HTTPAdminUser[] }>("/admin/users");
+    const response = await requestJSON<{ items: HTTPAdminUser[] }>(
+      "/admin/users",
+    );
     return response.items.map(mapAdminUser);
   },
 
   async listAdminDatabases() {
-    const response = await requestJSON<{ items: HTTPDatabase[] }>("/admin/databases");
+    const response = await requestJSON<{ items: HTTPDatabase[] }>(
+      "/admin/databases",
+    );
     return response.items.map(mapDatabase);
   },
 
   async listAdminWorkspaceSummaries() {
-    const response = await requestJSON<{ items: HTTPWorkspaceSummary[] }>("/admin/workspaces");
+    const response = await requestJSON<{ items: HTTPWorkspaceSummary[] }>(
+      "/admin/workspaces",
+    );
     return response.items.map(mapWorkspaceSummary);
   },
 
   async listAdminAgents() {
-    const response = await requestJSON<HTTPWorkspaceSessionList>("/admin/agents");
+    const response =
+      await requestJSON<HTTPWorkspaceSessionList>("/admin/agents");
     return response.items.map((item) =>
       mapAgentSession(
         item,

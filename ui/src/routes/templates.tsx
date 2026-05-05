@@ -6,6 +6,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import styled from "styled-components";
+import { SurfaceCard } from "../components/card-shell";
 import { CreateWorkspaceDialog } from "../features/workspaces/CreateWorkspaceDialog";
 import { findTemplate, templates } from "../features/templates/templates-data";
 import { useWorkspaceSummaries } from "../foundation/hooks/use-afs";
@@ -174,15 +175,12 @@ const Grid = styled.div`
   }
 `;
 
-const Card = styled.button`
+const Card = styled(SurfaceCard).attrs({ as: "button", type: "button" })`
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 18px 18px 16px;
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
   text-align: left;
   cursor: pointer;
   transition:

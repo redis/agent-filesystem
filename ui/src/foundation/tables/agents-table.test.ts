@@ -64,4 +64,48 @@ describe("filterAndSortAgents", () => {
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.sessionId).toBe("sess-payments");
   });
+
+  test("matches readable agent and session names", () => {
+    const namedRows = [
+      buildAgent({
+        sessionId: "sess-auth",
+        agentName: "Rowan Codex",
+        sessionName: "auth refactor",
+      }),
+      buildAgent({
+        sessionId: "sess-orders",
+        agentName: "CI Worker",
+        sessionName: "orders import",
+      }),
+    ];
+
+    expect(filterAndSortAgents(namedRows, "auth refactor", "lastSeenAt", "desc")[0]?.sessionId).toBe("sess-auth");
+    expect(filterAndSortAgents(namedRows, "ci worker", "lastSeenAt", "desc")[0]?.sessionId).toBe("sess-orders");
+  });
+
+  test("sorts by session and agent names", () => {
+    const namedRows = [
+      buildAgent({
+        sessionId: "sess-z",
+        agentName: "Beta Agent",
+        sessionName: "zeta cleanup",
+      }),
+      buildAgent({
+        sessionId: "sess-a",
+        agentName: "Alpha Agent",
+        sessionName: "auth refactor",
+      }),
+    ];
+
+    expect(
+      filterAndSortAgents(namedRows, "", "sessionName", "asc").map(
+        (agent) => agent.sessionId,
+      ),
+    ).toEqual(["sess-a", "sess-z"]);
+    expect(
+      filterAndSortAgents(namedRows, "", "agentName", "desc").map(
+        (agent) => agent.sessionId,
+      ),
+    ).toEqual(["sess-z", "sess-a"]);
+  });
 });

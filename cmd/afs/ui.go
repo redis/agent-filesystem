@@ -289,6 +289,17 @@ type outputRow struct {
 	NoTruncate bool
 }
 
+type plainTableOptions struct {
+	NoTruncateColumns map[int]bool
+}
+
+func (o plainTableOptions) noTruncateColumn(index int) bool {
+	if len(o.NoTruncateColumns) == 0 {
+		return false
+	}
+	return o.NoTruncateColumns[index]
+}
+
 func printSection(title string, rows []outputRow) {
 	fmt.Printf("\n")
 
@@ -332,6 +343,10 @@ func printSection(title string, rows []outputRow) {
 }
 
 func printPlainTable(headers []string, rows [][]string) {
+	printPlainTableWithOptions(headers, rows, plainTableOptions{})
+}
+
+func printPlainTableWithOptions(headers []string, rows [][]string, opts plainTableOptions) {
 	widths := make([]int, len(headers))
 	for i, header := range headers {
 		widths[i] = runeWidth(header)
@@ -346,13 +361,13 @@ func printPlainTable(headers []string, rows [][]string) {
 			}
 		}
 	}
-	printPlainTableRow(headers, widths)
+	printPlainTableRow(headers, widths, opts)
 	for _, row := range rows {
-		printPlainTableRow(row, widths)
+		printPlainTableRow(row, widths, opts)
 	}
 }
 
-func printPlainTableRow(cols []string, widths []int) {
+func printPlainTableRow(cols []string, widths []int, opts plainTableOptions) {
 	used := 0
 	for i, width := range widths {
 		value := ""
@@ -368,7 +383,9 @@ func printPlainTableRow(cols []string, widths []int) {
 			if remaining < 1 {
 				remaining = 1
 			}
-			value = fitDisplayText(value, remaining)
+			if !opts.noTruncateColumn(i) {
+				value = fitDisplayText(value, remaining)
+			}
 			fmt.Print(value)
 			used += runeWidth(value)
 			continue

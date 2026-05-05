@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -39,7 +40,10 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 	if off >= data.Size {
 		return []byte{}, nil
 	}
-	if data.ContentRef != "ext" {
+	if data.ContentRef == rediscontent.RefArray {
+		return rediscontent.ReadRange(ctx, c.rdb, c.keys.content(data.ID), rediscontent.RefArray, data.Size, off, size)
+	}
+	if data.ContentRef != rediscontent.RefExternal {
 		content, err := c.loadContentExternal(ctx, data.ID, data.ContentRef)
 		if err != nil {
 			return nil, err
@@ -98,7 +102,7 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	if snapErr != nil {
 		return snapErr
 	}
-	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
+	if err := c.ensurePreferredContentForRangeIO(ctx, data); err != nil {
 		return err
 	}
 
@@ -115,7 +119,9 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	data.Size = newSize
 	data.MtimeMs = now
 	data.AtimeMs = now
-	data.ContentRef = "ext"
+	if data.ContentRef == "" {
+		data.ContentRef = rediscontent.RefExternal
+	}
 
 	fields := c.inodeFields(data, false)
 	if path != "" {
@@ -137,6 +143,35 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 	}
 
 	var searchFields map[string]interface{}
+	if data.ContentRef == rediscontent.RefArray {
+		if err := rediscontent.WriteRange(ctx, c.rdb, c.keys.content(data.ID), off, payload); err != nil {
+			return err
+		}
+		if newSize <= fileSearchMaxIndexedBytes {
+			content, err := rediscontent.Load(ctx, c.rdb, c.keys.content(data.ID), rediscontent.RefArray, newSize)
+			if err != nil {
+				return err
+			}
+			searchFields = fileSearchIndexFields(string(content))
+		} else {
+			searchFields = map[string]interface{}{
+				"search_state":  fileSearchStateLarge,
+				"grep_grams_ci": "",
+			}
+		}
+		if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	if newSize <= fileSearchMaxIndexedBytes {
 		before := ""
 		if oldSize > 0 {
@@ -220,7 +255,7 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	if snapErr != nil {
 		return snapErr
 	}
-	if err := c.ensureExternalContentForRangeIO(ctx, data); err != nil {
+	if err := c.ensurePreferredContentForRangeIO(ctx, data); err != nil {
 		return err
 	}
 
@@ -230,7 +265,9 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	now := nowMs()
 	data.MtimeMs = now
 	data.AtimeMs = now
-	data.ContentRef = "ext"
+	if data.ContentRef == "" {
+		data.ContentRef = rediscontent.RefExternal
+	}
 
 	fields := c.inodeFields(data, false)
 	if path != "" {
@@ -252,6 +289,35 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	}
 
 	var searchFields map[string]interface{}
+	if data.ContentRef == rediscontent.RefArray {
+		if err := rediscontent.Truncate(ctx, c.rdb, c.keys.content(data.ID), oldSize, size); err != nil {
+			return err
+		}
+		if size <= fileSearchMaxIndexedBytes {
+			content, err := rediscontent.Load(ctx, c.rdb, c.keys.content(data.ID), rediscontent.RefArray, size)
+			if err != nil {
+				return err
+			}
+			searchFields = fileSearchIndexFields(string(content))
+		} else {
+			searchFields = map[string]interface{}{
+				"search_state":  fileSearchStateLarge,
+				"grep_grams_ci": "",
+			}
+		}
+		if err := c.finishRangeWrite(ctx, data, path, mergeFieldMaps(fields, searchFields), delta); err != nil {
+			return err
+		}
+		afterSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
+	}
+
 	switch {
 	case size < oldSize:
 		truncated := ""
@@ -325,24 +391,31 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 	return nil
 }
 
-func (c *nativeClient) ensureExternalContentForRangeIO(ctx context.Context, inode *inodeData) error {
-	if inode == nil || inode.Type != "file" || inode.ContentRef == "ext" {
+func (c *nativeClient) ensurePreferredContentForRangeIO(ctx context.Context, inode *inodeData) error {
+	if inode == nil || inode.Type != "file" {
 		return nil
 	}
-	content, err := c.rdb.HGet(ctx, c.keys.inode(inode.ID), "content").Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
+	preferredRef, err := c.preferredContentRef(ctx)
+	if err != nil {
+		return err
+	}
+	if inode.ContentRef == preferredRef {
+		return nil
+	}
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
+	if err != nil {
 		return err
 	}
 	pipe := c.rdb.Pipeline()
-	pipe.Set(ctx, c.keys.content(inode.ID), content, 0)
+	rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), preferredRef, []byte(content))
 	pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(map[string]interface{}{
-		"content_ref": "ext",
+		"content_ref": preferredRef,
 	}, fileSearchIndexFields(content)))
 	pipe.HDel(ctx, c.keys.inode(inode.ID), "content")
 	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
-	inode.ContentRef = "ext"
+	inode.ContentRef = preferredRef
 	return nil
 }
 

@@ -3,6 +3,7 @@ import { Button, Loader } from "@redis-ui/components";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
+import { SurfaceCard } from "../components/card-shell";
 import { afsApi } from "../foundation/api/afs";
 import { useAuthSession } from "../foundation/auth-context";
 import { shouldEnableConnectCLIQueries } from "../foundation/connect-cli";
@@ -267,12 +268,9 @@ const PageShell = styled.div`
   padding: 32px 0 48px;
 `;
 
-const ConnectCard = styled.section`
+const ConnectCard = styled(SurfaceCard).attrs({ as: "section" })`
   width: min(760px, 100%);
-  background: linear-gradient(180deg, rgba(255, 252, 244, 0.96), rgba(250, 245, 232, 0.96));
   border: 1px solid rgba(161, 134, 70, 0.18);
-  border-radius: 28px;
-  box-shadow: 0 24px 60px rgba(74, 56, 22, 0.1);
   padding: 32px;
 `;
 

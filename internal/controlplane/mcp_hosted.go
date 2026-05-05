@@ -123,6 +123,9 @@ func hostedMCPProviderForRequest(ctx context.Context, manager *DatabaseManager, 
 	}
 	sessionInput := createWorkspaceSessionRequest{
 		AgentID:         strings.TrimSpace(r.Header.Get(AgentIDHeader)),
+		AgentName:       strings.TrimSpace(r.Header.Get("X-AFS-Agent-Name")),
+		SessionName:     strings.TrimSpace(r.Header.Get("X-AFS-Session-Name")),
+		Label:           strings.TrimSpace(r.Header.Get("X-AFS-Label")),
 		ClientKind:      firstNonEmpty(strings.TrimSpace(r.Header.Get("X-AFS-Client-Kind")), "mcp"),
 		AFSVersion:      strings.TrimSpace(r.Header.Get("X-AFS-AFS-Version")),
 		Hostname:        strings.TrimSpace(r.Header.Get("X-AFS-Hostname")),

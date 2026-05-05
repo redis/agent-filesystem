@@ -13,6 +13,9 @@ import (
 // profile. All fields are best-effort: if the server is unreachable or the
 // relevant INFO line is missing, the field is left zero.
 type RedisStats struct {
+	// Server
+	RedisVersion string `json:"redis_version,omitempty"`
+
 	// Memory
 	UsedMemoryBytes int64   `json:"used_memory_bytes"`
 	MaxMemoryBytes  int64   `json:"max_memory_bytes"` // 0 = no limit configured
@@ -33,7 +36,7 @@ type RedisStats struct {
 // CollectRedisStats issues a single INFO + DBSIZE round-trip and returns the
 // parsed snapshot. Called by the background poller in DatabaseManager.
 func (s *Store) CollectRedisStats(ctx context.Context) (RedisStats, error) {
-	raw, err := s.rdb.Info(ctx, "memory", "clients", "stats").Result()
+	raw, err := s.rdb.Info(ctx, "server", "memory", "clients", "stats").Result()
 	if err != nil {
 		return RedisStats{}, fmt.Errorf("redis INFO: %w", err)
 	}
@@ -71,6 +74,8 @@ func parseRedisInfo(raw string) RedisStats {
 		}
 
 		switch key {
+		case "redis_version":
+			stats.RedisVersion = strings.TrimSpace(value)
 		case "used_memory":
 			stats.UsedMemoryBytes = parseInt64(value)
 		case "maxmemory":

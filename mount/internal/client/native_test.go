@@ -1,8 +1,10 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"net"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -97,6 +100,46 @@ func setupTestRedis(t *testing.T) (*redis.Client, context.Context) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	return rdb, ctx
+}
+
+func setupArrayRedisFromEnv(t *testing.T) (*redis.Client, context.Context) {
+	t.Helper()
+
+	addr := strings.TrimSpace(os.Getenv("AFS_TEST_ARRAY_REDIS_ADDR"))
+	if addr == "" {
+		t.Skip("set AFS_TEST_ARRAY_REDIS_ADDR to run Redis Array integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	t.Cleanup(cancel)
+
+	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: 15})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := rdb.Ping(ctx).Err(); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("array redis at %s did not become ready", addr)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	supported, err := rediscontent.SupportsArrays(ctx, rdb)
+	if err != nil {
+		t.Fatalf("SupportsArrays() returned error: %v", err)
+	}
+	if !supported {
+		t.Skipf("redis at %s does not support arrays", addr)
+	}
+	if err := rdb.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("FlushDB() returned error: %v", err)
+	}
 	return rdb, ctx
 }
 
@@ -355,6 +398,158 @@ func TestCanonicalInodeStorageFormat(t *testing.T) {
 	}
 	if nextInode != inodeID {
 		t.Fatalf("expected next inode counter to be %s, got %q", inodeID, nextInode)
+	}
+}
+
+func TestArrayBackendPreferredWhenAvailable(t *testing.T) {
+	rdb, ctx := setupArrayRedisFromEnv(t)
+	c := New(rdb, "array-preferred")
+
+	if err := c.Echo(ctx, "/hello.txt", []byte("world")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	st, err := c.Stat(ctx, "/hello.txt")
+	if err != nil {
+		t.Fatalf("Stat() returned error: %v", err)
+	}
+	if st == nil {
+		t.Fatal("expected stat for /hello.txt")
+	}
+
+	inodeID := strconv.FormatUint(st.Inode, 10)
+	inodeKey := "afs:{array-preferred}:inode:" + inodeID
+	contentRef, err := rdb.HGet(ctx, inodeKey, "content_ref").Result()
+	if err != nil {
+		t.Fatalf("HGet(content_ref) returned error: %v", err)
+	}
+	if contentRef != rediscontent.RefArray {
+		t.Fatalf("content_ref = %q, want %q", contentRef, rediscontent.RefArray)
+	}
+
+	contentKey := "afs:{array-preferred}:content:" + inodeID
+	length, err := rdb.Do(ctx, "ARLEN", contentKey).Int64()
+	if err != nil {
+		t.Fatalf("ARLEN(%s) returned error: %v", contentKey, err)
+	}
+	if length != 1 {
+		t.Fatalf("ARLEN(%s) = %d, want 1", contentKey, length)
+	}
+
+	data, err := c.Cat(ctx, "/hello.txt")
+	if err != nil {
+		t.Fatalf("Cat() returned error: %v", err)
+	}
+	if string(data) != "world" {
+		t.Fatalf("Cat() = %q, want %q", string(data), "world")
+	}
+}
+
+func TestArrayRangeWriteAndTruncate(t *testing.T) {
+	rdb, ctx := setupArrayRedisFromEnv(t)
+	c := New(rdb, "array-range")
+
+	base := bytes.Repeat([]byte("a"), rediscontent.ArrayChunkBytes+2)
+	if err := c.Echo(ctx, "/range.bin", base); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	st, err := c.Stat(ctx, "/range.bin")
+	if err != nil {
+		t.Fatalf("Stat() returned error: %v", err)
+	}
+	if st == nil {
+		t.Fatal("expected stat for /range.bin")
+	}
+
+	if err := c.WriteInodeAtPath(ctx, st.Inode, "/range.bin", []byte("WXYZ"), int64(rediscontent.ArrayChunkBytes-1)); err != nil {
+		t.Fatalf("WriteInodeAtPath() returned error: %v", err)
+	}
+	window, err := c.ReadInodeAt(ctx, st.Inode, int64(rediscontent.ArrayChunkBytes-3), 6)
+	if err != nil {
+		t.Fatalf("ReadInodeAt() returned error: %v", err)
+	}
+	if string(window) != "aaWXYZ" {
+		t.Fatalf("ReadInodeAt() = %q, want %q", string(window), "aaWXYZ")
+	}
+
+	if err := c.TruncateInodeAtPath(ctx, st.Inode, "/range.bin", int64(rediscontent.ArrayChunkBytes)); err != nil {
+		t.Fatalf("TruncateInodeAtPath(shrink) returned error: %v", err)
+	}
+	data, err := c.Cat(ctx, "/range.bin")
+	if err != nil {
+		t.Fatalf("Cat(shrink) returned error: %v", err)
+	}
+	if len(data) != rediscontent.ArrayChunkBytes {
+		t.Fatalf("len(Cat(shrink)) = %d, want %d", len(data), rediscontent.ArrayChunkBytes)
+	}
+	if data[len(data)-1] != 'W' {
+		t.Fatalf("last byte after shrink = %q, want %q", data[len(data)-1], 'W')
+	}
+
+	if err := c.TruncateInodeAtPath(ctx, st.Inode, "/range.bin", int64(rediscontent.ArrayChunkBytes+2)); err != nil {
+		t.Fatalf("TruncateInodeAtPath(grow) returned error: %v", err)
+	}
+	data, err = c.Cat(ctx, "/range.bin")
+	if err != nil {
+		t.Fatalf("Cat(grow) returned error: %v", err)
+	}
+	if len(data) != rediscontent.ArrayChunkBytes+2 {
+		t.Fatalf("len(Cat(grow)) = %d, want %d", len(data), rediscontent.ArrayChunkBytes+2)
+	}
+	if data[rediscontent.ArrayChunkBytes] != 0 || data[rediscontent.ArrayChunkBytes+1] != 0 {
+		t.Fatalf("grown suffix bytes = %v, want zero fill", data[rediscontent.ArrayChunkBytes:])
+	}
+}
+
+func TestArrayWriteChunksAndGrepPrefilter(t *testing.T) {
+	rdb, ctx := setupArrayRedisFromEnv(t)
+	c := NewWithCache(rdb, "array-grep", time.Hour)
+
+	chunkSize := 1024
+	initial := bytes.Repeat([]byte("a"), chunkSize*3)
+	if err := c.Echo(ctx, "/sync.txt", initial); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+
+	updatedChunk := bytes.Repeat([]byte("x"), chunkSize)
+	copy(updatedChunk, []byte("needle-line"))
+	if err := c.WriteChunks(ctx, "/sync.txt", map[int][]byte{1: updatedChunk}, chunkSize, int64(len(initial)), nil); err != nil {
+		t.Fatalf("WriteChunks() returned error: %v", err)
+	}
+
+	readBack, err := c.ReadChunks(ctx, "/sync.txt", []int{1}, chunkSize)
+	if err != nil {
+		t.Fatalf("ReadChunks() returned error: %v", err)
+	}
+	if got := string(readBack[1][:11]); got != "needle-line" {
+		t.Fatalf("ReadChunks()[1] prefix = %q, want %q", got, "needle-line")
+	}
+
+	var argrepCalls atomic.Int64
+	rdb.AddHook(&commandCountHook{
+		track: func(cmd redis.Cmder) {
+			args := cmd.Args()
+			if len(args) == 0 {
+				return
+			}
+			name, ok := args[0].(string)
+			if ok && strings.EqualFold(name, "argrep") {
+				argrepCalls.Add(1)
+			}
+		},
+	})
+
+	matches, err := c.Grep(ctx, "/sync.txt", "*needle*", false)
+	if err != nil {
+		t.Fatalf("Grep() returned error: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("len(Grep()) = %d, want 1", len(matches))
+	}
+	if !strings.Contains(matches[0].Line, "needle") {
+		t.Fatalf("Grep() line = %q, want literal needle match", matches[0].Line)
+	}
+	if argrepCalls.Load() == 0 {
+		t.Fatal("expected Grep() to issue at least one ARGREP prefilter command")
 	}
 }
 

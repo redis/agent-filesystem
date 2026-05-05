@@ -19,6 +19,7 @@ import {
   SectionHeader,
   SectionTitle,
 } from "../components/afs-kit";
+import { SurfaceCard } from "../components/card-shell";
 import { useAuthSession } from "../foundation/auth-context";
 import { accountQueryOptions, useAccount, useDeleteAccountMutation, useResetAccountDataMutation } from "../foundation/hooks/use-afs";
 import { queryClient } from "../foundation/query-client";
@@ -344,10 +345,7 @@ const InfoGrid = styled.div`
   }
 `;
 
-const InfoCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 18px;
-  background: var(--afs-panel);
+const InfoCard = styled(SurfaceCard)`
   padding: 18px 20px;
   display: grid;
   gap: 8px;
@@ -376,10 +374,7 @@ const Meta = styled.span`
   line-height: 1.5;
 `;
 
-const ActionCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 18px;
-  background: var(--afs-panel);
+const ActionCard = styled(SurfaceCard)`
   padding: 20px;
   display: grid;
   gap: 18px;

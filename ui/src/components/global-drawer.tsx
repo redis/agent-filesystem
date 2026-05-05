@@ -86,7 +86,7 @@ export function HelpButton() {
     }
   }
 
-  const hint = pageHelp ? pageHelp.title : "Help";
+  const hint = pageHelp ? pageHelp.title : "Getting Started";
 
   return (
     <HelpButtonRoot

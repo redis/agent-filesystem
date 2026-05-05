@@ -17,23 +17,17 @@ truth into the relevant current doc and remove it from this file.
   are not reachable from AFS Cloud.
 - Add cloud-connected FUSE/NFS mount mode if demand justifies it.
 
-## Redis Array Storage
+## Redis Array Benchmarks
 
-AFS should use Redis Array as the native live-root file-content backend when the
-connected Redis database supports the Array command family.
+Redis Array is now an implemented content backend. The remaining follow-up work
+is measurement, not basic enablement.
 
 Open implementation slices:
 
-- capability detection and rollout guardrails
-- Array-backed content reads/writes/truncation
-- mixed `ext` and Array-backed workspace support
-- sync integration for dirty ranges
-- `ARGREP` integration where it preserves CLI grep semantics
-- benchmarks for wire traffic, Redis memory, server work, local hashing, and
-  grep latency
-
-Current Redis databases without Array support must keep the existing external
-string-key backend unchanged.
+- compare `ext` versus `array` wire bytes and command counts under sync churn
+- compare Redis memory and server work per logical MiB
+- measure `ARGREP` prefilter impact on grep latency and false-positive rates
+- capture durable benchmark summaries in `docs/internals/performance.md`
 
 ## Versioned Filesystem
 

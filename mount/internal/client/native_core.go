@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/mount/internal/cache"
 	"github.com/redis/go-redis/v9"
 )
@@ -75,7 +76,7 @@ type inodeData struct {
 	AtimeMs    int64
 	Target     string
 	Content    string
-	ContentRef string // "ext" means content lives in afs:{fs}:content:{id}
+	ContentRef string // "ext"/"array" use afs:{fs}:content:{id}; empty means legacy inline content
 }
 
 func newNativeClient(rdb *redis.Client, key string, observer MutationObserver) Client {
@@ -847,9 +848,6 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	if inode.ContentRef == "" {
-		inode.ContentRef = "ext"
-	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -1005,9 +1003,6 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	if inode.ContentRef == "" {
-		inode.ContentRef = "ext"
-	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -1062,10 +1057,6 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 	now := nowMs()
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	// Ensure new writes use external content storage.
-	if inode.ContentRef == "" {
-		inode.ContentRef = "ext"
-	}
 	if err := c.saveInode(ctx, resolved, inode); err != nil {
 		return err
 	}
@@ -1165,8 +1156,88 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 	if snapErr != nil {
 		return snapErr
 	}
-	if inode.ContentRef != "ext" {
-		// Migrate to external content first.
+
+	preferredRef, err := c.preferredContentRef(ctx)
+	if err != nil {
+		return err
+	}
+	if preferredRef == rediscontent.RefArray {
+		if inode.ContentRef != rediscontent.RefArray {
+			content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
+			if err != nil {
+				return err
+			}
+			pipe := c.rdb.Pipeline()
+			rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), rediscontent.RefArray, []byte(content))
+			if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+				return err
+			}
+		}
+		dirty := make([]int, 0, len(chunks))
+		for idx := range chunks {
+			dirty = append(dirty, idx)
+		}
+		sort.Ints(dirty)
+		for _, idx := range dirty {
+			offset := int64(idx) * int64(chunkSize)
+			if err := rediscontent.WriteRange(ctx, c.rdb, c.keys.content(inode.ID), offset, chunks[idx]); err != nil {
+				return err
+			}
+		}
+		if newSize < inode.Size {
+			if err := rediscontent.Truncate(ctx, c.rdb, c.keys.content(inode.ID), inode.Size, newSize); err != nil {
+				return err
+			}
+		}
+		now := nowMs()
+		hashJSON, _ := encodeChunkHashes(hashes)
+		delta := newSize - inode.Size
+		searchFields := map[string]interface{}{
+			"search_state":  fileSearchStateLarge,
+			"grep_grams_ci": "",
+		}
+		if newSize <= fileSearchMaxIndexedBytes {
+			content, err := rediscontent.Load(ctx, c.rdb, c.keys.content(inode.ID), rediscontent.RefArray, newSize)
+			if err != nil {
+				return err
+			}
+			searchFields = fileSearchIndexFields(string(content))
+		}
+		metaPipe := c.rdb.Pipeline()
+		metaPipe.HSet(ctx, c.keys.inode(inode.ID),
+			"size", newSize,
+			"mtime_ms", now,
+			"atime_ms", now,
+			"content_ref", rediscontent.RefArray,
+			"chunk_size", chunkSize,
+			"chunk_hashes", hashJSON,
+		)
+		metaPipe.HSet(ctx, c.keys.inode(inode.ID), searchFields)
+		if delta != 0 {
+			metaPipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
+		}
+		metaPipe.Set(ctx, c.keys.rootDirty(), "1", 0)
+		if _, err := metaPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+
+		c.invalidateInode(ctx, resolved)
+		inode.Size = newSize
+		inode.MtimeMs = now
+		inode.AtimeMs = now
+		inode.ContentRef = rediscontent.RefArray
+		afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
+		if snapErr != nil {
+			return snapErr
+		}
+		if err := c.recordVersionMutation(ctx, beforeSnapshot, afterSnapshot); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if inode.ContentRef != rediscontent.RefExternal {
+		// Migrate to external string content first.
 		content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 		if err != nil {
 			return err
@@ -1221,7 +1292,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 		"size", newSize,
 		"mtime_ms", now,
 		"atime_ms", now,
-		"content_ref", "ext",
+		"content_ref", rediscontent.RefExternal,
 		"chunk_size", chunkSize,
 		"chunk_hashes", hashJSON,
 	)
@@ -1238,7 +1309,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 	inode.Size = newSize
 	inode.MtimeMs = now
 	inode.AtimeMs = now
-	inode.ContentRef = "ext"
+	inode.ContentRef = rediscontent.RefExternal
 	afterSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
 	if snapErr != nil {
 		return snapErr
@@ -1258,6 +1329,18 @@ func (c *nativeClient) ReadChunks(ctx context.Context, p string, indices []int, 
 	}
 	if inode.Type != "file" {
 		return nil, errors.New("not a file")
+	}
+	if inode.ContentRef == rediscontent.RefArray {
+		result := make(map[int][]byte, len(indices))
+		for _, idx := range indices {
+			offset := int64(idx) * int64(chunkSize)
+			chunk, err := rediscontent.ReadRange(ctx, c.rdb, c.keys.content(inode.ID), rediscontent.RefArray, inode.Size, offset, chunkSize)
+			if err != nil {
+				return nil, err
+			}
+			result[idx] = chunk
+		}
+		return result, nil
 	}
 
 	contentKey := c.keys.content(inode.ID)

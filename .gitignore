@@ -8,8 +8,10 @@ sandbox/sandbox
 sandbox/sandbox-cli
 *.rdb
 afs.config.json
+afs.config.json.backup
 afs.databases.json
 afs.catalog.sqlite*
+module/
 ui/.tanstack/
 .claude/
 

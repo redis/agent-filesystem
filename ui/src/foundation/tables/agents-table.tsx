@@ -8,6 +8,7 @@ import type { AFSAgentSession, AFSWorkspaceSummary } from "../types/afs";
 import * as S from "./workspace-table.styles";
 import styled, { keyframes, css } from "styled-components";
 import { BotIcon } from "../../components/lucide-icons";
+import { SurfaceCard } from "../../components/card-shell";
 import { LiveTopologyCard } from "../../components/live-topology-card";
 import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
 import type { AgentSortField } from "./agents-table-utils";
@@ -57,6 +58,32 @@ function displayMountPath(path: string): string {
   return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
 }
 
+function displayAgentName(agent: AFSAgentSession): string {
+  return (
+    agent.agentName?.trim() ||
+    (!agent.sessionName?.trim() ? agent.label?.trim() : "") ||
+    agent.agentId?.trim() ||
+    ""
+  );
+}
+
+function displaySessionName(agent: AFSAgentSession): string {
+  const sessionName = agent.sessionName?.trim();
+  if (sessionName) return sessionName;
+  const label = agent.label?.trim();
+  const agentName = agent.agentName?.trim();
+  if (label && agentName && label !== agentName) return label;
+  return "";
+}
+
+function displaySessionTitle(agent: AFSAgentSession): string {
+  return displaySessionName(agent) || agent.sessionId.trim() || "session";
+}
+
+function displaySystemName(agent: AFSAgentSession): string {
+  return agent.hostname.trim() || "unknown host";
+}
+
 /** Hook that ticks every second so uptime counters stay live. */
 function useTick(intervalMs = 1000) {
   const [, setTick] = useState(0);
@@ -89,7 +116,7 @@ const ActiveDot = styled.span<{ $active: boolean }>`
     `}
 `;
 
-const SystemNameText = styled.span`
+const TablePrimaryText = styled.span`
   flex: 1 1 auto;
   min-width: 0;
   color: var(--afs-ink, #18181b);
@@ -101,7 +128,7 @@ const SystemNameText = styled.span`
   white-space: nowrap;
 `;
 
-const AgentNameText = styled.span`
+const TableSecondaryText = styled.span`
   display: block;
   min-width: 0;
   color: var(--afs-muted, #71717a);
@@ -152,15 +179,13 @@ const CardGrid = styled.div`
   grid-template-columns: repeat(auto-fill, minmax(max(25%, 300px), 1fr));
 `;
 
-const AgentCard = styled.button<{ $active: boolean }>`
+const AgentCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $active: boolean }>`
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 22px;
   border: 1px solid var(--afs-line, #e4e4e7);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
   text-align: left;
   cursor: pointer;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -352,7 +377,11 @@ export function AgentDetailDialog({
           </DetailField>
           <DetailField>
             <DetailLabel>Agent Name</DetailLabel>
-            <DetailValue>{agent.label?.trim() || "Not set"}</DetailValue>
+            <DetailValue>{displayAgentName(agent) || "Not set"}</DetailValue>
+          </DetailField>
+          <DetailField>
+            <DetailLabel>Session Name</DetailLabel>
+            <DetailValue>{displaySessionName(agent) || "Not set"}</DetailValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Agent ID</DetailLabel>
@@ -439,17 +468,14 @@ export function AgentsTable({
     () =>
       [
         {
-          accessorKey: "hostname",
-          header: "Name",
-          size: 260,
+          accessorKey: "sessionName",
+          header: "Session",
+          size: 240,
           enableSorting: true,
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
-            const systemName = row.original.hostname || "unknown host";
-            const agentName =
-              row.original.label?.trim() ||
-              row.original.agentId?.trim() ||
-              "Agent name not set";
+            const sessionTitle = displaySessionTitle(row.original);
+            const sessionId = row.original.sessionId.trim();
             return (
               <StatusNameCell
                 active={active}
@@ -458,10 +484,46 @@ export function AgentsTable({
                 statusTitle={active ? "Active" : "Inactive"}
               >
                 <StatusNameLine>
-                  <SystemNameText title={systemName}>{systemName}</SystemNameText>
+                  <TablePrimaryText title={sessionTitle}>
+                    {sessionTitle}
+                  </TablePrimaryText>
                 </StatusNameLine>
-                <AgentNameText title={agentName}>{agentName}</AgentNameText>
+                {sessionId && sessionId !== sessionTitle ? (
+                  <TableSecondaryText title={sessionId}>
+                    {sessionId}
+                  </TableSecondaryText>
+                ) : null}
               </StatusNameCell>
+            );
+          },
+        },
+        {
+          accessorKey: "agentName",
+          header: "Agent Name",
+          size: 180,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const agentName = displayAgentName(row.original);
+            return agentName ? (
+              <S.SingleLineText title={agentName}>{agentName}</S.SingleLineText>
+            ) : (
+              <Typography.Body component="span" color="secondary">
+                &mdash;
+              </Typography.Body>
+            );
+          },
+        },
+        {
+          accessorKey: "hostname",
+          header: "System Name",
+          size: 180,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const systemName = displaySystemName(row.original);
+            return (
+              <S.SingleLineText title={systemName}>
+                {systemName}
+              </S.SingleLineText>
             );
           },
         },

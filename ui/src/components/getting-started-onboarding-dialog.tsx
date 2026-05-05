@@ -2,6 +2,7 @@ import { Button } from "@redis-ui/components";
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 import { DialogCloseButton, DialogOverlay } from "./afs-kit";
+import { SurfaceCard } from "./card-shell";
 import { ConnectAgentBanner } from "./connect-agent-banner";
 import { useScopedAgents } from "../foundation/database-scope";
 import { displayWorkspaceName } from "../foundation/workspace-display";
@@ -127,15 +128,12 @@ const SuccessShell = styled.div`
   overflow: auto;
 `;
 
-const SuccessCard = styled.div`
+const SuccessCard = styled(SurfaceCard)`
   position: relative;
-  border-radius: 24px;
+  border-radius: 16px;
   padding: 40px 36px 32px;
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 14%, transparent), transparent 32%),
-    linear-gradient(180deg, var(--afs-panel-strong, var(--afs-panel)), var(--afs-panel));
+  background: var(--afs-panel);
   border: 1px solid color-mix(in srgb, var(--afs-accent) 16%, var(--afs-line));
-  box-shadow: 0 24px 60px rgba(8, 6, 13, 0.12);
 
   @media (max-width: 720px) {
     padding: 28px 22px 24px;

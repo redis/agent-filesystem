@@ -21,6 +21,7 @@ import {
   FormGrid,
   TextInput,
 } from "../../components/afs-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import { getControlPlaneURL } from "../../foundation/api/afs";
 import {
   type AFSDatabaseScopeRecord,
@@ -645,12 +646,11 @@ const ModeStrip = styled.div`
   }
 `;
 
-const ModeCard = styled.button<{ $active?: boolean }>`
+const ModeCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $active?: boolean }>`
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 14px;
-  border-radius: 14px;
   border: 1.5px solid
     ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
   background: ${(p) =>

@@ -37,6 +37,9 @@ func TestManagedWorkspaceSessionRequestUsesManagedMetadata(t *testing.T) {
 	if req.AgentID != "agt_test123" {
 		t.Fatalf("AgentID = %q, want %q", req.AgentID, "agt_test123")
 	}
+	if req.AgentName != "Rowan's Agent" {
+		t.Fatalf("AgentName = %q, want %q", req.AgentName, "Rowan's Agent")
+	}
 	if req.Label != "Rowan's Agent" {
 		t.Fatalf("Label = %q, want %q", req.Label, "Rowan's Agent")
 	}
@@ -48,6 +51,28 @@ func TestManagedWorkspaceSessionRequestUsesManagedMetadata(t *testing.T) {
 	}
 	if req.OperatingSystem == "" {
 		t.Fatal("expected OperatingSystem to be populated")
+	}
+}
+
+func TestManagedWorkspaceSessionRequestUsesSessionNameSeparately(t *testing.T) {
+	t.Helper()
+
+	req := managedWorkspaceSessionRequest(config{
+		ProductMode: productModeSelfHosted,
+		agentSettings: agentSettings{
+			ID:   "agt_test123",
+			Name: "Rowan's Agent",
+		},
+		LocalPath: "/tmp/repo",
+	}, "auth refactor")
+	if req.AgentName != "Rowan's Agent" {
+		t.Fatalf("AgentName = %q, want Rowan's Agent", req.AgentName)
+	}
+	if req.SessionName != "auth refactor" {
+		t.Fatalf("SessionName = %q, want auth refactor", req.SessionName)
+	}
+	if req.Label != "auth refactor" {
+		t.Fatalf("Label = %q, want compatibility label auth refactor", req.Label)
 	}
 }
 

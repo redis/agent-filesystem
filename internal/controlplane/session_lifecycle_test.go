@@ -41,6 +41,8 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 
 	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
 		AgentID:         "agt_devbox",
+		AgentName:       "Rowan's Agent",
+		SessionName:     "auth refactor",
 		ClientKind:      "sync",
 		Hostname:        "devbox",
 		OperatingSystem: "darwin",
@@ -62,6 +64,15 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 	}
 	if sessions.Items[0].AgentID != "agt_devbox" {
 		t.Fatalf("listed agent_id = %q, want %q", sessions.Items[0].AgentID, "agt_devbox")
+	}
+	if sessions.Items[0].AgentName != "Rowan's Agent" {
+		t.Fatalf("listed agent_name = %q, want %q", sessions.Items[0].AgentName, "Rowan's Agent")
+	}
+	if sessions.Items[0].SessionName != "auth refactor" {
+		t.Fatalf("listed session_name = %q, want %q", sessions.Items[0].SessionName, "auth refactor")
+	}
+	if sessions.Items[0].Label != "auth refactor" {
+		t.Fatalf("listed label = %q, want compatibility label auth refactor", sessions.Items[0].Label)
 	}
 	if sessions.Items[0].State != workspaceSessionStateStarting {
 		t.Fatalf("session state = %q, want %q", sessions.Items[0].State, workspaceSessionStateStarting)
@@ -91,6 +102,114 @@ func TestServiceWorkspaceSessionLifecycle(t *testing.T) {
 	}
 	if record.State != workspaceSessionStateStale {
 		t.Fatalf("stored session state = %q, want %q", record.State, workspaceSessionStateStale)
+	}
+}
+
+func TestWorkspaceSessionNamesKeepAgentAndSessionSeparate(t *testing.T) {
+	t.Helper()
+
+	agentName, sessionName, label := workspaceSessionNames(createWorkspaceSessionRequest{
+		AgentName: "Rowan's Agent",
+		Label:     "Rowan's Agent",
+	})
+	if agentName != "Rowan's Agent" {
+		t.Fatalf("agentName = %q, want Rowan's Agent", agentName)
+	}
+	if sessionName != "" {
+		t.Fatalf("sessionName = %q, want empty", sessionName)
+	}
+	if label != "Rowan's Agent" {
+		t.Fatalf("label = %q, want Rowan's Agent", label)
+	}
+
+	agentOnlyRecord := WorkspaceSessionRecord{
+		AgentName: "Rowan's Agent",
+		Label:     "Rowan's Agent",
+	}
+	if got := workspaceSessionRecordAgentName(agentOnlyRecord); got != "Rowan's Agent" {
+		t.Fatalf("workspaceSessionRecordAgentName(agentOnly) = %q, want Rowan's Agent", got)
+	}
+	if got := workspaceSessionRecordSessionName(agentOnlyRecord); got != "" {
+		t.Fatalf("workspaceSessionRecordSessionName(agentOnly) = %q, want empty", got)
+	}
+
+	namedRecord := WorkspaceSessionRecord{
+		AgentName:   "Rowan's Agent",
+		SessionName: "auth refactor",
+		Label:       "auth refactor",
+	}
+	if got := workspaceSessionRecordAgentName(namedRecord); got != "Rowan's Agent" {
+		t.Fatalf("workspaceSessionRecordAgentName(named) = %q, want Rowan's Agent", got)
+	}
+	if got := workspaceSessionRecordSessionName(namedRecord); got != "auth refactor" {
+		t.Fatalf("workspaceSessionRecordSessionName(named) = %q, want auth refactor", got)
+	}
+
+	legacyRecord := WorkspaceSessionRecord{Label: "Codex"}
+	if got := workspaceSessionRecordAgentName(legacyRecord); got != "Codex" {
+		t.Fatalf("workspaceSessionRecordAgentName(legacy) = %q, want Codex", got)
+	}
+	if got := workspaceSessionRecordSessionName(legacyRecord); got != "" {
+		t.Fatalf("workspaceSessionRecordSessionName(legacy) = %q, want empty", got)
+	}
+}
+
+func TestWorkspaceSessionHeartbeatRefreshesAgentMetadata(t *testing.T) {
+	t.Helper()
+
+	service, ctx := newWorkspaceSessionTestService(t)
+	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
+		AgentID:         "agt_devbox",
+		ClientKind:      "sync",
+		Hostname:        "devbox",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
+	}
+
+	heartbeat, err := service.HeartbeatWorkspaceSession(ctx, "repo", session.SessionID, CreateWorkspaceSessionRequest{
+		AgentID:         "agt_devbox",
+		AgentName:       "Office Desktop",
+		ClientKind:      "sync",
+		Hostname:        "devbox",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/repo",
+	})
+	if err != nil {
+		t.Fatalf("HeartbeatWorkspaceSession() returned error: %v", err)
+	}
+	if heartbeat.AgentName != "Office Desktop" {
+		t.Fatalf("heartbeat agent_name = %q, want %q", heartbeat.AgentName, "Office Desktop")
+	}
+	if heartbeat.SessionName != "" {
+		t.Fatalf("heartbeat session_name = %q, want empty", heartbeat.SessionName)
+	}
+	if heartbeat.Label != "Office Desktop" {
+		t.Fatalf("heartbeat label = %q, want %q", heartbeat.Label, "Office Desktop")
+	}
+
+	heartbeat, err = service.HeartbeatWorkspaceSession(ctx, "repo", session.SessionID, CreateWorkspaceSessionRequest{
+		AgentID:         "agt_devbox",
+		AgentName:       "Office Desktop",
+		SessionName:     "auth refactor",
+		ClientKind:      "sync",
+		Hostname:        "devbox",
+		OperatingSystem: "darwin",
+		LocalPath:       "/tmp/repo",
+	})
+	if err != nil {
+		t.Fatalf("HeartbeatWorkspaceSession(named) returned error: %v", err)
+	}
+	if heartbeat.AgentName != "Office Desktop" {
+		t.Fatalf("named heartbeat agent_name = %q, want %q", heartbeat.AgentName, "Office Desktop")
+	}
+	if heartbeat.SessionName != "auth refactor" {
+		t.Fatalf("named heartbeat session_name = %q, want %q", heartbeat.SessionName, "auth refactor")
+	}
+	if heartbeat.Label != "auth refactor" {
+		t.Fatalf("named heartbeat label = %q, want %q", heartbeat.Label, "auth refactor")
 	}
 }
 
@@ -268,6 +387,8 @@ func TestServiceWorkspaceSessionCatalogLifecycle(t *testing.T) {
 	service := NewServiceWithCatalog(cfg, store, catalog, "redis-test", "test")
 	session, err := service.CreateWorkspaceSession(ctx, "repo", CreateWorkspaceSessionRequest{
 		AgentID:         "agt_catalog",
+		AgentName:       "Catalog Agent",
+		SessionName:     "catalog sync",
 		ClientKind:      "sync",
 		Hostname:        "devbox",
 		OperatingSystem: "darwin",
@@ -286,6 +407,12 @@ func TestServiceWorkspaceSessionCatalogLifecycle(t *testing.T) {
 	}
 	if catalogRecord.AgentID != "agt_catalog" {
 		t.Fatalf("catalog agent_id = %q, want %q", catalogRecord.AgentID, "agt_catalog")
+	}
+	if catalogRecord.AgentName != "Catalog Agent" {
+		t.Fatalf("catalog agent_name = %q, want %q", catalogRecord.AgentName, "Catalog Agent")
+	}
+	if catalogRecord.SessionName != "catalog sync" {
+		t.Fatalf("catalog session_name = %q, want %q", catalogRecord.SessionName, "catalog sync")
 	}
 	if catalogRecord.State != workspaceSessionStateStarting {
 		t.Fatalf("catalog state = %q, want %q", catalogRecord.State, workspaceSessionStateStarting)

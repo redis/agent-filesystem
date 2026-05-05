@@ -1,4 +1,4 @@
-import { Button } from "@redis-ui/components";
+import { Button, Select } from "@redis-ui/components";
 import { useEffect, useState } from "react";
 import styled from "styled-components";
 import {
@@ -13,15 +13,24 @@ import {
   SectionTitle,
   TextInput,
 } from "../../components/afs-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import {
   useUpdateWorkspaceVersioningPolicyMutation,
   useWorkspaceVersioningPolicy,
 } from "../../foundation/hooks/use-afs";
-import type { AFSMCPToken, AFSWorkspaceDetail } from "../../foundation/types/afs";
+import type {
+  AFSMCPToken,
+  AFSWorkspaceContentStorage,
+  AFSWorkspaceDetail,
+  AFSWorkspaceSearchIndex,
+} from "../../foundation/types/afs";
 
 type Props = {
   workspace: AFSWorkspaceDetail;
-  onSave: (input: { name: string; description: string }) => void | Promise<void>;
+  onSave: (input: {
+    name: string;
+    description: string;
+  }) => void | Promise<void>;
   isSaving: boolean;
   saveError?: string | null;
   onDelete: () => void;
@@ -40,7 +49,9 @@ export function SettingsTab({
   mcpTokens,
   onOpenMCPConsole,
 }: Props) {
-  const activeTokens = mcpTokens.filter((token) => token.revokedAt == null || token.revokedAt === "");
+  const activeTokens = mcpTokens.filter(
+    (token) => token.revokedAt == null || token.revokedAt === "",
+  );
   const activeToken = activeTokens.at(0);
   const tokenCount = activeTokens.length;
   const versioningQuery = useWorkspaceVersioningPolicy({
@@ -48,7 +59,9 @@ export function SettingsTab({
     workspaceId: workspace.id,
   });
   const updateVersioning = useUpdateWorkspaceVersioningPolicyMutation();
-  const [versioningMode, setVersioningMode] = useState<"off" | "all" | "paths">("off");
+  const [versioningMode, setVersioningMode] = useState<"off" | "all" | "paths">(
+    "off",
+  );
   const [includeGlobsText, setIncludeGlobsText] = useState("");
   const [excludeGlobsText, setExcludeGlobsText] = useState("");
   const [maxVersionsPerFile, setMaxVersionsPerFile] = useState("0");
@@ -89,7 +102,11 @@ export function SettingsTab({
         >
           <Field>
             Workspace name
-            <TextInput name="name" defaultValue={workspace.name} placeholder="customer-portal" />
+            <TextInput
+              name="name"
+              defaultValue={workspace.name}
+              placeholder="customer-portal"
+            />
           </Field>
 
           <Field>
@@ -101,7 +118,9 @@ export function SettingsTab({
             />
           </Field>
 
-          {saveError ? <DialogError role="alert">{saveError}</DialogError> : null}
+          {saveError ? (
+            <DialogError role="alert">{saveError}</DialogError>
+          ) : null}
 
           <DialogActions style={{ justifyContent: "flex-end" }}>
             <Button size="medium" type="submit" disabled={isSaving}>
@@ -122,12 +141,41 @@ export function SettingsTab({
               <MetaLabel>Database</MetaLabel>
               <MetaValue>{workspace.databaseName}</MetaValue>
             </MetaRow>
-            <MetaRow>
-              <MetaLabel>Redis key</MetaLabel>
-              <MetaValue>
-                <MonoValue>{workspace.redisKey}</MonoValue>
-              </MetaValue>
-            </MetaRow>
+            {workspace.contentStorage ? (
+              <MetaRow>
+                <MetaLabel>File storage</MetaLabel>
+                <MetaValue>
+                  <StorageSummary>
+                    <StorageBadge $profile={workspace.contentStorage.profile}>
+                      {storageProfileLabel(workspace.contentStorage)}
+                    </StorageBadge>
+                    <StorageText>
+                      {storageProfileDescription(workspace.contentStorage)}
+                    </StorageText>
+                  </StorageSummary>
+                </MetaValue>
+              </MetaRow>
+            ) : null}
+            {workspace.searchIndex ? (
+              <MetaRow>
+                <MetaLabel>Search index</MetaLabel>
+                <MetaValue>
+                  <StorageSummary>
+                    <StatusBadge
+                      $tone={searchIndexTone(workspace.searchIndex)}
+                    >
+                      {searchIndexLabel(workspace.searchIndex)}
+                    </StatusBadge>
+                    <StorageText>
+                      {searchIndexDescription(workspace.searchIndex)}
+                    </StorageText>
+                    {workspace.searchIndex.present ? (
+                      <MonoValue>{workspace.searchIndex.name}</MonoValue>
+                    ) : null}
+                  </StorageSummary>
+                </MetaValue>
+              </MetaRow>
+            ) : null}
             {workspace.mountedPath ? (
               <MetaRow>
                 <MetaLabel>Mounted path</MetaLabel>
@@ -144,8 +192,9 @@ export function SettingsTab({
         </SectionHeader>
 
         <VersioningCopy>
-          The live file tree still shows only the latest workspace state. This policy controls which
-          paths get immutable per-file history behind the scenes and how aggressively old versions are retained.
+          The live file tree still shows only the latest workspace state. This
+          policy controls which paths get immutable per-file history behind the
+          scenes and how aggressively old versions are retained.
         </VersioningCopy>
 
         <FormGrid
@@ -158,22 +207,42 @@ export function SettingsTab({
                 mode: versioningMode,
                 includeGlobs: splitGlobList(includeGlobsText),
                 excludeGlobs: splitGlobList(excludeGlobsText),
-                maxVersionsPerFile: parseWholeNumber(maxVersionsPerFile, "Max versions per file"),
+                maxVersionsPerFile: parseWholeNumber(
+                  maxVersionsPerFile,
+                  "Max versions per file",
+                ),
                 maxAgeDays: parseWholeNumber(maxAgeDays, "Max age (days)"),
-                maxTotalBytes: parseWholeNumber(maxTotalBytes, "Workspace budget (bytes)"),
-                largeFileCutoffBytes: parseWholeNumber(largeFileCutoffBytes, "Large file cutoff (bytes)"),
+                maxTotalBytes: parseWholeNumber(
+                  maxTotalBytes,
+                  "Workspace budget (bytes)",
+                ),
+                largeFileCutoffBytes: parseWholeNumber(
+                  largeFileCutoffBytes,
+                  "Large file cutoff (bytes)",
+                ),
               } as const;
-              void updateVersioning.mutateAsync({
-                databaseId: workspace.databaseId,
-                workspaceId: workspace.id,
-                policy: nextPolicy,
-              }).then(() => {
-                setVersioningNotice("Versioning policy saved.");
-              }).catch((error) => {
-                setVersioningError(error instanceof Error ? error.message : "Unable to save versioning policy.");
-              });
+              void updateVersioning
+                .mutateAsync({
+                  databaseId: workspace.databaseId,
+                  workspaceId: workspace.id,
+                  policy: nextPolicy,
+                })
+                .then(() => {
+                  setVersioningNotice("Versioning policy saved.");
+                })
+                .catch((error) => {
+                  setVersioningError(
+                    error instanceof Error
+                      ? error.message
+                      : "Unable to save versioning policy.",
+                  );
+                });
             } catch (error) {
-              setVersioningError(error instanceof Error ? error.message : "Unable to parse versioning policy.");
+              setVersioningError(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to parse versioning policy.",
+              );
             }
           }}
         >
@@ -181,37 +250,51 @@ export function SettingsTab({
             <ToggleText>
               <strong>Enable file versioning</strong>
               <span>
-                Turning this off keeps the working copy unchanged but stops automatic version capture for future writes.
+                Turning this off keeps the working copy unchanged but stops
+                automatic version capture for future writes.
               </span>
             </ToggleText>
             <ToggleSwitchLabel>
-              <ToggleCheckbox
-                type="checkbox"
-                checked={versioningMode !== "off"}
-                onChange={(event) => {
-                  setVersioningNotice(null);
-                  setVersioningError(null);
-                  setVersioningMode(event.currentTarget.checked ? (versioningMode === "off" ? "all" : versioningMode) : "off");
-                }}
-              />
-              <span>{versioningMode === "off" ? "Off" : "On"}</span>
+              <ToggleSwitch>
+                <ToggleCheckbox
+                  type="checkbox"
+                  checked={versioningMode !== "off"}
+                  onChange={(event) => {
+                    setVersioningNotice(null);
+                    setVersioningError(null);
+                    setVersioningMode(
+                      event.currentTarget.checked
+                        ? versioningMode === "off"
+                          ? "all"
+                          : versioningMode
+                        : "off",
+                    );
+                  }}
+                />
+                <ToggleTrack />
+              </ToggleSwitch>
+              <ToggleState>
+                {versioningMode === "off" ? "Off" : "On"}
+              </ToggleState>
             </ToggleSwitchLabel>
           </ToggleRow>
 
           <TwoFieldGrid>
             <Field>
               Tracking mode
-              <SelectField
-                value={versioningMode}
-                onChange={(event) => {
-                  setVersioningNotice(null);
-                  setVersioningMode(event.currentTarget.value as "off" | "all" | "paths");
-                }}
-              >
-                <option value="off">Off</option>
-                <option value="all">All paths</option>
-                <option value="paths">Matching paths only</option>
-              </SelectField>
+              <SelectFieldWrap>
+                <Select
+                  aria-label="Tracking mode"
+                  id="workspace-versioning-mode"
+                  options={VERSIONING_MODE_OPTIONS}
+                  value={versioningMode}
+                  onChange={(next) => {
+                    setVersioningNotice(null);
+                    setVersioningMode(next as "off" | "all" | "paths");
+                  }}
+                  placeholder="Tracking mode"
+                />
+              </SelectFieldWrap>
             </Field>
 
             <Field>
@@ -255,37 +338,77 @@ export function SettingsTab({
           <RetentionGrid>
             <Field>
               Max versions per file
-              <TextInput value={maxVersionsPerFile} onChange={(event) => setMaxVersionsPerFile(event.currentTarget.value)} inputMode="numeric" />
+              <TextInput
+                value={maxVersionsPerFile}
+                onChange={(event) =>
+                  setMaxVersionsPerFile(event.currentTarget.value)
+                }
+                inputMode="numeric"
+              />
             </Field>
 
             <Field>
               Max age (days)
-              <TextInput value={maxAgeDays} onChange={(event) => setMaxAgeDays(event.currentTarget.value)} inputMode="numeric" />
+              <TextInput
+                value={maxAgeDays}
+                onChange={(event) => setMaxAgeDays(event.currentTarget.value)}
+                inputMode="numeric"
+              />
             </Field>
 
             <Field>
               Workspace budget (bytes)
-              <TextInput value={maxTotalBytes} onChange={(event) => setMaxTotalBytes(event.currentTarget.value)} inputMode="numeric" />
+              <TextInput
+                value={maxTotalBytes}
+                onChange={(event) =>
+                  setMaxTotalBytes(event.currentTarget.value)
+                }
+                inputMode="numeric"
+              />
             </Field>
 
             <Field>
               Large file cutoff (bytes)
-              <TextInput value={largeFileCutoffBytes} onChange={(event) => setLargeFileCutoffBytes(event.currentTarget.value)} inputMode="numeric" />
+              <TextInput
+                value={largeFileCutoffBytes}
+                onChange={(event) =>
+                  setLargeFileCutoffBytes(event.currentTarget.value)
+                }
+                inputMode="numeric"
+              />
             </Field>
           </RetentionGrid>
 
-          {versioningQuery.isLoading ? <VersioningStatus>Loading current versioning policy…</VersioningStatus> : null}
+          {versioningQuery.isLoading ? (
+            <VersioningStatus>
+              Loading current versioning policy…
+            </VersioningStatus>
+          ) : null}
           {versioningQuery.isError ? (
             <DialogError role="alert">
-              {versioningQuery.error instanceof Error ? versioningQuery.error.message : "Unable to load versioning policy."}
+              {versioningQuery.error instanceof Error
+                ? versioningQuery.error.message
+                : "Unable to load versioning policy."}
             </DialogError>
           ) : null}
-          {versioningError ? <DialogError role="alert">{versioningError}</DialogError> : null}
-          {versioningNotice ? <VersioningNotice role="status">{versioningNotice}</VersioningNotice> : null}
+          {versioningError ? (
+            <DialogError role="alert">{versioningError}</DialogError>
+          ) : null}
+          {versioningNotice ? (
+            <VersioningNotice role="status">
+              {versioningNotice}
+            </VersioningNotice>
+          ) : null}
 
           <DialogActions style={{ justifyContent: "flex-end" }}>
-            <Button size="medium" type="submit" disabled={updateVersioning.isPending}>
-              {updateVersioning.isPending ? "Saving..." : "Save versioning policy"}
+            <Button
+              size="medium"
+              type="submit"
+              disabled={updateVersioning.isPending}
+            >
+              {updateVersioning.isPending
+                ? "Saving..."
+                : "Save versioning policy"}
             </Button>
           </DialogActions>
         </FormGrid>
@@ -300,32 +423,51 @@ export function SettingsTab({
         </SectionHeader>
 
         <AccessCopy>
-          MCP setup now lives on the Agents page so you can manage all workspace-scoped access tokens and config snippets in one place. This panel stays focused on the current workspace and shows whether it already has authorized MCP access.
+          MCP setup now lives on the Agents page so you can manage all
+          workspace-scoped access tokens and config snippets in one place. This
+          panel stays focused on the current workspace and shows whether it
+          already has authorized MCP access.
         </AccessCopy>
 
         <MetaTable>
           <tbody>
             <MetaRow>
               <MetaLabel>Authorized tokens</MetaLabel>
-              <MetaValue>{tokenCount === 0 ? "None yet" : `${tokenCount} active token${tokenCount === 1 ? "" : "s"}`}</MetaValue>
+              <MetaValue>
+                {tokenCount === 0
+                  ? "None yet"
+                  : `${tokenCount} active token${tokenCount === 1 ? "" : "s"}`}
+              </MetaValue>
             </MetaRow>
             <MetaRow>
               <MetaLabel>Workspace scope</MetaLabel>
-              <MetaValue>All MCP tokens created from this workspace stay locked to {workspace.name}.</MetaValue>
+              <MetaValue>
+                All MCP tokens created from this workspace stay locked to{" "}
+                {workspace.name}.
+              </MetaValue>
             </MetaRow>
             <MetaRow>
               <MetaLabel>Admin tools</MetaLabel>
-              <MetaValue>Workspace settings no longer mint admin access tokens. Use the access token console for explicit elevated flows.</MetaValue>
+              <MetaValue>
+                Workspace settings no longer mint admin access tokens. Use the
+                access token console for explicit elevated flows.
+              </MetaValue>
             </MetaRow>
             {activeToken ? (
               <>
                 <MetaRow>
                   <MetaLabel>Latest token</MetaLabel>
-                  <MetaValue>{activeToken.name?.trim() || activeToken.id}</MetaValue>
+                  <MetaValue>
+                    {activeToken.name?.trim() || activeToken.id}
+                  </MetaValue>
                 </MetaRow>
                 <MetaRow>
                   <MetaLabel>Last used</MetaLabel>
-                  <MetaValue>{activeToken.lastUsedAt ? formatTimestamp(activeToken.lastUsedAt) : "Never"}</MetaValue>
+                  <MetaValue>
+                    {activeToken.lastUsedAt
+                      ? formatTimestamp(activeToken.lastUsedAt)
+                      : "Never"}
+                  </MetaValue>
                 </MetaRow>
               </>
             ) : null}
@@ -350,8 +492,16 @@ export function SettingsTab({
                     <TokenSubtle>{token.id}</TokenSubtle>
                   </TokenCell>
                   <TokenCell>{formatProfile(token.profile)}</TokenCell>
-                  <TokenCell>{token.lastUsedAt ? formatTimestamp(token.lastUsedAt) : "Never"}</TokenCell>
-                  <TokenCell>{token.expiresAt ? formatTimestamp(token.expiresAt) : "Never"}</TokenCell>
+                  <TokenCell>
+                    {token.lastUsedAt
+                      ? formatTimestamp(token.lastUsedAt)
+                      : "Never"}
+                  </TokenCell>
+                  <TokenCell>
+                    {token.expiresAt
+                      ? formatTimestamp(token.expiresAt)
+                      : "Never"}
+                  </TokenCell>
                 </TokenRow>
               ))}
             </tbody>
@@ -363,37 +513,19 @@ export function SettingsTab({
         <DangerZoneHeader>
           <DangerZoneTitle>Delete workspace</DangerZoneTitle>
           <DangerZoneDesc>
-            Workspaces are deleted from the CLI. Run the command below to
-            permanently remove <strong>{workspace.name}</strong> from the
-            registry.
+            Permanently remove <strong>{workspace.name}</strong> from the
+            workspace registry.
           </DangerZoneDesc>
         </DangerZoneHeader>
-        <CliDeleteRow>
-          <CliDeletePrompt>$</CliDeletePrompt>
-          <CliDeleteCode>afs ws delete {workspace.name}</CliDeleteCode>
-          <CliDeleteCopy
-            type="button"
-            onClick={() => {
-              void navigator.clipboard
-                .writeText(`afs ws delete ${workspace.name}`)
-                .catch(() => undefined);
-            }}
+        <DangerZoneActions>
+          <DeleteWorkspaceButton
+            size="large"
+            disabled={isDeleting}
+            onClick={onDelete}
           >
-            copy
-          </CliDeleteCopy>
-        </CliDeleteRow>
-        <ManualOverride>
-          <ManualOverrideSummary>manual override (browser)</ManualOverrideSummary>
-          <ManualOverrideBody>
-            <ManualOverrideHint>
-              The button below issues a delete request from this browser
-              session. Use only when CLI access isn't available.
-            </ManualOverrideHint>
-            <DeleteWorkspaceButton size="large" disabled={isDeleting} onClick={onDelete}>
-              {isDeleting ? "Deleting..." : "Delete workspace"}
-            </DeleteWorkspaceButton>
-          </ManualOverrideBody>
-        </ManualOverride>
+            {isDeleting ? "Deleting..." : "Delete workspace"}
+          </DeleteWorkspaceButton>
+        </DangerZoneActions>
       </DangerZoneCard>
     </SectionGrid>
   );
@@ -434,6 +566,86 @@ const MetaValue = styled.td`
 const MonoValue = styled.code`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 13px;
+`;
+
+const StorageSummary = styled.div`
+  display: grid;
+  gap: 8px;
+`;
+
+const StorageBadge = styled.span<{
+  $profile: AFSWorkspaceContentStorage["profile"];
+}>`
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: 1px solid
+    ${({ $profile }) =>
+      $profile === "array"
+        ? "rgba(22, 163, 74, 0.24)"
+        : $profile === "mixed"
+          ? "rgba(217, 119, 6, 0.24)"
+          : "var(--afs-line)"};
+  background: ${({ $profile }) =>
+    $profile === "array"
+      ? "rgba(34, 197, 94, 0.08)"
+      : $profile === "mixed"
+        ? "rgba(245, 158, 11, 0.08)"
+        : "var(--afs-panel)"};
+  color: ${({ $profile }) =>
+    $profile === "array"
+      ? "#15803d"
+      : $profile === "mixed"
+        ? "#b45309"
+        : "var(--afs-ink-soft)"};
+`;
+
+const StatusBadge = styled.span<{
+  $tone: "good" | "warn" | "neutral" | "bad";
+}>`
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 6px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid
+    ${({ $tone }) =>
+      $tone === "good"
+        ? "rgba(22, 163, 74, 0.24)"
+        : $tone === "warn"
+          ? "rgba(217, 119, 6, 0.24)"
+          : $tone === "bad"
+            ? "rgba(220, 38, 38, 0.24)"
+            : "var(--afs-line)"};
+  background: ${({ $tone }) =>
+    $tone === "good"
+      ? "rgba(34, 197, 94, 0.08)"
+      : $tone === "warn"
+        ? "rgba(245, 158, 11, 0.08)"
+        : $tone === "bad"
+          ? "rgba(239, 68, 68, 0.08)"
+          : "var(--afs-panel)"};
+  color: ${({ $tone }) =>
+    $tone === "good"
+      ? "#15803d"
+      : $tone === "warn"
+        ? "#b45309"
+        : $tone === "bad"
+          ? "#b91c1c"
+          : "var(--afs-ink-soft)"};
+`;
+
+const StorageText = styled.div`
+  color: var(--afs-muted);
+  font-size: 13px;
+  line-height: 1.55;
 `;
 
 const AccessCopy = styled.p`
@@ -491,9 +703,57 @@ const ToggleSwitchLabel = styled.label`
   font-weight: 700;
 `;
 
+const ToggleSwitch = styled.span`
+  position: relative;
+  display: inline-flex;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+`;
+
 const ToggleCheckbox = styled.input`
-  width: 18px;
-  height: 18px;
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+`;
+
+const ToggleTrack = styled.span`
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--afs-line-strong, #cbd5e1);
+  transition: background 160ms ease;
+  cursor: pointer;
+
+  &::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: white;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    transition: transform 160ms ease;
+  }
+
+  ${ToggleCheckbox}:checked + & {
+    background: var(--afs-focus, #2563eb);
+  }
+
+  ${ToggleCheckbox}:checked + &::after {
+    transform: translateX(16px);
+  }
+
+  ${ToggleCheckbox}:focus-visible + & {
+    box-shadow: 0 0 0 3px var(--afs-focus-soft);
+  }
+`;
+
+const ToggleState = styled.span`
+  min-width: 24px;
 `;
 
 const TwoFieldGrid = styled.div`
@@ -520,13 +780,12 @@ const RetentionGrid = styled.div`
   }
 `;
 
-const SelectField = styled.select`
+const SelectFieldWrap = styled.div`
   width: 100%;
-  border-radius: 16px;
-  border: 1px solid var(--afs-line);
-  background: var(--afs-panel);
-  color: var(--afs-ink);
-  padding: 12px 14px;
+
+  > * {
+    width: 100%;
+  }
 `;
 
 const ScopeSummary = styled.div`
@@ -607,7 +866,7 @@ const TokenSubtle = styled.div`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 `;
 
-const DangerZoneCard = styled.div`
+const DangerZoneCard = styled(SurfaceCard)`
   grid-column: span 12;
   display: flex;
   align-items: center;
@@ -615,7 +874,6 @@ const DangerZoneCard = styled.div`
   gap: 24px;
   padding: 20px 24px;
   border: 1px solid rgba(220, 38, 38, 0.2);
-  border-radius: 16px;
   background: rgba(220, 38, 38, 0.03);
 
   @media (max-width: 720px) {
@@ -628,6 +886,18 @@ const DangerZoneHeader = styled.div`
   display: flex;
   flex-direction: column;
   gap: 4px;
+`;
+
+const DangerZoneActions = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+
+  @media (max-width: 720px) {
+    width: 100%;
+    align-items: flex-start;
+  }
 `;
 
 const DangerZoneTitle = styled.h3`
@@ -660,97 +930,6 @@ const DeleteWorkspaceButton = styled(Button)`
   }
 `;
 
-// CLI hint row inside the danger zone — primary path for delete.
-const CliDeleteRow = styled.div`
-  display: flex;
-  align-items: center;
-  padding: 10px 14px;
-  background: var(--afs-bg-soft);
-  border: 1px solid var(--afs-line);
-  border-radius: 8px;
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
-  font-size: 13px;
-`;
-
-const CliDeletePrompt = styled.span`
-  color: var(--afs-muted);
-  margin-right: 1ch;
-  user-select: none;
-`;
-
-const CliDeleteCode = styled.code`
-  flex: 1;
-  color: var(--afs-ink);
-  white-space: pre;
-  overflow-x: auto;
-`;
-
-const CliDeleteCopy = styled.button`
-  flex: 0 0 auto;
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
-  font-size: 11px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  background: transparent;
-  color: var(--afs-accent);
-  border: 1px solid var(--afs-accent);
-  border-radius: 4px;
-  padding: 3px 9px;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--afs-accent);
-    color: var(--afs-ink-on-accent);
-  }
-`;
-
-// Manual-override disclosure — collapsed by default. The actual destructive
-// button only appears once the user explicitly opens it.
-const ManualOverride = styled.details`
-  margin-top: 12px;
-
-  &[open] > summary {
-    color: var(--afs-ink);
-  }
-`;
-
-const ManualOverrideSummary = styled.summary`
-  cursor: pointer;
-  color: var(--afs-muted);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: lowercase;
-  list-style: none;
-  user-select: none;
-
-  &::-webkit-details-marker {
-    display: none;
-  }
-
-  &::before {
-    content: "▸ ";
-  }
-
-  ${ManualOverride}[open] > &::before {
-    content: "▾ ";
-  }
-`;
-
-const ManualOverrideBody = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 12px;
-`;
-
-const ManualOverrideHint = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 12px;
-  line-height: 1.5;
-`;
-
 function formatProfile(profile: AFSMCPToken["profile"]) {
   switch (profile) {
     case "workspace-ro":
@@ -766,6 +945,96 @@ function formatProfile(profile: AFSMCPToken["profile"]) {
     default:
       return profile;
   }
+}
+
+const VERSIONING_MODE_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "all", label: "All paths" },
+  { value: "paths", label: "Matching paths only" },
+];
+
+function storageProfileLabel(storage: AFSWorkspaceContentStorage) {
+  switch (storage.profile) {
+    case "array":
+      return "Redis Array";
+    case "mixed":
+      return "Mixed backends";
+    case "legacy":
+      return "Legacy strings";
+    default:
+      return "No file content yet";
+  }
+}
+
+function storageProfileDescription(storage: AFSWorkspaceContentStorage) {
+  switch (storage.profile) {
+    case "array":
+      return `All ${storage.fileCount} file${storage.fileCount === 1 ? "" : "s"} use Redis Array content keys.`;
+    case "mixed":
+      return `${storage.arrayFileCount} file${storage.arrayFileCount === 1 ? "" : "s"} use Redis Array and ${storage.legacyFileCount} still use legacy Redis string keys.`;
+    case "legacy":
+      return `All ${storage.fileCount} file${storage.fileCount === 1 ? "" : "s"} use legacy Redis string content keys.`;
+    default:
+      return "This workspace does not have any file content stored yet.";
+  }
+}
+
+function searchIndexTone(
+  index: AFSWorkspaceSearchIndex,
+): "good" | "warn" | "neutral" | "bad" {
+  switch (index.status) {
+    case "ready":
+      return "good";
+    case "building":
+      return "warn";
+    case "error":
+      return "bad";
+    default:
+      return "neutral";
+  }
+}
+
+function searchIndexLabel(index: AFSWorkspaceSearchIndex) {
+  switch (index.status) {
+    case "ready":
+      return "Present";
+    case "building":
+      return "Building";
+    case "missing":
+      return "Not created";
+    case "unavailable":
+      return "Unavailable";
+    case "error":
+      return "Error";
+    default:
+      return "Unknown";
+  }
+}
+
+function searchIndexDescription(index: AFSWorkspaceSearchIndex) {
+  switch (index.status) {
+    case "ready":
+      return `Search index is ready with ${index.documentCount} indexed document${index.documentCount === 1 ? "" : "s"}.`;
+    case "building":
+      return `Search index exists and is ${formatPercent(index.percentIndexed)} indexed.`;
+    case "missing":
+      return "No RediSearch index exists for this workspace yet.";
+    case "unavailable":
+      return "RediSearch is not available on this Redis database.";
+    case "error":
+      return index.error
+        ? `AFS could not inspect this workspace index: ${index.error}`
+        : "AFS could not inspect this workspace index.";
+    default:
+      return "AFS could not determine search index state.";
+  }
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0%";
+  }
+  return `${Math.min(100, Math.round(value * 100))}%`;
 }
 
 function formatTimestamp(value: string) {

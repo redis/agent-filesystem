@@ -1,15 +1,9 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { RedisLogoDarkFullIcon } from "@redis-ui/icons/multicolor";
-import { BookOpen, CloudDownload, GitBranch, LifeBuoy } from "lucide-react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
 import { ThemeModeToggle } from "../components/theme-mode-toggle";
-
-const publicNavItems = [
-  { label: "Docs", path: "/docs", icon: BookOpen },
-  { label: "Downloads", path: "/downloads", icon: CloudDownload },
-  { label: "Agent Guide", path: "/agent-guide", icon: LifeBuoy },
-] as const;
+import { publicNavItems, publicRepoLink } from "./public-navigation";
 
 export function PublicShell({ children }: { children: ReactNode }) {
   const location = useLocation();
@@ -43,9 +37,8 @@ export function PublicShell({ children }: { children: ReactNode }) {
               </PublicNavLink>
             );
           })}
-          <RepoLink href="https://github.com/redis/agent-filesystem" target="_blank" rel="noreferrer">
-            <GitBranch size={15} strokeWidth={1.9} aria-hidden="true" />
-            Repo
+          <RepoLink href={publicRepoLink.href} target="_blank" rel="noreferrer">
+            {publicRepoLink.label}
           </RepoLink>
         </PublicNav>
 

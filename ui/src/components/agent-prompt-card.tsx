@@ -2,6 +2,7 @@ import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
+import { SurfaceCard } from "./card-shell";
 
 type Tone = "primary" | "secondary";
 
@@ -55,12 +56,11 @@ export function AgentPromptCard({
   );
 }
 
-const Card = styled.section<{ $tone: Tone }>`
+const Card = styled(SurfaceCard).attrs({ as: "section" })<{ $tone: Tone }>`
   display: flex;
   flex-direction: column;
   gap: 16px;
   padding: 22px 24px 22px;
-  border-radius: 16px;
   border: 1px solid
     ${(p) =>
       p.$tone === "primary"
@@ -68,12 +68,12 @@ const Card = styled.section<{ $tone: Tone }>`
         : "var(--afs-line)"};
   background: ${(p) =>
     p.$tone === "primary"
-      ? "linear-gradient(180deg, color-mix(in srgb, var(--afs-accent) 4%, var(--afs-panel-strong)), var(--afs-panel-strong))"
+      ? "linear-gradient(180deg, color-mix(in srgb, var(--afs-accent) 4%, var(--afs-panel)), var(--afs-panel))"
       : "var(--afs-panel)"};
   box-shadow: ${(p) =>
     p.$tone === "primary"
       ? "0 12px 32px color-mix(in srgb, var(--afs-accent) 16%, transparent)"
-      : "none"};
+      : "0 10px 24px rgba(8, 6, 13, 0.08)"};
 `;
 
 const Header = styled.div`

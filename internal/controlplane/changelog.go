@@ -640,7 +640,7 @@ func (s *Service) buildChangelogTemplate(ctx context.Context, storageID, checkpo
 		return template
 	}
 	template.AgentID = record.AgentID
-	template.Label = record.Label
+	template.Label = workspaceSessionRecordLabel(record)
 	template.AgentVersion = record.AFSVersion
 	return template
 }

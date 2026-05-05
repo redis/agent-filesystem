@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
 import { z } from "zod";
 import {
@@ -20,9 +20,11 @@ import {
   TabButton,
   Tabs,
 } from "../components/afs-kit";
+import { SurfaceCard } from "../components/card-shell";
 import { ConnectAgentBanner } from "../components/connect-agent-banner";
-import { FormatToggle } from "../components/format-toggle";
 import { useAuthSession } from "../foundation/auth-context";
+import type { CommandsDrawerConfig } from "../foundation/drawer-context";
+import { useDrawerCommands } from "../foundation/drawer-context";
 import {
   useDeleteWorkspaceMutation,
   useMCPAccessTokens,
@@ -36,7 +38,10 @@ import { resolveWorkspaceBrowserView } from "../foundation/workspace-browser-vie
 import { displayWorkspaceName } from "../foundation/workspace-display";
 import { studioTabSchema } from "../foundation/workspace-tabs";
 import type { StudioTab } from "../foundation/workspace-tabs";
-import type { AFSWorkspaceDetail, AFSWorkspaceView } from "../foundation/types/afs";
+import type {
+  AFSWorkspaceDetail,
+  AFSWorkspaceView,
+} from "../foundation/types/afs";
 import { BrowseTab } from "./workspace-studio/-browse-tab";
 import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
@@ -68,7 +73,11 @@ function WorkspaceStudioPage() {
   const { unavailableDatabases } = useDatabaseScope();
   const workspaceQuery = useWorkspace(databaseId, workspaceId);
   const mcpAccessReady = !auth.isLoading && auth.isAuthenticated;
-  const mcpTokensQuery = useMCPAccessTokens(databaseId, workspaceId, mcpAccessReady);
+  const mcpTokensQuery = useMCPAccessTokens(
+    databaseId,
+    workspaceId,
+    mcpAccessReady,
+  );
   const deleteWorkspace = useDeleteWorkspaceMutation();
   const updateWorkspace = useUpdateWorkspaceMutation();
 
@@ -76,15 +85,25 @@ function WorkspaceStudioPage() {
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [userRequestedBanner, setUserRequestedBanner] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [isRedirectingAfterDelete, setIsRedirectingAfterDelete] = useState(false);
+  const [isRedirectingAfterDelete, setIsRedirectingAfterDelete] =
+    useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const workspace = workspaceQuery.data;
   const tab = search.tab ?? "browse";
+  const drawerConfig = useMemo<CommandsDrawerConfig | null>(() => {
+    if (workspace == null) {
+      return null;
+    }
+    return workspaceCommandsFor(workspace, tab);
+  }, [tab, workspace]);
   const hasAgents = (workspace?.agents.length ?? 0) > 0;
-  const showBanner = workspace != null && !bannerDismissed && userRequestedBanner;
+  const showBanner =
+    workspace != null && !bannerDismissed && userRequestedBanner;
   const showWelcomeInterstitial =
     workspace != null && search.welcome === true && !userRequestedBanner;
+
+  useDrawerCommands(drawerConfig);
 
   useEffect(() => {
     if (workspace == null) {
@@ -92,18 +111,20 @@ function WorkspaceStudioPage() {
       return;
     }
 
-    setBrowserView((currentView) => resolveWorkspaceBrowserView(workspace, currentView));
+    setBrowserView((currentView) =>
+      resolveWorkspaceBrowserView(workspace, currentView),
+    );
   }, [workspace]);
 
   function setStudioTab(nextTab: StudioTab) {
     void navigate({
       to: "/workspaces/$workspaceId",
-        params: { workspaceId },
-        search: {
-          ...(search.databaseId ? { databaseId: search.databaseId } : {}),
-          ...(nextTab === "browse" ? {} : { tab: nextTab }),
-        },
-        replace: true,
+      params: { workspaceId },
+      search: {
+        ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+        ...(nextTab === "browse" ? {} : { tab: nextTab }),
+      },
+      replace: true,
     });
   }
 
@@ -122,7 +143,10 @@ function WorkspaceStudioPage() {
     try {
       setDeleteDialogOpen(false);
       setIsRedirectingAfterDelete(true);
-      await deleteWorkspace.mutateAsync({ databaseId: databaseId ?? undefined, workspaceId });
+      await deleteWorkspace.mutateAsync({
+        databaseId: databaseId ?? undefined,
+        workspaceId,
+      });
       await navigate({ to: "/workspaces", replace: true });
     } catch {
       setIsRedirectingAfterDelete(false);
@@ -131,7 +155,10 @@ function WorkspaceStudioPage() {
     }
   }
 
-  async function saveWorkspaceSettings(input: { name: string; description: string }) {
+  async function saveWorkspaceSettings(input: {
+    name: string;
+    description: string;
+  }) {
     if (workspace == null) {
       return;
     }
@@ -148,14 +175,18 @@ function WorkspaceStudioPage() {
         region: workspace.region,
       });
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Unable to save workspace changes.");
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save workspace changes.",
+      );
     }
   }
 
   if (
-    workspaceQuery.isLoading
-    || isRedirectingAfterDelete
-    || (workspaceQuery.isError && deleteWorkspace.isSuccess)
+    workspaceQuery.isLoading ||
+    isRedirectingAfterDelete ||
+    (workspaceQuery.isError && deleteWorkspace.isSuccess)
   ) {
     return <Loader data-testid="loader--spinner" />;
   }
@@ -173,7 +204,12 @@ function WorkspaceStudioPage() {
           {unavailableDatabases.length > 0 ? (
             <NoticeBody>
               Disconnected databases:{" "}
-              {unavailableDatabases.map((database) => database.displayName || database.databaseName).join(", ")}.
+              {unavailableDatabases
+                .map(
+                  (database) => database.displayName || database.databaseName,
+                )
+                .join(", ")}
+              .
             </NoticeBody>
           ) : null}
         </EmptyState>
@@ -196,7 +232,8 @@ function WorkspaceStudioPage() {
         <NoticeCard $tone="warning" role="status">
           <NoticeTitle>Some databases are unavailable</NoticeTitle>
           <NoticeBody>
-            Workspace browsing will continue for healthy backends, but data from disconnected databases may be incomplete.
+            Workspace browsing will continue for healthy backends, but data from
+            disconnected databases may be incomplete.
           </NoticeBody>
         </NoticeCard>
       ) : null}
@@ -211,8 +248,8 @@ function WorkspaceStudioPage() {
               <ChipName>{workspaceLabel}</ChipName>
             </WorkspaceChip>
             <WelcomeBody>
-              We loaded your new workspace with sample files so you can
-              explore AFS immediately.
+              We loaded your new workspace with sample files so you can explore
+              AFS immediately.
             </WelcomeBody>
             <WelcomeFacts>
               <WelcomeFact>
@@ -237,7 +274,9 @@ function WorkspaceStudioPage() {
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId },
                     search: {
-                      ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+                      ...(search.databaseId
+                        ? { databaseId: search.databaseId }
+                        : {}),
                       ...(tab === "browse" ? {} : { tab }),
                     },
                     replace: true,
@@ -256,7 +295,9 @@ function WorkspaceStudioPage() {
                     to: "/workspaces/$workspaceId",
                     params: { workspaceId },
                     search: {
-                      ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+                      ...(search.databaseId
+                        ? { databaseId: search.databaseId }
+                        : {}),
                       ...(tab === "browse" ? {} : { tab }),
                     },
                     replace: true,
@@ -326,24 +367,37 @@ function WorkspaceStudioPage() {
       </StudioNavRow>
 
       <Tabs>
-        <TabButton $active={tab === "browse"} onClick={() => setStudioTab("browse")}>
+        <TabButton
+          $active={tab === "browse"}
+          onClick={() => setStudioTab("browse")}
+        >
           Browse Files
         </TabButton>
-        <TabButton $active={tab === "changes"} onClick={() => setStudioTab("changes")}>
+        <TabButton
+          $active={tab === "changes"}
+          onClick={() => setStudioTab("changes")}
+        >
           Changelog
         </TabButton>
-        <TabButton $active={tab === "checkpoints"} onClick={() => setStudioTab("checkpoints")}>
+        <TabButton
+          $active={tab === "checkpoints"}
+          onClick={() => setStudioTab("checkpoints")}
+        >
           Checkpoints
         </TabButton>
-        <TabButton $active={tab === "activity"} onClick={() => setStudioTab("activity")}>
+        <TabButton
+          $active={tab === "activity"}
+          onClick={() => setStudioTab("activity")}
+        >
           History
         </TabButton>
-        <TabButton $active={tab === "settings"} onClick={() => setStudioTab("settings")}>
+        <TabButton
+          $active={tab === "settings"}
+          onClick={() => setStudioTab("settings")}
+        >
           Settings
         </TabButton>
       </Tabs>
-
-      <FormatToggle {...formatToggleFor(tab, workspace)} />
 
       {tab === "browse" ? (
         <BrowseTab
@@ -417,8 +471,8 @@ function WorkspaceStudioPage() {
                   Delete this workspace?
                 </DialogTitle>
                 <DialogBody>
-                  Delete <strong>{workspaceLabel}</strong> and remove it from the workspace registry.
-                  This action cannot be undone.
+                  Delete <strong>{workspaceLabel}</strong> and remove it from
+                  the workspace registry. This action cannot be undone.
                 </DialogBody>
               </div>
               <DialogCloseButton
@@ -435,10 +489,14 @@ function WorkspaceStudioPage() {
             </DialogHeader>
 
             {deleteWorkspace.error instanceof Error ? (
-              <DialogError role="alert">{deleteWorkspace.error.message}</DialogError>
+              <DialogError role="alert">
+                {deleteWorkspace.error.message}
+              </DialogError>
             ) : null}
 
-            <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>
+            <DialogActions
+              style={{ justifyContent: "flex-end", marginTop: 20 }}
+            >
               <Button
                 variant="secondary-fill"
                 size="medium"
@@ -542,16 +600,12 @@ const WelcomeInterstitial = styled.section`
   justify-content: center;
 `;
 
-const WelcomeCard = styled.div`
+const WelcomeCard = styled(SurfaceCard)`
   width: min(100%, 760px);
-  border-radius: 24px;
+  border-radius: 16px;
   padding: 28px;
-  background:
-    radial-gradient(circle at top right, color-mix(in srgb, var(--afs-accent) 16%, transparent), transparent 28%),
-    radial-gradient(circle at bottom left, rgba(255, 209, 102, 0.18), transparent 34%),
-    linear-gradient(180deg, var(--afs-panel-strong), color-mix(in srgb, var(--afs-bg-soft) 58%, white));
+  background: var(--afs-panel);
   border: 1px solid color-mix(in srgb, var(--afs-accent) 16%, var(--afs-line));
-  box-shadow: 0 24px 60px rgba(79, 51, 24, 0.10);
 
   @media (max-width: 720px) {
     padding: 22px;
@@ -675,56 +729,56 @@ const DeleteConfirmButton = styled(Button)`
   }
 `;
 
-// formatToggleFor — per-tab CLI/MCP/HTTP form for the workspace detail page.
-// Each tab corresponds to a different shape of "what would I run from a
-// terminal to get this view." That makes the FormatToggle teach the CLI
-// surface contextually, not just abstractly.
-function formatToggleFor(tab: StudioTab, workspace: AFSWorkspaceDetail) {
+type WorkspaceCommandSection = CommandsDrawerConfig["sections"][number] & {
+  tab: StudioTab;
+};
+
+function workspaceCommandsFor(
+  workspace: AFSWorkspaceDetail,
+  activeTab: StudioTab,
+): CommandsDrawerConfig {
   const name = workspace.name;
-  switch (tab) {
-    case "browse":
-      return {
-        request: { method: "POST" as const, path: `/v1/workspaces/${workspace.id}:mount` },
-        json: { workspace_id: workspace.id, mount_path: `~/${name}` },
-        cliCommand: ["afs", "ws", "mount", name, `~/${name}`],
-        toolCall: { name: "workspace_mount", args: { workspace_id: workspace.id, path: `~/${name}` } },
-        pyCall: `with afs.workspaces.get('${name}').mount() as fs:\n    fs.list('/')`,
-        tsCall: `const fs = await afs.workspaces.get('${name}').mount()\nawait fs.list('/')`,
-      };
-    case "changes":
-      return {
-        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/changes` },
-        json: { workspace_id: workspace.id },
-        cliCommand: ["afs", "log", name, "--json"],
-        pyCall: `for change in afs.workspaces.get('${name}').changes():\n    print(change)`,
-        tsCall: `for await (const c of afs.workspaces.get('${name}').changes()) console.log(c)`,
-      };
-    case "checkpoints":
-      return {
-        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/checkpoints` },
-        json: { workspace_id: workspace.id },
-        cliCommand: ["afs", "cp", "list", name, "--json"],
-        toolCall: { name: "checkpoint_list", args: { workspace_id: workspace.id } },
-        pyCall: `for cp in afs.workspaces.get('${name}').checkpoints.list():\n    print(cp.id, cp.name)`,
-        tsCall: `(await afs.workspaces.get('${name}').checkpoints.list()).forEach(cp => console.log(cp.id))`,
-      };
-    case "activity":
-      return {
-        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}/activity` },
-        json: { workspace_id: workspace.id },
-        cliCommand: ["afs", "log", name, "--follow"],
-        pyCall: `for ev in afs.workspaces.get('${name}').activity.tail():\n    print(ev)`,
-        tsCall: `for await (const ev of afs.workspaces.get('${name}').activity.tail()) console.log(ev)`,
-      };
-    case "settings":
-    default:
-      return {
-        request: { method: "GET" as const, path: `/v1/workspaces/${workspace.id}` },
-        json: workspace,
-        cliCommand: ["afs", "ws", "info", name, "--json"],
-        toolCall: { name: "workspace_get", args: { workspace_id: workspace.id } },
-        pyCall: `afs.workspaces.get('${name}').summary()`,
-        tsCall: `await afs.workspaces.get('${name}').summary()`,
-      };
-  }
+  const sections: WorkspaceCommandSection[] = [
+    {
+      tab: "browse",
+      title: "Mount workspace",
+      description: "Browse and edit this workspace from a local path.",
+      command: `afs ws mount ${name} ~/${name}`,
+    },
+    {
+      tab: "changes",
+      title: "Inspect changelog",
+      description: "Print file changes as structured output.",
+      command: `afs log ${name} --json`,
+    },
+    {
+      tab: "checkpoints",
+      title: "List checkpoints",
+      description: "See saved checkpoints for this workspace.",
+      command: `afs cp list ${name} --json`,
+    },
+    {
+      tab: "activity",
+      title: "Follow activity",
+      description: "Tail the live activity stream for this workspace.",
+      command: `afs log ${name} --follow`,
+    },
+    {
+      tab: "settings",
+      title: "Inspect settings",
+      description: "Fetch workspace details and capabilities.",
+      command: `afs ws info ${name} --json`,
+    },
+  ];
+
+  const orderedSections = [
+    ...sections.filter((section) => section.tab === activeTab),
+    ...sections.filter((section) => section.tab !== activeTab),
+  ].map(({ tab: _tab, ...section }) => section);
+
+  return {
+    title: `Work with ${displayWorkspaceName(name)}`,
+    subline: "Workspace CLI commands for the current view.",
+    sections: orderedSections,
+  };
 }

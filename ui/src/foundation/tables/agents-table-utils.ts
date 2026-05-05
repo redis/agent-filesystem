@@ -1,6 +1,12 @@
 import type { AFSAgentSession } from "../types/afs";
 
-export type AgentSortField = "hostname" | "workspaceName" | "localPath" | "lastSeenAt";
+export type AgentSortField =
+  | "sessionName"
+  | "agentName"
+  | "hostname"
+  | "workspaceName"
+  | "localPath"
+  | "lastSeenAt";
 
 export function normalizeSearchValue(value?: string | null) {
   return value?.trim().toLowerCase() ?? "";
@@ -27,6 +33,8 @@ export function matchesAgentSearch(agent: AFSAgentSession, query: string) {
   return [
     agent.hostname,
     agent.agentId,
+    agent.agentName,
+    agent.sessionName,
     agent.localPath,
     agent.label,
     agent.workspaceName,
@@ -47,6 +55,14 @@ export function filterAndSortAgents(
   const filteredRows = rows.filter((row) => matchesAgentSearch(row, query));
 
   return [...filteredRows].sort((left, right) => {
-    return compareAgentValues(left[sortBy], right[sortBy], sortDirection);
+    return compareAgentValues(
+      agentSortValue(left, sortBy),
+      agentSortValue(right, sortBy),
+      sortDirection,
+    );
   });
+}
+
+function agentSortValue(agent: AFSAgentSession, field: AgentSortField): string {
+  return agent[field]?.trim() ?? "";
 }

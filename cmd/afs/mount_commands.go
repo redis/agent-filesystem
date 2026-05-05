@@ -20,11 +20,12 @@ import (
 const mountShellCDFileEnv = "AFS_MOUNT_CD_FILE"
 
 type mountOptions struct {
-	workspace string
-	directory string
-	verbose   bool
-	dryRun    bool
-	yes       bool
+	workspace   string
+	directory   string
+	sessionName string
+	verbose     bool
+	dryRun      bool
+	yes         bool
 }
 
 type unmountOptions struct {
@@ -84,7 +85,21 @@ func parseMountOptions(args []string) (mountOptions, error) {
 			opts.dryRun = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--session":
+			i++
+			if i >= len(args) || strings.TrimSpace(args[i]) == "" {
+				return opts, fmt.Errorf("--session requires a name")
+			}
+			opts.sessionName = strings.TrimSpace(args[i])
 		default:
+			if strings.HasPrefix(arg, "--session=") {
+				value := strings.TrimSpace(strings.TrimPrefix(arg, "--session="))
+				if value == "" {
+					return opts, fmt.Errorf("--session requires a name")
+				}
+				opts.sessionName = value
+				continue
+			}
 			if strings.HasPrefix(arg, "-") {
 				return opts, fmt.Errorf("unknown flag %q\n\n%s", arg, mountUsageText(filepath.Base(os.Args[0])))
 			}
@@ -200,7 +215,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 	if strings.TrimSpace(requested) == "" {
 		requested = selection.Name
 	}
-	bootstrap, closeSession, err := prepareSyncBootstrapForWorkspace(ctx, cfg, requested)
+	bootstrap, closeSession, err := prepareSyncBootstrapForWorkspace(ctx, cfg, requested, opts.sessionName)
 	if err != nil {
 		return err
 	}
@@ -415,6 +430,8 @@ func recordMountShellDirectory(localRoot string) {
 type mountPromptChoice struct {
 	Workspace   string
 	WorkspaceID string
+	DatabaseID  string
+	Database    string
 	Path        string
 	Mounted     bool
 }
@@ -449,7 +466,7 @@ func promptMountSelection(opts mountOptions) error {
 	fmt.Println()
 	fmt.Println("Mount workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Status", "Path"}, mountPromptRows(choices))
+	printPlainTable([]string{"#", "Workspace", "Workspace ID", "Database", "Status", "Path"}, mountPromptRows(choices))
 	fmt.Println()
 	fmt.Print("Workspace to mount: ")
 
@@ -494,41 +511,105 @@ func promptMountSelection(opts mountOptions) error {
 		localPath = defaultPath
 	}
 	opts.workspace = selected.Workspace
+	if strings.TrimSpace(selected.WorkspaceID) != "" {
+		opts.workspace = selected.WorkspaceID
+	}
 	opts.directory = localPath
 	return mountWorkspace(opts)
 }
 
 func mountPromptChoices(reg mountRegistry, workspaces []workspaceSummary) []mountPromptChoice {
 	choices := make([]mountPromptChoice, 0, len(reg.Mounts)+len(workspaces))
+	summariesByID := make(map[string]workspaceSummary, len(workspaces))
+	summariesByName := make(map[string][]workspaceSummary)
+	for _, ws := range workspaces {
+		if id := strings.TrimSpace(ws.ID); id != "" {
+			summariesByID[id] = ws
+		}
+		if name := strings.TrimSpace(ws.Name); name != "" {
+			summariesByName[name] = append(summariesByName[name], ws)
+		}
+	}
+
 	mountedByID := make(map[string]bool, len(reg.Mounts))
-	mountedByName := make(map[string]bool, len(reg.Mounts))
+	mountedByDatabaseName := make(map[string]bool, len(reg.Mounts))
+	mountedByLegacyName := make(map[string]bool, len(reg.Mounts))
 	for _, rec := range sortedMountRecords(reg.Mounts) {
-		choices = append(choices, mountPromptChoice{
+		choice := mountPromptChoice{
 			Workspace:   rec.Workspace,
 			WorkspaceID: rec.WorkspaceID,
+			DatabaseID:  rec.ControlPlaneDatabase,
 			Path:        rec.LocalPath,
 			Mounted:     true,
-		})
+		}
+		if summary, ok := workspaceSummaryForMountRecord(rec, summariesByID, summariesByName); ok {
+			choice.Workspace = summary.Name
+			choice.WorkspaceID = summary.ID
+			choice.DatabaseID = summary.DatabaseID
+			choice.Database = summary.DatabaseName
+		}
+		choices = append(choices, choice)
 		if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
 			mountedByID[id] = true
+			continue
 		}
-		if name := strings.TrimSpace(rec.Workspace); name != "" {
-			mountedByName[name] = true
+		name := strings.TrimSpace(rec.Workspace)
+		databaseID := strings.TrimSpace(rec.ControlPlaneDatabase)
+		if name != "" && databaseID != "" {
+			mountedByDatabaseName[mountPromptDatabaseNameKey(databaseID, name)] = true
+			continue
+		}
+		if name != "" {
+			mountedByLegacyName[name] = true
 		}
 	}
 	for _, ws := range workspaces {
 		if strings.TrimSpace(ws.ID) != "" && mountedByID[ws.ID] {
 			continue
 		}
-		if strings.TrimSpace(ws.Name) != "" && mountedByName[ws.Name] {
+		if strings.TrimSpace(ws.DatabaseID) != "" && strings.TrimSpace(ws.Name) != "" && mountedByDatabaseName[mountPromptDatabaseNameKey(ws.DatabaseID, ws.Name)] {
+			continue
+		}
+		if strings.TrimSpace(ws.ID) == "" && strings.TrimSpace(ws.DatabaseID) == "" && strings.TrimSpace(ws.Name) != "" && mountedByLegacyName[ws.Name] {
 			continue
 		}
 		choices = append(choices, mountPromptChoice{
 			Workspace:   ws.Name,
 			WorkspaceID: ws.ID,
+			DatabaseID:  ws.DatabaseID,
+			Database:    ws.DatabaseName,
 		})
 	}
 	return choices
+}
+
+func workspaceSummaryForMountRecord(rec mountRecord, summariesByID map[string]workspaceSummary, summariesByName map[string][]workspaceSummary) (workspaceSummary, bool) {
+	if id := strings.TrimSpace(rec.WorkspaceID); id != "" {
+		if summary, ok := summariesByID[id]; ok {
+			return summary, true
+		}
+	}
+	name := strings.TrimSpace(rec.Workspace)
+	if name == "" {
+		return workspaceSummary{}, false
+	}
+	databaseID := strings.TrimSpace(rec.ControlPlaneDatabase)
+	if databaseID != "" {
+		for _, summary := range summariesByName[name] {
+			if strings.TrimSpace(summary.DatabaseID) == databaseID {
+				return summary, true
+			}
+		}
+	}
+	matches := summariesByName[name]
+	if len(matches) == 1 {
+		return matches[0], true
+	}
+	return workspaceSummary{}, false
+}
+
+func mountPromptDatabaseNameKey(databaseID, workspaceName string) string {
+	return strings.TrimSpace(databaseID) + "\x00" + strings.TrimSpace(workspaceName)
 }
 
 func mountPromptRows(choices []mountPromptChoice) [][]string {
@@ -540,9 +621,31 @@ func mountPromptRows(choices []mountPromptChoice) [][]string {
 			status = "mounted"
 			path = compactDisplayPath(choice.Path)
 		}
-		rows = append(rows, []string{strconv.Itoa(i + 1), choice.Workspace, status, path})
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1),
+			choice.Workspace,
+			mountPromptWorkspaceID(choice),
+			mountPromptDatabase(choice),
+			status,
+			path,
+		})
 	}
 	return rows
+}
+
+func mountPromptWorkspaceID(choice mountPromptChoice) string {
+	id := strings.TrimSpace(choice.WorkspaceID)
+	if id == "" {
+		return "-"
+	}
+	return id
+}
+
+func mountPromptDatabase(choice mountPromptChoice) string {
+	return workspaceListDatabase(workspaceSummary{
+		DatabaseID:   choice.DatabaseID,
+		DatabaseName: choice.Database,
+	})
 }
 
 func promptMountPathForWorkspace(workspace string) (string, bool, error) {
@@ -819,11 +922,12 @@ func countMountableLocalEntries(root string) (int, error) {
 
 func mountUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws mount [--dry-run] [--yes] [--verbose] [<workspace> [directory]]
+  %s ws mount [--dry-run] [--yes] [--verbose] [--session <name>] [<workspace> [directory]]
 
 Mount a workspace to a local directory using sync mode.
 With no workspace, lists workspaces and prompts for a selection.
 With no directory, prompts for a local folder.
+Use --session to name this mount session separately from agent.name.
 When mounting to a populated local folder, AFS shows the safe reconciliation
 plan and asks before uploading or downloading files. Use --yes to accept a
 safe plan non-interactively; conflicts still block mount.

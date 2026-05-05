@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/go-redis/v9"
 )
@@ -279,6 +280,10 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	if len(nodes) == 0 {
 		return errors.New("workspace manifest is missing a root entry")
 	}
+	contentRef, err := rediscontent.PreferredRef(ctx, store.rdb)
+	if err != nil {
+		return err
+	}
 
 	var (
 		fileCount    int64
@@ -314,7 +319,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	}
 
 	for _, node := range nodes {
-		fields, content, size, err := workspaceFSNodeFields(ctx, store, workspace, node, opts)
+		fields, content, size, err := workspaceFSNodeFields(ctx, store, workspace, node, opts, contentRef)
 		if err != nil {
 			return fmt.Errorf("materialize %s: %w", node.Path, err)
 		}
@@ -334,7 +339,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 			return err
 		}
 		if node.Entry.Type == "file" {
-			pipe.Set(ctx, workspaceFSContentKey(fsKey, node.ID), content, 0)
+			rediscontent.QueueWriteFull(ctx, pipe, workspaceFSContentKey(fsKey, node.ID), contentRef, content)
 		}
 		pipe.HSet(ctx, workspaceFSInodeKey(fsKey, node.ID), fields)
 		if node.ParentID != "" {
@@ -356,7 +361,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 	return flush()
 }
 
-func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode, opts SyncOptions) (map[string]interface{}, []byte, int64, error) {
+func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, node workspaceFSNode, opts SyncOptions, contentRef string) (map[string]interface{}, []byte, int64, error) {
 	fields := map[string]interface{}{
 		"type":           node.Entry.Type,
 		"mode":           manifestEntryModeForWorkspaceFS(node.Entry),
@@ -388,7 +393,7 @@ func workspaceFSNodeFields(ctx context.Context, store *Store, workspace string, 
 			return nil, nil, 0, err
 		}
 		fields["size"] = int64(len(data))
-		fields["content_ref"] = "ext"
+		fields["content_ref"] = contentRef
 		indexFields := searchindex.BuildFileFields(data)
 		fields["search_state"] = indexFields.SearchState
 		fields["grep_grams_ci"] = indexFields.GrepGramsCI

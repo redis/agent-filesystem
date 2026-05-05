@@ -118,7 +118,7 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/workspaces")) {
-    return { page: "Workspaces", subtitle: "Manage workspaces. These are the filesystems your agents can access." };
+    return { page: "Workspaces", subtitle: "These are the filesystems your agents can access." };
   }
 
   if (pathname.startsWith("/agents")) {

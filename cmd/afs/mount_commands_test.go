@@ -11,12 +11,15 @@ import (
 func TestParseMountOptionsAllowsOptionalDirectory(t *testing.T) {
 	t.Helper()
 
-	opts, err := parseMountOptions([]string{"--dry-run", "--yes", "--verbose", "notes", "~/notes"})
+	opts, err := parseMountOptions([]string{"--dry-run", "--yes", "--verbose", "--session", "auth refactor", "notes", "~/notes"})
 	if err != nil {
 		t.Fatalf("parseMountOptions() returned error: %v", err)
 	}
 	if opts.workspace != "notes" || opts.directory != "~/notes" {
 		t.Fatalf("parseMountOptions() = %#v, want notes + ~/notes", opts)
+	}
+	if opts.sessionName != "auth refactor" {
+		t.Fatalf("sessionName = %q, want auth refactor", opts.sessionName)
 	}
 	if !opts.dryRun || !opts.yes || !opts.verbose {
 		t.Fatalf("parseMountOptions() flags = dryRun:%v yes:%v verbose:%v, want true/true/true", opts.dryRun, opts.yes, opts.verbose)
@@ -28,6 +31,22 @@ func TestParseMountOptionsAllowsOptionalDirectory(t *testing.T) {
 	}
 	if opts.workspace != "notes" || opts.directory != "" {
 		t.Fatalf("parseMountOptions(workspace only) = %#v, want notes + empty directory", opts)
+	}
+
+	opts, err = parseMountOptions([]string{"--session=bench run", "notes"})
+	if err != nil {
+		t.Fatalf("parseMountOptions(--session=) returned error: %v", err)
+	}
+	if opts.sessionName != "bench run" || opts.workspace != "notes" {
+		t.Fatalf("parseMountOptions(--session=) = %#v, want session and notes workspace", opts)
+	}
+}
+
+func TestParseMountOptionsRejectsMissingSessionName(t *testing.T) {
+	t.Helper()
+
+	if _, err := parseMountOptions([]string{"--session"}); err == nil {
+		t.Fatal("parseMountOptions(--session) returned nil error, want missing session name")
 	}
 }
 
@@ -71,6 +90,71 @@ func TestPromptMountPathForWorkspaceDefaultsToHomeWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(out, "Local folder [~/notes]:") {
 		t.Fatalf("output missing default prompt:\n%s", out)
+	}
+}
+
+func TestMountPromptRowsShowWorkspaceIDAndDatabase(t *testing.T) {
+	t.Helper()
+
+	out, err := captureStdout(t, func() error {
+		printPlainTable(
+			[]string{"#", "Workspace", "Workspace ID", "Database", "Status", "Path"},
+			mountPromptRows([]mountPromptChoice{
+				{
+					Workspace:   "getting-started",
+					WorkspaceID: "ws_primary",
+					DatabaseID:  "db_primary",
+					Database:    "Primary Redis",
+					Mounted:     false,
+				},
+			}),
+		)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("printPlainTable() returned error: %v", err)
+	}
+	stripped := stripAnsi(out)
+	for _, want := range []string{"Workspace ID", "Database", "ws_primary", "Primary Redis"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("mount prompt output = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestMountPromptChoicesPreserveDuplicateNamesAcrossDatabases(t *testing.T) {
+	t.Helper()
+
+	choices := mountPromptChoices(mountRegistry{Mounts: []mountRecord{
+		{
+			ID:                   "mnt_primary",
+			Workspace:            "getting-started",
+			WorkspaceID:          "ws_primary",
+			ControlPlaneDatabase: "db_primary",
+			LocalPath:            "/tmp/getting-started",
+		},
+	}}, []workspaceSummary{
+		{
+			ID:           "ws_primary",
+			Name:         "getting-started",
+			DatabaseID:   "db_primary",
+			DatabaseName: "Primary Redis",
+		},
+		{
+			ID:           "ws_secondary",
+			Name:         "getting-started",
+			DatabaseID:   "db_secondary",
+			DatabaseName: "Secondary Redis",
+		},
+	})
+	if len(choices) != 2 {
+		t.Fatalf("len(choices) = %d, want mounted and available duplicate-name workspaces: %#v", len(choices), choices)
+	}
+	if !choices[0].Mounted || choices[0].WorkspaceID != "ws_primary" || choices[0].Database != "Primary Redis" {
+		t.Fatalf("choices[0] = %#v, want mounted primary workspace with database name", choices[0])
+	}
+	if choices[1].Mounted || choices[1].WorkspaceID != "ws_secondary" || choices[1].Database != "Secondary Redis" {
+		t.Fatalf("choices[1] = %#v, want available secondary workspace with database name", choices[1])
 	}
 }
 

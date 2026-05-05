@@ -12,6 +12,13 @@ import { Check, Copy } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import styled, { keyframes } from "styled-components";
+import { SurfaceCard } from "./card-shell";
+import { AgentPromptCard } from "./agent-prompt-card";
+import {
+  agentBootstrapPrompt,
+  agentMcpPrompt,
+} from "../features/docs/afs-samples";
+import type { DrawerCommandSection } from "../foundation/drawer-context";
 
 // Slide animation timing — keep in sync with the CSS @keyframes durations
 // on Backdrop and DrawerShell below.
@@ -30,12 +37,6 @@ function useDrawerAnimation(onCloseParent: () => void) {
 
   return { closing, handleClose };
 }
-import { AgentPromptCard } from "./agent-prompt-card";
-import {
-  agentBootstrapPrompt,
-  agentMcpPrompt,
-} from "../features/docs/afs-samples";
-import type { DrawerCommandSection } from "../foundation/drawer-context";
 
 export type OnboardingPath = "agent" | "cli";
 
@@ -562,12 +563,11 @@ const StepCopyButton = styled.button`
 `;
 
 // Path card (peer choice)
-const PathCard = styled.div<{ $tone: "primary" | "secondary" }>`
+const PathCard = styled(SurfaceCard)<{ $tone: "primary" | "secondary" }>`
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 22px 22px 20px;
-  border-radius: 16px;
   border: 1px solid
     ${(p) =>
       p.$tone === "primary"
@@ -575,12 +575,12 @@ const PathCard = styled.div<{ $tone: "primary" | "secondary" }>`
         : "var(--afs-line)"};
   background: ${(p) =>
     p.$tone === "primary"
-      ? "linear-gradient(180deg, color-mix(in srgb, var(--afs-accent) 5%, var(--afs-panel-strong)), var(--afs-panel-strong))"
+      ? "linear-gradient(180deg, color-mix(in srgb, var(--afs-accent) 5%, var(--afs-panel)), var(--afs-panel))"
       : "var(--afs-panel)"};
   box-shadow: ${(p) =>
     p.$tone === "primary"
       ? "0 12px 32px color-mix(in srgb, var(--afs-accent) 14%, transparent)"
-      : "none"};
+      : "0 10px 24px rgba(8, 6, 13, 0.08)"};
   text-align: left;
 `;
 
@@ -622,7 +622,7 @@ const ChooseButton = styled.button<{ $tone: "primary" | "secondary" }>`
   background: ${(p) =>
     p.$tone === "primary"
       ? "var(--afs-accent)"
-      : "var(--afs-panel-strong)"};
+      : "var(--afs-panel)"};
   color: ${(p) =>
     p.$tone === "primary" ? "var(--afs-ink-on-accent, #fff)" : "var(--afs-ink)"};
   font-size: 13px;

@@ -3,15 +3,17 @@ import { Loader } from "@redis-ui/components";
 import styled from "styled-components";
 import { PageStack } from "../components/afs-kit";
 import { AgentHeroAnimation } from "../components/agent-hero-animation";
+import { SurfaceCard } from "../components/card-shell";
 import { OnboardingPathCard } from "../components/onboarding-drawer";
 import type { OnboardingPath } from "../components/onboarding-drawer";
+import { QuickstartTipCard } from "../features/home/QuickstartTipCard";
 import { PublicLandingPage } from "../features/landing/PublicLandingPage";
 import { useDrawer } from "../foundation/drawer-context";
 import { afsApi } from "../foundation/api/afs";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope, useScopedActivity, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
-import type { AFSActivityEvent } from "../foundation/types/afs";
+import type { AFSActivityEvent, AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
 import { queryClient } from "../foundation/query-client";
 import {
   agentsQueryOptions,
@@ -19,7 +21,6 @@ import {
   useQuickstartMutation,
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
-import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
 
 export const Route = createFileRoute("/")({
   loader: async () => {
@@ -112,6 +113,9 @@ function InspectorView({
   const activityQuery = useScopedActivity(50);
   const connectedAgents = agents.length;
   const opsPerMin = computeOpsPerMin(activityQuery.data);
+  const hasQuickstartWorkspace = workspaces.some(
+    (workspace) => workspace.name === "getting-started",
+  );
 
   function openActivity(event: AFSActivityEvent) {
     if (!event.workspaceId) return;
@@ -153,7 +157,9 @@ function InspectorView({
         />
       </ActivityCard>
 
-      <CliQuickstartCard onChoosePath={onChoosePath} />
+      {hasQuickstartWorkspace ? (
+        <QuickstartTipCard onOpen={() => onChoosePath("agent")} />
+      ) : null}
 
       <TemplatesLinkCard as={Link} to="/templates">
         <TemplatesLinkCopy>
@@ -223,7 +229,19 @@ function ActiveAgentsPanel({ agents, onOpenAgents }: {
 }
 
 function agentDisplayLabel(agent: AFSAgentSession) {
-  return agent.label || agent.agentId || agent.hostname || agent.sessionId.slice(0, 12);
+  const sessionName = agent.sessionName?.trim();
+  const agentName = agent.agentName?.trim();
+  if (sessionName && agentName && sessionName !== agentName) {
+    return `${sessionName} · ${agentName}`;
+  }
+  return (
+    sessionName ||
+    agentName ||
+    agent.label?.trim() ||
+    agent.agentId ||
+    agent.hostname ||
+    agent.sessionId.slice(0, 12)
+  );
 }
 
 function isAgentIdle(agent: AFSAgentSession) {
@@ -282,43 +300,6 @@ function computeOpsPerMin(events: AFSActivityEvent[]) {
     const t = Date.parse(e.createdAt);
     return Number.isFinite(t) && t >= cutoff ? count + 1 : count;
   }, 0);
-}
-
-function CliQuickstartCard({
-  onChoosePath,
-}: {
-  onChoosePath: (path: OnboardingPath) => void;
-}) {
-  return (
-    <GettingStartedShell>
-      <GettingStartedHeader>
-        <CliQuickstartEyebrow>Getting Started</CliQuickstartEyebrow>
-        <CliQuickstartTitle>Need to (re)open the quick start?</CliQuickstartTitle>
-        <CliQuickstartSubline>
-          Pick a path. Your <Mono>getting-started</Mono> workspace already
-          exists — these just bring the instructions back.
-        </CliQuickstartSubline>
-      </GettingStartedHeader>
-
-      <PathPair>
-        <OnboardingPathCard
-          tone="primary"
-          badge="Recommended"
-          title="Connect your agent"
-          description="Paste a prompt into Claude, Cursor, Codex, or any MCP-capable agent."
-          buttonLabel="Open"
-          onClick={() => onChoosePath("agent")}
-        />
-        <OnboardingPathCard
-          tone="secondary"
-          title="Use the CLI"
-          description="Install, authenticate, and mount the workspace from your shell."
-          buttonLabel="Open"
-          onClick={() => onChoosePath("cli")}
-        />
-      </PathPair>
-    </GettingStartedShell>
-  );
 }
 
 function GettingStartedView({
@@ -593,15 +574,12 @@ const FooterLink = styled.a`
 // StatusHeader + ActivityCard styles (Inspector home)
 // ──────────────────────────────────────────────────────────────────────
 
-const StatusBar = styled.div`
+const StatusBar = styled(SurfaceCard)`
   display: flex;
   align-items: baseline;
   gap: 12px;
   flex-wrap: wrap;
   padding: 14px 18px;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  background: var(--afs-bg-soft);
   font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
   font-size: 13px;
 `;
@@ -655,28 +633,22 @@ const StatusLabel = styled.span`
   font-size: 12px;
 `;
 
-const ActivityCard = styled.section`
+const ActivityCard = styled(SurfaceCard).attrs({ as: "section" })`
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 18px 22px;
-  border: 1px solid var(--afs-line);
-  border-radius: 14px;
-  background: var(--afs-panel);
 `;
 
 // ──────────────────────────────────────────────────────────────────────
 // ActiveAgentsPanel styles
 // ──────────────────────────────────────────────────────────────────────
 
-const AgentsPanelCard = styled.section`
+const AgentsPanelCard = styled(SurfaceCard).attrs({ as: "section" })`
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px 18px;
-  border: 1px solid var(--afs-line);
-  border-radius: 12px;
-  background: var(--afs-panel);
 `;
 
 const AgentsPanelHeader = styled.div`
@@ -820,74 +792,11 @@ const ActivityCardSub = styled.p`
   line-height: 1.5;
 `;
 
-const GettingStartedShell = styled.section`
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
-  padding: 22px 22px 24px;
-
-  @media (max-width: 640px) {
-    padding: 18px;
-  }
-
-  [data-skin="situation-room"] && {
-    border-radius: var(--afs-r-2);
-    border-color: var(--afs-line-strong);
-    background: var(--afs-bg-1);
-  }
-`;
-
-const GettingStartedHeader = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-`;
-
-const CliQuickstartSubline = styled.p`
-  margin: 0;
-  color: var(--afs-muted);
-  font-size: 13px;
-  line-height: 1.5;
-`;
-
-const PathPair = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-
-  @media (max-width: 720px) {
-    grid-template-columns: 1fr;
-  }
-`;
-
-const CliQuickstartEyebrow = styled.div`
-  color: var(--afs-accent, #2563eb);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-`;
-
-const CliQuickstartTitle = styled.h2`
-  margin: 0;
-  color: var(--afs-ink);
-  font-size: 18px;
-  font-weight: 750;
-  line-height: 1.25;
-  letter-spacing: 0;
-`;
-
-const TemplatesLinkCard = styled.a`
+const TemplatesLinkCard = styled(SurfaceCard).attrs({ as: "a" })`
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
   padding: 18px 20px;
   color: inherit;
   text-decoration: none;
@@ -898,13 +807,6 @@ const TemplatesLinkCard = styled.a`
     box-shadow: 0 6px 20px rgba(8, 6, 13, 0.08);
     transform: translateY(-2px);
   }
-
-  [data-skin="situation-room"] && {
-    border-radius: var(--afs-r-2);
-    border-color: var(--afs-line-strong);
-    background: var(--afs-bg-1);
-  }
-
   @media (max-width: 640px) {
     align-items: flex-start;
   }

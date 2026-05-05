@@ -110,7 +110,7 @@ where the workspace argument is optional.
 ### `afs ws mount`
 
 ```bash
-afs ws mount [--dry-run] [--verbose] [<workspace> <directory>]
+afs ws mount [--dry-run] [--verbose] [--session <name>] [<workspace> <directory>]
 ```
 
 Mounts a durable workspace to a local directory using sync mode. The
@@ -133,8 +133,12 @@ Examples:
 ```bash
 afs ws mount getting-started ~/getting-started
 afs ws mount notes ~/work/notes
+afs ws mount notes --session "auth refactor"
 afs ws mount --dry-run notes ~/work/notes
 ```
+
+`agent.name` identifies the agent/machine. `--session` names this specific
+mount session, so the UI can show both the stable agent and the current task.
 
 ### `afs ws unmount`
 

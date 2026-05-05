@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -130,13 +131,13 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 			return manifest{}, nil, manifestStats{}, err
 		}
 
-		// For inodes with content_ref="ext", we need a second pipeline to
-		// read content from the separate STRING key.
-		type extContent struct {
+		// For externally stored file content, fetch bytes from the dedicated
+		// content key after the inode metadata pass.
+		type externalContent struct {
 			idx int
-			cmd *redis.StringCmd
+			id  string
 		}
-		var extFetches []extContent
+		var externalFetches []externalContent
 
 		// Collect directories that need their children enumerated.
 		var dirItems []bfsItem
@@ -168,24 +169,19 @@ func buildManifestFromWorkspaceRootWithProgress(ctx context.Context, rdb *redis.
 			parsedInodes = append(parsedInodes, parsedInode{inode: inode, item: item})
 		}
 
-		// Second pipeline: fetch external content for ext inodes.
+		// Second pass: fetch external content.
 		if len(parsedInodes) > 0 {
-			pipe2 := rdb.Pipeline()
 			for i, p := range parsedInodes {
-				if p.inode != nil && p.inode.Type == "file" && p.inode.ContentRef == "ext" {
-					cmd := pipe2.Get(ctx, workspaceRootContentKey(fsKey, queue[i].inodeID))
-					extFetches = append(extFetches, extContent{idx: i, cmd: cmd})
+				if p.inode != nil && p.inode.Type == "file" && p.inode.ContentRef != "" {
+					externalFetches = append(externalFetches, externalContent{idx: i, id: queue[i].inodeID})
 				}
 			}
-			if len(extFetches) > 0 {
-				if _, err := pipe2.Exec(ctx); err != nil && err != redis.Nil {
+			for _, fetch := range externalFetches {
+				content, err := rediscontent.Load(ctx, rdb, workspaceRootContentKey(fsKey, fetch.id), parsedInodes[fetch.idx].inode.ContentRef, parsedInodes[fetch.idx].inode.Size)
+				if err != nil {
 					return manifest{}, nil, manifestStats{}, err
 				}
-				for _, ef := range extFetches {
-					if v, err := ef.cmd.Result(); err == nil {
-						parsedInodes[ef.idx].inode.Content = v
-					}
-				}
+				parsedInodes[fetch.idx].inode.Content = string(content)
 			}
 		}
 
@@ -381,11 +377,11 @@ func loadWorkspaceRootInode(ctx context.Context, rdb *redis.Client, fsKey, inode
 	if len(values) > 6 {
 		inode.ContentRef = workspaceRootString(values[6])
 	}
-	// If content is external, fetch from the separate STRING key.
-	if inode.ContentRef == "ext" && inode.Type == "file" {
-		v, err := rdb.Get(ctx, workspaceRootContentKey(fsKey, inodeID)).Result()
+	// If content is external, fetch from the dedicated content key.
+	if inode.ContentRef != "" && inode.Type == "file" {
+		data, err := rediscontent.Load(ctx, rdb, workspaceRootContentKey(fsKey, inodeID), inode.ContentRef, inode.Size)
 		if err == nil {
-			inode.Content = v
+			inode.Content = string(data)
 		}
 	}
 	return inode, nil

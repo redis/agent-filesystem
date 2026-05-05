@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/go-redis/v9"
 )
@@ -134,6 +135,26 @@ func searchIndexInt(value interface{}) int {
 	}
 }
 
+func searchIndexInt64(value interface{}) int64 {
+	switch v := value.(type) {
+	case nil:
+		return 0
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		return n
+	case []byte:
+		n, _ := strconv.ParseInt(strings.TrimSpace(string(v)), 10, 64)
+		return n
+	case int:
+		return int64(v)
+	case int64:
+		return v
+	default:
+		n, _ := strconv.ParseInt(strings.TrimSpace(fmt.Sprint(v)), 10, 64)
+		return n
+	}
+}
+
 func backfillWorkspaceSearchFields(ctx context.Context, rdb *redis.Client, fsKey string) error {
 	pattern := fmt.Sprintf("afs:{%s}:inode:*", fsKey)
 	prefix := fmt.Sprintf("afs:{%s}:inode:", fsKey)
@@ -142,6 +163,7 @@ func backfillWorkspaceSearchFields(ctx context.Context, rdb *redis.Client, fsKey
 		key        string
 		inodeID    string
 		contentRef string
+		size       int64
 	}
 
 	var cursor uint64
@@ -155,7 +177,7 @@ func backfillWorkspaceSearchFields(ctx context.Context, rdb *redis.Client, fsKey
 			metaPipe := rdb.Pipeline()
 			metaCmds := make([]*redis.SliceCmd, len(keys))
 			for i, key := range keys {
-				metaCmds[i] = metaPipe.HMGet(ctx, key, "type", "search_state", "content_ref")
+				metaCmds[i] = metaPipe.HMGet(ctx, key, "type", "search_state", "content_ref", "size")
 			}
 			if _, err := metaPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 				return err
@@ -174,28 +196,26 @@ func backfillWorkspaceSearchFields(ctx context.Context, rdb *redis.Client, fsKey
 					key:        keys[i],
 					inodeID:    strings.TrimPrefix(keys[i], prefix),
 					contentRef: searchIndexString(values, 2),
+					size:       searchIndexInt64(values[3]),
 				})
 			}
 
 			if len(missing) > 0 {
-				contentPipe := rdb.Pipeline()
-				contentCmds := make([]*redis.StringCmd, len(missing))
-				for i, item := range missing {
-					if item.contentRef == "ext" {
-						contentCmds[i] = contentPipe.Get(ctx, fmt.Sprintf("afs:{%s}:content:%s", fsKey, item.inodeID))
-						continue
-					}
-					contentCmds[i] = contentPipe.HGet(ctx, item.key, "content")
-				}
-				if _, err := contentPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
-					return err
-				}
-
 				writePipe := rdb.Pipeline()
-				for i, item := range missing {
-					content, err := contentCmds[i].Result()
-					if err != nil && !errors.Is(err, redis.Nil) {
-						return err
+				for _, item := range missing {
+					content := ""
+					if item.contentRef == "" {
+						inline, err := rdb.HGet(ctx, item.key, "content").Result()
+						if err != nil && !errors.Is(err, redis.Nil) {
+							return err
+						}
+						content = inline
+					} else {
+						data, err := rediscontent.Load(ctx, rdb, fmt.Sprintf("afs:{%s}:content:%s", fsKey, item.inodeID), item.contentRef, item.size)
+						if err != nil {
+							return err
+						}
+						content = string(data)
 					}
 					fields := searchindex.BuildFileFields([]byte(content))
 					writePipe.HSet(ctx, item.key, map[string]interface{}{

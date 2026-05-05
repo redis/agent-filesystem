@@ -393,6 +393,13 @@ make clean
 make uninstall
 ```
 
+Browse and run the repo's tests and benchmarks interactively:
+
+```bash
+./scripts/test_harness.py
+./scripts/test_harness.py --list
+```
+
 ## Web UI Dev
 
 To run the local control plane and web UI together:
