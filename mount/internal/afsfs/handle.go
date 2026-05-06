@@ -99,9 +99,6 @@ func (fh *FileHandle) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return syscall.EINTR
 	}
-	if err.Error() == "lock would block" {
-		return syscall.EAGAIN
-	}
 	return mapError(err)
 }
 
@@ -112,9 +109,6 @@ func (fh *FileHandle) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLoc
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return syscall.EINTR
-	}
-	if err.Error() == "lock would block" {
-		return syscall.EAGAIN
 	}
 	return mapError(err)
 }

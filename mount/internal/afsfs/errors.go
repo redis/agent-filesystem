@@ -1,17 +1,44 @@
 package afsfs
 
 import (
+	"errors"
 	"strings"
 	"syscall"
+
+	"github.com/redis/agent-filesystem/mount/internal/client"
 )
 
-// mapError maps an AFS error to a syscall errno.
+// mapError maps an AFS client error to a syscall errno. Sentinel checks
+// (errors.Is) take precedence so a wrapped error
+// (fmt.Errorf("...: %w", client.ErrNotFile)) still maps correctly. The
+// substring fallback exists because some errors arrive from outside the
+// client package — Redis "ERR ..." replies, redis-go errors, etc. — that
+// can't carry one of our sentinels but still mention the same condition.
 func mapError(err error) syscall.Errno {
 	if err == nil {
 		return 0
 	}
-	msg := err.Error()
 
+	switch {
+	case errors.Is(err, client.ErrNotFound):
+		return syscall.ENOENT
+	case errors.Is(err, client.ErrNotFile),
+		errors.Is(err, client.ErrCannotWriteRoot):
+		return syscall.EISDIR
+	case errors.Is(err, client.ErrNotDir),
+		errors.Is(err, client.ErrParentConflict):
+		return syscall.ENOTDIR
+	case errors.Is(err, client.ErrAlreadyExists):
+		return syscall.EEXIST
+	case errors.Is(err, client.ErrDirNotEmpty):
+		return syscall.ENOTEMPTY
+	case errors.Is(err, client.ErrUnsupported):
+		return syscall.ENOTSUP
+	case errors.Is(err, client.ErrLockWouldBlock):
+		return syscall.EAGAIN
+	}
+
+	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "no such filesystem key"),
 		strings.Contains(msg, "no such file or directory"),
