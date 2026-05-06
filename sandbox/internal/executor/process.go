@@ -2,17 +2,22 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// stdoutBufferCap bounds the in-memory output retained per process. A
+// chatty process at high throughput would otherwise OOM the sandbox; bytes
+// past this cap are dropped and a marker is added to the output.
+const stdoutBufferCap = 1 << 20 // 1 MiB
 
 // ProcessState represents the current state of a process.
 type ProcessState string
@@ -36,8 +41,8 @@ type Process struct {
 	PID       int          `json:"pid,omitempty"`
 
 	cmd    *exec.Cmd
-	stdout *bytes.Buffer
-	stderr *bytes.Buffer
+	stdout *boundedBuffer
+	stderr *boundedBuffer
 	stdin  io.WriteCloser
 	mu     sync.RWMutex
 	done   chan struct{}
@@ -84,7 +89,7 @@ func (m *Manager) Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult
 	cwd := opts.Cwd
 	if cwd == "" {
 		cwd = m.workspace
-	} else if cwd[0] != '/' {
+	} else if !strings.HasPrefix(cwd, "/") {
 		cwd = m.workspace + "/" + cwd
 	}
 
@@ -92,8 +97,8 @@ func (m *Manager) Launch(ctx context.Context, opts LaunchOptions) (*LaunchResult
 	cmd.Dir = cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
+	stdout := newBoundedBuffer(stdoutBufferCap)
+	stderr := newBoundedBuffer(stdoutBufferCap)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 

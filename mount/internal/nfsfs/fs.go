@@ -125,7 +125,7 @@ func (f *FS) OpenFile(filename string, flag int, perm os.FileMode) (billy.File, 
 		}
 		created, _, err := f.client.CreateFile(ctx, p, uint32(perm.Perm()), flag&os.O_EXCL != 0)
 		if err != nil {
-			if strings.Contains(err.Error(), "already exists") {
+			if errors.Is(err, client.ErrAlreadyExists) {
 				return nil, os.ErrExist
 			}
 			return nil, err

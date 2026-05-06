@@ -1,11 +1,6 @@
 import { Button, Select } from "@redis-ui/components";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import styled from "styled-components";
 import {
@@ -21,21 +16,17 @@ import {
   FormGrid,
   TextInput,
 } from "../../components/afs-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import { getControlPlaneURL } from "../../foundation/api/afs";
-import {
-  type AFSDatabaseScopeRecord,
-  useDatabaseScope,
-} from "../../foundation/database-scope";
+import { useDatabaseScope } from "../../foundation/database-scope";
+import type { AFSDatabaseScopeRecord } from "../../foundation/database-scope";
 import {
   useCreateMCPAccessTokenMutation,
   useCreateWorkspaceMutation,
   useImportLocalMutation,
 } from "../../foundation/hooks/use-afs";
-import {
-  findTemplate,
-  type Template,
-  type TemplateSeedFile,
-} from "../templates/templates-data";
+import { findTemplate } from "../templates/templates-data";
+import type { Template, TemplateSeedFile } from "../templates/templates-data";
 
 type SeedMode = "blank" | "import";
 type View = "chooser" | "template-form";
@@ -51,9 +42,12 @@ function eligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
   return databases.filter((database) => database.canCreateWorkspaces);
 }
 
-function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
+function preferredDatabase(
+  databases: AFSDatabaseScopeRecord[],
+): AFSDatabaseScopeRecord | null {
   const list = eligibleDatabases(databases);
-  return list.find((database) => database.isDefault) ?? list[0] ?? null;
+  if (list.length === 0) return null;
+  return list.find((database) => database.isDefault) ?? list[0];
 }
 
 function isFreeTierLimitError(error: unknown): boolean {
@@ -164,10 +158,8 @@ export function CreateWorkspaceDialog({
     const startTemplate = initialTemplateId
       ? findTemplate(initialTemplateId) ?? null
       : null;
-    const startedFromTemplate =
-      startTemplate != null && startTemplate.id !== "blank";
 
-    if (startedFromTemplate && startTemplate) {
+    if (startTemplate != null && startTemplate.id !== "blank") {
       setView("template-form");
       setSelectedTemplateId(startTemplate.id);
       setName(startTemplate.slug);
@@ -208,7 +200,7 @@ export function CreateWorkspaceDialog({
 
   function handleFolderPicked(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
+    const path = files[0].webkitRelativePath.split("/")[0];
     if (!path) return;
     setImportPath(path);
     setImportFileCount(files.length);
@@ -457,7 +449,7 @@ export function CreateWorkspaceDialog({
                   label: `${database.displayName || database.databaseName}${database.isDefault ? " (default)" : ""}`,
                 }))}
                 value={databaseId}
-                onChange={(next) => setDatabaseId(next as string)}
+                onChange={(next) => setDatabaseId(next)}
               />
             </Field>
           ) : null}
@@ -588,7 +580,7 @@ export function CreateWorkspaceDialog({
                 label: `${database.displayName || database.databaseName}${database.isDefault ? " (default)" : ""}`,
               }))}
               value={databaseId}
-              onChange={(next) => setDatabaseId(next as string)}
+              onChange={(next) => setDatabaseId(next)}
             />
           </Field>
         ) : null}
@@ -645,12 +637,11 @@ const ModeStrip = styled.div`
   }
 `;
 
-const ModeCard = styled.button<{ $active?: boolean }>`
+const ModeCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $active?: boolean }>`
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 14px;
-  border-radius: 14px;
   border: 1.5px solid
     ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
   background: ${(p) =>

@@ -1,13 +1,13 @@
 *.dSYM/
 /afs
 /afs-control-plane
-/afs-server
 mount/agent-filesystem-mount
 mount/agent-filesystem-nfs
 sandbox/sandbox
 sandbox/sandbox-cli
 *.rdb
 afs.config.json
+afs.config.json.backup
 afs.databases.json
 afs.catalog.sqlite*
 ui/.tanstack/

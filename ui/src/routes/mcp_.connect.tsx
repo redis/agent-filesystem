@@ -3,6 +3,7 @@ import { Button, Typography } from "@redis-ui/components";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
 import { PageStack } from "../components/afs-kit";
+import { SurfaceCard } from "../components/card-shell";
 import { getControlPlaneURL } from "../foundation/api/afs";
 
 export const Route = createFileRoute("/mcp_/connect")({
@@ -310,10 +311,7 @@ const ClientTab = styled.button<{ $selected: boolean }>`
   }
 `;
 
-const Card = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
+const Card = styled(SurfaceCard)`
   padding: 28px 32px;
   display: flex;
   flex-direction: column;

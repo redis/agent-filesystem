@@ -181,3 +181,27 @@ func (m *Manager) Wait(ctx context.Context, id string) (*ReadResult, error) {
 
 	return m.Read(id)
 }
+
+// GC prunes terminal-state processes whose EndedAt timestamp is older than
+// maxAge. Without this, the process map grows without bound for the
+// lifetime of the sandbox. Returns the number of entries removed.
+func (m *Manager) GC(maxAge time.Duration) int {
+	cutoff := time.Now().Add(-maxAge)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for id, proc := range m.processes {
+		proc.mu.RLock()
+		state := proc.State
+		ended := proc.EndedAt
+		proc.mu.RUnlock()
+		if state == StateRunning {
+			continue
+		}
+		if ended != nil && ended.Before(cutoff) {
+			delete(m.processes, id)
+			removed++
+		}
+	}
+	return removed
+}

@@ -98,7 +98,7 @@ export function LocalMCPAccessDialog({
                     }))
               }
               value={workspaceKey}
-              onChange={(next) => setWorkspaceKey(next as string)}
+              onChange={(next) => setWorkspaceKey(next)}
               disabled={options.length === 0}
             />
           </Field>

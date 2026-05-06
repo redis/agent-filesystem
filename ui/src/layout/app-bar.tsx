@@ -1,6 +1,7 @@
 import { useLocation } from "@tanstack/react-router";
 import * as S from "./app-bar.styles";
 import { resolveNavigationTitleParts } from "./navigation-items";
+import { HelpButton } from "../components/global-drawer";
 
 export function AppBar() {
   const location = useLocation();
@@ -23,6 +24,7 @@ export function AppBar() {
           {title.subtitle ? <S.Subtitle>{title.subtitle}</S.Subtitle> : null}
         </S.TitleStack>
       </S.HeaderTitleGroup>
+      <HelpButton />
     </S.HeaderContainer>
   );
 }

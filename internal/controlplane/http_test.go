@@ -115,11 +115,61 @@ func TestHTTPBrowseAndRestore(t *testing.T) {
 	if detail.CheckpointCount != 2 {
 		t.Fatalf("detail checkpoint_count = %d, want 2", detail.CheckpointCount)
 	}
+	if detail.ContentStorage.Profile != workspaceContentStorageLegacy {
+		t.Fatalf("detail content_storage.profile = %q, want %q", detail.ContentStorage.Profile, workspaceContentStorageLegacy)
+	}
+	if detail.DatabaseSupportsArrays == nil {
+		t.Fatal("detail database_supports_arrays = nil, want false for miniredis")
+	}
+	if *detail.DatabaseSupportsArrays {
+		t.Fatal("detail database_supports_arrays = true, want false for miniredis")
+	}
+	if detail.SearchIndex.Status != workspaceSearchIndexUnavailable {
+		t.Fatalf("detail search_index.status = %q, want %q", detail.SearchIndex.Status, workspaceSearchIndexUnavailable)
+	}
 	if !detail.Capabilities.BrowseWorkingCopy {
 		t.Fatal("detail capabilities should expose working-copy browsing")
 	}
 	if detail.DatabaseID != databaseID {
 		t.Fatalf("detail database_id = %q, want %q", detail.DatabaseID, databaseID)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/databases")
+	if err != nil {
+		t.Fatalf("GET /v1/databases returned error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var databases databaseListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&databases); err != nil {
+		t.Fatalf("Decode(databases) returned error: %v", err)
+	}
+	if len(databases.Items) != 1 {
+		t.Fatalf("len(databases.items) = %d, want 1", len(databases.Items))
+	}
+	if databases.Items[0].SupportsArrays == nil {
+		t.Fatal("databases.items[0].SupportsArrays = nil, want false for miniredis")
+	}
+	if *databases.Items[0].SupportsArrays {
+		t.Fatal("databases.items[0].SupportsArrays = true, want false for miniredis")
+	}
+	if databases.Items[0].SupportsSearch == nil {
+		t.Fatal("databases.items[0].SupportsSearch = nil, want false for miniredis")
+	}
+	if *databases.Items[0].SupportsSearch {
+		t.Fatal("databases.items[0].SupportsSearch = true, want false for miniredis")
+	}
+	if len(databases.Items[0].WorkspaceStorage) != 1 {
+		t.Fatalf("len(databases.items[0].WorkspaceStorage) = %d, want 1", len(databases.Items[0].WorkspaceStorage))
+	}
+	if databases.Items[0].WorkspaceStorage[0].WorkspaceName != "repo" {
+		t.Fatalf("workspace_storage[0].workspace_name = %q, want %q", databases.Items[0].WorkspaceStorage[0].WorkspaceName, "repo")
+	}
+	if databases.Items[0].WorkspaceStorage[0].RedisKey != detail.RedisKey {
+		t.Fatalf("workspace_storage[0].redis_key = %q, want %q", databases.Items[0].WorkspaceStorage[0].RedisKey, detail.RedisKey)
+	}
+	if databases.Items[0].WorkspaceStorage[0].ContentStorage.Profile != workspaceContentStorageLegacy {
+		t.Fatalf("workspace_storage[0].content_storage.profile = %q, want %q", databases.Items[0].WorkspaceStorage[0].ContentStorage.Profile, workspaceContentStorageLegacy)
 	}
 
 	resp, err = http.Get(server.URL + "/v1/databases/" + databaseID + "/workspaces/repo/tree?view=head&path=/&depth=1")
@@ -1786,8 +1836,18 @@ func TestHTTPClientWorkspaceSessionHeartbeatAndClose(t *testing.T) {
 	if sessions.Items[0].AgentID != "agt_http" {
 		t.Fatalf("listed agent_id = %q, want %q", sessions.Items[0].AgentID, "agt_http")
 	}
+	if sessions.Items[0].AgentName != "" {
+		t.Fatalf("listed agent_name = %q, want empty before metadata heartbeat", sessions.Items[0].AgentName)
+	}
+	if sessions.Items[0].SessionName != "" {
+		t.Fatalf("listed session_name = %q, want empty before metadata heartbeat", sessions.Items[0].SessionName)
+	}
 
-	resp, err = http.Post(server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID+"/heartbeat", "application/json", nil)
+	resp, err = http.Post(
+		server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID+"/heartbeat",
+		"application/json",
+		strings.NewReader(`{"agent_id":"agt_http","agent_name":"HTTP Agent","session_name":"http sync","client_kind":"sync","hostname":"devbox","os":"darwin","local_path":"/tmp/repo"}`),
+	)
 	if err != nil {
 		t.Fatalf("POST heartbeat returned error: %v", err)
 	}
@@ -1803,6 +1863,12 @@ func TestHTTPClientWorkspaceSessionHeartbeatAndClose(t *testing.T) {
 	}
 	if heartbeat.State != workspaceSessionStateActive {
 		t.Fatalf("heartbeat state = %q, want %q", heartbeat.State, workspaceSessionStateActive)
+	}
+	if heartbeat.AgentName != "HTTP Agent" {
+		t.Fatalf("heartbeat agent_name = %q, want %q", heartbeat.AgentName, "HTTP Agent")
+	}
+	if heartbeat.SessionName != "http sync" {
+		t.Fatalf("heartbeat session_name = %q, want %q", heartbeat.SessionName, "http sync")
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, server.URL+"/v1/client/databases/"+databaseID+"/workspaces/repo/sessions/"+session.SessionID, nil)
@@ -1968,6 +2034,9 @@ func TestHTTPDatabaseCRUDAndScopedWorkspaces(t *testing.T) {
 	}
 	if len(databases.Items) != 2 {
 		t.Fatalf("len(databases.items) = %d, want 2", len(databases.Items))
+	}
+	if databases.Items[0].SupportsArrays == nil && databases.Items[1].SupportsArrays == nil {
+		t.Fatal("expected at least one database to report supports_arrays")
 	}
 
 	req, err := http.NewRequest(http.MethodDelete, server.URL+"/v1/databases/"+secondary.ID, nil)

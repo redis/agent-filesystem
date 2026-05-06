@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 import type { AFSAgentSession } from "../types/afs";
-import { filterAndSortAgents } from "./agents-table-utils";
+import {
+  displayAgentIdentityLabel,
+  filterAndSortAgents,
+} from "./agents-table-utils";
 
 const baseAgent: AFSAgentSession = {
   sessionId: "sess-1",
@@ -63,5 +66,127 @@ describe("filterAndSortAgents", () => {
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.sessionId).toBe("sess-payments");
+  });
+
+  test("matches readable agent and session names", () => {
+    const namedRows = [
+      buildAgent({
+        sessionId: "sess-auth",
+        agentName: "Rowan Codex",
+        sessionName: "auth refactor",
+      }),
+      buildAgent({
+        sessionId: "sess-orders",
+        agentName: "CI Worker",
+        sessionName: "orders import",
+      }),
+    ];
+
+    expect(filterAndSortAgents(namedRows, "auth refactor", "lastSeenAt", "desc")[0]?.sessionId).toBe("sess-auth");
+    expect(filterAndSortAgents(namedRows, "rowan codex - auth refactor", "lastSeenAt", "desc")[0]?.sessionId).toBe("sess-auth");
+    expect(filterAndSortAgents(namedRows, "ci worker", "lastSeenAt", "desc")[0]?.sessionId).toBe("sess-orders");
+  });
+
+  test("sorts by session and agent names", () => {
+    const namedRows = [
+      buildAgent({
+        sessionId: "sess-z",
+        agentName: "Beta Agent",
+        sessionName: "zeta cleanup",
+      }),
+      buildAgent({
+        sessionId: "sess-a",
+        agentName: "Alpha Agent",
+        sessionName: "auth refactor",
+      }),
+    ];
+
+    expect(
+      filterAndSortAgents(namedRows, "", "sessionName", "asc").map(
+        (agent) => agent.sessionId,
+      ),
+    ).toEqual(["sess-a", "sess-z"]);
+    expect(
+      filterAndSortAgents(namedRows, "", "agentName", "desc").map(
+        (agent) => agent.sessionId,
+      ),
+    ).toEqual(["sess-z", "sess-a"]);
+  });
+
+  test("builds the first-column identity label from agent, session, and machine names", () => {
+    expect(
+      displayAgentIdentityLabel(
+        buildAgent({
+          agentName: "Codex",
+          sessionName: "auth refactor",
+          hostname: "rowan-mbp",
+        }),
+      ),
+    ).toBe("Codex - auth refactor");
+
+    expect(
+      displayAgentIdentityLabel(
+        buildAgent({
+          agentName: undefined,
+          sessionName: "docs cleanup",
+          hostname: "ci-runner-01",
+        }),
+      ),
+    ).toBe("docs cleanup - ci-runner-01");
+
+    expect(
+      displayAgentIdentityLabel(
+        buildAgent({
+          agentName: "Claude",
+          sessionName: undefined,
+          hostname: "maya-mbp",
+        }),
+      ),
+    ).toBe("Claude - maya-mbp");
+
+    expect(
+      displayAgentIdentityLabel(
+        buildAgent({
+          agentName: undefined,
+          sessionName: undefined,
+          hostname: "support-gateway-01",
+        }),
+      ),
+    ).toBe("support-gateway-01");
+  });
+
+  test("sorts the default name column by the displayed identity label", () => {
+    const namedRows = [
+      buildAgent({
+        sessionId: "sess-zulu",
+        agentName: "Zulu Agent",
+        sessionName: "checkout",
+        hostname: "machine-z",
+      }),
+      buildAgent({
+        sessionId: "sess-alpha",
+        agentName: undefined,
+        sessionName: "alpha task",
+        hostname: "machine-a",
+      }),
+      buildAgent({
+        sessionId: "sess-bravo",
+        agentName: "Bravo Agent",
+        sessionName: undefined,
+        hostname: "machine-b",
+      }),
+      buildAgent({
+        sessionId: "sess-charlie",
+        agentName: undefined,
+        sessionName: undefined,
+        hostname: "charlie-host",
+      }),
+    ];
+
+    expect(
+      filterAndSortAgents(namedRows, "", "agentName", "asc").map(
+        (agent) => agent.sessionId,
+      ),
+    ).toEqual(["sess-alpha", "sess-bravo", "sess-charlie", "sess-zulu"]);
   });
 });

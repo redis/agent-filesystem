@@ -145,6 +145,65 @@ func TestParseWorkspaceDeleteArgsSupportsConfirmationBypass(t *testing.T) {
 	}
 }
 
+func TestWorkspaceDeletePromptsWhenWorkspaceOmitted(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	if err := cmdWorkspace([]string{"workspace", "create", "repo-delete"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() returned error: %v", err)
+	}
+	if _, err := input.WriteString("1\ny\n"); err != nil {
+		t.Fatalf("WriteString() returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "delete"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(delete) returned error: %v", err)
+	}
+	if !strings.Contains(out, "Select workspace") {
+		t.Fatalf("cmdWorkspace(delete) output = %q, want workspace selection prompt", out)
+	}
+	if !strings.Contains(out, "Are you sure you want to delete repo-delete? [y/N]") {
+		t.Fatalf("cmdWorkspace(delete) output = %q, want delete confirmation", out)
+	}
+
+	_, store, closeStore, err := openAFSStore(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSStore() returned error: %v", err)
+	}
+	defer closeStore()
+
+	exists, err := store.workspaceExists(context.Background(), "repo-delete")
+	if err != nil {
+		t.Fatalf("workspaceExists(repo-delete) returned error: %v", err)
+	}
+	if exists {
+		t.Fatal("expected prompted workspace to be deleted")
+	}
+}
+
 func TestConfirmWorkspaceDeleteDefaultsNo(t *testing.T) {
 	t.Helper()
 
@@ -258,7 +317,8 @@ func TestWorkspaceListShowsMountedFolder(t *testing.T) {
 	if err := cmdWorkspace([]string{"ws", "create", "repo"}); err != nil {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
-	localPath := filepath.Join(homeDir, "repo")
+	localPath := filepath.Join(homeDir, "projects", "customer-success", "very-deeply-nested", "repo-with-a-long-mount-folder-name")
+	displayPath := filepath.Join("~", "projects", "customer-success", "very-deeply-nested", "repo-with-a-long-mount-folder-name")
 	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{
 		{
 			ID:        "att_repo",
@@ -278,9 +338,14 @@ func TestWorkspaceListShowsMountedFolder(t *testing.T) {
 		t.Fatalf("cmdWorkspace(list) returned error: %v", err)
 	}
 	stripped := stripAnsi(out)
-	for _, want := range []string{"Mounted", "repo", "~/repo"} {
+	for _, want := range []string{"Mounted", "repo", displayPath} {
 		if !strings.Contains(stripped, want) {
 			t.Fatalf("cmdWorkspace(list) output = %q, want %q", out, want)
+		}
+	}
+	for _, line := range strings.Split(stripped, "\n") {
+		if strings.Contains(line, "repo-with-a-long-mount-folder-name") && strings.Contains(line, "…") {
+			t.Fatalf("cmdWorkspace(list) mount path was ellipsized: %q", line)
 		}
 	}
 }
@@ -311,12 +376,29 @@ func TestWorkspaceListSelfHostedIgnoresStaleConfiguredDatabaseForWorkspaceFirstR
 func TestWorkspaceListSelfHostedShowsDatabaseAndIDForDuplicateNames(t *testing.T) {
 	t.Helper()
 
-	server, _, _, _ := newDuplicateNameSelfHostedControlPlaneServer(t)
+	homeDir := withTempHome(t)
+	server, secondaryWorkspaceID, _, secondaryDatabaseID := newDuplicateNameSelfHostedControlPlaneServer(t)
 
 	cfg := defaultConfig()
 	cfg.ProductMode = productModeSelfHosted
 	cfg.URL = server.URL
 	saveTempConfig(t, cfg)
+
+	localPath := filepath.Join(homeDir, "mounted-repo")
+	displayPath := filepath.Join("~", "mounted-repo")
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{
+		{
+			ID:                   "mnt_repo",
+			Workspace:            "repo",
+			WorkspaceID:          secondaryWorkspaceID,
+			ControlPlaneDatabase: secondaryDatabaseID,
+			LocalPath:            localPath,
+			Mode:                 modeSync,
+			StartedAt:            time.Now().UTC(),
+		},
+	}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
 
 	listOutput, err := captureStdout(t, func() error {
 		return cmdWorkspace([]string{"workspace", "list"})
@@ -329,6 +411,25 @@ func TestWorkspaceListSelfHostedShowsDatabaseAndIDForDuplicateNames(t *testing.T
 	}
 	if !strings.Contains(listOutput, "ws_") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want workspace ids for duplicate workspaces", listOutput)
+	}
+	stripped := stripAnsi(listOutput)
+	var primaryLine, secondaryLine string
+	for _, line := range strings.Split(stripped, "\n") {
+		switch {
+		case strings.Contains(line, "primary"):
+			primaryLine = line
+		case strings.Contains(line, "secondary"):
+			secondaryLine = line
+		}
+	}
+	if primaryLine == "" || secondaryLine == "" {
+		t.Fatalf("cmdWorkspace(list) output = %q, want primary and secondary duplicate rows", listOutput)
+	}
+	if strings.Contains(primaryLine, displayPath) {
+		t.Fatalf("primary duplicate row incorrectly inherited mounted path: %q", primaryLine)
+	}
+	if !strings.Contains(secondaryLine, displayPath) {
+		t.Fatalf("secondary duplicate row = %q, want mounted path %q", secondaryLine, displayPath)
 	}
 }
 

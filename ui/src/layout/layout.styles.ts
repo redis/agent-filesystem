@@ -2,7 +2,9 @@ import styled from "styled-components";
 
 export const FlexRow = styled.div`
   display: flex;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 `;
 
 export const FlexCol = styled(FlexRow)`
@@ -12,13 +14,16 @@ export const FlexCol = styled(FlexRow)`
 
 export const FlexColItem = styled(FlexCol)`
   flex: 1;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   overflow: hidden;
 `;
 
 export const MainContainer = styled.main`
   display: flex;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   position: relative;
   overflow-x: hidden;

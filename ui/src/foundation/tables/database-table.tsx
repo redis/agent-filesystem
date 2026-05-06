@@ -1,12 +1,24 @@
-import { Menu } from "@redis-ui/components";
+import { Button, Menu } from "@redis-ui/components";
 import { MoreactionsIcon } from "@redis-ui/icons/monochrome";
 import { Table } from "@redis-ui/table";
 import { DatabaseIcon } from "../../components/lucide-icons";
 import type { ColumnDef } from "@redis-ui/table";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
+import {
+  DialogActions,
+  DialogBody,
+  DialogCard,
+  DialogCloseButton,
+  DialogHeader,
+  DialogOverlay,
+  DialogTitle,
+} from "../../components/afs-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import type { AFSDatabaseScopeRecord } from "../database-scope";
 import { formatBytes } from "../api/afs";
+import { CheckIcon, CopyIcon } from "../clipboard-icons";
+import { redisInsightUrl } from "../redis-insight";
 import * as S from "./workspace-table.styles";
 import { DenseTableViewport } from "./workspace-table.styles";
 import { StatusNameCell, StatusNameLine } from "./status-name-cell";
@@ -19,6 +31,11 @@ type Props = {
   onEditDatabase: (databaseId: string) => void;
   onSetDefaultDatabase: (databaseId: string) => void;
   onRemoveDatabase: (databaseId: string) => void;
+};
+
+type CapabilityHelp = {
+  capability: "arrays" | "search";
+  databaseName: string;
 };
 
 /* ------------------------------------------------------------------ */
@@ -45,11 +62,27 @@ function tierFor(usageFraction: number): UsageTier {
   return "ok";
 }
 
+function arrayCapabilityLabel(supportsArrays: boolean | undefined) {
+  if (supportsArrays === true) return "Arrays Enabled";
+  if (supportsArrays === false) return "Arrays Coming soon";
+  return "Arrays unknown";
+}
+
+function searchCapabilityLabel(supportsSearch: boolean | undefined) {
+  if (supportsSearch === true) return "Search Enabled";
+  if (supportsSearch === false) return "Search Unavailable";
+  return "Search unknown";
+}
+
 /* ------------------------------------------------------------------ */
 /*  Summary strip (4 cards above the table)                            */
 /* ------------------------------------------------------------------ */
 
-export function DatabaseSummaryStrip({ rows }: { rows: AFSDatabaseScopeRecord[] }) {
+export function DatabaseSummaryStrip({
+  rows,
+}: {
+  rows: AFSDatabaseScopeRecord[];
+}) {
   const metrics = useMemo(() => {
     let healthy = 0;
     let totalAfsBytes = 0;
@@ -82,7 +115,10 @@ export function DatabaseSummaryStrip({ rows }: { rows: AFSDatabaseScopeRecord[] 
       }
     }
 
-    const avgPct = capacityCount === 0 ? null : Math.round((capacitySum / capacityCount) * 100);
+    const avgPct =
+      capacityCount === 0
+        ? null
+        : Math.round((capacitySum / capacityCount) * 100);
 
     return {
       total: rows.length,
@@ -103,7 +139,10 @@ export function DatabaseSummaryStrip({ rows }: { rows: AFSDatabaseScopeRecord[] 
         <SummaryLabel>Databases</SummaryLabel>
         <SummaryValue>{metrics.total}</SummaryValue>
         <SummaryDetail>
-          {metrics.healthy} healthy{metrics.total !== metrics.healthy ? `, ${metrics.total - metrics.healthy} unavailable` : ""}
+          {metrics.healthy} healthy
+          {metrics.total !== metrics.healthy
+            ? `, ${metrics.total - metrics.healthy} unavailable`
+            : ""}
         </SummaryDetail>
       </SummaryCard>
 
@@ -111,13 +150,16 @@ export function DatabaseSummaryStrip({ rows }: { rows: AFSDatabaseScopeRecord[] 
         <SummaryLabel>Total Stored</SummaryLabel>
         <SummaryValue>{formatBytes(metrics.totalAfsBytes)}</SummaryValue>
         <SummaryDetail>
-          {metrics.totalWorkspaces} workspace{metrics.totalWorkspaces === 1 ? "" : "s"}
+          {metrics.totalWorkspaces} workspace
+          {metrics.totalWorkspaces === 1 ? "" : "s"}
         </SummaryDetail>
       </SummaryCard>
 
       <SummaryCard>
         <SummaryLabel>Capacity Used</SummaryLabel>
-        <SummaryValue>{metrics.avgPct == null ? "—" : `${metrics.avgPct}%`}</SummaryValue>
+        <SummaryValue>
+          {metrics.avgPct == null ? "—" : `${metrics.avgPct}%`}
+        </SummaryValue>
         <SummaryDetail>
           {metrics.avgPct == null
             ? "No memory limits configured"
@@ -156,6 +198,9 @@ export function DatabaseTable({
 }: Props & { toolbarAction?: React.ReactNode }) {
   const [search, setSearch] = useState("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [capabilityHelp, setCapabilityHelp] = useState<CapabilityHelp | null>(
+    null,
+  );
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -194,7 +239,8 @@ export function DatabaseTable({
           enableSorting: false,
           cell: ({ row }) => {
             const isDefault = !!row.original.isDefault;
-            const nameLabel = row.original.displayName || row.original.databaseName;
+            const nameLabel =
+              row.original.displayName || row.original.databaseName;
             const id = row.original.id;
             const canEdit = row.original.canEdit;
             const canSetDefault = row.original.canCreateWorkspaces;
@@ -203,7 +249,9 @@ export function DatabaseTable({
                 active={row.original.isHealthy}
                 icon={<DatabaseIcon customSize={18} />}
                 inactiveTone="danger"
-                statusLabel={row.original.isHealthy ? "Connected" : "Unavailable"}
+                statusLabel={
+                  row.original.isHealthy ? "Connected" : "Unavailable"
+                }
                 statusTitle={
                   row.original.isHealthy
                     ? "Connected"
@@ -241,7 +289,8 @@ export function DatabaseTable({
                     disabled={isDefault || !canSetDefault}
                     onClick={(event) => {
                       event.stopPropagation();
-                      if (!isDefault && canSetDefault) onSetDefaultDatabase(row.original.id);
+                      if (!isDefault && canSetDefault)
+                        onSetDefaultDatabase(row.original.id);
                     }}
                   >
                     <StarIcon filled={isDefault} />
@@ -293,11 +342,13 @@ export function DatabaseTable({
 
             const workspaceSummary = (
               <UsageSubline>
-                {row.original.workspaceCount} workspace{row.original.workspaceCount === 1 ? "" : "s"}
+                {row.original.workspaceCount} workspace
+                {row.original.workspaceCount === 1 ? "" : "s"}
                 {" · "}
                 {formatBytes(row.original.afsTotalBytes)}
                 {" · "}
-                {row.original.afsFileCount.toLocaleString()} file{row.original.afsFileCount === 1 ? "" : "s"}
+                {row.original.afsFileCount.toLocaleString()} file
+                {row.original.afsFileCount === 1 ? "" : "s"}
               </UsageSubline>
             );
 
@@ -371,11 +422,89 @@ export function DatabaseTable({
                   ) : null}
                 </LoadLine>
                 <LoadSubline>
-                  {stats.connectedClients} client{stats.connectedClients === 1 ? "" : "s"}
+                  {stats.connectedClients} client
+                  {stats.connectedClients === 1 ? "" : "s"}
                   {" · "}
-                  {stats.keyCount.toLocaleString()} key{stats.keyCount === 1 ? "" : "s"}
+                  {stats.keyCount.toLocaleString()} key
+                  {stats.keyCount === 1 ? "" : "s"}
                 </LoadSubline>
               </LoadStack>
+            );
+          },
+        },
+
+        {
+          id: "version",
+          header: "Version",
+          size: 130,
+          enableSorting: false,
+          cell: ({ row }) => {
+            const version = row.original.stats?.redisVersion?.trim();
+            return version ? (
+              <VersionText>{version}</VersionText>
+            ) : (
+              <DimCell>—</DimCell>
+            );
+          },
+        },
+
+        {
+          id: "capabilities",
+          header: "Capabilities",
+          size: 210,
+          enableSorting: false,
+          cell: ({ row }) => {
+            const databaseName =
+              row.original.displayName || row.original.databaseName;
+            return (
+              <CapabilityStack>
+                <CapabilityLine>
+                  <StorageCapabilityBadge
+                    $supported={row.original.supportsArrays}
+                  >
+                    {arrayCapabilityLabel(row.original.supportsArrays)}
+                  </StorageCapabilityBadge>
+                  {row.original.supportsArrays === false ? (
+                    <CapabilityHelpButton
+                      type="button"
+                      aria-label={`Learn about Redis Arrays for ${databaseName}`}
+                      title="Why is this unavailable?"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setCapabilityHelp({
+                          capability: "arrays",
+                          databaseName,
+                        });
+                      }}
+                    >
+                      ?
+                    </CapabilityHelpButton>
+                  ) : null}
+                </CapabilityLine>
+                <CapabilityLine>
+                  <StorageCapabilityBadge
+                    $supported={row.original.supportsSearch}
+                  >
+                    {searchCapabilityLabel(row.original.supportsSearch)}
+                  </StorageCapabilityBadge>
+                  {row.original.supportsSearch === false ? (
+                    <CapabilityHelpButton
+                      type="button"
+                      aria-label={`Learn about Redis Search for ${databaseName}`}
+                      title="Why is this unavailable?"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setCapabilityHelp({
+                          capability: "search",
+                          databaseName,
+                        });
+                      }}
+                    >
+                      ?
+                    </CapabilityHelpButton>
+                  ) : null}
+                </CapabilityLine>
+              </CapabilityStack>
             );
           },
         },
@@ -399,16 +528,31 @@ export function DatabaseTable({
                   <MoreactionsIcon size="S" />
                 </S.MoreActionsTrigger>
               </Menu.Trigger>
-              <Menu.Content align="end" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+              <Menu.Content
+                align="end"
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+              >
                 <Menu.Content.Item
-                  text={row.original.isDefault ? "Current default" : "Set as default"}
-                  disabled={row.original.isDefault || !row.original.canCreateWorkspaces}
+                  text={
+                    row.original.isDefault
+                      ? "Current default"
+                      : "Set as default"
+                  }
+                  disabled={
+                    row.original.isDefault || !row.original.canCreateWorkspaces
+                  }
                   onClick={() => onSetDefaultDatabase(row.original.id)}
                 />
                 <Menu.Content.Item
                   text="Edit database"
                   disabled={!row.original.canEdit}
                   onClick={() => onEditDatabase(row.original.id)}
+                />
+                <Menu.Content.Item
+                  text="Launch Redis Insight"
+                  onClick={() => {
+                    window.open(redisInsightUrl(), "_blank", "noreferrer");
+                  }}
                 />
                 <Menu.Content.Item
                   text="Delete database"
@@ -461,7 +605,66 @@ export function DatabaseTable({
           </DatabaseTableViewport>
         </S.TableCard>
       ) : null}
+      {capabilityHelp ? (
+        <CapabilityHelpDialog
+          help={capabilityHelp}
+          onClose={() => setCapabilityHelp(null)}
+        />
+      ) : null}
     </S.TableBlock>
+  );
+}
+
+function CapabilityHelpDialog({
+  help,
+  onClose,
+}: {
+  help: CapabilityHelp;
+  onClose: () => void;
+}) {
+  const isArrays = help.capability === "arrays";
+  return (
+    <DialogOverlay
+      role="presentation"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <CapabilityDialogCard
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="capability-help-title"
+      >
+        <DialogHeader>
+          <div>
+            <DialogTitle id="capability-help-title">
+              {isArrays
+                ? "Redis Arrays coming soon"
+                : "Redis Search unavailable"}
+            </DialogTitle>
+            <DialogBody>
+              {help.databaseName} does not currently expose this Redis
+              capability.
+            </DialogBody>
+          </div>
+          <DialogCloseButton aria-label="Close" onClick={onClose}>
+            x
+          </DialogCloseButton>
+        </DialogHeader>
+
+        <CapabilityHelpCopy>
+          {isArrays
+            ? "Redis Arrays are coming soon. They have not been accepted into the upstream Redis repository yet, so this capability will become available after Redis ships support and the database is upgraded."
+            : "Redis Search is included in current Redis distributions that provide the query engine. Upgrade this database to the latest Redis release with Search support enabled, then refresh the database catalog."}
+        </CapabilityHelpCopy>
+
+        <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>
+          <Button size="medium" onClick={onClose}>
+            Close
+          </Button>
+        </DialogActions>
+      </CapabilityDialogCard>
+    </DialogOverlay>
   );
 }
 
@@ -520,9 +723,13 @@ const DefaultStarButton = styled.button<{ $filled: boolean }>`
   background: transparent;
   flex-shrink: 0;
   cursor: ${({ $filled }) => ($filled ? "default" : "pointer")};
-  color: ${({ $filled }) => ($filled ? DEFAULT_AMBER : "var(--afs-muted, #71717a)")};
+  color: ${({ $filled }) =>
+    $filled ? DEFAULT_AMBER : "var(--afs-muted, #71717a)"};
   opacity: ${({ $filled }) => ($filled ? 1 : 0)};
-  transition: opacity 140ms ease, color 140ms ease, transform 140ms ease;
+  transition:
+    opacity 140ms ease,
+    color 140ms ease,
+    transform 140ms ease;
 
   &:hover:not(:disabled) {
     color: ${DEFAULT_AMBER};
@@ -571,7 +778,14 @@ const IdRow = styled.div`
 
 const IdText = styled.span`
   flex: 1 1 auto;
-  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(
+    --afs-mono,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace
+  );
   font-size: 11px;
   color: var(--afs-muted, #71717a);
   letter-spacing: 0;
@@ -595,7 +809,9 @@ const CopyButton = styled.button`
   color: var(--afs-muted, #71717a);
   cursor: pointer;
   border-radius: 4px;
-  transition: background 140ms ease, color 140ms ease;
+  transition:
+    background 140ms ease,
+    color 140ms ease;
   opacity: 0;
 
   &:hover {
@@ -609,43 +825,6 @@ const CopyButton = styled.button`
     opacity: 1;
   }
 `;
-
-function CopyIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="#16a34a"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
 
 /* ---- Usage cell ---- */
 
@@ -688,7 +867,9 @@ const UsageBarInner = styled.div<{ $pct: number; $tier: UsageTier }>`
   width: ${({ $pct }) => `${$pct}%`};
   background: ${({ $tier }) => tierColor($tier)};
   border-radius: 999px;
-  transition: width 400ms ease, background 200ms ease;
+  transition:
+    width 400ms ease,
+    background 200ms ease;
 `;
 
 const UsageText = styled.span`
@@ -775,6 +956,104 @@ const DimCell = styled.span`
   font-size: 13px;
 `;
 
+const VersionText = styled.code`
+  display: inline-block;
+  max-width: 120px;
+  overflow: hidden;
+  color: var(--afs-ink, #18181b);
+  font-family: var(
+    --afs-mono,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace
+  );
+  font-size: 12px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+/* ---- Capabilities cell ---- */
+
+const CapabilityStack = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+`;
+
+const CapabilityLine = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+`;
+
+const StorageCapabilityBadge = styled.span<{ $supported?: boolean }>`
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  border: 1px solid
+    ${({ $supported }) =>
+      $supported === true
+        ? "rgba(37, 99, 235, 0.24)"
+        : $supported === false
+          ? "rgba(220, 38, 38, 0.28)"
+          : "var(--afs-line, #e4e4e7)"};
+  background: ${({ $supported }) =>
+    $supported === true
+      ? "rgba(37, 99, 235, 0.08)"
+      : $supported === false
+        ? "rgba(220, 38, 38, 0.08)"
+        : "var(--afs-panel, #fff)"};
+  color: ${({ $supported }) =>
+    $supported === true
+      ? "#1d4ed8"
+      : $supported === false
+        ? "#b91c1c"
+        : "var(--afs-ink-soft, #3f3f46)"};
+`;
+
+const CapabilityHelpButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(220, 38, 38, 0.32);
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.06);
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+
+  &:hover,
+  &:focus-visible {
+    background: rgba(220, 38, 38, 0.12);
+    outline: none;
+  }
+`;
+
+const CapabilityDialogCard = styled(DialogCard)`
+  max-width: 480px;
+`;
+
+const CapabilityHelpCopy = styled.p`
+  margin: 0;
+  color: var(--afs-ink-soft, #3f3f46);
+  font-size: 14px;
+  line-height: 1.6;
+`;
+
 /* ---- Summary strip ---- */
 
 const SummaryGrid = styled.div`
@@ -792,15 +1071,16 @@ const SummaryGrid = styled.div`
   }
 `;
 
-const SummaryCard = styled.div<{ $alert?: boolean }>`
+const SummaryCard = styled(SurfaceCard)<{ $alert?: boolean }>`
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding: 14px 16px;
   border: 1px solid
-    ${({ $alert }) => ($alert ? "rgba(220, 38, 38, 0.35)" : "var(--afs-line, #e4e4e7)")};
-  border-radius: 12px;
-  background: ${({ $alert }) => ($alert ? "rgba(220, 38, 38, 0.04)" : "var(--afs-panel-strong, #fff)")};
+    ${({ $alert }) =>
+      $alert ? "rgba(220, 38, 38, 0.35)" : "var(--afs-line, #e4e4e7)"};
+  background: ${({ $alert }) =>
+    $alert ? "rgba(220, 38, 38, 0.04)" : "var(--afs-panel-strong, #fff)"};
 `;
 
 const SummaryLabel = styled.span`

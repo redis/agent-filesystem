@@ -9,10 +9,16 @@ import {
   useSaveDatabaseMutation,
   useSetDefaultDatabaseMutation,
   useActivity,
+  useAgentLeaseExpiryInvalidation,
   useAgents,
+  useMonitorStreamInvalidation,
   useWorkspaceSummaries,
 } from "./hooks/use-afs";
-import type { AFSClientMode, SaveDatabaseInput } from "./types/afs";
+import type {
+  AFSClientMode,
+  AFSDatabaseWorkspaceStorage,
+  SaveDatabaseInput,
+} from "./types/afs";
 
 export type AFSDatabaseScopeRecord = {
   id: string;
@@ -43,8 +49,12 @@ export type AFSDatabaseScopeRecord = {
   // AFS aggregates
   afsTotalBytes: number;
   afsFileCount: number;
+  supportsArrays?: boolean;
+  supportsSearch?: boolean;
+  workspaceStorage?: AFSDatabaseWorkspaceStorage[];
   // Redis server stats snapshot (from background poller); undefined until sampled
   stats?: {
+    redisVersion?: string;
     usedMemoryBytes: number;
     maxMemoryBytes: number;
     fragmentationRatio: number;
@@ -68,9 +78,13 @@ type DatabaseScopeContextValue = {
   reconcileCatalog: () => Promise<void>;
 };
 
-const DatabaseScopeContext = createContext<DatabaseScopeContextValue | null>(null);
+const DatabaseScopeContext = createContext<DatabaseScopeContextValue | null>(
+  null,
+);
 
-function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases>>[number]): AFSDatabaseScopeRecord {
+function mapDatabaseRecord(
+  input: Awaited<ReturnType<typeof afsApi.listDatabases>>[number],
+): AFSDatabaseScopeRecord {
   return {
     id: input.id,
     displayName: input.name,
@@ -99,6 +113,9 @@ function mapDatabaseRecord(input: Awaited<ReturnType<typeof afsApi.listDatabases
     lastSessionReconcileError: input.lastSessionReconcileError,
     afsTotalBytes: input.afsTotalBytes,
     afsFileCount: input.afsFileCount,
+    supportsArrays: input.supportsArrays,
+    supportsSearch: input.supportsSearch,
+    workspaceStorage: input.workspaceStorage,
     stats: input.stats,
   };
 }
@@ -107,11 +124,15 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const clientMode = getAFSClientMode();
   const queryClient = useQueryClient();
   const auth = useAuthSession();
-  const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
+  const queriesEnabled =
+    !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const databasesQuery = useDatabases(queriesEnabled);
+  const agentsQuery = useAgents(null, queriesEnabled);
   const saveDatabaseMutation = useSaveDatabaseMutation();
   const setDefaultDatabaseMutation = useSetDefaultDatabaseMutation();
   const deleteDatabaseMutation = useDeleteDatabaseMutation();
+  useMonitorStreamInvalidation(queriesEnabled);
+  useAgentLeaseExpiryInvalidation(agentsQuery.data ?? [], queriesEnabled);
 
   const databases = useMemo(
     () => (databasesQuery.data ?? []).map(mapDatabaseRecord),
@@ -120,9 +141,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
   const errorMessage = !queriesEnabled
     ? null
     : databasesQuery.error instanceof Error
-    ? databasesQuery.error.message
-    : databasesQuery.error != null
-      ? "Unable to load databases."
+      ? databasesQuery.error.message
       : null;
   const unavailableDatabases = useMemo(
     () => databases.filter((database) => !database.isHealthy),
@@ -148,7 +167,8 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
       reconcileCatalog: async () => {
         await afsApi.reconcileCatalog();
         await queryClient.invalidateQueries({
-          predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "afs",
+          predicate: (query) =>
+            Array.isArray(query.queryKey) && query.queryKey[0] === "afs",
         });
       },
     }),
@@ -177,7 +197,9 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
 export function useDatabaseScope() {
   const context = useContext(DatabaseScopeContext);
   if (context == null) {
-    throw new Error("useDatabaseScope must be used inside DatabaseScopeProvider.");
+    throw new Error(
+      "useDatabaseScope must be used inside DatabaseScopeProvider.",
+    );
   }
 
   return context;

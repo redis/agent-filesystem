@@ -1,6 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { ThemeProvider } from "styled-components";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { SettingsTab } from "./-settings-tab";
 
 const mutateAsync = vi.fn();
@@ -32,6 +38,19 @@ vi.mock("@redis-ui/components", () => ({
       },
     },
   }),
+  Select: ({ options, value, onChange, ...props }: any) => (
+    <select
+      {...props}
+      value={value}
+      onChange={(event) => onChange(event.currentTarget.value)}
+    >
+      {options.map((option: any) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  ),
   Card: (props: any) => <div {...props} />,
   Typography: {
     Body: (props: any) => <span {...props} />,
@@ -51,10 +70,46 @@ vi.mock("../../foundation/hooks/use-afs", () => ({
   }),
 }));
 
+afterEach(() => {
+  cleanup();
+});
+
 describe("SettingsTab versioning controls", () => {
   beforeEach(() => {
     mutateAsync.mockReset();
     mutateAsync.mockResolvedValue(undefined);
+  });
+
+  test("shows Redis Array, content storage, and search index metadata", () => {
+    render(
+      <ThemeProvider theme={testTheme}>
+        <SettingsTab
+          workspace={buildWorkspace()}
+          onSave={vi.fn()}
+          isSaving={false}
+          onDelete={vi.fn()}
+          isDeleting={false}
+          mcpTokens={[]}
+          onOpenMCPConsole={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+
+    expect(screen.queryByText("Redis Array support")).not.toBeInTheDocument();
+    expect(screen.queryByText("Redis keyspace")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /launch redis insight/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("db")).toBeInTheDocument();
+    expect(screen.getByText("File storage")).toBeInTheDocument();
+    expect(screen.getByText("Redis Array")).toBeInTheDocument();
+    expect(screen.getByText("Search index")).toBeInTheDocument();
+    expect(
+      screen.getByText("Search index is ready with 2 indexed documents."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("afs:{workspace-1}:search_index_v1"),
+    ).toBeInTheDocument();
   });
 
   test("submits the parsed versioning policy", async () => {
@@ -87,7 +142,9 @@ describe("SettingsTab versioning controls", () => {
       target: { value: "12" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /save versioning policy/i }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /save versioning policy/i }),
+    );
 
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
@@ -115,6 +172,7 @@ function buildWorkspace() {
     cloudAccount: "Direct Redis",
     databaseId: "db-1",
     databaseName: "db",
+    databaseSupportsArrays: true,
     redisKey: "afs:workspace-1",
     region: "us-east-1",
     source: "blank" as const,
@@ -126,6 +184,20 @@ function buildWorkspace() {
     fileCount: 1,
     folderCount: 0,
     totalBytes: 128,
+    contentStorage: {
+      profile: "array" as const,
+      fileCount: 2,
+      arrayFileCount: 2,
+      legacyFileCount: 0,
+    },
+    searchIndex: {
+      name: "afs:{workspace-1}:search_index_v1",
+      present: true,
+      ready: true,
+      status: "ready" as const,
+      documentCount: 2,
+      percentIndexed: 1,
+    },
     checkpointCount: 0,
     files: [],
     savepoints: [],

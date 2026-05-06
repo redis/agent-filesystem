@@ -3,6 +3,7 @@ import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
 import type { AFSActivityEvent } from "../types/afs";
+import { compareValues } from "../sort-compare";
 import * as S from "./workspace-table.styles";
 
 type ActivitySortField = "createdAt" | "workspaceName" | "title" | "scope" | "actor";
@@ -15,19 +16,6 @@ type Props = {
   hideTypeColumn?: boolean;
   onOpenActivity: (event: AFSActivityEvent) => void;
 };
-
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-
-  return direction === "asc" ? result : result * -1;
-}
 
 export function ActivityTable({
   rows,

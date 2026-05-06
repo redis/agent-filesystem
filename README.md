@@ -172,10 +172,8 @@ The current config shape is nested and workspace-oriented:
   },
   "mode": "sync",
   "currentWorkspace": "my-repo",
-  "localPath": "~/afs",
   "mount": {
     "backend": "none",
-    "readOnly": false,
     "allowOther": false,
     "mountBin": "",
     "nfsBin": "",
@@ -391,6 +389,13 @@ make web-ui
 make web-dev
 make clean
 make uninstall
+```
+
+Browse and run the repo's tests and benchmarks interactively:
+
+```bash
+./scripts/test_harness.py
+./scripts/test_harness.py --list
 ```
 
 ## Web UI Dev

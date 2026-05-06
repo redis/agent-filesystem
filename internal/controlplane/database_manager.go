@@ -56,6 +56,10 @@ type databaseRecord struct {
 	AFSTotalBytes int64 `json:"afs_total_bytes"`
 	AFSFileCount  int   `json:"afs_file_count"`
 
+	SupportsArrays   *bool                      `json:"supports_arrays,omitempty"`
+	SupportsSearch   *bool                      `json:"supports_search,omitempty"`
+	WorkspaceStorage []databaseWorkspaceStorage `json:"workspace_storage"`
+
 	// Redis server stats (populated by the background poller). Pointer so the
 	// JSON omits the whole block when we have never sampled (e.g. for an
 	// unreachable DB on startup).
@@ -378,6 +382,18 @@ func (m *DatabaseManager) ListDatabases(ctx context.Context) (databaseListRespon
 		}
 		record.AFSTotalBytes = totalBytes
 		record.AFSFileCount = totalFiles
+		if service, _, err := m.serviceForLocked(ctx, id); err == nil {
+			supportsArrays, workspaceStorage, storageErr := inspectDatabaseWorkspaceStorage(ctx, service, workspaces)
+			if supportsArrays != nil {
+				record.SupportsArrays = supportsArrays
+			}
+			if supportsSearch, err := inspectDatabaseSearchSupport(ctx, service.store); err == nil && supportsSearch != nil {
+				record.SupportsSearch = supportsSearch
+			}
+			if storageErr == nil {
+				record.WorkspaceStorage = workspaceStorage
+			}
+		}
 
 		if stats, ok := m.statsFor(id); ok {
 			s := stats
@@ -741,6 +757,7 @@ func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string
 	if err := m.attachWorkspaceDetailIdentity(ctx, &detail, profile); err != nil {
 		return workspaceDetail{}, err
 	}
+	m.publishWorkspaceMonitorEvent(ctx, service, profile, detail, "created")
 	return detail, nil
 }
 
@@ -838,31 +855,47 @@ func (m *DatabaseManager) UpdateResolvedWorkspaceVersioningPolicy(ctx context.Co
 }
 
 func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, workspace string) error {
-	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	service, profile, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+			if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+				return err
+			}
+			m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+			return nil
 		}
 		return err
 	}
-	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+	if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+		return err
+	}
+	m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+	return nil
 }
 
 func (m *DatabaseManager) DeleteResolvedWorkspace(ctx context.Context, workspace string) error {
-	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return err
 	}
 	if err := service.DeleteWorkspace(ctx, route.WorkspaceID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+			if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+				return err
+			}
+			m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+			return nil
 		}
 		return err
 	}
-	return m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route)
+	if err := m.deleteWorkspaceFromCatalog(ctx, route.DatabaseID, route); err != nil {
+		return err
+	}
+	m.publishWorkspaceRouteMonitorEvent(ctx, service, profile, route, "deleted")
+	return nil
 }
 
 func (m *DatabaseManager) ListGlobalActivity(ctx context.Context, databaseID string, req activityListRequest) (activityListResponse, error) {
@@ -1335,11 +1368,14 @@ func (m *DatabaseManager) ListAgentSessions(ctx context.Context, databaseID stri
 			DatabaseID:      record.DatabaseID,
 			DatabaseName:    databaseName,
 			AgentID:         record.AgentID,
+			AgentName:       record.AgentName,
+			SessionName:     record.SessionName,
 			ClientKind:      record.ClientKind,
 			AFSVersion:      record.AFSVersion,
 			Hostname:        record.Hostname,
 			OperatingSystem: record.OperatingSystem,
 			LocalPath:       record.LocalPath,
+			Label:           record.Label,
 			Readonly:        record.Readonly,
 			State:           record.State,
 			StartedAt:       record.StartedAt,
@@ -1612,20 +1648,20 @@ func (m *DatabaseManager) attachDatabaseToEvents(response *EventListResponse, da
 	}
 }
 
-func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) (workspaceSessionInfo, error) {
+func (m *DatabaseManager) HeartbeatWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string, input ...createWorkspaceSessionRequest) (workspaceSessionInfo, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
-	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID)
+	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID, input...)
 }
 
-func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string) (workspaceSessionInfo, error) {
+func (m *DatabaseManager) HeartbeatResolvedWorkspaceSession(ctx context.Context, workspace, sessionID string, input ...createWorkspaceSessionRequest) (workspaceSessionInfo, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return workspaceSessionInfo{}, err
 	}
-	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID)
+	return service.HeartbeatWorkspaceSession(ctx, route.WorkspaceID, sessionID, input...)
 }
 
 func (m *DatabaseManager) CloseWorkspaceSession(ctx context.Context, databaseID, workspace, sessionID string) error {

@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
@@ -175,5 +179,149 @@ func TestSyncWorkspaceRootMaterializesLiveWorkspaceFS(t *testing.T) {
 
 	if _, err := rdb.Get(ctx, searchindex.ReadyKey("repo")).Result(); !errors.Is(err, redis.Nil) {
 		t.Fatalf("Get(search ready key) error = %v, want redis.Nil", err)
+	}
+}
+
+func TestSyncWorkspaceRootUsesArrayBackendWhenAvailable(t *testing.T) {
+	addr := strings.TrimSpace(os.Getenv("AFS_TEST_ARRAY_REDIS_ADDR"))
+	if addr == "" {
+		t.Skip("set AFS_TEST_ARRAY_REDIS_ADDR to run Redis Array integration tests")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	rdb := redis.NewClient(&redis.Options{Addr: addr, DB: 14})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		t.Fatalf("Ping() returned error: %v", err)
+	}
+	supported, err := rediscontent.SupportsArrays(ctx, rdb)
+	if err != nil {
+		t.Fatalf("SupportsArrays() returned error: %v", err)
+	}
+	if !supported {
+		t.Skipf("redis at %s does not support arrays", addr)
+	}
+	if err := rdb.FlushDB(ctx).Err(); err != nil {
+		t.Fatalf("FlushDB() returned error: %v", err)
+	}
+
+	store := NewStore(rdb)
+	manifestValue := Manifest{
+		Version:   formatVersion,
+		Workspace: "repo-array",
+		Savepoint: "snapshot",
+		Entries: map[string]ManifestEntry{
+			"/":          {Type: "dir", Mode: 0o755, MtimeMs: 100},
+			"/README.md": {Type: "file", Mode: 0o644, MtimeMs: 110, Size: 6, Inline: base64.StdEncoding.EncodeToString([]byte("hello\n"))},
+		},
+	}
+
+	if err := SyncWorkspaceRoot(ctx, store, "repo-array", manifestValue); err != nil {
+		t.Fatalf("SyncWorkspaceRoot() returned error: %v", err)
+	}
+
+	fsClient := client.New(rdb, WorkspaceFSKey("repo-array"))
+	readmeStat, err := fsClient.Stat(ctx, "/README.md")
+	if err != nil {
+		t.Fatalf("Stat(/README.md) returned error: %v", err)
+	}
+	if readmeStat == nil {
+		t.Fatal("expected README.md stat to exist")
+	}
+
+	inodeID := strconv.FormatUint(readmeStat.Inode, 10)
+	contentRef, err := rdb.HGet(ctx, workspaceFSInodeKey("repo-array", inodeID), "content_ref").Result()
+	if err != nil {
+		t.Fatalf("HGet(content_ref) returned error: %v", err)
+	}
+	if contentRef != rediscontent.RefArray {
+		t.Fatalf("content_ref = %q, want %q", contentRef, rediscontent.RefArray)
+	}
+
+	contentKey := workspaceFSContentKey("repo-array", inodeID)
+	length, err := rdb.Do(ctx, "ARLEN", contentKey).Int64()
+	if err != nil {
+		t.Fatalf("ARLEN(%s) returned error: %v", contentKey, err)
+	}
+	if length != 1 {
+		t.Fatalf("ARLEN(%s) = %d, want 1", contentKey, length)
+	}
+
+	data, err := fsClient.Cat(ctx, "/README.md")
+	if err != nil {
+		t.Fatalf("Cat(/README.md) returned error: %v", err)
+	}
+	if string(data) != "hello\n" {
+		t.Fatalf("Cat(/README.md) = %q, want %q", string(data), "hello\n")
+	}
+}
+
+func TestScanWorkspaceContentStorageReportsLegacyMixedAndArrayProfiles(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	store := NewStore(rdb)
+	ctx := context.Background()
+	manifestValue := Manifest{
+		Version:   formatVersion,
+		Workspace: "repo-storage",
+		Savepoint: "snapshot",
+		Entries: map[string]ManifestEntry{
+			"/":          {Type: "dir", Mode: 0o755, MtimeMs: 100},
+			"/README.md": {Type: "file", Mode: 0o644, MtimeMs: 110, Size: 6, Inline: base64.StdEncoding.EncodeToString([]byte("hello\n"))},
+			"/notes.txt": {Type: "file", Mode: 0o644, MtimeMs: 120, Size: 5, Inline: base64.StdEncoding.EncodeToString([]byte("todo\n"))},
+		},
+	}
+	if err := SyncWorkspaceRoot(ctx, store, "repo-storage", manifestValue); err != nil {
+		t.Fatalf("SyncWorkspaceRoot() returned error: %v", err)
+	}
+
+	stats, err := scanWorkspaceContentStorage(ctx, rdb, "repo-storage")
+	if err != nil {
+		t.Fatalf("scanWorkspaceContentStorage() returned error: %v", err)
+	}
+	if stats.Profile != workspaceContentStorageLegacy || stats.FileCount != 2 || stats.LegacyFileCount != 2 || stats.ArrayFileCount != 0 {
+		t.Fatalf("legacy stats = %+v, want legacy with 2 legacy files", stats)
+	}
+
+	fsClient := client.New(rdb, WorkspaceFSKey("repo-storage"))
+	readmeStat, err := fsClient.Stat(ctx, "/README.md")
+	if err != nil {
+		t.Fatalf("Stat(/README.md) returned error: %v", err)
+	}
+	notesStat, err := fsClient.Stat(ctx, "/notes.txt")
+	if err != nil {
+		t.Fatalf("Stat(/notes.txt) returned error: %v", err)
+	}
+
+	if err := rdb.HSet(ctx, workspaceFSInodeKey("repo-storage", strconv.FormatUint(readmeStat.Inode, 10)), "content_ref", rediscontent.RefArray).Err(); err != nil {
+		t.Fatalf("HSet(readme content_ref=array) returned error: %v", err)
+	}
+	stats, err = scanWorkspaceContentStorage(ctx, rdb, "repo-storage")
+	if err != nil {
+		t.Fatalf("scanWorkspaceContentStorage(mixed) returned error: %v", err)
+	}
+	if stats.Profile != workspaceContentStorageMixed || stats.FileCount != 2 || stats.LegacyFileCount != 1 || stats.ArrayFileCount != 1 {
+		t.Fatalf("mixed stats = %+v, want mixed with 1 array and 1 legacy file", stats)
+	}
+
+	if err := rdb.HSet(ctx, workspaceFSInodeKey("repo-storage", strconv.FormatUint(notesStat.Inode, 10)), "content_ref", rediscontent.RefArray).Err(); err != nil {
+		t.Fatalf("HSet(notes content_ref=array) returned error: %v", err)
+	}
+	stats, err = scanWorkspaceContentStorage(ctx, rdb, "repo-storage")
+	if err != nil {
+		t.Fatalf("scanWorkspaceContentStorage(array) returned error: %v", err)
+	}
+	if stats.Profile != workspaceContentStorageArray || stats.FileCount != 2 || stats.LegacyFileCount != 0 || stats.ArrayFileCount != 2 {
+		t.Fatalf("array stats = %+v, want array with 2 array files", stats)
 	}
 }

@@ -32,7 +32,9 @@ func (n *FSNode) Create(ctx context.Context, name string, flags uint32, mode uin
 
 	handle := newFileHandle(child.fsPath, st.Inode, n.client, child)
 	if flags&syscall.O_TRUNC != 0 {
-		if err := n.client.TruncateInode(ctx, st.Inode, 0); err != nil {
+		// *AtPath updates the path cache in place; the no-path variant flushes
+		// the whole cache.
+		if err := n.client.TruncateInodeAtPath(ctx, st.Inode, child.fsPath, 0); err != nil {
 			return nil, nil, 0, mapError(err)
 		}
 		n.root().invalidatePath(child.fsPath)
@@ -58,7 +60,9 @@ func (n *FSNode) Open(ctx context.Context, flags uint32) (fs.FileHandle, uint32,
 	handle := newFileHandle(n.fsPath, st.Inode, n.client, n)
 
 	if flags&syscall.O_TRUNC != 0 {
-		if err := n.client.TruncateInode(ctx, st.Inode, 0); err != nil {
+		// *AtPath updates the path cache in place; the no-path variant flushes
+		// the whole cache.
+		if err := n.client.TruncateInodeAtPath(ctx, st.Inode, n.fsPath, 0); err != nil {
 			return nil, 0, mapError(err)
 		}
 		n.root().invalidatePath(n.fsPath)

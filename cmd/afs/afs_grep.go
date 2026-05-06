@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
@@ -538,47 +539,31 @@ func loadIndexedTargetContentBatch(ctx context.Context, rdb *redis.Client, fsKey
 		if target.inodeKey == "" {
 			return errors.New("missing indexed inode key")
 		}
-		metaCmds[i] = metaPipe.HMGet(ctx, target.inodeKey, "content_ref", "content")
+		metaCmds[i] = metaPipe.HMGet(ctx, target.inodeKey, "content_ref", "size", "content")
 	}
 	if _, err := metaPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return err
 	}
 
-	contentPipe := rdb.Pipeline()
-	contentCmds := make([]*redis.StringCmd, len(targets))
-	needsExternalContent := false
 	for i, cmd := range metaCmds {
 		values, err := cmd.Result()
 		if err != nil && !errors.Is(err, redis.Nil) {
 			return err
 		}
 		contentRef := searchIndexString(values, 0)
-		if contentRef == "ext" {
-			if targets[i].inodeID == "" {
-				return errors.New("missing indexed inode id")
-			}
-			contentCmds[i] = contentPipe.Get(ctx, fmt.Sprintf("afs:{%s}:content:%s", fsKey, targets[i].inodeID))
-			needsExternalContent = true
+		if contentRef == "" {
+			targets[i].content = []byte(searchIndexString(values, 2))
+			targets[i].loaded = true
 			continue
 		}
-		targets[i].content = []byte(searchIndexString(values, 1))
-		targets[i].loaded = true
-	}
-	if needsExternalContent {
-		if _, err := contentPipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		if targets[i].inodeID == "" {
+			return errors.New("missing indexed inode id")
+		}
+		content, err := rediscontent.Load(ctx, rdb, fmt.Sprintf("afs:{%s}:content:%s", fsKey, targets[i].inodeID), contentRef, searchIndexInt64(values[1]))
+		if err != nil {
 			return err
 		}
-	}
-
-	for i, cmd := range contentCmds {
-		if cmd == nil {
-			continue
-		}
-		content, err := cmd.Result()
-		if err != nil && !errors.Is(err, redis.Nil) {
-			return err
-		}
-		targets[i].content = []byte(content)
+		targets[i].content = content
 		targets[i].loaded = true
 	}
 	return nil

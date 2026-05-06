@@ -366,7 +366,12 @@ function AgentsPanel({ loading, error, rows }: { loading: boolean; error: unknow
         <tbody>
           {rows.map((row) => (
             <tr key={row.sessionId}>
-              <td><PrimaryCell title={row.sessionId}>{row.label || row.agentId || row.sessionId}<MetaLine>{row.sessionId}</MetaLine></PrimaryCell></td>
+              <td>
+                <PrimaryCell title={row.sessionId}>
+                  {agentSessionTitle(row)}
+                  <MetaLine>{agentSessionMeta(row)}</MetaLine>
+                </PrimaryCell>
+              </td>
               <td>{ownerLabel(row.ownerSubject, row.ownerLabel)}</td>
               <td><PrimaryCell>{row.workspaceName}<MetaLine>{row.workspaceId}</MetaLine></PrimaryCell></td>
               <td><PrimaryCell>{row.databaseName || row.databaseId}<MetaLine>{row.databaseId}</MetaLine></PrimaryCell></td>
@@ -417,6 +422,15 @@ function filterRows<T>(rows: T[], search: string, values: (row: T) => Array<stri
   return rows.filter((row) =>
     values(row).some((value) => String(value ?? "").toLowerCase().includes(query)),
   );
+}
+
+function agentSessionTitle(row: AFSAgentSession) {
+  return row.sessionName?.trim() || row.agentName?.trim() || row.label?.trim() || row.agentId || row.sessionId;
+}
+
+function agentSessionMeta(row: AFSAgentSession) {
+  const values = [row.agentName?.trim(), row.agentId?.trim(), row.sessionId].filter(Boolean);
+  return values.join(" · ");
 }
 
 function ownerLabel(subject?: string, label?: string) {

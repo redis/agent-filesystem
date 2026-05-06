@@ -1,14 +1,11 @@
-import styled, { css } from "styled-components";
+import styled from "styled-components";
+import { SurfaceCard, cardSurface } from "./card-shell";
 
 /* ------------------------------------------------------------------ */
 /*  Shared components for documentation / guide pages                  */
 /* ------------------------------------------------------------------ */
 
-const panelSurface = css`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
-`;
+const panelSurface = cardSurface;
 
 /* ---- Page wrapper (narrower for readability) ---- */
 export const DocPage = styled.div`
@@ -25,7 +22,7 @@ export const DocPage = styled.div`
 `;
 
 /* ---- Section card ---- */
-export const DocSection = styled.div`
+export const DocSection = styled(SurfaceCard)`
   ${panelSurface}
   padding: 28px;
 
@@ -202,7 +199,7 @@ export const CmdTable = styled.table`
 `;
 
 /* ---- Cross-link card ---- */
-export const CrossLinkCard = styled.a`
+export const CrossLinkCard = styled(SurfaceCard).attrs({ as: "a" })`
   ${panelSurface}
   display: flex;
   align-items: center;

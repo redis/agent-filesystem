@@ -1,5 +1,6 @@
 import { Button, Select } from "@redis-ui/components";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
 import styled from "styled-components";
 import {
   DialogActions,
@@ -259,7 +260,7 @@ export function CreateMCPAccessDialog({
                         }))
                   }
                   value={workspaceKey}
-                  onChange={(next) => setWorkspaceKey(next as string)}
+                  onChange={(next) => setWorkspaceKey(next)}
                   disabled={options.length === 0}
                 />
               </Field>
@@ -303,7 +304,7 @@ export function CreateMCPAccessDialog({
                   { value: "never", label: "No expiry" },
                 ]}
                 value={expiry}
-                onChange={(next) => setExpiry(next as string)}
+                onChange={(next) => setExpiry(next)}
               />
             </Field>
 

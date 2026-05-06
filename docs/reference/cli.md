@@ -110,7 +110,7 @@ where the workspace argument is optional.
 ### `afs ws mount`
 
 ```bash
-afs ws mount [--dry-run] [--verbose] [<workspace> <directory>]
+afs ws mount [--dry-run] [--verbose] [--readonly] [--session <name>] [<workspace> <directory>]
 ```
 
 Mounts a durable workspace to a local directory using sync mode. The
@@ -133,8 +133,14 @@ Examples:
 ```bash
 afs ws mount getting-started ~/getting-started
 afs ws mount notes ~/work/notes
+afs ws mount --readonly notes ~/work/notes
+afs ws mount notes --session "auth refactor"
 afs ws mount --dry-run notes ~/work/notes
 ```
+
+`--readonly` makes this mount refuse local writes. `agent.name` identifies the
+agent/machine. `--session` names this specific mount session, so the UI can
+show both the stable agent and the current task.
 
 ### `afs ws unmount`
 
@@ -241,10 +247,10 @@ Subcommands:
 | `afs ws set-default <workspace>` | Save a default workspace for commands that allow the workspace argument to be omitted. |
 | `afs ws unset-default` | Clear the saved default workspace. |
 | `afs ws info [workspace]` | Show workspace metadata without mounting it locally. |
-| `afs ws mount <workspace> [directory]` | Mount a workspace at a local directory. |
+| `afs ws mount [--readonly] <workspace> [directory]` | Mount a workspace at a local directory. |
 | `afs ws unmount [--delete] [<workspace|directory>]` | Unmount a workspace from AFS. |
 | `afs ws fork [source-workspace] <new-workspace>` | Create a new workspace from the source workspace's current checkpoint. |
-| `afs ws delete [--no-confirmation] <workspace>...` | Delete one or more workspaces and local materialized state. Prompts before deleting unless `--no-confirmation` is set. |
+| `afs ws delete [--no-confirmation] [workspace]...` | Delete one or more workspaces and local materialized state. If omitted, prompts for a workspace. Prompts before deleting unless `--no-confirmation` is set. |
 | `afs ws import [--force] [--mount-at-source] [--database <database>] <workspace> <directory>` | Import a local directory into a workspace. `--mount-at-source` mounts the source folder after import. |
 
 Examples:

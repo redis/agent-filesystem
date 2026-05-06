@@ -519,6 +519,10 @@ func newAdminMux(manager *DatabaseManager, auth *AuthHandler) *http.ServeMux {
 		writeJSON(w, http.StatusOK, response)
 	})
 
+	mux.HandleFunc("/v1/monitor/stream", func(w http.ResponseWriter, r *http.Request) {
+		handleMonitorStream(w, r, manager)
+	})
+
 	mux.HandleFunc("/v1/activity", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, fmt.Errorf("%s not allowed", r.Method))
@@ -971,7 +975,14 @@ func newClientMux(manager *DatabaseManager) *http.ServeMux {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 				return
 			}
-			response, err := manager.HeartbeatWorkspaceSession(r.Context(), databaseID, parts[1], parts[3])
+			var input createWorkspaceSessionRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.HeartbeatWorkspaceSession(r.Context(), databaseID, parts[1], parts[3], input)
 			if err != nil {
 				writeError(w, err)
 				return
@@ -1038,7 +1049,14 @@ func newClientMux(manager *DatabaseManager) *http.ServeMux {
 				writeError(w, fmt.Errorf("%s not allowed", r.Method))
 				return
 			}
-			response, err := manager.HeartbeatResolvedWorkspaceSession(r.Context(), parts[0], parts[2])
+			var input createWorkspaceSessionRequest
+			if r.Body != nil {
+				if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+					writeError(w, fmt.Errorf("invalid request body: %w", err))
+					return
+				}
+			}
+			response, err := manager.HeartbeatResolvedWorkspaceSession(r.Context(), parts[0], parts[2], input)
 			if err != nil {
 				writeError(w, err)
 				return

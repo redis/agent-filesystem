@@ -38,7 +38,6 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 		"config", "set",
 		"--redis-url", "rediss://alice:secret@127.0.0.1:6380/4",
 		"--mount-backend", "nfs",
-		"--mountpoint", "~/mounted-demo",
 	})
 	if err != nil {
 		t.Fatalf("cmdConfig(set) returned error: %v", err)
@@ -66,9 +65,8 @@ func TestCmdConfigSetPersistsNonInteractiveSettings(t *testing.T) {
 	if cfg.MountBackend != mountBackendNFS {
 		t.Fatalf("MountBackend = %q, want %q", cfg.MountBackend, mountBackendNFS)
 	}
-	wantMountpoint := filepath.Join(homeDir, "mounted-demo")
-	if cfg.LocalPath != wantMountpoint {
-		t.Fatalf("Mountpoint = %q, want %q", cfg.LocalPath, wantMountpoint)
+	if cfg.LocalPath != "" {
+		t.Fatalf("LocalPath = %q, want empty because mount paths are per-mount state", cfg.LocalPath)
 	}
 }
 
@@ -119,11 +117,68 @@ func TestSaveConfigPersistsDefaultWorkspaceOutsideLegacyRuntimeKeys(t *testing.T
 	if got, ok := saved["mode"].(string); !ok || got != modeMount {
 		t.Fatalf("config should persist mode %q, got %v in %s", modeMount, saved["mode"], string(raw))
 	}
+	runtimeCfg, ok := saved["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("config should keep runtime defaults without per-mount state: %s", string(raw))
+	}
+	if _, ok := runtimeCfg["localPath"]; ok {
+		t.Fatalf("config should not persist runtime.localPath: %s", string(raw))
+	}
+	mountCfg, ok := runtimeCfg["mount"].(map[string]any)
+	if !ok {
+		t.Fatalf("config should keep runtime.mount defaults: %s", string(raw))
+	}
+	if _, ok := mountCfg["readOnly"]; ok {
+		t.Fatalf("config should not persist runtime.mount.readOnly: %s", string(raw))
+	}
 	if _, ok := saved["controlPlane"]; !ok {
 		t.Fatalf("config should keep controlPlane settings: %s", string(raw))
 	}
 	if _, ok := saved["agent"]; !ok {
 		t.Fatalf("config should keep agent settings: %s", string(raw))
+	}
+}
+
+func TestLoadConfigIgnoresLegacyRuntimeLocalPathAndReadOnly(t *testing.T) {
+	t.Helper()
+
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	raw := `{
+  "redis": {
+    "addr": "127.0.0.1:6379"
+  },
+  "runtime": {
+    "localPath": "/tmp/legacy",
+    "mount": {
+      "backend": "nfs",
+      "readOnly": true,
+      "nfsHost": "127.0.0.1",
+      "nfsPort": 20490
+    }
+  }
+}`
+	if err := os.WriteFile(configFile, []byte(raw), 0o644); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.LocalPath != "" {
+		t.Fatalf("LocalPath = %q, want empty", cfg.LocalPath)
+	}
+	if cfg.ReadOnly {
+		t.Fatal("ReadOnly = true, want false because readonly is per mount")
+	}
+	if cfg.MountBackend != mountBackendNFS {
+		t.Fatalf("MountBackend = %q, want nfs", cfg.MountBackend)
 	}
 }
 
@@ -444,8 +499,8 @@ func TestLoadConfigForUpAppliesWorkspaceAndMountpointAndSavesConfig(t *testing.T
 	if saved.CurrentWorkspace != "beta" {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q", saved.CurrentWorkspace, "beta")
 	}
-	if saved.LocalPath != wantMountpoint {
-		t.Fatalf("saved Mountpoint = %q, want %q", saved.LocalPath, wantMountpoint)
+	if saved.LocalPath != "" {
+		t.Fatalf("saved LocalPath = %q, want empty because mount paths are per-mount state", saved.LocalPath)
 	}
 	if saved.MountBackend != mountBackendNFS {
 		t.Fatalf("saved MountBackend = %q, want %q", saved.MountBackend, mountBackendNFS)
@@ -493,8 +548,8 @@ func TestLoadConfigForUpRejectsExistingFileMountpointWithoutSavingConfig(t *test
 	if saved.CurrentWorkspace != base.CurrentWorkspace {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q after rejected mountpoint", saved.CurrentWorkspace, base.CurrentWorkspace)
 	}
-	if saved.LocalPath != base.LocalPath {
-		t.Fatalf("saved Mountpoint = %q, want %q after rejected mountpoint", saved.LocalPath, base.LocalPath)
+	if saved.LocalPath != "" {
+		t.Fatalf("saved LocalPath = %q, want empty after rejected mountpoint", saved.LocalPath)
 	}
 	if saved.MountBackend != base.MountBackend {
 		t.Fatalf("saved MountBackend = %q, want %q after rejected mountpoint", saved.MountBackend, base.MountBackend)
@@ -606,8 +661,8 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	if saved.CurrentWorkspace != "demo" {
 		t.Fatalf("saved CurrentWorkspace = %q, want %q", saved.CurrentWorkspace, "demo")
 	}
-	if saved.LocalPath != "/tmp/afs-demo" {
-		t.Fatalf("saved Mountpoint = %q, want %q", saved.LocalPath, "/tmp/afs-demo")
+	if saved.LocalPath != "" {
+		t.Fatalf("saved LocalPath = %q, want empty because mount paths are per-mount state", saved.LocalPath)
 	}
 }
 
@@ -692,7 +747,6 @@ func TestCmdConfigSetHelpListsDetailedFlags(t *testing.T) {
 		"--config-source local|self-hosted|cloud",
 		"--mount-backend auto|none|fuse|nfs",
 		"Default workspace is managed with",
-		"runtime paths stay available in afs.config.json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("config set help output = %q, want substring %q", out, want)
@@ -784,13 +838,13 @@ func TestLoadConfigForUpAppliesModeOverrideAndSavesConfig(t *testing.T) {
 	base := defaultConfig()
 	base.Mode = modeSync
 	base.CurrentWorkspace = "alpha"
-	base.LocalPath = t.TempDir()
 	base.MountBackend = mountBackendNFS
 	base.NFSBin = "/usr/bin/true"
 	saveTempConfig(t, base)
 
 	mode := optionalString{value: modeMount, set: true}
-	cfg, err := loadConfigForUpWithMode([]string{}, mode)
+	mountpoint := filepath.Join(t.TempDir(), "mnt")
+	cfg, err := loadConfigForUpWithMode([]string{"alpha", mountpoint}, mode)
 	if err != nil {
 		t.Fatalf("loadConfigForUpWithMode() returned error: %v", err)
 	}

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -162,7 +163,7 @@ func (c *nativeClient) ensureParents(ctx context.Context, p string) error {
 				return err
 			}
 			if child == nil || child.Type != "dir" {
-				return errors.New("parent path conflict")
+				return ErrParentConflict
 			}
 			c.cachePath(nextPath, child)
 			curPath = nextPath
@@ -291,7 +292,7 @@ func (c *nativeClient) resolvePath(ctx context.Context, p string, followFinal bo
 			return nextPath, inode, nil
 		}
 		if inode.Type != "dir" {
-			return "", nil, errors.New("not a directory")
+			return "", nil, ErrNotDir
 		}
 
 		curPath = nextPath
@@ -447,38 +448,71 @@ func (c *nativeClient) loadWarmBatch(ctx context.Context, keys []string) ([]warm
 // storage (dedicated STRING key). When the inode's content_ref is already
 // known, pass it via loadContentExternal to skip the extra round trip.
 func (c *nativeClient) loadContentByID(ctx context.Context, id string) (string, error) {
-	// Check content_ref to decide storage mode.
-	ref, err := c.rdb.HGet(ctx, c.keys.inode(id), "content_ref").Result()
+	values, err := c.rdb.HMGet(ctx, c.keys.inode(id), "content_ref", "size").Result()
 	if err != nil && err != redis.Nil {
 		return "", err
 	}
-	return c.loadContentExternal(ctx, id, ref)
-}
-
-// loadContentExternal reads content using the already-known content_ref value.
-// When contentRef is "ext", reads from the separate STRING key. Otherwise
-// falls back to the legacy inline HASH field and lazily migrates the content
-// to the external key on first access (zero-downtime online migration).
-func (c *nativeClient) loadContentExternal(ctx context.Context, id, contentRef string) (string, error) {
-	if contentRef == "ext" {
+	ref := toStr(values[0])
+	if ref == rediscontent.RefExternal {
 		v, err := c.rdb.Get(ctx, c.keys.content(id)).Result()
 		if err != nil && err != redis.Nil {
 			return "", err
 		}
 		return v, nil
 	}
+	if !isExternalContentRef(ref) {
+		return c.loadContentExternal(ctx, id, ref)
+	}
+	size := int64(0)
+	if len(values) > 1 {
+		size = toInt(values[1])
+	}
+	data, err := rediscontent.Load(ctx, c.rdb, c.keys.content(id), ref, size)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// loadContentExternal reads content using the already-known content_ref value.
+// When contentRef points at an external backend, reads from the dedicated
+// content key. Otherwise falls back to the legacy inline HASH field and lazily
+// migrates the content to the preferred external backend on first access.
+func (c *nativeClient) loadContentExternal(ctx context.Context, id, contentRef string) (string, error) {
+	if contentRef == rediscontent.RefExternal {
+		v, err := c.rdb.Get(ctx, c.keys.content(id)).Result()
+		if err != nil && err != redis.Nil {
+			return "", err
+		}
+		return v, nil
+	}
+	if isExternalContentRef(contentRef) {
+		size, err := c.loadInodeSize(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		data, err := rediscontent.Load(ctx, c.rdb, c.keys.content(id), contentRef, size)
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+	}
 	// Legacy inline mode: content stored in the inode HASH field.
 	v, err := c.rdb.HGet(ctx, c.keys.inode(id), "content").Result()
 	if err != nil && err != redis.Nil {
 		return "", err
 	}
-	// Lazy migration: move inline content to the external STRING key.
+	preferredRef, err := c.preferredContentRef(ctx)
+	if err != nil {
+		return "", err
+	}
+	// Lazy migration: move inline content to the preferred external backend.
 	// This is best-effort — if it fails, the next read will retry.
-	if v != "" {
+	if v != "" || preferredRef != "" {
 		pipe := c.rdb.Pipeline()
-		pipe.Set(ctx, c.keys.content(id), v, 0)
+		rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(id), preferredRef, []byte(v))
 		pipe.HSet(ctx, c.keys.inode(id), mergeFieldMaps(map[string]interface{}{
-			"content_ref": "ext",
+			"content_ref": preferredRef,
 		}, fileSearchIndexFields(v)))
 		pipe.HDel(ctx, c.keys.inode(id), "content")
 		_, _ = pipe.Exec(ctx)
@@ -549,11 +583,14 @@ func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData
 	if inode == nil || inode.ID == "" {
 		return errors.New("missing inode id")
 	}
-	if inode.ContentRef == "ext" && inode.Type == "file" {
-		// Write content to the external STRING key and metadata to HASH
-		// in the same pipeline.
+	if err := c.selectContentRef(ctx, inode); err != nil {
+		return err
+	}
+	if inode.Type == "file" && isExternalContentRef(inode.ContentRef) {
+		// Write content to the external backend and metadata to HASH in the
+		// same pipeline.
 		pipe := c.rdb.Pipeline()
-		pipe.Set(ctx, c.keys.content(inode.ID), inode.Content, 0)
+		rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), inode.ContentRef, []byte(inode.Content))
 		pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(inode.Content)))
 		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 			return err
@@ -595,7 +632,7 @@ func (c *nativeClient) saveInodeDirect(ctx context.Context, inode *inodeData, in
 func (c *nativeClient) createInodeAtPath(ctx context.Context, p string, inode *inodeData, ensureParents bool) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	}
 	if ensureParents {
 		if err := c.ensureParents(ctx, p); err != nil {
@@ -613,10 +650,10 @@ func (c *nativeClient) createInodeAtPath(ctx context.Context, p string, inode *i
 
 func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath string, parent *inodeData, name string, inode *inodeData) error {
 	if parent == nil || parent.Type != "dir" {
-		return errors.New("parent path conflict")
+		return ErrParentConflict
 	}
 	if _, err := c.lookupChildID(ctx, parent.ID, name); err == nil {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	} else if !errors.Is(err, redis.Nil) {
 		return err
 	}
@@ -631,18 +668,20 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 	inode.Name = name
 	now := nowMs()
 
-	// New files use external content storage.
+	// New files use the preferred external content backend.
 	if inode.Type == "file" {
-		inode.ContentRef = "ext"
+		if err := c.selectContentRef(ctx, inode); err != nil {
+			return err
+		}
 	}
 
 	pipe := c.rdb.Pipeline()
-	if inode.Type == "file" {
-		// Content goes to the external STRING key; metadata-only to the HASH.
-		pipe.Set(ctx, c.keys.content(id), inode.Content, 0)
+	if inode.Type == "file" && isExternalContentRef(inode.ContentRef) {
+		// Content goes to the external backend; metadata-only to the HASH.
+		rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(id), inode.ContentRef, []byte(inode.Content))
 		pipe.HSet(ctx, c.keys.inode(id), mergeFieldMaps(c.inodeFieldsAtPath(inode, childPath, false), fileSearchIndexFields(inode.Content)))
 	} else {
-		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, false))
+		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, inode.Type == "file"))
 	}
 	pipe.HSet(ctx, c.keys.dirents(parent.ID), name, id)
 	c.queueTouchTimes(pipe, parent.ID, now)
@@ -693,7 +732,7 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, content string, mode uint32, exclusive bool) (*inodeData, bool, error) {
 	p = normalizePath(p)
 	if p == "/" {
-		return nil, false, errors.New("cannot write to root")
+		return nil, false, ErrCannotWriteRoot
 	}
 	parentPath := parentOf(p)
 	_, parentInode, err := c.resolvePath(ctx, parentPath, true)
@@ -701,7 +740,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return nil, false, err
 	}
 	if parentInode.Type != "dir" {
-		return nil, false, errors.New("parent path conflict")
+		return nil, false, ErrParentConflict
 	}
 
 	direntsKey := c.keys.dirents(parentInode.ID)
@@ -717,19 +756,21 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 
 	now := nowMs()
 	inode := &inodeData{
-		ID:         id,
-		Parent:     parentInode.ID,
-		Name:       name,
-		Type:       "file",
-		Mode:       mode,
-		UID:        0,
-		GID:        0,
-		Size:       int64(len(content)),
-		CtimeMs:    now,
-		MtimeMs:    now,
-		AtimeMs:    now,
-		Content:    content,
-		ContentRef: "ext",
+		ID:      id,
+		Parent:  parentInode.ID,
+		Name:    name,
+		Type:    "file",
+		Mode:    mode,
+		UID:     0,
+		GID:     0,
+		Size:    int64(len(content)),
+		CtimeMs: now,
+		MtimeMs: now,
+		AtimeMs: now,
+		Content: content,
+	}
+	if err := c.selectContentRef(ctx, inode); err != nil {
+		return nil, false, err
 	}
 
 	// Optimistic write: claim the name with HSETNX and unconditionally
@@ -738,9 +779,9 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	// orphan inode and counter bumps are compensated below.
 	pipe := c.rdb.Pipeline()
 	claim := pipe.HSetNX(ctx, direntsKey, name, inode.ID)
-	// Content goes to the external STRING key; metadata (with content_ref="ext")
-	// goes to the inode HASH. includeContent=false because content_ref="ext".
-	pipe.Set(ctx, c.keys.content(inode.ID), content, 0)
+	// Content goes to the preferred external backend; metadata remains in the
+	// inode HASH.
+	rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), inode.ContentRef, []byte(content))
 	pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(content)))
 	c.queueTouchTimes(pipe, parentInode.ID, now)
 	c.queueCreateInfo(pipe, inode)
@@ -777,7 +818,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	}
 
 	if exclusive {
-		return nil, false, errors.New("already exists")
+		return nil, false, ErrAlreadyExists
 	}
 
 	// Re-resolve the existing child. Use HGet directly (not lookupChildID)
@@ -788,7 +829,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		if errors.Is(err, redis.Nil) {
 			// The winner removed the entry between HSETNX and our HGet.
 			// Surface this as the same error the resolvePath family uses.
-			return nil, false, errors.New("no such file or directory")
+			return nil, false, ErrNotFound
 		}
 		return nil, false, err
 	}
@@ -797,10 +838,10 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return nil, false, err
 	}
 	if existing == nil {
-		return nil, false, errors.New("no such file or directory")
+		return nil, false, ErrNotFound
 	}
 	if existing.Type != "file" {
-		return nil, false, errors.New("not a file")
+		return nil, false, ErrNotFile
 	}
 	// Nothing in the parent directory actually changed from our
 	// perspective, so we leave the parent's cache alone and only
@@ -814,7 +855,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 	oldName := srcInode.Name
 	newName := baseName(dst)
 	if oldParentID == "" {
-		return errors.New("no such file or directory")
+		return ErrNotFound
 	}
 
 	var watchDstDirID string
@@ -829,7 +870,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 			currentSrcID, err := tx.HGet(ctx, c.keys.dirents(oldParentID), oldName).Result()
 			if err != nil {
 				if errors.Is(err, redis.Nil) {
-					return errors.New("no such file or directory")
+					return ErrNotFound
 				}
 				return err
 			}
@@ -842,7 +883,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 				return err
 			}
 			if currentSrc == nil {
-				return errors.New("no such file or directory")
+				return ErrNotFound
 			}
 
 			var replaced *inodeData
@@ -857,13 +898,13 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 					return redis.TxFailedErr
 				}
 				if flags&RenameNoreplace != 0 {
-					return errors.New("already exists")
+					return ErrAlreadyExists
 				}
 				if currentSrc.Type == "dir" && replaced.Type != "dir" {
-					return errors.New("not a directory")
+					return ErrNotDir
 				}
 				if currentSrc.Type != "dir" && replaced.Type == "dir" {
-					return errors.New("not a file")
+					return ErrNotFile
 				}
 				if replaced.Type == "dir" {
 					if watchDstDirID != replaced.ID {
@@ -875,7 +916,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 						return err
 					}
 					if count > 0 {
-						return errors.New("directory not empty")
+						return ErrDirNotEmpty
 					}
 				}
 			case !errors.Is(err, redis.Nil):
@@ -942,7 +983,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 
 func (c *nativeClient) listDirChildren(ctx context.Context, dirPath string, dir *inodeData) ([]namedInode, error) {
 	if dir == nil || dir.Type != "dir" {
-		return nil, errors.New("not a directory")
+		return nil, ErrNotDir
 	}
 	if c.cache != nil {
 		if cached, ok := c.cache.Get(dirCacheKey(dirPath)); ok {
@@ -1041,12 +1082,12 @@ func (c *nativeClient) inodeFields(inode *inodeData, includeContent bool) map[st
 	if inode.ContentRef != "" {
 		fields["content_ref"] = inode.ContentRef
 	}
-	if includeContent && inode.Type == "file" && inode.ContentRef != "ext" {
+	if includeContent && inode.Type == "file" && !isExternalContentRef(inode.ContentRef) {
 		// Legacy inline mode: content stored in the inode HASH.
 		fields["content"] = inode.Content
 	}
-	// When content_ref == "ext", the caller is responsible for writing
-	// content to the separate STRING key via c.keys.content(id).
+	// When content_ref points at an external backend, the caller is responsible
+	// for writing content to the separate content key via c.keys.content(id).
 	return fields
 }
 
@@ -1217,6 +1258,53 @@ func inodeFromValues(id string, vals []interface{}) *inodeData {
 		inode.ContentRef = toStr(vals[11])
 	}
 	return inode
+}
+
+func (c *nativeClient) preferredContentRef(ctx context.Context) (string, error) {
+	return rediscontent.PreferredRef(ctx, c.rdb)
+}
+
+func (c *nativeClient) selectContentRef(ctx context.Context, inode *inodeData) error {
+	if inode == nil || inode.Type != "file" {
+		return nil
+	}
+	preferredRef, err := c.preferredContentRef(ctx)
+	if err != nil {
+		return err
+	}
+	switch inode.ContentRef {
+	case "":
+		inode.ContentRef = preferredRef
+	case rediscontent.RefExternal:
+		if preferredRef == rediscontent.RefArray {
+			inode.ContentRef = preferredRef
+		}
+	}
+	return nil
+}
+
+func (c *nativeClient) loadInodeSize(ctx context.Context, id string) (int64, error) {
+	value, err := c.rdb.HGet(ctx, c.keys.inode(id), "size").Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	n, parseErr := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if parseErr != nil {
+		return 0, nil
+	}
+	return n, nil
+}
+
+func isExternalContentRef(ref string) bool {
+	switch strings.TrimSpace(ref) {
+	case rediscontent.RefExternal, rediscontent.RefArray:
+		return true
+	default:
+		return false
+	}
 }
 
 func inodeUint64(id string) uint64 {

@@ -80,7 +80,7 @@ func (s stubAFSControlPlane) CreateWorkspaceSession(context.Context, string, con
 	return controlplane.WorkspaceSession{}, fmt.Errorf("unexpected CreateWorkspaceSession call")
 }
 
-func (s stubAFSControlPlane) HeartbeatWorkspaceSession(context.Context, string, string) (controlplane.WorkspaceSessionInfo, error) {
+func (s stubAFSControlPlane) HeartbeatWorkspaceSession(context.Context, string, string, ...controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSessionInfo, error) {
 	return controlplane.WorkspaceSessionInfo{}, fmt.Errorf("unexpected HeartbeatWorkspaceSession call")
 }
 
@@ -578,6 +578,60 @@ func TestResolveWorkspaceSelectionPromptsWhenSavedDefaultIsMissing(t *testing.T)
 	}
 	if selection.ID != "ws_beta" || selection.Name != "beta" || selection.Source != workspaceSelectionPrompt {
 		t.Fatalf("selection = %+v, want prompted beta", selection)
+	}
+}
+
+func TestPromptWorkspaceSelectionShowsWorkspaceIDAndDatabase(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdin) returned error: %v", err)
+	}
+	if _, err := input.WriteString("1\n"); err != nil {
+		t.Fatalf("WriteString(stdin) returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek(stdin) returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	var selection workspaceSelection
+	out, err := captureStdout(t, func() error {
+		var runErr error
+		selection, runErr = promptWorkspaceSelectionFromSummaries([]workspaceSummary{
+			{
+				ID:           "ws_alpha",
+				Name:         "alpha",
+				DatabaseID:   "db_primary",
+				DatabaseName: "Primary Redis",
+			},
+			{
+				ID:           "ws_beta",
+				Name:         "alpha",
+				DatabaseID:   "db_secondary",
+				DatabaseName: "Secondary Redis",
+			},
+		})
+		return runErr
+	})
+	if err != nil {
+		t.Fatalf("promptWorkspaceSelectionFromSummaries() returned error: %v", err)
+	}
+	if selection.ID != "ws_alpha" || selection.Name != "alpha" || selection.Source != workspaceSelectionPrompt {
+		t.Fatalf("selection = %+v, want prompted alpha", selection)
+	}
+	stripped := stripAnsi(out)
+	for _, want := range []string{"Workspace ID", "Database", "ws_alpha", "Primary Redis", "ws_beta", "Secondary Redis"} {
+		if !strings.Contains(stripped, want) {
+			t.Fatalf("prompt output = %q, want %q", out, want)
+		}
 	}
 }
 

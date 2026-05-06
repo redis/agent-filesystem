@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -209,11 +210,11 @@ func (c *nativeClient) Grep(ctx context.Context, p, pattern string, nocase bool)
 	var matches []GrepMatch
 	switch inode.Type {
 	case "file":
-		content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
+		fileMatches, err := c.grepFileWithPrefilter(ctx, resolved, inode, pattern, nocase)
 		if err != nil {
 			return nil, err
 		}
-		matches = append(matches, c.grepFile(resolved, content, pattern, nocase)...)
+		matches = append(matches, fileMatches...)
 	case "dir":
 		if err := c.grepWalk(ctx, resolved, inode, pattern, nocase, &matches); err != nil {
 			return nil, err
@@ -232,11 +233,11 @@ func (c *nativeClient) grepWalk(ctx context.Context, dirPath string, dir *inodeD
 	for _, child := range children {
 		switch child.Inode.Type {
 		case "file":
-			content, err := c.loadContentExternal(ctx, child.Inode.ID, child.Inode.ContentRef)
+			fileMatches, err := c.grepFileWithPrefilter(ctx, child.Path, child.Inode, pattern, nocase)
 			if err != nil {
 				return err
 			}
-			*matches = append(*matches, c.grepFile(child.Path, content, pattern, nocase)...)
+			*matches = append(*matches, fileMatches...)
 		case "dir":
 			if err := c.grepWalk(ctx, child.Path, child.Inode, pattern, nocase, matches); err != nil {
 				return err
@@ -244,6 +245,22 @@ func (c *nativeClient) grepWalk(ctx context.Context, dirPath string, dir *inodeD
 		}
 	}
 	return nil
+}
+
+func (c *nativeClient) grepFileWithPrefilter(ctx context.Context, filePath string, inode *inodeData, pattern string, nocase bool) ([]GrepMatch, error) {
+	if inode != nil && inode.ContentRef == rediscontent.RefArray {
+		if probe := grepLiteralProbe(pattern); probe != "" {
+			ok, err := rediscontent.MayContainLiteral(ctx, c.rdb, c.keys.content(inode.ID), inode.Size, probe, nocase)
+			if err == nil && !ok {
+				return nil, nil
+			}
+		}
+	}
+	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
+	if err != nil {
+		return nil, err
+	}
+	return c.grepFile(filePath, content, pattern, nocase), nil
 }
 
 func (c *nativeClient) grepFile(filePath string, content string, pattern string, nocase bool) []GrepMatch {
@@ -282,4 +299,50 @@ func (c *nativeClient) grepFile(filePath string, content string, pattern string,
 		}
 	}
 	return matches
+}
+
+func grepLiteralProbe(pattern string) string {
+	best := ""
+	var current strings.Builder
+	escaped := false
+	inClass := false
+
+	flush := func() {
+		if current.Len() > len(best) {
+			best = current.String()
+		}
+		current.Reset()
+	}
+
+	for i := 0; i < len(pattern); i++ {
+		ch := pattern[i]
+		if escaped {
+			current.WriteByte(ch)
+			escaped = false
+			continue
+		}
+		if inClass {
+			if ch == ']' {
+				inClass = false
+			}
+			flush()
+			continue
+		}
+		switch ch {
+		case '\\':
+			escaped = true
+		case '*', '?':
+			flush()
+		case '[':
+			inClass = true
+			flush()
+		default:
+			current.WriteByte(ch)
+		}
+	}
+	if escaped {
+		current.WriteByte('\\')
+	}
+	flush()
+	return best
 }

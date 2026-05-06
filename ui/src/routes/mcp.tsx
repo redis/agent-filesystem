@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button, Loader } from "@redis-ui/components";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { z } from "zod";
 import {
   DialogError,
@@ -26,7 +26,40 @@ import {
   useWorkspaceSummaries,
 } from "../foundation/hooks/use-afs";
 import { AccessTokensTable } from "../foundation/tables/access-tokens-table";
-import { isControlPlaneScope, type AFSMCPToken } from "../foundation/types/afs";
+import { isControlPlaneScope } from "../foundation/types/afs";
+import type { AFSMCPToken } from "../foundation/types/afs";
+import { useDrawerCommands } from "../foundation/drawer-context";
+import type { CommandsDrawerConfig } from "../foundation/drawer-context";
+
+const MCP_COMMANDS: CommandsDrawerConfig = {
+  title: "Connect via MCP",
+  subline: "Snippets for wiring AFS into MCP-capable agents.",
+  sections: [
+    {
+      title: "Run local stdio MCP",
+      description: "Workspace-scoped, runs from your shell.",
+      command: "afs mcp --workspace my-workspace --profile workspace-rw",
+    },
+    {
+      title: "Add to Codex CLI",
+      description: "Hosted endpoint, bearer token from $AFS_TOKEN.",
+      command:
+        "codex mcp add agent-filesystem --transport http https://afs.cloud/mcp --bearer-token-env AFS_TOKEN",
+    },
+    {
+      title: "Claude / Cursor config",
+      description: "Drop into your client's MCP config file.",
+      command: `{
+  "mcpServers": {
+    "agent-filesystem": {
+      "url": "https://afs.cloud/mcp",
+      "headers": { "Authorization": "Bearer $AFS_TOKEN" }
+    }
+  }
+}`,
+    },
+  ],
+};
 
 const mcpSearchSchema = z.object({
   workspaceId: z.string().optional(),
@@ -42,6 +75,7 @@ function MCPPage() {
   const navigate = useNavigate();
   const auth = useAuthSession();
   const search = Route.useSearch();
+  useDrawerCommands(MCP_COMMANDS);
   const { unavailableDatabases } = useDatabaseScope();
   const queriesEnabled = !auth.isLoading && (!auth.config.enabled || auth.isAuthenticated);
   const databasesQuery = useDatabases(queriesEnabled);
@@ -58,14 +92,6 @@ function MCPPage() {
   const databaseId = search.databaseId;
   const allWorkspaces = workspacesQuery.data ?? [];
   const databases = databasesQuery.data ?? [];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void workspaceTokensQuery.refetch();
-      void controlPlaneTokensQuery.refetch();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [workspaceTokensQuery, controlPlaneTokensQuery]);
 
   const workspaceNameById = useMemo(
     () => new Map(allWorkspaces.map((workspace) => [workspace.id, workspace.name])),

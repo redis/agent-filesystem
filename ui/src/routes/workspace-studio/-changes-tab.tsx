@@ -100,11 +100,18 @@ export function ChangesTab({ databaseId, workspaceId, editable }: Props) {
 const HeaderSummary = styled.span`
   color: var(--afs-muted);
   font-size: 13px;
-  white-space: nowrap;
+  line-height: 1.5;
+  max-width: 100%;
+  min-width: 0;
+  text-align: right;
 
   strong {
     color: var(--afs-ink);
     font-weight: 700;
+  }
+
+  @media (max-width: 720px) {
+    text-align: left;
   }
 `;
 

@@ -93,6 +93,8 @@ type WorkspaceSessionRecord struct {
 	SessionID       string    `json:"session_id"`
 	Workspace       string    `json:"workspace"`
 	AgentID         string    `json:"agent_id,omitempty"`
+	AgentName       string    `json:"agent_name,omitempty"`
+	SessionName     string    `json:"session_name,omitempty"`
 	ClientKind      string    `json:"client_kind,omitempty"`
 	AFSVersion      string    `json:"afs_version,omitempty"`
 	Hostname        string    `json:"hostname,omitempty"`
@@ -674,7 +676,8 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 	if err != nil {
 		return err
 	}
-	ts := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+	now := time.Now().UTC()
+	ts := strconv.FormatInt(now.UnixMilli(), 10)
 	fields := map[string]any{
 		"ts_ms":     ts,
 		"workspace": meta.Name,
@@ -690,6 +693,11 @@ func (s *Store) Audit(ctx context.Context, workspace, op string, extra map[strin
 	})
 	enqueueEventFields(ctx, pipe, storageID, auditEventFields(fields))
 	_, err = pipe.Exec(ctx)
+	if err == nil {
+		event := newMonitorEvent("activity", op, meta)
+		event.CreatedAt = now.Format(time.RFC3339Nano)
+		s.publishMonitorEvent(ctx, event)
+	}
 	return err
 }
 

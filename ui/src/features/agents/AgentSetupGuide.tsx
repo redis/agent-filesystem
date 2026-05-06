@@ -9,6 +9,7 @@ import {
   CrossLinkDesc,
   CrossLinkArrow,
 } from "../../components/doc-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import { getControlPlaneURL } from "../../foundation/api/afs";
 import { useAuthSession } from "../../foundation/auth-context";
 
@@ -350,11 +351,8 @@ const TabItem = styled.button<{ $active?: boolean }>`
   }
 `;
 
-const PanelCard = styled.div`
-  border: 1px solid var(--afs-line);
-  border-radius: 16px;
+const PanelCard = styled(SurfaceCard)`
   padding: 24px;
-  background: var(--afs-panel-strong);
 `;
 
 const MethodPills = styled.div`

@@ -71,7 +71,6 @@ type persistedConfig struct {
 type persistedRuntime struct {
 	CurrentWorkspace   string        `json:"currentWorkspace,omitempty"`
 	CurrentWorkspaceID string        `json:"currentWorkspaceID,omitempty"`
-	LocalPath          string        `json:"localPath,omitempty"`
 	Mount              mountSettings `json:"mount,omitempty"`
 	Logs               logSettings   `json:"logs,omitempty"`
 }
@@ -116,11 +115,15 @@ func persistedConfigFromRuntime(cfg config) persistedConfig {
 	out.Runtime = &persistedRuntime{
 		CurrentWorkspace:   strings.TrimSpace(cfg.CurrentWorkspace),
 		CurrentWorkspaceID: strings.TrimSpace(cfg.CurrentWorkspaceID),
-		LocalPath:          strings.TrimSpace(cfg.LocalPath),
-		Mount:              cfg.mountSettings,
+		Mount:              persistedMountSettings(cfg.mountSettings),
 		Logs:               cfg.logSettings,
 	}
 	return out
+}
+
+func persistedMountSettings(settings mountSettings) mountSettings {
+	settings.ReadOnly = false
+	return settings
 }
 
 func persistedMode(cfg config) string {
@@ -171,12 +174,12 @@ func loadConfig() (config, error) {
 	}
 
 	if raw.Runtime != nil {
-		cfg.LocalPath = raw.Runtime.LocalPath
-		cfg.mountSettings = raw.Runtime.Mount
+		cfg.LocalPath = ""
+		cfg.mountSettings = persistedMountSettings(raw.Runtime.Mount)
 		cfg.logSettings = raw.Runtime.Logs
 	} else {
 		cfg.LocalPath = legacy.LocalPath
-		cfg.mountSettings = legacy.mountSettings
+		cfg.mountSettings = persistedMountSettings(legacy.mountSettings)
 		cfg.logSettings = legacy.logSettings
 	}
 	cfg.WorkRoot = defaultWorkRoot()

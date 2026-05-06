@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -57,10 +58,11 @@ func BuildManifestFromWorkspaceRoot(ctx context.Context, rdb *redis.Client, work
 			return Manifest{}, nil, 0, 0, 0, err
 		}
 
-		// For inodes with content_ref="ext", fetch content from separate key.
-		type extContent struct {
+		// For externally stored file content, fetch bytes from the dedicated
+		// content key after the inode metadata pass.
+		type externalContent struct {
 			idx int
-			cmd *redis.StringCmd
+			id  string
 		}
 		type parsedInode struct {
 			typ        string
@@ -92,24 +94,19 @@ func BuildManifestFromWorkspaceRoot(ctx context.Context, rdb *redis.Client, work
 			parsed[i] = p
 		}
 
-		// Second pipeline: fetch external content.
-		var extFetches []extContent
-		pipe2 := rdb.Pipeline()
+		// Second pass: fetch external content.
+		var externalFetches []externalContent
 		for i, p := range parsed {
-			if p != nil && p.typ == "file" && p.contentRef == "ext" {
-				cmd := pipe2.Get(ctx, workspaceFSContentKey(fsKey, queue[i].inodeID))
-				extFetches = append(extFetches, extContent{idx: i, cmd: cmd})
+			if p != nil && p.typ == "file" && p.contentRef != "" {
+				externalFetches = append(externalFetches, externalContent{idx: i, id: queue[i].inodeID})
 			}
 		}
-		if len(extFetches) > 0 {
-			if _, err := pipe2.Exec(ctx); err != nil && err != redis.Nil {
+		for _, fetch := range externalFetches {
+			content, err := rediscontent.Load(ctx, rdb, workspaceFSContentKey(fsKey, fetch.id), parsed[fetch.idx].contentRef, parsed[fetch.idx].size)
+			if err != nil {
 				return Manifest{}, nil, 0, 0, 0, err
 			}
-			for _, ef := range extFetches {
-				if v, err := ef.cmd.Result(); err == nil {
-					parsed[ef.idx].content = v
-				}
-			}
+			parsed[fetch.idx].content = string(content)
 		}
 
 		var dirItems []bfsItem

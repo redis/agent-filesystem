@@ -354,6 +354,8 @@ export type AFSAgentSession = {
   databaseId?: string;
   databaseName?: string;
   agentId?: string;
+  agentName?: string;
+  sessionName?: string;
   clientKind: string;
   afsVersion: string;
   hostname: string;
@@ -399,6 +401,43 @@ export type AFSFileContent = {
   target?: string;
 };
 
+export type AFSWorkspaceContentStorageProfile =
+  | "none"
+  | "legacy"
+  | "array"
+  | "mixed";
+
+export type AFSWorkspaceContentStorage = {
+  profile: AFSWorkspaceContentStorageProfile;
+  fileCount: number;
+  arrayFileCount: number;
+  legacyFileCount: number;
+};
+
+export type AFSWorkspaceSearchIndexStatus =
+  | "ready"
+  | "building"
+  | "missing"
+  | "unavailable"
+  | "error";
+
+export type AFSWorkspaceSearchIndex = {
+  name: string;
+  present: boolean;
+  ready: boolean;
+  status: AFSWorkspaceSearchIndexStatus;
+  documentCount: number;
+  percentIndexed: number;
+  error?: string;
+};
+
+export type AFSDatabaseWorkspaceStorage = {
+  workspaceId: string;
+  workspaceName: string;
+  redisKey: string;
+  contentStorage: AFSWorkspaceContentStorage;
+};
+
 export type AFSWorkspace = {
   id: string;
   name: string;
@@ -406,6 +445,7 @@ export type AFSWorkspace = {
   cloudAccount: string;
   databaseId: string;
   databaseName: string;
+  databaseSupportsArrays?: boolean;
   ownerSubject?: string;
   ownerLabel?: string;
   databaseManagementType?: string;
@@ -424,6 +464,8 @@ export type AFSWorkspace = {
   fileCount: number;
   folderCount: number;
   totalBytes: number;
+  contentStorage?: AFSWorkspaceContentStorage;
+  searchIndex?: AFSWorkspaceSearchIndex;
   checkpointCount: number;
   files: AFSFile[];
   savepoints: AFSSavepoint[];
@@ -462,6 +504,7 @@ export type AFSWorkspaceListResponse = {
 export type AFSWorkspaceDetail = AFSWorkspace;
 
 export type AFSRedisStats = {
+  redisVersion?: string;
   usedMemoryBytes: number;
   maxMemoryBytes: number; // 0 = no limit
   fragmentationRatio: number;
@@ -499,6 +542,9 @@ export type AFSDatabase = {
   // AFS-specific footprint across all workspaces in this database
   afsTotalBytes: number;
   afsFileCount: number;
+  supportsArrays?: boolean;
+  supportsSearch?: boolean;
+  workspaceStorage?: AFSDatabaseWorkspaceStorage[];
   // Redis server stats snapshot (undefined while the poller warms up or the
   // database is unreachable)
   stats?: AFSRedisStats;
@@ -581,9 +627,10 @@ export type GetWorkspaceVersioningPolicyInput = {
   workspaceId: string;
 };
 
-export type UpdateWorkspaceVersioningPolicyInput = GetWorkspaceVersioningPolicyInput & {
-  policy: AFSWorkspaceVersioningPolicy;
-};
+export type UpdateWorkspaceVersioningPolicyInput =
+  GetWorkspaceVersioningPolicyInput & {
+    policy: AFSWorkspaceVersioningPolicy;
+  };
 
 export type GetFileHistoryInput = {
   databaseId?: string;
@@ -681,7 +728,9 @@ export type AFSMCPScope = string;
 export const AFS_MCP_SCOPE_CONTROL_PLANE = "control-plane";
 
 export function isControlPlaneScope(scope?: string): boolean {
-  return typeof scope === "string" && scope.trim() === AFS_MCP_SCOPE_CONTROL_PLANE;
+  return (
+    typeof scope === "string" && scope.trim() === AFS_MCP_SCOPE_CONTROL_PLANE
+  );
 }
 
 export type AFSMCPToken = {

@@ -56,7 +56,7 @@ func prepareSyncBootstrap(ctx context.Context, cfg config) (syncBootstrap, func(
 	return prepareSyncBootstrapForWorkspace(ctx, cfg, "")
 }
 
-func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requestedWorkspace string) (syncBootstrap, func(), error) {
+func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requestedWorkspace string, sessionName ...string) (syncBootstrap, func(), error) {
 	resolvedCfg, service, closeFn, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
 		return syncBootstrap{}, func() {}, err
@@ -82,7 +82,7 @@ func prepareSyncBootstrapForWorkspace(ctx context.Context, cfg config, requested
 		return syncBootstrap{}, func() {}, fmt.Errorf("a workspace is required before AFS can sync: %w", err)
 	}
 
-	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
+	sessionInput := managedWorkspaceSessionRequest(resolvedCfg, sessionName...)
 	session, err := service.CreateWorkspaceSession(ctx, selection.ID, sessionInput)
 	if err != nil {
 		closeFn()

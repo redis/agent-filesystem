@@ -1,7 +1,7 @@
 import { Button } from "@redis-ui/components";
-import JSZip from "jszip";
 import { useState } from "react";
 import styled from "styled-components";
+import { SurfaceCard } from "../../components/card-shell";
 import { getControlPlaneURL } from "../../foundation/api/afs";
 import type {
   AFSMCPToken,
@@ -63,6 +63,7 @@ export async function downloadClaudePlugin(args: {
   token: string;
 }): Promise<void> {
   const files = buildClaudePlugin(args);
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const file of files) {
     const isExecutable = file.path.endsWith(".sh");
@@ -416,12 +417,11 @@ const ChoiceStrip = styled.div`
   }
 `;
 
-const ChoiceCard = styled.button<{ $active?: boolean; $disabled?: boolean }>`
+const ChoiceCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $active?: boolean; $disabled?: boolean }>`
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 14px;
-  border-radius: 14px;
   border: 1.5px solid
     ${(p) => (p.$active ? "var(--afs-accent, #2563eb)" : "var(--afs-line)")};
   background: ${(p) =>

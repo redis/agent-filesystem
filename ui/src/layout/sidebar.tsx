@@ -41,14 +41,19 @@ function readInitialSidebarState() {
 
 function profileInitials(displayName: string) {
   const parts = displayName.trim().split(/\s+/).filter(Boolean);
-  const initials = parts.length > 1
-    ? `${parts[0][0]}${parts[1][0]}`
-    : parts[0]?.slice(0, 2);
+  const initials =
+    parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0]?.slice(0, 2);
   return (initials || "AF").toUpperCase();
 }
 
 /** Routes that remain active even when no databases are configured. */
-const ALWAYS_ENABLED_PATHS = new Set(["/", "/admin", "/docs", "/agent-guide", "/downloads"]);
+const ALWAYS_ENABLED_PATHS = new Set([
+  "/",
+  "/admin",
+  "/docs",
+  "/agent-guide",
+  "/downloads",
+]);
 
 const serverVersionQueryOptions = () =>
   queryOptions({
@@ -69,7 +74,9 @@ export function AppSidebar() {
   const [isExpanded, setIsExpanded] = useState(readInitialSidebarState);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
-  const profileLabel = auth.supportsAccountAuth ? auth.displayName : "Logged in";
+  const profileLabel = auth.supportsAccountAuth
+    ? auth.displayName
+    : "Logged in";
   const avatarLabel = auth.supportsAccountAuth ? auth.displayName : "AFS";
 
   // Surface the control-plane version in the footer so operators can tell at
@@ -130,7 +137,9 @@ export function AppSidebar() {
         <SideBar.Item
           isActive={isNavigationItemActive(item, location.pathname)}
           tooltipProps={{
-            text: disabled ? `${item.label} (add a database first)` : item.label,
+            text: disabled
+              ? `${item.label} (add a database first)`
+              : item.label,
             placement: "right",
           }}
           onMouseEnter={disabled ? undefined : () => handlePrefetch(item.path)}
@@ -170,22 +179,25 @@ export function AppSidebar() {
         </S.CenterSidebarHeader>
 
         <SideBar.ScrollContainer>
-          <SideBar.ItemsContainer>{navigationItems.map(renderRouteItem)}</SideBar.ItemsContainer>
+          <SideBar.ItemsContainer>
+            {navigationItems.map(renderRouteItem)}
+          </SideBar.ItemsContainer>
 
           {showAdminNavigation ? (
             <>
               <SideBar.Divider fullWidth />
-              <SideBar.ItemsContainer>{renderRouteItem(adminNavigationItem)}</SideBar.ItemsContainer>
+              <SideBar.ItemsContainer>
+                {renderRouteItem(adminNavigationItem)}
+              </SideBar.ItemsContainer>
             </>
           ) : null}
 
-          <S.Spacer />
+          <SideBar.Split />
           <SideBar.Divider fullWidth />
 
           <SideBar.ItemsContainer>
             {bottomNavigationItems.map(renderRouteItem)}
           </SideBar.ItemsContainer>
-
         </SideBar.ScrollContainer>
 
         <SideBar.Footer>
@@ -201,7 +213,10 @@ export function AppSidebar() {
                 </Button>
               </S.SignInButtonWrapper>
             ) : (
-              <S.ProfileMenuContainer ref={profileMenuRef} $isExpanded={isExpanded}>
+              <S.ProfileMenuContainer
+                ref={profileMenuRef}
+                $isExpanded={isExpanded}
+              >
                 <S.ProfileButton
                   type="button"
                   onClick={() => setIsProfileMenuOpen((open) => !open)}
@@ -210,14 +225,21 @@ export function AppSidebar() {
                   title={auth.displayName}
                   $isExpanded={isExpanded}
                 >
-                  <S.ProfileAvatar>{profileInitials(avatarLabel)}</S.ProfileAvatar>
+                  <S.ProfileAvatar>
+                    {profileInitials(avatarLabel)}
+                  </S.ProfileAvatar>
                   {isExpanded ? (
                     <S.ProfileTextGroup>
                       <S.ProfileName>{profileLabel}</S.ProfileName>
-                      {auth.secondaryLabel ? <S.ProfileMeta>{auth.secondaryLabel}</S.ProfileMeta> : null}
+                      {auth.secondaryLabel ? (
+                        <S.ProfileMeta>{auth.secondaryLabel}</S.ProfileMeta>
+                      ) : null}
                     </S.ProfileTextGroup>
                   ) : null}
-                  <S.ProfileChevron $isOpen={isProfileMenuOpen} $isExpanded={isExpanded}>
+                  <S.ProfileChevron
+                    $isOpen={isProfileMenuOpen}
+                    $isExpanded={isExpanded}
+                  >
                     <ChevronDownIcon customSize="14px" />
                   </S.ProfileChevron>
                 </S.ProfileButton>

@@ -2,6 +2,7 @@ import { Button } from "@redis-ui/components";
 import { useEffect, useMemo, useState } from "react";
 import styled from "styled-components";
 import { NoticeBody, NoticeCard, NoticeTitle, Tag } from "../../components/afs-kit";
+import { SurfaceCard } from "../../components/card-shell";
 import { afsApi, formatBytes } from "../../foundation/api/afs";
 import {
   useChangelog,
@@ -610,13 +611,10 @@ const DetailPane = styled.div`
   gap: 16px;
 `;
 
-const LineageCard = styled.div`
+const LineageCard = styled(SurfaceCard)`
   display: grid;
   gap: 10px;
-  border: 1px solid var(--afs-line);
-  border-radius: 14px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.45);
 `;
 
 const LineageHeader = styled.div`

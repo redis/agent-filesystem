@@ -40,7 +40,6 @@ import { Route as DocsLocalFilesRouteImport } from './routes/docs_.local-files'
 import { Route as DocsHowItWorksRouteImport } from './routes/docs_.how-it-works'
 import { Route as DocsFaqRouteImport } from './routes/docs_.faq'
 import { Route as DocsCliRouteImport } from './routes/docs_.cli'
-import { Route as AgentsAddRouteImport } from './routes/agents_.add'
 import { Route as TemplatesInstalledWorkspaceIdRouteImport } from './routes/templates.installed.$workspaceId'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
@@ -198,11 +197,6 @@ const DocsCliRoute = DocsCliRouteImport.update({
   path: '/docs/cli',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AgentsAddRoute = AgentsAddRouteImport.update({
-  id: '/agents_/add',
-  path: '/agents/add',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const TemplatesInstalledWorkspaceIdRoute =
   TemplatesInstalledWorkspaceIdRouteImport.update({
     id: '/installed/$workspaceId',
@@ -228,7 +222,6 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
-  '/agents/add': typeof AgentsAddRoute
   '/docs/cli': typeof DocsCliRoute
   '/docs/faq': typeof DocsFaqRoute
   '/docs/how-it-works': typeof DocsHowItWorksRoute
@@ -263,7 +256,6 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
-  '/agents/add': typeof AgentsAddRoute
   '/docs/cli': typeof DocsCliRoute
   '/docs/faq': typeof DocsFaqRoute
   '/docs/how-it-works': typeof DocsHowItWorksRoute
@@ -299,7 +291,6 @@ export interface FileRoutesById {
   '/signup': typeof SignupRouteWithChildren
   '/templates': typeof TemplatesRouteWithChildren
   '/workspaces': typeof WorkspacesRouteWithChildren
-  '/agents_/add': typeof AgentsAddRoute
   '/docs_/cli': typeof DocsCliRoute
   '/docs_/faq': typeof DocsFaqRoute
   '/docs_/how-it-works': typeof DocsHowItWorksRoute
@@ -336,7 +327,6 @@ export interface FileRouteTypes {
     | '/signup'
     | '/templates'
     | '/workspaces'
-    | '/agents/add'
     | '/docs/cli'
     | '/docs/faq'
     | '/docs/how-it-works'
@@ -371,7 +361,6 @@ export interface FileRouteTypes {
     | '/signup'
     | '/templates'
     | '/workspaces'
-    | '/agents/add'
     | '/docs/cli'
     | '/docs/faq'
     | '/docs/how-it-works'
@@ -406,7 +395,6 @@ export interface FileRouteTypes {
     | '/signup'
     | '/templates'
     | '/workspaces'
-    | '/agents_/add'
     | '/docs_/cli'
     | '/docs_/faq'
     | '/docs_/how-it-works'
@@ -442,7 +430,6 @@ export interface RootRouteChildren {
   SignupRoute: typeof SignupRouteWithChildren
   TemplatesRoute: typeof TemplatesRouteWithChildren
   WorkspacesRoute: typeof WorkspacesRouteWithChildren
-  AgentsAddRoute: typeof AgentsAddRoute
   DocsCliRoute: typeof DocsCliRoute
   DocsFaqRoute: typeof DocsFaqRoute
   DocsHowItWorksRoute: typeof DocsHowItWorksRoute
@@ -675,13 +662,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DocsCliRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/agents_/add': {
-      id: '/agents_/add'
-      path: '/agents/add'
-      fullPath: '/agents/add'
-      preLoaderRoute: typeof AgentsAddRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/templates/installed/$workspaceId': {
       id: '/templates/installed/$workspaceId'
       path: '/installed/$workspaceId'
@@ -755,7 +735,6 @@ const rootRouteChildren: RootRouteChildren = {
   SignupRoute: SignupRouteWithChildren,
   TemplatesRoute: TemplatesRouteWithChildren,
   WorkspacesRoute: WorkspacesRouteWithChildren,
-  AgentsAddRoute: AgentsAddRoute,
   DocsCliRoute: DocsCliRoute,
   DocsFaqRoute: DocsFaqRoute,
   DocsHowItWorksRoute: DocsHowItWorksRoute,

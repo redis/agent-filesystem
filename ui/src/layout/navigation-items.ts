@@ -40,7 +40,7 @@ export type NavigationTitleParts = {
 };
 
 export const navigationItems: ReadonlyArray<NavigationItem> = [
-  { kind: "route", label: "Overview", path: "/", icon: PieChartIcon },
+  { kind: "route", label: "Monitor", path: "/", icon: PieChartIcon, title: "Monitor" },
   { kind: "route", label: "Workspaces", path: "/workspaces", icon: FoldersIcon },
   { kind: "route", label: "Agents", path: "/agents", icon: BotIcon },
   { kind: "route", label: "MCP", path: "/mcp", icon: PlugIcon },
@@ -118,7 +118,7 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   }
 
   if (pathname.startsWith("/workspaces")) {
-    return { page: "Workspaces", subtitle: "Manage workspaces. These are the filesystems your agents can access." };
+    return { page: "Workspaces", subtitle: "These are the filesystems your agents can access." };
   }
 
   if (pathname.startsWith("/agents")) {
@@ -140,7 +140,10 @@ export function resolveNavigationTitleParts(pathname: string): NavigationTitlePa
   for (const item of navigationItems) {
     if (item.kind === "route" && isPathMatch(pathname, item.path)) {
       if (item.path === "/") {
-        return { page: item.title ?? item.label, subtitle: "Dashboard overview of workspaces, agents, and storage." };
+        return {
+          page: item.title ?? item.label,
+          subtitle: "What your CLI and agents are doing right now.",
+        };
       }
       return { page: item.title ?? item.label };
     }

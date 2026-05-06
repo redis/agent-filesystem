@@ -541,6 +541,128 @@ func TestMountReconcileMissingLocalRootDownloadsInsteadOfRemoteDelete(t *testing
 	}
 }
 
+func TestMountReconcileMissingLocalRootWithDeletedOnlyStateDownloads(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeRemoteFile(t, "README.md", "restored\n")
+
+	st := newSyncState(env.workspace, env.localRoot)
+	st.Entries["README.md"] = SyncEntry{
+		Type:         "file",
+		Size:         int64(len("restored\n")),
+		Deleted:      true,
+		LastSyncedAt: time.Now().UTC(),
+	}
+	if err := saveSyncState(st); err != nil {
+		t.Fatalf("saveSyncState() returned error: %v", err)
+	}
+	if err := os.RemoveAll(env.localRoot); err != nil {
+		t.Fatalf("RemoveAll(localRoot) returned error: %v", err)
+	}
+	localSnapshot, err := inspectMountLocalRoot(env.localRoot)
+	if err != nil {
+		t.Fatalf("inspectMountLocalRoot() returned error: %v", err)
+	}
+
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if !mountPlanDeletesRemoteFromEmptyLocal(plan, localSnapshot) {
+		t.Fatalf("plan should be recognized as empty-local remote delete with deleted-only state: %#v", plan)
+	}
+	if !mountPlanShouldResetEmptyLocalState(plan, localSnapshot) {
+		t.Fatalf("plan should reset missing local root with deleted-only state: %#v", plan)
+	}
+
+	resetMountSyncState(d)
+	plan, err = buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan after reset: %v", err)
+	}
+	if plan.DownloadCount != 1 || plan.DeleteRemoteCount != 0 || plan.ConflictCount != 0 {
+		t.Fatalf("plan counts = download:%d deleteRemote:%d conflict:%d, want 1/0/0; operations = %#v", plan.DownloadCount, plan.DeleteRemoteCount, plan.ConflictCount, plan.Operations)
+	}
+	requireMountOp(t, plan, "D", "README.md")
+}
+
+func TestMountReconcileEmptyLocalRootWithDeletedOnlyStateResets(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeRemoteFile(t, "README.md", "restored\n")
+
+	st := newSyncState(env.workspace, env.localRoot)
+	st.Entries["README.md"] = SyncEntry{
+		Type:         "file",
+		Size:         int64(len("restored\n")),
+		Deleted:      true,
+		LastSyncedAt: time.Now().UTC(),
+	}
+	if err := saveSyncState(st); err != nil {
+		t.Fatalf("saveSyncState() returned error: %v", err)
+	}
+	localSnapshot, err := inspectMountLocalRoot(env.localRoot)
+	if err != nil {
+		t.Fatalf("inspectMountLocalRoot() returned error: %v", err)
+	}
+	if !localSnapshot.Exists || localSnapshot.EntryCount != 0 {
+		t.Fatalf("localSnapshot = %#v, want existing empty root", localSnapshot)
+	}
+
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if !mountPlanShouldResetEmptyLocalState(plan, localSnapshot) {
+		t.Fatalf("plan should reset existing empty root with deleted-only state: %#v", plan)
+	}
+}
+
+func TestMountReconcileKeepsDeletedRemoteDirWithLiveChildren(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeRemoteFile(t, "docs/architecture.md", "architecture\n")
+	env.writeRemoteFile(t, "docs/quickstart.md", "quickstart\n")
+
+	st := newSyncState(env.workspace, env.localRoot)
+	st.Entries["docs"] = SyncEntry{
+		Type:         "dir",
+		Deleted:      true,
+		LastSyncedAt: time.Now().UTC(),
+	}
+	if err := saveSyncState(st); err != nil {
+		t.Fatalf("saveSyncState() returned error: %v", err)
+	}
+	if err := os.RemoveAll(env.localRoot); err != nil {
+		t.Fatalf("RemoveAll(localRoot) returned error: %v", err)
+	}
+
+	d := newTestMountDaemon(t, env)
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if plan.DownloadCount != 3 || plan.DeleteRemoteCount != 0 || plan.ConflictCount != 0 {
+		t.Fatalf("plan counts = download:%d deleteRemote:%d conflict:%d, want 3/0/0; operations = %#v", plan.DownloadCount, plan.DeleteRemoteCount, plan.ConflictCount, plan.Operations)
+	}
+	requireMountOp(t, plan, "D", "docs")
+	requireMountOp(t, plan, "D", "docs/architecture.md")
+	requireMountOp(t, plan, "D", "docs/quickstart.md")
+
+	approveMountReconcilePlan(d, plan)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() after deleted dir with live children: %v", err)
+	}
+	env.daemon = d
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "remote children to download locally", func() bool {
+		return env.localExists("docs/architecture.md") && env.localExists("docs/quickstart.md")
+	})
+}
+
 // Scenario 9: oversize files are explicitly refused and never reach the
 // uploader's Echo path. We set a tiny cap to keep the test fast.
 func TestSyncOversizedFileRefused(t *testing.T) {

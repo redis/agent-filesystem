@@ -12,8 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-var errLockWouldBlock = errors.New("lock would block")
-
 type storedFileLock struct {
 	Start uint64 `json:"start"`
 	End   uint64 `json:"end"`
@@ -64,7 +62,7 @@ func (c *nativeClient) Setlk(ctx context.Context, inode uint64, handleID string,
 		switch {
 		case err == nil:
 			return nil
-		case errors.Is(err, errLockWouldBlock):
+		case errors.Is(err, ErrLockWouldBlock):
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -107,7 +105,7 @@ func (c *nativeClient) trySetLock(ctx context.Context, inode uint64, handleID st
 				}
 				for _, existing := range ownerLocks {
 					if locksConflict(existing, *lk) {
-						return errLockWouldBlock
+						return ErrLockWouldBlock
 					}
 				}
 			}

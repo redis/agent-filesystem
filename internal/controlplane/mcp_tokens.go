@@ -181,6 +181,7 @@ func (m *DatabaseManager) createMCPAccessTokenRecord(ctx context.Context, subjec
 	if err := m.catalog.CreateMCPAccessToken(ctx, record); err != nil {
 		return mcpAccessTokenResponse{}, err
 	}
+	m.publishMCPTokenMonitorEvent(ctx, record, "created")
 	response := mcpAccessTokenResponseFromRecord(record)
 	response.Token = formatMCPAccessToken(tokenID, secret)
 	return response, nil
@@ -222,6 +223,7 @@ func (m *DatabaseManager) CreateControlPlaneMCPAccessToken(ctx context.Context, 
 	if err := m.catalog.CreateMCPAccessToken(ctx, record); err != nil {
 		return mcpAccessTokenResponse{}, err
 	}
+	m.publishMCPTokenMonitorEvent(ctx, record, "created")
 	response := mcpAccessTokenResponseFromRecord(record)
 	response.Token = formatControlPlaneMCPAccessToken(tokenID, secret)
 	return response, nil
@@ -273,7 +275,11 @@ func (m *DatabaseManager) RevokeControlPlaneMCPAccessToken(ctx context.Context, 
 	if subject != "" && strings.TrimSpace(record.OwnerSubject) != "" && strings.TrimSpace(record.OwnerSubject) != subject {
 		return os.ErrNotExist
 	}
-	return m.catalog.RevokeMCPAccessTokenByID(ctx, tokenID, time.Now().UTC().Format(timeRFC3339))
+	if err := m.catalog.RevokeMCPAccessTokenByID(ctx, tokenID, time.Now().UTC().Format(timeRFC3339)); err != nil {
+		return err
+	}
+	m.publishMCPTokenMonitorEvent(ctx, record, "revoked")
+	return nil
 }
 
 func (m *DatabaseManager) ListResolvedMCPAccessTokens(ctx context.Context, workspace string) ([]mcpAccessTokenResponse, error) {
@@ -390,7 +396,11 @@ func (m *DatabaseManager) revokeTokenByID(ctx context.Context, databaseID, works
 	if subject != "" && strings.TrimSpace(record.OwnerSubject) != "" && strings.TrimSpace(record.OwnerSubject) != subject {
 		return os.ErrNotExist
 	}
-	return m.catalog.RevokeMCPAccessToken(ctx, tokenID, record.DatabaseID, record.WorkspaceID, time.Now().UTC().Format(timeRFC3339))
+	if err := m.catalog.RevokeMCPAccessToken(ctx, tokenID, record.DatabaseID, record.WorkspaceID, time.Now().UTC().Format(timeRFC3339)); err != nil {
+		return err
+	}
+	m.publishMCPTokenMonitorEvent(ctx, record, "revoked")
+	return nil
 }
 
 func (m *DatabaseManager) AuthenticateMCPAccessToken(ctx context.Context, rawToken string) (mcpAccessTokenRecord, error) {

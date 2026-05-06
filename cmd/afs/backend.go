@@ -132,7 +132,7 @@ type afsControlPlane interface {
 	UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error)
 	DeleteWorkspace(ctx context.Context, workspace string) error
 	CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error)
-	HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (controlplane.WorkspaceSessionInfo, error)
+	HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string, input ...controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSessionInfo, error)
 	CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error
 	ListCheckpoints(ctx context.Context, workspace string, limit int) ([]controlplane.CheckpointSummary, error)
 	GetCheckpoint(ctx context.Context, workspace, checkpointID string) (controlplane.CheckpointDetail, error)

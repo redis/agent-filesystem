@@ -1,6 +1,6 @@
 # Agent Filesystem Repo Walkthrough
 
-This guide is the "what lives where" map for the current `/Users/rowantrollope/git/agent-filesystem` working tree as of 2026-04-24.
+This guide is the "what lives where" map for the current `agent-filesystem` working tree as of 2026-05-05.
 
 ## Scope
 
@@ -71,6 +71,22 @@ Supporting areas:
 ### `internal/worktree/`
 
 - Manifest scanning, blob collection, and local materialization helpers.
+
+### `internal/rediscontent/`
+
+- Shared Redis content backend helpers: Array capability detection, chunked array IO, and `ARGREP` literal prefiltering used by mount and control-plane file-content paths.
+
+### `internal/searchindex/`
+
+- RediSearch index helpers used by grep and workspace catalog.
+
+### `internal/mcpproto/`
+
+- Shared MCP protocol types used by both the CLI and hosted MCP surfaces.
+
+### `internal/version/`
+
+- Build-time version metadata injected via `-ldflags` from the Makefile.
 
 ### `mount/`
 

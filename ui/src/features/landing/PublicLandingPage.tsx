@@ -13,6 +13,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import styled from "styled-components";
+import { SurfaceCard } from "../../components/card-shell";
 
 const githubUrl = "https://github.com/redis/agent-filesystem";
 
@@ -284,7 +285,7 @@ const HeroStrike = styled.s`
 `;
 
 const HeroAccent = styled.span`
-  color: var(--afs-accent);
+  color: var(--afs-redis-red);
 `;
 
 const HeroLead = styled.p`
@@ -565,13 +566,10 @@ const FeatureGrid = styled.section`
   }
 `;
 
-const FeatureCard = styled.article`
+const FeatureCard = styled(SurfaceCard).attrs({ as: "article" })`
   display: grid;
   gap: 12px;
   min-height: 210px;
-  border: 1px solid var(--afs-line-strong);
-  border-radius: var(--afs-r-2);
-  background: color-mix(in srgb, var(--afs-bg-1) 88%, transparent);
   padding: 22px;
 `;
 
@@ -691,15 +689,12 @@ const PublicLinks = styled.section`
   }
 `;
 
-const PublicLinkCard = styled(Link)`
+const PublicLinkCard = styled(SurfaceCard).attrs({ as: Link })`
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
   min-height: 132px;
-  border: 1px solid var(--afs-line-strong);
-  border-radius: var(--afs-r-2);
-  background: var(--afs-bg-1);
   padding: 18px;
   color: var(--afs-ink);
   text-decoration: none;

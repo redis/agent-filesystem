@@ -116,8 +116,9 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
     "tls": false
   },
   "mode": "sync",
-  "currentWorkspace": "my-project",
-  "localPath": "~/afs"
+  "workspace": {
+    "default": "my-project"
+  }
 }
 ```
 
@@ -127,8 +128,7 @@ AFS reads `afs.config.json` from the same directory as the `afs` binary:
 | `redis.password` | Auth password (empty = no auth) |
 | `redis.tls` | Enable TLS |
 | `mode` | `sync` (recommended), `mount`, or `none` |
-| `currentWorkspace` | Default workspace name |
-| `localPath` | Local directory for sync/mount |
+| `workspace.default` | Default workspace name |
 
 ## CLI Command Reference
 

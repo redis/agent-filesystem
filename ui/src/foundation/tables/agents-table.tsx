@@ -4,11 +4,17 @@ import type { ColumnDef, SortingState } from "@redis-ui/table";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
-import type { AFSAgentSession } from "../types/afs";
+import type { AFSAgentSession, AFSWorkspaceSummary } from "../types/afs";
 import * as S from "./workspace-table.styles";
 import styled, { keyframes, css } from "styled-components";
 import { BotIcon } from "../../components/lucide-icons";
-import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
+import { SurfaceCard } from "../../components/card-shell";
+import { LiveTopologyCard } from "../../components/live-topology-card";
+import {
+  displayAgentIdentityLabel,
+  filterAndSortAgents,
+  normalizeSearchValue,
+} from "./agents-table-utils";
 import type { AgentSortField } from "./agents-table-utils";
 import { StatusNameCell, StatusNameLine } from "./status-name-cell";
 import {
@@ -56,6 +62,32 @@ function displayMountPath(path: string): string {
   return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
 }
 
+function displayAgentName(agent: AFSAgentSession): string {
+  return (
+    agent.agentName?.trim() ||
+    (!agent.sessionName?.trim() ? agent.label?.trim() : "") ||
+    agent.agentId?.trim() ||
+    ""
+  );
+}
+
+function displaySessionName(agent: AFSAgentSession): string {
+  const sessionName = agent.sessionName?.trim();
+  if (sessionName) return sessionName;
+  const label = agent.label?.trim();
+  const agentName = agent.agentName?.trim();
+  if (label && agentName && label !== agentName) return label;
+  return "";
+}
+
+function displaySessionTitle(agent: AFSAgentSession): string {
+  return displaySessionName(agent) || agent.sessionId.trim() || "session";
+}
+
+function displaySystemName(agent: AFSAgentSession): string {
+  return agent.hostname.trim() || "unknown host";
+}
+
 /** Hook that ticks every second so uptime counters stay live. */
 function useTick(intervalMs = 1000) {
   const [, setTick] = useState(0);
@@ -88,7 +120,7 @@ const ActiveDot = styled.span<{ $active: boolean }>`
     `}
 `;
 
-const SystemNameText = styled.span`
+const TablePrimaryText = styled.span`
   flex: 1 1 auto;
   min-width: 0;
   color: var(--afs-ink, #18181b);
@@ -100,7 +132,7 @@ const SystemNameText = styled.span`
   white-space: nowrap;
 `;
 
-const AgentNameText = styled.span`
+const TableSecondaryText = styled.span`
   display: block;
   min-width: 0;
   color: var(--afs-muted, #71717a);
@@ -144,6 +176,15 @@ const DetailValue = styled.span`
   word-break: break-all;
 `;
 
+const DetailTimeValue = styled(DetailValue)`
+  white-space: nowrap;
+  word-break: normal;
+`;
+
+const TableTimeText = styled(Typography.Body)`
+  white-space: nowrap;
+`;
+
 /* ---- Card view ---- */
 const CardGrid = styled.div`
   display: grid;
@@ -151,15 +192,13 @@ const CardGrid = styled.div`
   grid-template-columns: repeat(auto-fill, minmax(max(25%, 300px), 1fr));
 `;
 
-const AgentCard = styled.button<{ $active: boolean }>`
+const AgentCard = styled(SurfaceCard).attrs({ as: "button", type: "button" })<{ $active: boolean }>`
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 14px;
   padding: 22px;
   border: 1px solid var(--afs-line, #e4e4e7);
-  border-radius: 16px;
-  background: var(--afs-panel-strong);
   text-align: left;
   cursor: pointer;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
@@ -284,6 +323,8 @@ const UptimeLabel = styled.span`
 /* ------------------------------------------------------------------ */
 type Props = {
   rows: AFSAgentSession[];
+  // Required for the Map (topology) view. When omitted the toggle hides Map.
+  workspaces?: AFSWorkspaceSummary[];
   loading?: boolean;
   error?: boolean;
   errorMessage?: string;
@@ -349,7 +390,11 @@ export function AgentDetailDialog({
           </DetailField>
           <DetailField>
             <DetailLabel>Agent Name</DetailLabel>
-            <DetailValue>{agent.label?.trim() || "Not set"}</DetailValue>
+            <DetailValue>{displayAgentName(agent) || "Not set"}</DetailValue>
+          </DetailField>
+          <DetailField>
+            <DetailLabel>Session Name</DetailLabel>
+            <DetailValue>{displaySessionName(agent) || "Not set"}</DetailValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Agent ID</DetailLabel>
@@ -361,15 +406,15 @@ export function AgentDetailDialog({
           </DetailField>
           <DetailField>
             <DetailLabel>Started</DetailLabel>
-            <DetailValue>{new Date(agent.startedAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.startedAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Last Seen</DetailLabel>
-            <DetailValue>{new Date(agent.lastSeenAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.lastSeenAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Lease Expires</DetailLabel>
-            <DetailValue>{new Date(agent.leaseExpiresAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.leaseExpiresAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
         </DetailGrid>
 
@@ -397,6 +442,7 @@ export function AgentDetailDialog({
 /* ------------------------------------------------------------------ */
 export function AgentsTable({
   rows,
+  workspaces,
   loading = false,
   error = false,
   errorMessage = "Unable to load connected agents. Please retry.",
@@ -404,9 +450,17 @@ export function AgentsTable({
   onOpenWorkspace,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<AgentSortField>("lastSeenAt");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useStoredViewMode("afs.agents.viewMode");
+  const [sortBy, setSortBy] = useState<AgentSortField>("agentName");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  // viewMode = "map" | "table". Default to map (topology graphic).
+  // The hook persists whichever value is set; legacy stored "cards" or
+  // anything else is sanitized away by the validModes whitelist.
+  const [viewMode, setViewMode] = useStoredViewMode<"map" | "table">(
+    "afs.agents.viewMode",
+    "map",
+    ["map", "table"],
+  );
+  const mapAvailable = !!workspaces;
   const [selectedAgent, setSelectedAgent] = useState<AFSAgentSession | null>(null);
 
   // Tick every second so live counters (uptime, time-ago) update in real-time.
@@ -427,17 +481,13 @@ export function AgentsTable({
     () =>
       [
         {
-          accessorKey: "hostname",
+          accessorKey: "agentName",
           header: "Name",
-          size: 260,
+          size: 240,
           enableSorting: true,
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
-            const systemName = row.original.hostname || "unknown host";
-            const agentName =
-              row.original.label?.trim() ||
-              row.original.agentId?.trim() ||
-              "Agent name not set";
+            const identityLabel = displayAgentIdentityLabel(row.original);
             return (
               <StatusNameCell
                 active={active}
@@ -446,10 +496,33 @@ export function AgentsTable({
                 statusTitle={active ? "Active" : "Inactive"}
               >
                 <StatusNameLine>
-                  <SystemNameText title={systemName}>{systemName}</SystemNameText>
+                  <TablePrimaryText title={identityLabel}>
+                    {identityLabel}
+                  </TablePrimaryText>
                 </StatusNameLine>
-                <AgentNameText title={agentName}>{agentName}</AgentNameText>
               </StatusNameCell>
+            );
+          },
+        },
+        {
+          accessorKey: "sessionName",
+          header: "Session",
+          size: 240,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const sessionTitle = displaySessionTitle(row.original);
+            const sessionId = row.original.sessionId.trim();
+            return (
+              <>
+                <S.SingleLineText title={sessionTitle}>
+                  {sessionTitle}
+                </S.SingleLineText>
+                {sessionId && sessionId !== sessionTitle ? (
+                  <TableSecondaryText title={sessionId}>
+                    {sessionId}
+                  </TableSecondaryText>
+                ) : null}
+              </>
             );
           },
         },
@@ -487,6 +560,20 @@ export function AgentsTable({
           },
         },
         {
+          accessorKey: "hostname",
+          header: "System Name",
+          size: 180,
+          enableSorting: true,
+          cell: ({ row }) => {
+            const systemName = displaySystemName(row.original);
+            return (
+              <S.SingleLineText title={systemName}>
+                {systemName}
+              </S.SingleLineText>
+            );
+          },
+        },
+        {
           accessorKey: "lastSeenAt",
           header: "Last Active",
           size: 120,
@@ -494,12 +581,12 @@ export function AgentsTable({
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
             return (
-              <Typography.Body
+              <TableTimeText
                 component="span"
                 color={active ? undefined : "secondary"}
               >
                 {active ? "Active now" : timeAgo(row.original.lastSeenAt)}
-              </Typography.Body>
+              </TableTimeText>
             );
           },
         },
@@ -517,13 +604,15 @@ export function AgentsTable({
           placeholder="Search by name, path, workspace..."
         />
         <S.ToggleGroup>
-          <S.ToggleButton
-            $active={viewMode === "cards"}
-            aria-pressed={viewMode === "cards"}
-            onClick={() => setViewMode("cards")}
-          >
-            Cards
-          </S.ToggleButton>
+          {mapAvailable ? (
+            <S.ToggleButton
+              $active={viewMode === "map"}
+              aria-pressed={viewMode === "map"}
+              onClick={() => setViewMode("map")}
+            >
+              Map
+            </S.ToggleButton>
+          ) : null}
           <S.ToggleButton
             $active={viewMode === "table"}
             aria-pressed={viewMode === "table"}
@@ -545,8 +634,13 @@ export function AgentsTable({
         </S.EmptyState>
       ) : null}
 
+      {/* ---- MAP (TOPOLOGY) VIEW ---- */}
+      {!loading && !error && filteredRows.length > 0 && viewMode === "map" && mapAvailable ? (
+        <LiveTopologyCard agents={filteredRows} workspaces={workspaces} />
+      ) : null}
+
       {/* ---- TABLE VIEW ---- */}
-      {!loading && !error && filteredRows.length > 0 && viewMode === "table" ? (
+      {!loading && !error && filteredRows.length > 0 && (viewMode === "table" || !mapAvailable) ? (
         <S.TableCard>
           <S.DenseTableViewport>
             <Table
@@ -556,8 +650,8 @@ export function AgentsTable({
               manualSorting
               onSortingChange={(nextState) => {
                 if (nextState.length === 0) {
-                  setSortBy("lastSeenAt");
-                  setSortDirection("desc");
+                  setSortBy("agentName");
+                  setSortDirection("asc");
                   return;
                 }
                 const next = nextState[0];
@@ -572,61 +666,7 @@ export function AgentsTable({
         </S.TableCard>
       ) : null}
 
-      {/* ---- CARD VIEW ---- */}
-      {!loading && !error && filteredRows.length > 0 && viewMode === "cards" ? (
-        <CardGrid>
-          {filteredRows.map((agent) => {
-            const active = isAgentActive(agent);
-            const mountPath = agent.localPath.trim();
-            const displayPath = displayMountPath(mountPath);
-            return (
-              <AgentCard
-                key={agent.sessionId}
-                $active={active}
-                onClick={() => setSelectedAgent(agent)}
-              >
-                <CardTop>
-                  <CardDot $active={active} />
-                  <CardHostname>{agent.hostname || "unknown host"}</CardHostname>
-                  <CardStatusBadge $active={active}>
-                    {active ? "Active" : "Inactive"}
-                  </CardStatusBadge>
-                </CardTop>
-
-                <CardWorkspace>
-                  {agent.workspaceName}
-                  {mountPath ? <> &rarr; {displayPath}</> : null}
-                </CardWorkspace>
-
-                <CardMeta>
-                  <CardMetaTag>{agent.clientKind || "client"}</CardMetaTag>
-                  <CardMetaTag>{agent.readonly ? "RO" : "RW"}</CardMetaTag>
-                  {agent.operatingSystem ? (
-                    <CardMetaTag>{agent.operatingSystem}</CardMetaTag>
-                  ) : null}
-                  {agent.afsVersion ? (
-                    <CardMetaTag>v{agent.afsVersion}</CardMetaTag>
-                  ) : null}
-                </CardMeta>
-
-                <CardFooter>
-                  <ClockWrap $active={active}>
-                    <ClockIcon $spinning={active}>
-                      {active ? "\u23F1" : "\u23F0"}
-                    </ClockIcon>
-                    {active
-                      ? `Active \u00B7 ${timeAgo(agent.lastSeenAt)}`
-                      : `Last seen ${timeAgo(agent.lastSeenAt)}`}
-                  </ClockWrap>
-                  <UptimeLabel>
-                    Uptime: {uptimeLabel(agent.startedAt)}
-                  </UptimeLabel>
-                </CardFooter>
-              </AgentCard>
-            );
-          })}
-        </CardGrid>
-      ) : null}
+      {/* Card view removed \u2014 replaced by Map (topology) view above. */}
     </S.TableBlock>
 
       {/* ---- DETAIL DIALOG ---- */}

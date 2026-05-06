@@ -66,8 +66,6 @@ type configOverrides struct {
 	controlPlaneDatabase optionalString
 	mode                 optionalString
 	mountBackend         optionalString
-	mountpoint           optionalString
-	readonly             optionalBool
 }
 
 func cmdConfig(args []string) error {
@@ -427,7 +425,7 @@ func applyUpWorkspaceAndMountpoint(cfg *config, workspace, mountpoint string) er
 			return err
 		}
 		if backendName == mountBackendNone {
-			return fmt.Errorf("filesystem mounts are disabled in config\nRun '%s config set --mount-backend nfs --mountpoint %s' or similar first", filepath.Base(os.Args[0]), mountpoint)
+			return fmt.Errorf("filesystem mounts are disabled in config\nRun '%s config set --mount-backend nfs' or use sync mode with '%s ws mount <workspace> <directory>'", filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 		}
 	}
 
@@ -451,7 +449,7 @@ func validateUpModeSelection(cfg config) error {
 	}
 	if backendName == mountBackendNone {
 		bin := filepath.Base(os.Args[0])
-		return fmt.Errorf("mode=mount requires a configured mount backend\nRun '%s config set --mount-backend nfs --mountpoint <path>' or rerun '%s setup'", bin, bin)
+		return fmt.Errorf("mode=mount requires a configured mount backend\nRun '%s config set --mount-backend nfs' or rerun '%s setup'", bin, bin)
 	}
 	return nil
 }
@@ -499,12 +497,6 @@ func loadConfigWithUpPresence() (config, upConfigPresence, error) {
 	}
 	if _, ok := fields["localPath"]; ok {
 		presence.localPathPresent = true
-	} else if rawRuntime, ok := fields["runtime"]; ok {
-		var runtimeFields map[string]json.RawMessage
-		if err := json.Unmarshal(rawRuntime, &runtimeFields); err != nil {
-			return cfg, presence, err
-		}
-		_, presence.localPathPresent = runtimeFields["localPath"]
 	}
 	return cfg, presence, nil
 }
@@ -519,9 +511,7 @@ func hasConfigOverrides(overrides configOverrides) bool {
 		overrides.controlPlaneURL.set ||
 		overrides.controlPlaneDatabase.set ||
 		overrides.mode.set ||
-		overrides.mountBackend.set ||
-		overrides.mountpoint.set ||
-		overrides.readonly.set
+		overrides.mountBackend.set
 }
 
 func upPresenceWithOverrides(presence upConfigPresence, overrides configOverrides) upConfigPresence {
@@ -530,9 +520,6 @@ func upPresenceWithOverrides(presence upConfigPresence, overrides configOverride
 	}
 	if overrides.redisURL.set {
 		presence.redisDBPresent = true
-	}
-	if overrides.mountpoint.set {
-		presence.localPathPresent = true
 	}
 	return presence
 }
@@ -710,8 +697,6 @@ func registerConfigOverrideFlags(fs *flag.FlagSet, overrides *configOverrides) {
 	fs.Var(&overrides.controlPlaneDatabase, "control-plane-database", "database id for self-managed control plane mode")
 	fs.Var(&overrides.mode, "mode", "sync|mount")
 	fs.Var(&overrides.mountBackend, "mount-backend", "auto|none|fuse|nfs")
-	fs.Var(&overrides.mountpoint, "mountpoint", "local mountpoint")
-	fs.Var(&overrides.readonly, "readonly", "start readonly")
 }
 
 func configUsageError(command string) error {
@@ -808,8 +793,6 @@ Flags:
   --control-plane-database <id>
   --mode sync|mount
   --mount-backend auto|none|fuse|nfs
-  --mountpoint <path>
-  --readonly
 
 Examples:
   %s config set redis.url rediss://user:pass@redis.example:6379/4
@@ -824,7 +807,6 @@ Notes:
   Use "self-managed" for the control-plane-backed mode.
   Workspace mounts are runtime state; use '%s ws mount <workspace> <directory>'.
   Default workspace is managed with '%s ws set-default <workspace>'.
-  Mode and other runtime paths stay available in afs.config.json.
 `, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
@@ -887,12 +869,6 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 
 	if overrides.mountBackend.set {
 		cfg.MountBackend = strings.TrimSpace(overrides.mountBackend.value)
-	}
-	if overrides.mountpoint.set {
-		cfg.LocalPath = overrides.mountpoint.value
-	}
-	if overrides.readonly.set {
-		cfg.ReadOnly = overrides.readonly.value
 	}
 	return nil
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/redis/agent-filesystem/internal/controlplane"
 )
 
-func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSessionRequest {
+func managedWorkspaceSessionRequest(cfg config, sessionName ...string) controlplane.CreateWorkspaceSessionRequest {
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
 		return controlplane.CreateWorkspaceSessionRequest{}
@@ -29,14 +29,25 @@ func managedWorkspaceSessionRequest(cfg config) controlplane.CreateWorkspaceSess
 	if productMode == productModeLocal {
 		clientKind = "sync"
 	}
+	agentName := strings.TrimSpace(cfg.Name)
+	resolvedSessionName := ""
+	if len(sessionName) > 0 {
+		resolvedSessionName = strings.TrimSpace(sessionName[0])
+	}
+	label := resolvedSessionName
+	if label == "" {
+		label = agentName
+	}
 	return controlplane.CreateWorkspaceSessionRequest{
 		ClientKind:      clientKind,
 		AgentID:         strings.TrimSpace(cfg.ID),
+		AgentName:       agentName,
+		SessionName:     resolvedSessionName,
 		AFSVersion:      "dev",
 		Hostname:        strings.TrimSpace(hostname),
 		OperatingSystem: runtime.GOOS,
 		LocalPath:       strings.TrimSpace(cfg.LocalPath),
-		Label:           strings.TrimSpace(cfg.Name),
+		Label:           label,
 		Readonly:        cfg.ReadOnly,
 	}
 }
@@ -65,7 +76,7 @@ func startManagedWorkspaceSessionLifecycle(cfg config, workspace, sessionID stri
 				return
 			case <-ticker.C:
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				_, err := service.HeartbeatWorkspaceSession(ctx, workspaceRef, sessionID)
+				_, err := service.HeartbeatWorkspaceSession(ctx, workspaceRef, sessionID, managedWorkspaceSessionRequest(cfg))
 				cancel()
 				if err != nil && !errors.Is(err, os.ErrNotExist) {
 					fmt.Fprintf(os.Stderr, "afs sync: session heartbeat failed: %v\n", err)

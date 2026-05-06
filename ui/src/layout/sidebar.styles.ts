@@ -2,19 +2,17 @@ import { SideBar } from "@redis-ui/components";
 import styled from "styled-components";
 
 export const SidebarContainer = styled.div`
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 6;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   flex-shrink: 0;
+  overflow: hidden;
 
   [data-role="nav-bar"] {
-    height: 100vh !important;
+    height: 100% !important;
+    max-height: 100% !important;
   }
-`;
-
-export const Spacer = styled.div`
-  flex: 1;
 `;
 
 export const CenterSidebarHeader = styled(SideBar.Header)`
@@ -39,7 +37,8 @@ export const CenterSidebarHeader = styled(SideBar.Header)`
 export const HeaderToggleIcon = styled.div<{ $isExpanded: boolean }>`
   position: absolute;
   top: 50%;
-  right: ${({ $isExpanded }) => ($isExpanded ? "1.6rem" : "calc(2.2rem * -0.45)")};
+  right: ${({ $isExpanded }) =>
+    $isExpanded ? "1.6rem" : "calc(2.2rem * -0.45)"};
   transform: translateY(-50%);
   z-index: 7;
   display: inline-flex;
@@ -100,15 +99,19 @@ export const NavItemWrapper = styled.div<{ $disabled?: boolean }>`
 
 export const ProfileMenuContainer = styled.div<{ $isExpanded: boolean }>`
   position: relative;
-  padding: ${({ $isExpanded }) => ($isExpanded ? "12px 12px 8px" : "12px 8px 8px")};
+  padding: ${({ $isExpanded }) =>
+    $isExpanded ? "12px 12px 8px" : "12px 8px 8px"};
 `;
 
-export const ProfileButton = styled.button.attrs({ "data-afs-profile-button": "" })<{ $isExpanded: boolean }>`
+export const ProfileButton = styled.button.attrs({
+  "data-afs-profile-button": "",
+})<{ $isExpanded: boolean }>`
   width: 100%;
   display: flex;
   align-items: center;
   gap: ${({ $isExpanded }) => ($isExpanded ? "10px" : "0")};
-  justify-content: ${({ $isExpanded }) => ($isExpanded ? "flex-start" : "center")};
+  justify-content: ${({ $isExpanded }) =>
+    $isExpanded ? "flex-start" : "center"};
   border: 1px solid var(--afs-line);
   border-radius: 10px;
   background: var(--afs-panel);
@@ -116,7 +119,9 @@ export const ProfileButton = styled.button.attrs({ "data-afs-profile-button": ""
   color: var(--afs-ink);
   cursor: pointer;
   text-align: left;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 
   &:hover {
     border-color: var(--afs-line-strong);
@@ -129,7 +134,9 @@ export const ProfileButton = styled.button.attrs({ "data-afs-profile-button": ""
   }
 `;
 
-export const ProfileAvatar = styled.div.attrs({ "data-afs-profile-avatar": "" })`
+export const ProfileAvatar = styled.div.attrs({
+  "data-afs-profile-avatar": "",
+})`
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -169,7 +176,10 @@ export const ProfileMeta = styled.div`
   color: var(--afs-muted);
 `;
 
-export const ProfileChevron = styled.div<{ $isOpen: boolean; $isExpanded: boolean }>`
+export const ProfileChevron = styled.div<{
+  $isOpen: boolean;
+  $isExpanded: boolean;
+}>`
   margin-left: auto;
   display: ${({ $isExpanded }) => ($isExpanded ? "inline-flex" : "none")};
   align-items: center;
@@ -179,7 +189,9 @@ export const ProfileChevron = styled.div<{ $isOpen: boolean; $isExpanded: boolea
   transition: transform 0.18s ease;
 `;
 
-export const ProfileDropdown = styled.div.attrs({ "data-afs-profile-dropdown": "" })<{ $isExpanded: boolean }>`
+export const ProfileDropdown = styled.div.attrs({
+  "data-afs-profile-dropdown": "",
+})<{ $isExpanded: boolean }>`
   position: absolute;
   left: ${({ $isExpanded }) => ($isExpanded ? "12px" : "calc(100% + 8px)")};
   right: ${({ $isExpanded }) => ($isExpanded ? "12px" : "auto")};
@@ -218,8 +230,10 @@ export const ProfileMenuItem = styled.button`
 
 export const SignInButtonWrapper = styled.div<{ $isExpanded: boolean }>`
   display: flex;
-  justify-content: ${({ $isExpanded }) => ($isExpanded ? "flex-start" : "center")};
-  padding: ${({ $isExpanded }) => ($isExpanded ? "12px 12px 8px" : "12px 8px 8px")};
+  justify-content: ${({ $isExpanded }) =>
+    $isExpanded ? "flex-start" : "center"};
+  padding: ${({ $isExpanded }) =>
+    $isExpanded ? "12px 12px 8px" : "12px 8px 8px"};
 
   > button {
     width: ${({ $isExpanded }) => ($isExpanded ? "100%" : "auto")};
@@ -229,5 +243,6 @@ export const SignInButtonWrapper = styled.div<{ $isExpanded: boolean }>`
 export const DarkModeRow = styled.div<{ $isExpanded: boolean }>`
   display: flex;
   justify-content: center;
-  padding: ${({ $isExpanded }) => ($isExpanded ? "8px 12px 4px" : "8px 8px 4px")};
+  padding: ${({ $isExpanded }) =>
+    $isExpanded ? "8px 12px 4px" : "8px 8px 4px"};
 `;

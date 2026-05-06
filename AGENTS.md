@@ -47,6 +47,8 @@ make web-dev        # run the control plane and UI together
 ./afs ws unmount <workspace-or-directory>
 ./afs ws import <workspace> <directory>
 ./afs cp list <workspace>
+./scripts/test_harness.py        # interactive test/benchmark catalog and runner
+./scripts/test_harness.py --list # print the indexed runnable entries
 
 # UI-only commands
 cd ui && npm run dev
@@ -63,6 +65,7 @@ cd ui && npm run lint
 - UI changes: run `cd ui && npm run build` and the most relevant `npm run test` scope you can.
 - Cross-surface web changes: prefer `make web-dev` to verify the control plane and Vite UI together.
 - If you touch embedded UI behavior, verify with a path that rebuilds the UI assets, not just raw Go compilation.
+- Use `./scripts/test_harness.py` when you need to discover the current runnable suites, package tests, benchmarks, or smoke scripts before picking a validation command.
 
 ## Embedded UI Build Rule
 
@@ -190,8 +193,20 @@ The most important implementation seams are:
 - Remounting a workspace to an empty path with prior sync state is ambiguous.
   Treat a missing local root as a fresh mount; require explicit destructive
   confirmation before propagating local absence as remote deletes.
+- When a mount error names a path like `rm remote docs`, that path is a
+  workspace-relative entry under the selected mount root, not a separate local
+  mount target.
 - TanStack route files should only export their `Route`. Move shared route UI
   into `ui/src/features/` instead of importing from another route file.
+- Active-agent UI fixes may need both the Agents table and the Monitor compact
+  card. The Monitor page active-agents card lives in `ui/src/routes/index.tsx`
+  and renders relative time in `AgentSeen`.
+- Do not sort active-agent lists by `lastSeenAt`; heartbeat/time updates make
+  rows jump around. Use a stable identity/display label sort for live lists.
 - Template source files live under `templates/<template-id>/`. After changing
   template manifests, seed files, skills, or commands, run
   `npm run templates:generate` from `ui/` or `make templates-generate`.
+- This repo has multiple nested Go modules (`mount/`, `sandbox/`,
+  `third_party/go-nfs`, and `tests/bench`). For lightweight local discovery,
+  prefer filesystem scanning over `go list` across the whole tree because
+  `go list` can trigger dependency downloads in those nested modules.

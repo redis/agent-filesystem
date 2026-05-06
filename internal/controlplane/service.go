@@ -156,34 +156,37 @@ type activityListResponse struct {
 }
 
 type workspaceDetail struct {
-	ID                     string              `json:"id"`
-	Name                   string              `json:"name"`
-	Description            string              `json:"description,omitempty"`
-	CloudAccount           string              `json:"cloud_account"`
-	DatabaseID             string              `json:"database_id"`
-	DatabaseName           string              `json:"database_name"`
-	OwnerSubject           string              `json:"owner_subject,omitempty"`
-	OwnerLabel             string              `json:"owner_label,omitempty"`
-	DatabaseManagementType string              `json:"database_management_type,omitempty"`
-	DatabaseCanEdit        bool                `json:"database_can_edit"`
-	DatabaseCanDelete      bool                `json:"database_can_delete"`
-	RedisKey               string              `json:"redis_key"`
-	Region                 string              `json:"region"`
-	Status                 string              `json:"status"`
-	Source                 string              `json:"source"`
-	TemplateSlug           string              `json:"template_slug,omitempty"`
-	CreatedAt              string              `json:"created_at"`
-	UpdatedAt              string              `json:"updated_at"`
-	DraftState             string              `json:"draft_state"`
-	HeadCheckpointID       string              `json:"head_checkpoint_id"`
-	Tags                   []string            `json:"tags,omitempty"`
-	FileCount              int                 `json:"file_count"`
-	FolderCount            int                 `json:"folder_count"`
-	TotalBytes             int64               `json:"total_bytes"`
-	CheckpointCount        int                 `json:"checkpoint_count"`
-	Checkpoints            []checkpointSummary `json:"checkpoints"`
-	Activity               []activityEvent     `json:"activity"`
-	Capabilities           capabilities        `json:"capabilities"`
+	ID                     string                  `json:"id"`
+	Name                   string                  `json:"name"`
+	Description            string                  `json:"description,omitempty"`
+	CloudAccount           string                  `json:"cloud_account"`
+	DatabaseID             string                  `json:"database_id"`
+	DatabaseName           string                  `json:"database_name"`
+	DatabaseSupportsArrays *bool                   `json:"database_supports_arrays,omitempty"`
+	OwnerSubject           string                  `json:"owner_subject,omitempty"`
+	OwnerLabel             string                  `json:"owner_label,omitempty"`
+	DatabaseManagementType string                  `json:"database_management_type,omitempty"`
+	DatabaseCanEdit        bool                    `json:"database_can_edit"`
+	DatabaseCanDelete      bool                    `json:"database_can_delete"`
+	RedisKey               string                  `json:"redis_key"`
+	Region                 string                  `json:"region"`
+	Status                 string                  `json:"status"`
+	Source                 string                  `json:"source"`
+	TemplateSlug           string                  `json:"template_slug,omitempty"`
+	CreatedAt              string                  `json:"created_at"`
+	UpdatedAt              string                  `json:"updated_at"`
+	DraftState             string                  `json:"draft_state"`
+	HeadCheckpointID       string                  `json:"head_checkpoint_id"`
+	Tags                   []string                `json:"tags,omitempty"`
+	FileCount              int                     `json:"file_count"`
+	FolderCount            int                     `json:"folder_count"`
+	TotalBytes             int64                   `json:"total_bytes"`
+	ContentStorage         workspaceContentStorage `json:"content_storage"`
+	SearchIndex            workspaceSearchIndex    `json:"search_index"`
+	CheckpointCount        int                     `json:"checkpoint_count"`
+	Checkpoints            []checkpointSummary     `json:"checkpoints"`
+	Activity               []activityEvent         `json:"activity"`
+	Capabilities           capabilities            `json:"capabilities"`
 }
 
 type treeItem struct {
@@ -256,6 +259,8 @@ type RestoreCheckpointResult struct {
 
 type createWorkspaceSessionRequest struct {
 	AgentID         string `json:"agent_id,omitempty"`
+	AgentName       string `json:"agent_name,omitempty"`
+	SessionName     string `json:"session_name,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`
 	Hostname        string `json:"hostname,omitempty"`
@@ -288,6 +293,8 @@ type workspaceSessionInfo struct {
 	OwnerSubject    string `json:"owner_subject,omitempty"`
 	OwnerLabel      string `json:"owner_label,omitempty"`
 	AgentID         string `json:"agent_id,omitempty"`
+	AgentName       string `json:"agent_name,omitempty"`
+	SessionName     string `json:"session_name,omitempty"`
 	ClientKind      string `json:"client_kind,omitempty"`
 	AFSVersion      string `json:"afs_version,omitempty"`
 	Hostname        string `json:"hostname,omitempty"`
@@ -305,6 +312,56 @@ type workspaceSessionListResponse struct {
 	Items []workspaceSessionInfo `json:"items"`
 }
 
+func workspaceSessionNames(input createWorkspaceSessionRequest) (agentName, sessionName, label string) {
+	agentName = strings.TrimSpace(input.AgentName)
+	sessionName = strings.TrimSpace(input.SessionName)
+	legacyLabel := strings.TrimSpace(input.Label)
+	if agentName == "" && sessionName == "" {
+		agentName = legacyLabel
+	}
+	label = sessionName
+	if label == "" {
+		label = agentName
+	}
+	if label == "" {
+		label = legacyLabel
+	}
+	return agentName, sessionName, label
+}
+
+func workspaceSessionRecordAgentName(record WorkspaceSessionRecord) string {
+	if value := strings.TrimSpace(record.AgentName); value != "" {
+		return value
+	}
+	if strings.TrimSpace(record.SessionName) == "" {
+		return strings.TrimSpace(record.Label)
+	}
+	return ""
+}
+
+func workspaceSessionRecordSessionName(record WorkspaceSessionRecord) string {
+	if value := strings.TrimSpace(record.SessionName); value != "" {
+		return value
+	}
+	if agentName := strings.TrimSpace(record.AgentName); agentName != "" {
+		label := strings.TrimSpace(record.Label)
+		if label != "" && label != agentName {
+			return label
+		}
+	}
+	return ""
+}
+
+func workspaceSessionRecordLabel(record WorkspaceSessionRecord) string {
+	if value := workspaceSessionRecordSessionName(record); value != "" {
+		return value
+	}
+	if value := workspaceSessionRecordAgentName(record); value != "" {
+		return value
+	}
+	return strings.TrimSpace(record.Label)
+}
+
 type viewRef struct {
 	Kind         string
 	CheckpointID string
@@ -318,7 +375,6 @@ type Service struct {
 	catalogDatabaseName string
 }
 
-type Capabilities = capabilities
 type WorkspaceSummary = workspaceSummary
 type WorkspaceListResponse = workspaceListResponse
 type CheckpointSummary = checkpointSummary
@@ -587,16 +643,19 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 	if err != nil {
 		return WorkspaceSession{}, err
 	}
+	agentName, sessionName, label := workspaceSessionNames(input)
 	record := WorkspaceSessionRecord{
 		SessionID:       sessionID,
 		Workspace:       workspace,
 		AgentID:         strings.TrimSpace(input.AgentID),
+		AgentName:       agentName,
+		SessionName:     sessionName,
 		ClientKind:      strings.TrimSpace(input.ClientKind),
 		AFSVersion:      strings.TrimSpace(input.AFSVersion),
 		Hostname:        strings.TrimSpace(input.Hostname),
 		OperatingSystem: strings.TrimSpace(input.OperatingSystem),
 		LocalPath:       strings.TrimSpace(input.LocalPath),
-		Label:           strings.TrimSpace(input.Label),
+		Label:           label,
 		Readonly:        input.Readonly,
 		State:           workspaceSessionStateStarting,
 		StartedAt:       now,
@@ -614,6 +673,7 @@ func (s *Service) CreateWorkspaceSession(ctx context.Context, workspace string, 
 		"client_kind": defaultString(record.ClientKind, "sync"),
 		"hostname":    record.Hostname,
 	})
+	s.publishSessionMonitorEvent(ctx, workspace, record, "started")
 
 	session.SessionID = record.SessionID
 	session.HeartbeatIntervalSeconds = int(workspaceSessionHeartbeatInterval / time.Second)
@@ -649,13 +709,20 @@ func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, session
 	}
 	record.ClientKind = strings.TrimSpace(input.ClientKind)
 	record.AgentID = strings.TrimSpace(input.AgentID)
+	agentName, sessionName, label := workspaceSessionNames(input)
+	if agentName != "" {
+		record.AgentName = agentName
+	}
+	if sessionName != "" {
+		record.SessionName = sessionName
+	}
+	if label != "" {
+		record.Label = label
+	}
 	record.AFSVersion = strings.TrimSpace(input.AFSVersion)
 	record.Hostname = strings.TrimSpace(input.Hostname)
 	record.OperatingSystem = strings.TrimSpace(input.OperatingSystem)
 	record.LocalPath = strings.TrimSpace(input.LocalPath)
-	if label := strings.TrimSpace(input.Label); label != "" {
-		record.Label = label
-	}
 	record.Readonly = input.Readonly
 	record.State = workspaceSessionStateActive
 	record.LastSeenAt = now
@@ -666,6 +733,7 @@ func (s *Service) UpsertWorkspaceSession(ctx context.Context, workspace, session
 	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
 		return WorkspaceSessionInfo{}, err
 	}
+	s.publishSessionMonitorEvent(ctx, workspace, record, "upserted")
 	return workspaceSessionInfoFromRecord(record), nil
 }
 
@@ -693,7 +761,7 @@ func (s *Service) ListWorkspaceSessions(ctx context.Context, workspace string) (
 	return WorkspaceSessionListResponse{Items: items}, nil
 }
 
-func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string) (WorkspaceSessionInfo, error) {
+func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sessionID string, input ...CreateWorkspaceSessionRequest) (WorkspaceSessionInfo, error) {
 	record, err := s.store.GetWorkspaceSession(ctx, workspace, sessionID)
 	if err != nil {
 		return WorkspaceSessionInfo{}, err
@@ -706,6 +774,9 @@ func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sess
 		return WorkspaceSessionInfo{}, err
 	}
 	record.State = workspaceSessionStateActive
+	if len(input) > 0 && (shouldTrackWorkspaceSession(input[0]) || input[0].Readonly) {
+		record = workspaceSessionRecordWithHeartbeatMetadata(record, input[0])
+	}
 	record.LastSeenAt = now
 	record.LeaseExpiresAt = now.Add(workspaceSessionLeaseTTL)
 	if err := s.store.PutWorkspaceSession(ctx, record); err != nil {
@@ -714,7 +785,41 @@ func (s *Service) HeartbeatWorkspaceSession(ctx context.Context, workspace, sess
 	if err := s.syncWorkspaceSessionCatalog(ctx, workspace, record, ""); err != nil {
 		return WorkspaceSessionInfo{}, err
 	}
+	s.publishSessionMonitorEvent(ctx, workspace, record, "heartbeat")
 	return workspaceSessionInfoFromRecord(record), nil
+}
+
+func workspaceSessionRecordWithHeartbeatMetadata(record WorkspaceSessionRecord, input CreateWorkspaceSessionRequest) WorkspaceSessionRecord {
+	if value := strings.TrimSpace(input.ClientKind); value != "" {
+		record.ClientKind = value
+	}
+	if value := strings.TrimSpace(input.AgentID); value != "" {
+		record.AgentID = value
+	}
+	agentName, sessionName, label := workspaceSessionNames(input)
+	if agentName != "" {
+		record.AgentName = agentName
+	}
+	if sessionName != "" {
+		record.SessionName = sessionName
+	}
+	if label != "" {
+		record.Label = label
+	}
+	if value := strings.TrimSpace(input.AFSVersion); value != "" {
+		record.AFSVersion = value
+	}
+	if value := strings.TrimSpace(input.Hostname); value != "" {
+		record.Hostname = value
+	}
+	if value := strings.TrimSpace(input.OperatingSystem); value != "" {
+		record.OperatingSystem = value
+	}
+	if value := strings.TrimSpace(input.LocalPath); value != "" {
+		record.LocalPath = value
+	}
+	record.Readonly = input.Readonly
+	return record
 }
 
 func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionID string) error {
@@ -743,6 +848,7 @@ func (s *Service) CloseWorkspaceSession(ctx context.Context, workspace, sessionI
 		"client_kind": defaultString(record.ClientKind, "sync"),
 		"hostname":    record.Hostname,
 	})
+	s.publishSessionMonitorEvent(ctx, workspace, record, "closed")
 	return nil
 }
 
@@ -800,6 +906,9 @@ func ManifestBlobRefs(m Manifest) map[string]int64 {
 
 func shouldTrackWorkspaceSession(input createWorkspaceSessionRequest) bool {
 	return strings.TrimSpace(input.AgentID) != "" ||
+		strings.TrimSpace(input.AgentName) != "" ||
+		strings.TrimSpace(input.SessionName) != "" ||
+		strings.TrimSpace(input.Label) != "" ||
 		strings.TrimSpace(input.ClientKind) != "" ||
 		strings.TrimSpace(input.Hostname) != "" ||
 		strings.TrimSpace(input.OperatingSystem) != "" ||
@@ -812,12 +921,14 @@ func workspaceSessionInfoFromRecord(record WorkspaceSessionRecord) workspaceSess
 		SessionID:       record.SessionID,
 		Workspace:       record.Workspace,
 		AgentID:         record.AgentID,
+		AgentName:       workspaceSessionRecordAgentName(record),
+		SessionName:     workspaceSessionRecordSessionName(record),
 		ClientKind:      record.ClientKind,
 		AFSVersion:      record.AFSVersion,
 		Hostname:        record.Hostname,
 		OperatingSystem: record.OperatingSystem,
 		LocalPath:       record.LocalPath,
-		Label:           record.Label,
+		Label:           workspaceSessionRecordLabel(record),
 		Readonly:        record.Readonly,
 		State:           record.State,
 		StartedAt:       record.StartedAt.UTC().Format(time.RFC3339),
@@ -871,6 +982,7 @@ func (s *Service) reapExpiredWorkspaceSessions(ctx context.Context, workspace st
 			"client_kind": defaultString(record.ClientKind, "sync"),
 			"hostname":    record.Hostname,
 		})
+		s.publishSessionMonitorEvent(ctx, workspace, record, "stale")
 	}
 	return nil
 }
@@ -901,11 +1013,14 @@ func (s *Service) listWorkspaceSessionsFromCatalog(ctx context.Context, workspac
 			SessionID:       record.SessionID,
 			Workspace:       defaultString(record.WorkspaceName, meta.Name),
 			AgentID:         record.AgentID,
+			AgentName:       record.AgentName,
+			SessionName:     record.SessionName,
 			ClientKind:      record.ClientKind,
 			AFSVersion:      record.AFSVersion,
 			Hostname:        record.Hostname,
 			OperatingSystem: record.OperatingSystem,
 			LocalPath:       record.LocalPath,
+			Label:           record.Label,
 			Readonly:        record.Readonly,
 			State:           record.State,
 			StartedAt:       record.StartedAt,
@@ -1005,6 +1120,18 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 		return workspaceDetail{}, err
 	}
 	stats := s.currentWorkspaceStats(ctx, storageID, headMeta)
+	contentStorage, err := inspectWorkspaceContentStorage(ctx, s.store, storageID)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	databaseSupportsArrays, err := inspectDatabaseArraySupport(ctx, s.store)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
+	searchIndex, err := inspectWorkspaceSearchIndex(ctx, s.store.rdb, storageID)
+	if err != nil {
+		return workspaceDetail{}, err
+	}
 	dirty, err := s.workspaceDirtyState(ctx, storageID, meta)
 	if err != nil {
 		return workspaceDetail{}, err
@@ -1015,28 +1142,31 @@ func (s *Service) getWorkspace(ctx context.Context, workspace string) (workspace
 	}
 
 	detail := workspaceDetail{
-		ID:               storageID,
-		Name:             meta.Name,
-		Description:      meta.Description,
-		CloudAccount:     meta.CloudAccount,
-		DatabaseID:       meta.DatabaseID,
-		DatabaseName:     meta.DatabaseName,
-		RedisKey:         WorkspaceFSKey(storageID),
-		Region:           meta.Region,
-		Status:           workspaceStatus(dirty),
-		Source:           workspaceSource(meta),
-		CreatedAt:        meta.CreatedAt.UTC().Format(time.RFC3339),
-		UpdatedAt:        meta.UpdatedAt.UTC().Format(time.RFC3339),
-		DraftState:       draftState(dirty),
-		HeadCheckpointID: meta.HeadSavepoint,
-		Tags:             append([]string(nil), meta.Tags...),
-		FileCount:        stats.FileCount,
-		FolderCount:      stats.FolderCount,
-		TotalBytes:       stats.TotalBytes,
-		CheckpointCount:  len(checkpoints),
-		Checkpoints:      make([]checkpointSummary, 0, len(checkpoints)),
-		Activity:         activity.Items,
-		Capabilities:     defaultCapabilities(),
+		ID:                     storageID,
+		Name:                   meta.Name,
+		Description:            meta.Description,
+		CloudAccount:           meta.CloudAccount,
+		DatabaseID:             meta.DatabaseID,
+		DatabaseName:           meta.DatabaseName,
+		DatabaseSupportsArrays: databaseSupportsArrays,
+		RedisKey:               WorkspaceFSKey(storageID),
+		Region:                 meta.Region,
+		Status:                 workspaceStatus(dirty),
+		Source:                 workspaceSource(meta),
+		CreatedAt:              meta.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:              meta.UpdatedAt.UTC().Format(time.RFC3339),
+		DraftState:             draftState(dirty),
+		HeadCheckpointID:       meta.HeadSavepoint,
+		Tags:                   append([]string(nil), meta.Tags...),
+		FileCount:              stats.FileCount,
+		FolderCount:            stats.FolderCount,
+		TotalBytes:             stats.TotalBytes,
+		ContentStorage:         contentStorage,
+		SearchIndex:            searchIndex,
+		CheckpointCount:        len(checkpoints),
+		Checkpoints:            make([]checkpointSummary, 0, len(checkpoints)),
+		Activity:               activity.Items,
+		Capabilities:           defaultCapabilities(),
 	}
 
 	for _, checkpoint := range checkpoints {
@@ -1408,7 +1538,7 @@ func (s *Service) checkpointAttribution(ctx context.Context, storageID string, i
 			record, err := s.store.GetWorkspaceSession(ctx, storageID, meta.SessionID)
 			if err == nil {
 				meta.AgentID = strings.TrimSpace(record.AgentID)
-				meta.AgentName = strings.TrimSpace(record.Label)
+				meta.AgentName = workspaceSessionRecordAgentName(record)
 				if meta.AgentName == "" {
 					meta.AgentName = strings.TrimSpace(record.Hostname)
 				}

@@ -3,9 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +14,7 @@ import (
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/internal/mcpproto"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -31,50 +29,41 @@ type afsMCPServer struct {
 	workspaceLocked string
 }
 
-type mcpFileListItem struct {
-	Path       string `json:"path"`
-	Name       string `json:"name"`
-	Kind       string `json:"kind"`
-	Size       int64  `json:"size"`
-	ModifiedAt string `json:"modified_at,omitempty"`
-	Target     string `json:"target,omitempty"`
-}
+// Aliases for shared MCP helpers and types. The canonical definitions
+// live in internal/mcptools — see that package for behavior. Local names
+// are retained so existing call sites in this file keep working.
+type (
+	mcpFileListItem   = mcptools.FileListItem
+	mcpGrepMatch      = mcptools.GrepMatch
+	mcpGrepCount      = mcptools.GrepCount
+	mcpFilePatchOp    = mcptools.FilePatchOp
+	mcpFilePatchInput = mcptools.FilePatchInput
+	mcpTextMatch      = mcptools.TextMatch
+)
 
-type mcpGrepMatch struct {
-	Path   string `json:"path"`
-	Line   int64  `json:"line,omitempty"`
-	Text   string `json:"text"`
-	Binary bool   `json:"binary,omitempty"`
-}
-
-type mcpGrepCount struct {
-	Path  string `json:"path"`
-	Count int    `json:"count"`
-}
-
-type mcpFilePatchOp struct {
-	Op            string `json:"op"`
-	StartLine     *int   `json:"start_line,omitempty"`
-	EndLine       *int   `json:"end_line,omitempty"`
-	Old           string `json:"old,omitempty"`
-	New           string `json:"new,omitempty"`
-	ContextBefore string `json:"context_before,omitempty"`
-	ContextAfter  string `json:"context_after,omitempty"`
-}
-
-type mcpFilePatchInput struct {
-	Workspace      string           `json:"workspace,omitempty"`
-	Path           string           `json:"path"`
-	ExpectedSHA256 string           `json:"expected_sha256,omitempty"`
-	Patches        []mcpFilePatchOp `json:"patches"`
-}
-
-type mcpTextMatch struct {
-	Start     int
-	End       int
-	StartLine int
-	EndLine   int
-}
+var (
+	mcpRequiredString       = mcptools.RequiredString
+	mcpRequiredText         = mcptools.RequiredText
+	mcpOptionalString       = mcptools.OptionalString
+	mcpOptionalText         = mcptools.OptionalText
+	mcpStringDefault        = mcptools.StringDefault
+	mcpBool                 = mcptools.Bool
+	mcpInt                  = mcptools.Int
+	mcpOptionalInt          = mcptools.OptionalInt
+	mcpOptionalInt64        = mcptools.OptionalInt64
+	mcpOptionalStringSlice  = mcptools.OptionalStringSlice
+	decodeMCPArgs           = mcptools.DecodeArgs
+	textSHA256              = mcptools.TextSHA256
+	countTextMatches        = mcptools.CountTextMatches
+	findSingleTextMatch     = mcptools.FindSingleTextMatch
+	matchMatchesConstraints = mcptools.MatchMatchesConstraints
+	lineNumberAtOffset      = mcptools.LineNumberAtOffset
+	textEndLine             = mcptools.TextEndLine
+	applyMCPTextPatch       = mcptools.ApplyTextPatch
+	insertOffsetForLine     = mcptools.InsertOffsetForLine
+	deleteContentLines      = mcptools.DeleteContentLines
+	splitTextLines          = mcptools.SplitTextLines
+)
 
 func (s *afsMCPServer) effectiveProfile() string {
 	profile, err := controlplane.NormalizeMCPProfile(s.profile)
@@ -2147,157 +2136,6 @@ func mcpHistoryDirection(raw string) (bool, error) {
 	}
 }
 
-func mcpRequiredString(args map[string]any, key string) (string, error) {
-	value, ok := args[key]
-	if !ok {
-		return "", fmt.Errorf("missing required argument %q", key)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("argument %q must not be empty", key)
-	}
-	return text, nil
-}
-
-func mcpRequiredText(args map[string]any, key string, allowEmpty bool) (string, error) {
-	value, ok := args[key]
-	if !ok {
-		return "", fmt.Errorf("missing required argument %q", key)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	if !allowEmpty && strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("argument %q must not be empty", key)
-	}
-	return text, nil
-}
-
-func mcpOptionalString(args map[string]any, key string) (string, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return "", nil
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	return strings.TrimSpace(text), nil
-}
-
-func mcpOptionalText(args map[string]any, key string) (string, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return "", nil
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	return text, nil
-}
-
-func mcpStringDefault(args map[string]any, key, fallback string) (string, error) {
-	value, err := mcpOptionalString(args, key)
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		return fallback, nil
-	}
-	return value, nil
-}
-
-func mcpBool(args map[string]any, key string, fallback bool) (bool, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return fallback, nil
-	}
-	switch v := value.(type) {
-	case bool:
-		return v, nil
-	default:
-		return false, fmt.Errorf("argument %q must be a boolean", key)
-	}
-}
-
-func mcpInt(args map[string]any, key string, fallback int) (int, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return fallback, nil
-	}
-	switch v := value.(type) {
-	case float64:
-		return int(v), nil
-	case int:
-		return v, nil
-	case int64:
-		return int(v), nil
-	default:
-		return 0, fmt.Errorf("argument %q must be an integer", key)
-	}
-}
-
-func mcpOptionalInt(args map[string]any, key string) (*int, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return nil, nil
-	}
-	intValue, err := mcpInt(args, key, 0)
-	if err != nil {
-		return nil, err
-	}
-	return &intValue, nil
-}
-
-func mcpOptionalInt64(args map[string]any, key string) (*int64, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return nil, nil
-	}
-	switch v := value.(type) {
-	case float64:
-		result := int64(v)
-		return &result, nil
-	case int:
-		result := int64(v)
-		return &result, nil
-	case int64:
-		return &v, nil
-	default:
-		return nil, fmt.Errorf("argument %q must be an integer", key)
-	}
-}
-
-func mcpOptionalStringSlice(args map[string]any, key string) (*[]string, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return nil, nil
-	}
-	switch typed := value.(type) {
-	case []string:
-		copied := append([]string(nil), typed...)
-		return &copied, nil
-	case []any:
-		values := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text, ok := item.(string)
-			if !ok {
-				return nil, fmt.Errorf("argument %q must be an array of strings", key)
-			}
-			values = append(values, text)
-		}
-		return &values, nil
-	default:
-		return nil, fmt.Errorf("argument %q must be an array of strings", key)
-	}
-}
-
 func applyWorkspaceVersioningPolicyPatchArgs(base controlplane.WorkspaceVersioningPolicy, args map[string]any) (controlplane.WorkspaceVersioningPolicy, error) {
 	next := base
 
@@ -2352,226 +2190,6 @@ func applyWorkspaceVersioningPolicyPatchArgs(base controlplane.WorkspaceVersioni
 	}
 
 	return next, nil
-}
-
-func decodeMCPArgs(args map[string]any, target any) error {
-	body, err := json.Marshal(args)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(body, target)
-}
-
-func textSHA256(content string) string {
-	sum := sha256.Sum256([]byte(content))
-	return hex.EncodeToString(sum[:])
-}
-
-func countTextMatches(content, old, contextBefore, contextAfter string, startLine, endLine *int) int {
-	if old == "" {
-		return 0
-	}
-	count := 0
-	offset := 0
-	for {
-		index := strings.Index(content[offset:], old)
-		if index < 0 {
-			break
-		}
-		matchStart := offset + index
-		matchEnd := matchStart + len(old)
-		match := mcpTextMatch{
-			Start:     matchStart,
-			End:       matchEnd,
-			StartLine: lineNumberAtOffset(content, matchStart),
-			EndLine:   textEndLine(lineNumberAtOffset(content, matchStart), old),
-		}
-		if matchMatchesConstraints(content, match, contextBefore, contextAfter, startLine, endLine) {
-			count++
-		}
-		offset = matchStart + len(old)
-	}
-	return count
-}
-
-func findSingleTextMatch(content, old, contextBefore, contextAfter string, startLine, endLine *int) (mcpTextMatch, error) {
-	if old == "" {
-		return mcpTextMatch{}, errors.New("old text must not be empty")
-	}
-	var (
-		match  mcpTextMatch
-		found  bool
-		offset int
-		count  int
-	)
-	for {
-		index := strings.Index(content[offset:], old)
-		if index < 0 {
-			break
-		}
-		matchStart := offset + index
-		matchEnd := matchStart + len(old)
-		current := mcpTextMatch{
-			Start:     matchStart,
-			End:       matchEnd,
-			StartLine: lineNumberAtOffset(content, matchStart),
-			EndLine:   textEndLine(lineNumberAtOffset(content, matchStart), old),
-		}
-		if matchMatchesConstraints(content, current, contextBefore, contextAfter, startLine, endLine) {
-			match = current
-			found = true
-			count++
-		}
-		offset = matchStart + len(old)
-	}
-	switch {
-	case !found:
-		return mcpTextMatch{}, errors.New("target text not found with the requested constraints")
-	case count > 1:
-		return mcpTextMatch{}, fmt.Errorf("target text matched %d times; refine with start_line or surrounding context", count)
-	default:
-		return match, nil
-	}
-}
-
-func matchMatchesConstraints(content string, match mcpTextMatch, contextBefore, contextAfter string, startLine, endLine *int) bool {
-	if startLine != nil && match.StartLine != *startLine {
-		return false
-	}
-	if endLine != nil && match.EndLine != *endLine {
-		return false
-	}
-	if contextBefore != "" && !strings.HasSuffix(content[:match.Start], contextBefore) {
-		return false
-	}
-	if contextAfter != "" && !strings.HasPrefix(content[match.End:], contextAfter) {
-		return false
-	}
-	return true
-}
-
-func lineNumberAtOffset(content string, offset int) int {
-	if offset <= 0 {
-		return 1
-	}
-	return strings.Count(content[:offset], "\n") + 1
-}
-
-func textEndLine(startLine int, text string) int {
-	if text == "" {
-		return startLine
-	}
-	newlineCount := strings.Count(text, "\n")
-	if newlineCount == 0 {
-		return startLine
-	}
-	if strings.HasSuffix(text, "\n") {
-		return startLine + newlineCount - 1
-	}
-	return startLine + newlineCount
-}
-
-func applyMCPTextPatch(content string, patch mcpFilePatchOp) (string, map[string]any, error) {
-	switch patch.Op {
-	case "replace":
-		if patch.Old == "" {
-			return "", nil, errors.New("replace patch requires old")
-		}
-		match, err := findSingleTextMatch(content, patch.Old, patch.ContextBefore, patch.ContextAfter, patch.StartLine, patch.EndLine)
-		if err != nil {
-			return "", nil, err
-		}
-		return content[:match.Start] + patch.New + content[match.End:], map[string]any{
-			"op":         patch.Op,
-			"start_line": match.StartLine,
-			"end_line":   match.EndLine,
-		}, nil
-	case "insert":
-		if patch.New == "" {
-			return "", nil, errors.New("insert patch requires new")
-		}
-		if patch.StartLine == nil {
-			return "", nil, errors.New("insert patch requires start_line")
-		}
-		insertOffset, actualLine, err := insertOffsetForLine(content, *patch.StartLine)
-		if err != nil {
-			return "", nil, err
-		}
-		if patch.ContextBefore != "" && !strings.HasSuffix(content[:insertOffset], patch.ContextBefore) {
-			return "", nil, errors.New("insert patch context_before did not match")
-		}
-		if patch.ContextAfter != "" && !strings.HasPrefix(content[insertOffset:], patch.ContextAfter) {
-			return "", nil, errors.New("insert patch context_after did not match")
-		}
-		return content[:insertOffset] + patch.New + content[insertOffset:], map[string]any{
-			"op":         patch.Op,
-			"start_line": actualLine,
-		}, nil
-	case "delete":
-		switch {
-		case patch.Old != "":
-			match, err := findSingleTextMatch(content, patch.Old, patch.ContextBefore, patch.ContextAfter, patch.StartLine, patch.EndLine)
-			if err != nil {
-				return "", nil, err
-			}
-			return content[:match.Start] + content[match.End:], map[string]any{
-				"op":         patch.Op,
-				"start_line": match.StartLine,
-				"end_line":   match.EndLine,
-			}, nil
-		case patch.StartLine != nil && patch.EndLine != nil:
-			next, deleted, err := deleteContentLines(content, *patch.StartLine, *patch.EndLine)
-			if err != nil {
-				return "", nil, err
-			}
-			return next, map[string]any{
-				"op":            patch.Op,
-				"start_line":    *patch.StartLine,
-				"end_line":      *patch.EndLine,
-				"deleted_lines": deleted,
-			}, nil
-		default:
-			return "", nil, errors.New("delete patch requires old or both start_line and end_line")
-		}
-	default:
-		return "", nil, fmt.Errorf("unsupported patch op %q", patch.Op)
-	}
-}
-
-func insertOffsetForLine(content string, startLine int) (int, int, error) {
-	if startLine < -1 {
-		return 0, 0, errors.New("start_line must be >= -1")
-	}
-	if startLine == -1 {
-		return len(content), -1, nil
-	}
-	if startLine == 0 {
-		return 0, 0, nil
-	}
-	lines := splitTextLines(content)
-	if startLine > len(lines) {
-		return 0, 0, fmt.Errorf("start_line %d is beyond EOF", startLine)
-	}
-	offset := 0
-	for i := 0; i < startLine; i++ {
-		offset += len(lines[i])
-	}
-	return offset, startLine, nil
-}
-
-func deleteContentLines(content string, start, end int) (string, int, error) {
-	if start <= 0 || end < start {
-		return "", 0, errors.New("start_line and end_line must be >= 1 and end_line must be >= start_line")
-	}
-	lines := splitTextLines(content)
-	if start > len(lines) {
-		return "", 0, fmt.Errorf("start_line %d is beyond EOF", start)
-	}
-	if end > len(lines) {
-		end = len(lines)
-	}
-	next := strings.Join(append(lines[:start-1], lines[end:]...), "")
-	return next, end - start + 1, nil
 }
 
 func readLocalWorkspaceEntry(workspace, normalizedPath, localPath string, info os.FileInfo) (any, error) {
@@ -2629,17 +2247,6 @@ func readTextWorkspaceFile(localPath, normalizedPath string) (string, os.FileInf
 		return "", nil, fmt.Errorf("path %q is binary", normalizedPath)
 	}
 	return string(data), info, nil
-}
-
-func splitTextLines(content string) []string {
-	if content == "" {
-		return []string{}
-	}
-	lines := strings.SplitAfter(content, "\n")
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
 }
 
 func listLocalWorkspaceEntries(treePath, localPath, manifestPath string, depth int) ([]mcpFileListItem, error) {

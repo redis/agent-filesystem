@@ -389,27 +389,6 @@ func GetOwnership() (uint32, uint32) {
 	return uint32(os.Getuid()), uint32(os.Getgid())
 }
 
-// parentPath returns the parent dir of a path.
-func parentPath(p string) string {
-	if p == "/" {
-		return "/"
-	}
-	parent := filepath.Dir(p)
-	if parent == "." {
-		return "/"
-	}
-	return parent
-}
-
-// baseName returns the last component of a path.
-func baseName(p string) string {
-	if p == "/" {
-		return ""
-	}
-	parts := strings.Split(p, "/")
-	return parts[len(parts)-1]
-}
-
 // Ensure interfaces are satisfied.
 var _ fs.NodeStatfser = (*FSNode)(nil)
 var _ fs.NodeGetattrer = (*FSNode)(nil)
