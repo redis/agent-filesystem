@@ -34,9 +34,20 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/redis/agent-filesystem/sandbox/internal/api"
 	"github.com/redis/agent-filesystem/sandbox/internal/executor"
+)
+
+// gcInterval is how often the process-map sweeper runs.
+// gcMaxAge is how long terminal-state processes (exited / killed / timed-out)
+// are retained before they are pruned. Long enough that a CLI client can
+// reasonably read the result back, short enough that a long-lived sandbox
+// doesn't accumulate forever.
+const (
+	gcInterval = 5 * time.Minute
+	gcMaxAge   = 1 * time.Hour
 )
 
 func main() {
@@ -65,7 +76,18 @@ func main() {
 	httpServer := &http.Server{
 		Addr:    addr,
 		Handler: server.Handler(),
+		// Bound the request side; the wait endpoints stream
+		// long-running process completion, so WriteTimeout is
+		// intentionally not set.
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+
+	// Periodic process-map GC so terminal-state entries don't accumulate.
+	gcCtx, cancelGC := context.WithCancel(context.Background())
+	defer cancelGC()
+	go runProcessGC(gcCtx, manager)
 
 	// Graceful shutdown
 	go func() {
@@ -73,6 +95,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Println("Shutting down...")
+		cancelGC()
 		httpServer.Shutdown(context.Background())
 	}()
 
@@ -91,5 +114,20 @@ func main() {
 
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatalf("Server error: %v", err)
+	}
+}
+
+func runProcessGC(ctx context.Context, m *executor.Manager) {
+	tick := time.NewTicker(gcInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if removed := m.GC(gcMaxAge); removed > 0 {
+				log.Printf("sandbox: pruned %d terminal-state process(es)", removed)
+			}
+		}
 	}
 }
