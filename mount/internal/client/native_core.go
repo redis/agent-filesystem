@@ -426,7 +426,7 @@ func (c *nativeClient) Cat(ctx context.Context, p string) ([]byte, error) {
 		return nil, err
 	}
 	if inode.Type != "file" {
-		return nil, errors.New("not a file")
+		return nil, ErrNotFile
 	}
 	content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 	if err != nil {
@@ -450,7 +450,7 @@ func (c *nativeClient) EchoAppend(ctx context.Context, p string, data []byte) er
 func (c *nativeClient) Touch(ctx context.Context, p string) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("cannot write to root")
+		return ErrCannotWriteRoot
 	}
 	if err := c.ensureParents(ctx, p); err != nil {
 		return err
@@ -465,7 +465,7 @@ func (c *nativeClient) Touch(ctx context.Context, p string) error {
 		return err
 	}
 	if inode.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	now := nowMs()
 	inode.MtimeMs = now
@@ -480,7 +480,7 @@ func (c *nativeClient) Touch(ctx context.Context, p string) error {
 func (c *nativeClient) CreateFile(ctx context.Context, p string, mode uint32, exclusive bool) (*StatResult, bool, error) {
 	p = normalizePath(p)
 	if p == "/" {
-		return nil, false, errors.New("cannot write to root")
+		return nil, false, ErrCannotWriteRoot
 	}
 	if err := c.ensureParents(ctx, p); err != nil {
 		return nil, false, err
@@ -522,7 +522,7 @@ func (c *nativeClient) Mkdir(ctx context.Context, p string) error {
 		if existing.Type == "dir" {
 			return nil
 		}
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	}
 	if err := c.createDir(ctx, p, 0o755); err != nil {
 		return err
@@ -533,7 +533,7 @@ func (c *nativeClient) Mkdir(ctx context.Context, p string) error {
 func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("cannot remove root")
+		return ErrCannotRemoveRoot
 	}
 	resolved, inode, err := c.resolvePath(ctx, p, false)
 	if err != nil {
@@ -573,7 +573,7 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 				c.invalidateInode(ctx, resolved)
 			}
 			if liveChildren > 0 {
-				return errors.New("directory not empty")
+				return ErrDirNotEmpty
 			}
 		}
 	}
@@ -631,7 +631,7 @@ func (c *nativeClient) LsLong(ctx context.Context, p string) ([]LsEntry, error) 
 		return nil, err
 	}
 	if inode.Type != "dir" {
-		return nil, errors.New("not a directory")
+		return nil, ErrNotDir
 	}
 
 	children, err := c.listDirChildren(ctx, resolved, inode)
@@ -659,16 +659,16 @@ func (c *nativeClient) Rename(ctx context.Context, src, dst string, flags uint32
 	src = normalizePath(src)
 	dst = normalizePath(dst)
 	if src == "/" {
-		return errors.New("cannot move root")
+		return ErrCannotMoveRoot
 	}
 	if src == dst {
 		return nil
 	}
 	if flags&RenameExchange != 0 {
-		return errors.New("operation not supported")
+		return ErrUnsupported
 	}
 	if flags&^RenameNoreplace != 0 {
-		return errors.New("operation not supported")
+		return ErrUnsupported
 	}
 
 	resolvedSrc, srcInode, err := c.resolvePath(ctx, src, false)
@@ -688,7 +688,7 @@ func (c *nativeClient) Rename(ctx context.Context, src, dst string, flags uint32
 	}
 	_ = resolvedParent
 	if newParent.Type != "dir" {
-		return errors.New("parent path conflict")
+		return ErrParentConflict
 	}
 
 	if err := c.renamePath(ctx, resolvedSrc, srcInode, dst, newParent, flags); err != nil {
@@ -716,7 +716,7 @@ func (c *nativeClient) Mv(ctx context.Context, src, dst string) error {
 func (c *nativeClient) Ln(ctx context.Context, target, linkpath string) error {
 	linkpath = normalizePath(linkpath)
 	if linkpath == "/" {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	}
 	if err := c.ensureParents(ctx, linkpath); err != nil {
 		return err
@@ -726,7 +726,7 @@ func (c *nativeClient) Ln(ctx context.Context, target, linkpath string) error {
 		return err
 	}
 	if existing != nil {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	}
 	now := nowMs()
 	inode := &inodeData{
@@ -762,7 +762,7 @@ func (c *nativeClient) Readlink(ctx context.Context, p string) (string, error) {
 		return "", err
 	}
 	if inode.Type != "symlink" {
-		return "", errors.New("not a symlink")
+		return "", ErrNotSymlink
 	}
 	return inode.Target, nil
 }
@@ -823,7 +823,7 @@ func (c *nativeClient) Truncate(ctx context.Context, p string, size int64) error
 		return snapErr
 	}
 	if inode.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 
 	var content []byte
@@ -978,7 +978,7 @@ func (c *nativeClient) Info(ctx context.Context) (*InfoResult, error) {
 func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []byte, mode uint32) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("cannot write to root")
+		return ErrCannotWriteRoot
 	}
 	if err := c.ensureParents(ctx, p); err != nil {
 		return err
@@ -991,7 +991,7 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 		return err
 	}
 	if inode.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
 	if snapErr != nil {
@@ -1023,7 +1023,7 @@ func (c *nativeClient) writeFileWithMode(ctx context.Context, p string, data []b
 func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, appendMode bool) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("cannot write to root")
+		return ErrCannotWriteRoot
 	}
 	resolved, inode, err := c.resolvePath(ctx, p, true)
 	if err != nil {
@@ -1036,7 +1036,7 @@ func (c *nativeClient) writeFile(ctx context.Context, p string, data []byte, app
 		return err
 	}
 	if inode.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
 	if snapErr != nil {
@@ -1150,7 +1150,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 		return err
 	}
 	if inode.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	beforeSnapshot, snapErr := c.versionedSnapshotFromResolved(ctx, resolved, inode)
 	if snapErr != nil {
@@ -1328,7 +1328,7 @@ func (c *nativeClient) ReadChunks(ctx context.Context, p string, indices []int, 
 		return nil, err
 	}
 	if inode.Type != "file" {
-		return nil, errors.New("not a file")
+		return nil, ErrNotFile
 	}
 	if inode.ContentRef == rediscontent.RefArray {
 		result := make(map[int][]byte, len(indices))
@@ -1372,7 +1372,7 @@ func (c *nativeClient) ChunkMeta(ctx context.Context, p string) (int, []string, 
 		return 0, nil, err
 	}
 	if inode.Type != "file" {
-		return 0, nil, errors.New("not a file")
+		return 0, nil, ErrNotFile
 	}
 
 	vals, err := c.rdb.HMGet(ctx, c.keys.inode(inode.ID), "chunk_size", "chunk_hashes").Result()

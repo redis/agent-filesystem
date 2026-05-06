@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  go-root:
+    name: Go (root)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache-dependency-path: go.sum
+      - name: Vet
+        run: go vet ./cmd/... ./internal/... ./deploy/...
+      - name: Test
+        run: go test ./cmd/... ./internal/... ./deploy/...
+
+  go-mount:
+    name: Go (mount)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Mount client tests fork a real redis-server per test (see
+      # mount/internal/client/native_test.go); install the binary so the
+      # tests can spawn it.
+      - name: Install redis-server
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache-dependency-path: mount/go.sum
+      - name: Vet
+        working-directory: mount
+        run: go vet ./...
+      - name: Test
+        working-directory: mount
+        run: go test ./...
+
+  go-sandbox:
+    name: Go (sandbox)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.22"
+          cache-dependency-path: sandbox/go.sum
+      - name: Vet
+        working-directory: sandbox
+        run: go vet ./...
+      - name: Test
+        working-directory: sandbox
+        run: go test ./...
+
+  ui:
+    name: UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Test
+        run: npm test
+
+  ui-lint:
+    name: UI lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - name: Lint
+        run: npm run lint

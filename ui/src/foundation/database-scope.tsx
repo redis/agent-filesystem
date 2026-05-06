@@ -142,9 +142,7 @@ export function DatabaseScopeProvider(props: PropsWithChildren) {
     ? null
     : databasesQuery.error instanceof Error
       ? databasesQuery.error.message
-      : databasesQuery.error != null
-        ? "Unable to load databases."
-        : null;
+      : null;
   const unavailableDatabases = useMemo(
     () => databases.filter((database) => !database.isHealthy),
     [databases],

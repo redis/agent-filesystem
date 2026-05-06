@@ -10,7 +10,6 @@ import styled from "styled-components";
 import { SiteModeFrame } from "../features/agent-experience/SiteModeFrame";
 import { RouteErrorBoundary } from "../error-boundaries/route-error-boundary";
 import { isCloudAdminConfig, useAuthSession } from "../foundation/auth-context";
-import { BackgroundPatternProvider } from "../foundation/background-pattern";
 import { AppBar } from "../layout/app-bar";
 import { isPublicMarketingPath } from "../layout/public-routes";
 import { PublicShell } from "../layout/public-shell";
@@ -150,13 +149,11 @@ function RootLayout() {
   );
 
   return (
-    <BackgroundPatternProvider>
-      <DrawerProvider>
-        <BgFx />
-        <SiteModeFrame>{humanView}</SiteModeFrame>
-        <GlobalDrawer />
-      </DrawerProvider>
-    </BackgroundPatternProvider>
+    <DrawerProvider>
+      <BgFx />
+      <SiteModeFrame>{humanView}</SiteModeFrame>
+      <GlobalDrawer />
+    </DrawerProvider>
   );
 }
 

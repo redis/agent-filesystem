@@ -375,7 +375,6 @@ type Service struct {
 	catalogDatabaseName string
 }
 
-type Capabilities = capabilities
 type WorkspaceSummary = workspaceSummary
 type WorkspaceListResponse = workspaceListResponse
 type CheckpointSummary = checkpointSummary

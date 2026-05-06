@@ -22,7 +22,7 @@ export function GlobalDrawer() {
   const { state, close } = useDrawer();
   const quickstartMutation = useQuickstartMutation();
   const workspacesQuery = useScopedWorkspaceSummaries();
-  const workspaces = workspacesQuery.data ?? [];
+  const workspaces = workspacesQuery.data;
   const haveAnyWorkspace = workspaces.length > 0;
 
   if (!state) return null;
@@ -49,7 +49,7 @@ export function GlobalDrawer() {
         : "idle";
 
   const errorMessage = quickstartMutation.isError
-    ? quickstartMutation.error.message?.includes("cannot connect")
+    ? quickstartMutation.error.message.includes("cannot connect")
       ? "Could not connect to Redis at localhost:6379. Start Redis or add a remote database, then retry."
       : quickstartMutation.error.message || "Something went wrong."
     : null;

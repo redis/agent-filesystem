@@ -43,7 +43,7 @@ export function GettingStartedOnboardingDialog({
   }
 
   const workspaceLabel = displayWorkspaceName(workspaceName);
-  const agentConnected = (agentsQuery.data ?? []).some(
+  const agentConnected = agentsQuery.data.some(
     (agent) => agent.workspaceId === workspaceId,
   );
 

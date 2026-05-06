@@ -51,7 +51,10 @@ func (fh *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
 
-	if err := fh.client.WriteInodeAt(ctx, fh.inode, data, off); err != nil {
+	// Use *AtPath so the per-path attribute cache is updated in place rather
+	// than wiped. Without this, every FUSE write triggered a whole-cache
+	// invalidatePrefix("/") inside finishRangeWriteCache.
+	if err := fh.client.WriteInodeAtPath(ctx, fh.inode, fh.path, data, off); err != nil {
 		return 0, mapError(err)
 	}
 	fh.node.root().invalidatePath(fh.path)
@@ -96,9 +99,6 @@ func (fh *FileHandle) Setlk(ctx context.Context, owner uint64, lk *fuse.FileLock
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return syscall.EINTR
 	}
-	if err.Error() == "lock would block" {
-		return syscall.EAGAIN
-	}
 	return mapError(err)
 }
 
@@ -109,9 +109,6 @@ func (fh *FileHandle) Setlkw(ctx context.Context, owner uint64, lk *fuse.FileLoc
 	}
 	if err == context.Canceled || err == context.DeadlineExceeded {
 		return syscall.EINTR
-	}
-	if err.Error() == "lock would block" {
-		return syscall.EAGAIN
 	}
 	return mapError(err)
 }

@@ -2,8 +2,11 @@ package afsfs
 
 import (
 	"errors"
+	"fmt"
 	"syscall"
 	"testing"
+
+	"github.com/redis/agent-filesystem/mount/internal/client"
 )
 
 func TestMapError(t *testing.T) {
@@ -30,5 +33,35 @@ func TestMapError(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("mapError(%q) = %d, want %d", tc.msg, got, tc.want)
 		}
+	}
+}
+
+// TestMapErrorSentinels confirms mapError matches client sentinels via
+// errors.Is, including when the caller wraps the sentinel with extra
+// context. The substring fallback would silently break under wrapping;
+// this test ensures the principled path doesn't.
+func TestMapErrorSentinels(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want syscall.Errno
+	}{
+		{"NotFound", client.ErrNotFound, syscall.ENOENT},
+		{"NotFile", client.ErrNotFile, syscall.EISDIR},
+		{"NotDir", client.ErrNotDir, syscall.ENOTDIR},
+		{"AlreadyExists", client.ErrAlreadyExists, syscall.EEXIST},
+		{"DirNotEmpty", client.ErrDirNotEmpty, syscall.ENOTEMPTY},
+		{"Unsupported", client.ErrUnsupported, syscall.ENOTSUP},
+		{"LockWouldBlock", client.ErrLockWouldBlock, syscall.EAGAIN},
+		{"WrappedNotFile", fmt.Errorf("inode 42: %w", client.ErrNotFile), syscall.EISDIR},
+		{"WrappedAlreadyExists", fmt.Errorf("create %q: %w", "/foo", client.ErrAlreadyExists), syscall.EEXIST},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mapError(tc.err); got != tc.want {
+				t.Fatalf("mapError(%v) = %d, want %d", tc.err, got, tc.want)
+			}
+		})
 	}
 }

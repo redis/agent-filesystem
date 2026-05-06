@@ -32,10 +32,10 @@ func (c *nativeClient) ReadInodeAt(ctx context.Context, inode uint64, off int64,
 		return nil, err
 	}
 	if data == nil {
-		return nil, errors.New("no such file or directory")
+		return nil, ErrNotFound
 	}
 	if data.Type != "file" {
-		return nil, errors.New("not a file")
+		return nil, ErrNotFile
 	}
 	if off >= data.Size {
 		return []byte{}, nil
@@ -93,10 +93,10 @@ func (c *nativeClient) WriteInodeAtPath(ctx context.Context, inode uint64, path 
 		return err
 	}
 	if data == nil {
-		return errors.New("no such file or directory")
+		return ErrNotFound
 	}
 	if data.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	beforeSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
 	if snapErr != nil {
@@ -246,10 +246,10 @@ func (c *nativeClient) TruncateInodeAtPath(ctx context.Context, inode uint64, pa
 		return err
 	}
 	if data == nil {
-		return errors.New("no such file or directory")
+		return ErrNotFound
 	}
 	if data.Type != "file" {
-		return errors.New("not a file")
+		return ErrNotFile
 	}
 	beforeSnapshot, snapErr := c.versionedSnapshotForCurrentInode(ctx, data.ID, path)
 	if snapErr != nil {

@@ -1,6 +1,6 @@
 import type { ComponentType, SVGProps } from "react";
 import type { MonochromeIconProps } from "@redis-ui/icons";
-import { useTheme } from "@redislabsdev/redis-ui-styles";
+import { useTheme } from "@redis-ui/styles";
 import {
   Bell,
   BookOpen,
@@ -36,12 +36,12 @@ function makeLucideIcon(Icon: LucideIcon, defaultLabel: string) {
     const theme = useTheme();
     const sizeValue =
       customSize ||
-      theme?.core.icon.size[size] ||
-      theme?.core.icon.size.L ||
+      theme.core.icon.size[size] ||
+      theme.core.icon.size.L ||
       20;
     const colorValue =
       customColor ||
-      (color && theme?.semantic.color.icon[color]) ||
+      (color && theme.semantic.color.icon[color]) ||
       "currentColor";
 
     return (

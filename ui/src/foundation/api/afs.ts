@@ -893,7 +893,7 @@ function normalizeWorkspace(workspace: AFSWorkspace): AFSWorkspace {
 }
 
 function demoWorkspaceContentStorage(workspace: AFSWorkspace) {
-  const fileCount = workspace.fileCount ?? workspace.files.length;
+  const fileCount = workspace.fileCount;
   if (fileCount <= 0) {
     return {
       profile: "none" as const,

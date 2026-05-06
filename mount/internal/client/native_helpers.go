@@ -163,7 +163,7 @@ func (c *nativeClient) ensureParents(ctx context.Context, p string) error {
 				return err
 			}
 			if child == nil || child.Type != "dir" {
-				return errors.New("parent path conflict")
+				return ErrParentConflict
 			}
 			c.cachePath(nextPath, child)
 			curPath = nextPath
@@ -292,7 +292,7 @@ func (c *nativeClient) resolvePath(ctx context.Context, p string, followFinal bo
 			return nextPath, inode, nil
 		}
 		if inode.Type != "dir" {
-			return "", nil, errors.New("not a directory")
+			return "", nil, ErrNotDir
 		}
 
 		curPath = nextPath
@@ -632,7 +632,7 @@ func (c *nativeClient) saveInodeDirect(ctx context.Context, inode *inodeData, in
 func (c *nativeClient) createInodeAtPath(ctx context.Context, p string, inode *inodeData, ensureParents bool) error {
 	p = normalizePath(p)
 	if p == "/" {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	}
 	if ensureParents {
 		if err := c.ensureParents(ctx, p); err != nil {
@@ -650,10 +650,10 @@ func (c *nativeClient) createInodeAtPath(ctx context.Context, p string, inode *i
 
 func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath string, parent *inodeData, name string, inode *inodeData) error {
 	if parent == nil || parent.Type != "dir" {
-		return errors.New("parent path conflict")
+		return ErrParentConflict
 	}
 	if _, err := c.lookupChildID(ctx, parent.ID, name); err == nil {
-		return errors.New("already exists")
+		return ErrAlreadyExists
 	} else if !errors.Is(err, redis.Nil) {
 		return err
 	}
@@ -732,7 +732,7 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, content string, mode uint32, exclusive bool) (*inodeData, bool, error) {
 	p = normalizePath(p)
 	if p == "/" {
-		return nil, false, errors.New("cannot write to root")
+		return nil, false, ErrCannotWriteRoot
 	}
 	parentPath := parentOf(p)
 	_, parentInode, err := c.resolvePath(ctx, parentPath, true)
@@ -740,7 +740,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return nil, false, err
 	}
 	if parentInode.Type != "dir" {
-		return nil, false, errors.New("parent path conflict")
+		return nil, false, ErrParentConflict
 	}
 
 	direntsKey := c.keys.dirents(parentInode.ID)
@@ -818,7 +818,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	}
 
 	if exclusive {
-		return nil, false, errors.New("already exists")
+		return nil, false, ErrAlreadyExists
 	}
 
 	// Re-resolve the existing child. Use HGet directly (not lookupChildID)
@@ -829,7 +829,7 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		if errors.Is(err, redis.Nil) {
 			// The winner removed the entry between HSETNX and our HGet.
 			// Surface this as the same error the resolvePath family uses.
-			return nil, false, errors.New("no such file or directory")
+			return nil, false, ErrNotFound
 		}
 		return nil, false, err
 	}
@@ -838,10 +838,10 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 		return nil, false, err
 	}
 	if existing == nil {
-		return nil, false, errors.New("no such file or directory")
+		return nil, false, ErrNotFound
 	}
 	if existing.Type != "file" {
-		return nil, false, errors.New("not a file")
+		return nil, false, ErrNotFile
 	}
 	// Nothing in the parent directory actually changed from our
 	// perspective, so we leave the parent's cache alone and only
@@ -855,7 +855,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 	oldName := srcInode.Name
 	newName := baseName(dst)
 	if oldParentID == "" {
-		return errors.New("no such file or directory")
+		return ErrNotFound
 	}
 
 	var watchDstDirID string
@@ -870,7 +870,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 			currentSrcID, err := tx.HGet(ctx, c.keys.dirents(oldParentID), oldName).Result()
 			if err != nil {
 				if errors.Is(err, redis.Nil) {
-					return errors.New("no such file or directory")
+					return ErrNotFound
 				}
 				return err
 			}
@@ -883,7 +883,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 				return err
 			}
 			if currentSrc == nil {
-				return errors.New("no such file or directory")
+				return ErrNotFound
 			}
 
 			var replaced *inodeData
@@ -898,13 +898,13 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 					return redis.TxFailedErr
 				}
 				if flags&RenameNoreplace != 0 {
-					return errors.New("already exists")
+					return ErrAlreadyExists
 				}
 				if currentSrc.Type == "dir" && replaced.Type != "dir" {
-					return errors.New("not a directory")
+					return ErrNotDir
 				}
 				if currentSrc.Type != "dir" && replaced.Type == "dir" {
-					return errors.New("not a file")
+					return ErrNotFile
 				}
 				if replaced.Type == "dir" {
 					if watchDstDirID != replaced.ID {
@@ -916,7 +916,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 						return err
 					}
 					if count > 0 {
-						return errors.New("directory not empty")
+						return ErrDirNotEmpty
 					}
 				}
 			case !errors.Is(err, redis.Nil):
@@ -983,7 +983,7 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 
 func (c *nativeClient) listDirChildren(ctx context.Context, dirPath string, dir *inodeData) ([]namedInode, error) {
 	if dir == nil || dir.Type != "dir" {
-		return nil, errors.New("not a directory")
+		return nil, ErrNotDir
 	}
 	if c.cache != nil {
 		if cached, ok := c.cache.Get(dirCacheKey(dirPath)); ok {

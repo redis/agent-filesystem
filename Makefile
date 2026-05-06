@@ -88,7 +88,7 @@ uninstall: ## Remove the installed afs symlink from $(BINDIR).
 
 clean: ## Remove compiled artifacts.
 	$(MAKE) -C mount clean
-	$(RM) afs afs-control-plane afs-server
+	$(RM) afs afs-control-plane
 
 test: ## Run Go unit tests for the active product surfaces.
 	go test ./cmd/... ./deploy/... ./internal/...

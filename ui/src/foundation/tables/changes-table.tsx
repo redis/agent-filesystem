@@ -3,6 +3,7 @@ import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
+import { compareValues } from "../sort-compare";
 import { shortDateTime } from "../time-format";
 import type { AFSChangelogEntry } from "../types/afs";
 import { truncateMiddlePath } from "./changes-table-utils";
@@ -32,18 +33,6 @@ type Props = {
   searchPlaceholder?: string;
   onOpenChange?: (entry: HistoryTableRow) => void;
 };
-
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-  return direction === "asc" ? result : result * -1;
-}
 
 function formatSignedBytes(n?: number): string {
   if (n === undefined || n === 0) return "—";

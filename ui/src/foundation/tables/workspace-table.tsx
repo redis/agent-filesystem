@@ -10,6 +10,8 @@ import { useNavigate } from "@tanstack/react-router";
 import styled, { css, keyframes } from "styled-components";
 import { formatBytes } from "../api/afs";
 import { useStoredViewMode } from "../hooks/use-stored-view-mode";
+import { CheckIcon, CopyIcon } from "../clipboard-icons";
+import { compareValues } from "../sort-compare";
 import { shortDateTime } from "../time-format";
 import type { AFSWorkspaceSummary } from "../types/afs";
 import { displayWorkspaceName } from "../workspace-display";
@@ -69,19 +71,6 @@ function workspaceRowKey(workspace: AFSWorkspaceSummary) {
   return `${workspace.databaseId}:${workspace.id}`;
 }
 
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-
-  return direction === "asc" ? result : result * -1;
-}
-
 export function WorkspaceTable({
   rows,
   loading = false,
@@ -98,7 +87,10 @@ export function WorkspaceTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode", "table");
+  const [viewMode, setViewMode] = useStoredViewMode<"table" | "cards">(
+    "afs.workspaces.viewMode",
+    "table",
+  );
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const navigate = useNavigate();
   useMinuteTick();
@@ -282,7 +274,7 @@ export function WorkspaceTable({
                       disabled={isDeleting}
                       onClick={(event) => {
                         event.stopPropagation();
-                        onDeleteWorkspace?.(row.original);
+                        onDeleteWorkspace(row.original);
                       }}
                     >
                       <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />
@@ -619,43 +611,6 @@ const CopyButton = styled.button`
     opacity: 1;
   }
 `;
-
-function CopyIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="#16a34a"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  );
-}
 
 const UpdatedStack = styled.div`
   display: flex;

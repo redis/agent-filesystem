@@ -1,5 +1,4 @@
 import { Button } from "@redis-ui/components";
-import JSZip from "jszip";
 import { useState } from "react";
 import styled from "styled-components";
 import { SurfaceCard } from "../../components/card-shell";
@@ -64,6 +63,7 @@ export async function downloadClaudePlugin(args: {
   token: string;
 }): Promise<void> {
   const files = buildClaudePlugin(args);
+  const { default: JSZip } = await import("jszip");
   const zip = new JSZip();
   for (const file of files) {
     const isExecutable = file.path.endsWith(".sh");

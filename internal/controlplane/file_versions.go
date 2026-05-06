@@ -1063,30 +1063,6 @@ func (s *Store) getFileLineageForCmd(ctx context.Context, cmd redis.Cmdable, sto
 	return getJSON[FileLineage](ctx, cmd, fileLineageMetaKey(storageID, strings.TrimSpace(fileID)))
 }
 
-func WorkspacePathFileIDsKey(workspace string) string {
-	return workspacePathFileIDsKey(workspace)
-}
-
-func WorkspacePathHistoryKey(workspace, normalizedPath string) string {
-	return workspacePathHistoryKey(workspace, normalizedPath)
-}
-
-func WorkspaceVersionFileIDsKey(workspace string) string {
-	return workspaceVersionFileIDsKey(workspace)
-}
-
-func FileLineageMetaKey(workspace, fileID string) string {
-	return fileLineageMetaKey(workspace, fileID)
-}
-
-func FileLineageVersionsKey(workspace, fileID string) string {
-	return fileLineageVersionsKey(workspace, fileID)
-}
-
-func FileVersionKey(workspace, fileID, versionID string) string {
-	return fileVersionKey(workspace, fileID, versionID)
-}
-
 func workspacePathFileIDsKey(workspace string) string {
 	return fmt.Sprintf("afs:{%s}:workspace:path_file_ids", workspace)
 }
