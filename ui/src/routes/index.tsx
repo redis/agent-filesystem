@@ -138,7 +138,10 @@ function InspectorView({
         loading={activityQuery.isLoading}
       />
 
-      <ActiveAgentsPanel agents={agents} onOpenAgents={() => void navigate({ to: "/agents" })} />
+      <MissionHudPanel
+        agents={agents}
+        onOpenAgents={() => void navigate({ to: "/agents" })}
+      />
 
       <ActivityCard>
         <ActivityCardHeader>
@@ -176,56 +179,19 @@ function InspectorView({
   );
 }
 
-// ActiveAgentsPanel — compact list of currently-connected agents and the
-// workspace each is on. This is the "watch your CLI/agents work" cue for the
-// Inspector page: dense, no animation, per-row state dot for at-a-glance
-// activity. Replaces the old animated topology graph.
-function ActiveAgentsPanel({ agents, onOpenAgents }: {
-  agents: AFSAgentSession[];
-  onOpenAgents: () => void;
-}) {
-  if (agents.length === 0) return null;
-  // sort: most recently active first
-  const ordered = [...agents].sort((a, b) =>
-    Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt),
-  );
-  const showCount = Math.min(6, ordered.length);
-  const overflow = ordered.length - showCount;
-  const visible = ordered.slice(0, showCount);
+function compareMonitorAgents(a: AFSAgentSession, b: AFSAgentSession) {
+  return monitorAgentSortKey(a).localeCompare(monitorAgentSortKey(b));
+}
 
-  return (
-    <AgentsPanelCard>
-      <AgentsPanelHeader>
-        <AgentsPanelEyebrow>Active agents ({agents.length})</AgentsPanelEyebrow>
-        <AgentsPanelLink type="button" onClick={onOpenAgents}>
-          all agents &rarr;
-        </AgentsPanelLink>
-      </AgentsPanelHeader>
-      <AgentsPanelList>
-        {visible.map((agent) => (
-          <AgentRow key={agent.sessionId}>
-            <AgentDot $idle={isAgentIdle(agent)} />
-            <AgentLabel>{agentDisplayLabel(agent)}</AgentLabel>
-            <AgentArrow>&rarr;</AgentArrow>
-            <AgentWorkspace>{agent.workspaceName}</AgentWorkspace>
-            <AgentMeta>
-              <AgentTag>{agent.clientKind}</AgentTag>
-              <AgentTag>{agent.readonly ? "RO" : "RW"}</AgentTag>
-              <AgentTag>{agent.operatingSystem}</AgentTag>
-            </AgentMeta>
-            <AgentSeen>{relativeAgentSeen(agent.lastSeenAt)}</AgentSeen>
-          </AgentRow>
-        ))}
-        {overflow > 0 ? (
-          <AgentRow>
-            <AgentMore type="button" onClick={onOpenAgents}>
-              + {overflow} more &rarr;
-            </AgentMore>
-          </AgentRow>
-        ) : null}
-      </AgentsPanelList>
-    </AgentsPanelCard>
-  );
+function monitorAgentSortKey(agent: AFSAgentSession) {
+  return [
+    agentDisplayLabel(agent),
+    agent.workspaceName,
+    agent.hostname,
+    agent.sessionId,
+  ]
+    .map((value) => value.trim().toLowerCase())
+    .join("\u0000");
 }
 
 function agentDisplayLabel(agent: AFSAgentSession) {
@@ -258,6 +224,97 @@ function relativeAgentSeen(iso: string) {
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Helpers — uptime formatting
+// ──────────────────────────────────────────────────────────────────────
+
+function uptimeText(iso: string) {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+  if (s < 86400) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return `${h}h${String(m).padStart(2, "0")}m`;
+  }
+  return `${Math.floor(s / 86400)}d`;
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// MissionHudPanel — htop / ps-aux feel. Mono column header. Per-agent row
+// shows uptime, block-meter ops bar, last call preview, kind + RO/RW. Hint
+// bar at the bottom mimics terminal keybind hints.
+// ──────────────────────────────────────────────────────────────────────
+function MissionHudPanel({
+  agents,
+  onOpenAgents,
+}: {
+  agents: AFSAgentSession[];
+  onOpenAgents: () => void;
+}) {
+  if (agents.length === 0) return null;
+  const ordered = [...agents].sort(compareMonitorAgents);
+  const showCount = Math.min(6, ordered.length);
+  const overflow = ordered.length - showCount;
+  const visible = ordered.slice(0, showCount);
+
+  return (
+    <HudCard>
+      <HudHeader>
+        <HudEyebrow>
+          <HudCursor />
+          ACTIVE AGENTS [{agents.length}]
+        </HudEyebrow>
+        <HudHeaderLink type="button" onClick={onOpenAgents}>
+          all agents &rarr;
+        </HudHeaderLink>
+      </HudHeader>
+      <HudTable>
+        <HudColRow $head>
+          <HudCol>AGENT</HudCol>
+          <HudCol>WORKSPACE</HudCol>
+          <HudCol>KIND</HudCol>
+          <HudCol>UP</HudCol>
+          <HudCol $right>LAST SEEN</HudCol>
+        </HudColRow>
+        {visible.map((agent) => {
+          const idle = isAgentIdle(agent);
+          const lastSeen = relativeAgentSeen(agent.lastSeenAt);
+          return (
+            <HudColRow key={agent.sessionId}>
+              <HudCol>
+                <HudActiveMark $idle={idle} />
+                <HudAgentName>{agentDisplayLabel(agent)}</HudAgentName>
+              </HudCol>
+              <HudCol $accent>{agent.workspaceName}</HudCol>
+              <HudCol>
+                {agent.clientKind} {agent.readonly ? "ro" : "rw"}
+              </HudCol>
+              <HudCol>{uptimeText(agent.startedAt)}</HudCol>
+              <HudCol $muted $right>{lastSeen}</HudCol>
+            </HudColRow>
+          );
+        })}
+      </HudTable>
+      <HudHintBar>
+        {overflow > 0 ? (
+          <HudHintLink type="button" onClick={onOpenAgents}>
+            ↵ {overflow} more
+          </HudHintLink>
+        ) : (
+          <HudHintLink type="button" onClick={onOpenAgents}>↵ open all</HudHintLink>
+        )}
+        <HudHintSep>·</HudHintSep>
+        <HudHintText>/ filter</HudHintText>
+        <HudHintSep>·</HudHintSep>
+        <HudHintText>k disconnect</HudHintText>
+      </HudHintBar>
+    </HudCard>
+  );
 }
 
 // Compact inline status. Replaces the four stat cards with a single line that
@@ -641,134 +698,167 @@ const ActivityCard = styled(SurfaceCard).attrs({ as: "section" })`
 `;
 
 // ──────────────────────────────────────────────────────────────────────
-// ActiveAgentsPanel styles
+// MissionHudPanel styles
 // ──────────────────────────────────────────────────────────────────────
-
-const AgentsPanelCard = styled(SurfaceCard).attrs({ as: "section" })`
+const HudCard = styled(SurfaceCard).attrs({ as: "section" })`
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 18px;
+  padding: 14px 16px 10px;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  background: var(--afs-panel-strong);
 `;
 
-const AgentsPanelHeader = styled.div`
+const HudHeader = styled.div`
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 `;
 
-const AgentsPanelEyebrow = styled.h3`
+const HudEyebrow = styled.h3`
   margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   color: var(--afs-ink);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 `;
 
-const AgentsPanelLink = styled.button`
+const hudCursorBlink = `
+  @keyframes afs-hud-cursor {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+`;
+
+const HudCursor = styled.span`
+  ${hudCursorBlink}
+  display: inline-block;
+  width: 7px;
+  height: 12px;
+  background: #22c55e;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.7);
+  animation: afs-hud-cursor 1.1s steps(1, end) infinite;
+`;
+
+const HudTable = styled.div`
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--afs-line);
+  border-bottom: 1px solid var(--afs-line);
+`;
+
+const HudColRow = styled.div<{ $head?: boolean }>`
+  display: grid;
+  grid-template-columns:
+    minmax(0, 3fr)
+    minmax(0, 1.4fr)
+    minmax(0, 0.9fr)
+    minmax(60px, auto)
+    minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: ${(p) => (p.$head ? "6px 4px" : "7px 4px")};
+  border-bottom: 1px dashed
+    ${(p) => (p.$head ? "var(--afs-line)" : "transparent")};
+  font-size: ${(p) => (p.$head ? "10px" : "11px")};
+  color: ${(p) => (p.$head ? "var(--afs-muted)" : "var(--afs-ink)")};
+  letter-spacing: ${(p) => (p.$head ? "0.12em" : "0")};
+  text-transform: ${(p) => (p.$head ? "uppercase" : "none")};
+
+  &:not(:first-child):hover {
+    background: color-mix(in srgb, var(--afs-accent) 6%, transparent);
+  }
+`;
+
+const HudCol = styled.span<{ $accent?: boolean; $muted?: boolean; $right?: boolean }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  justify-content: ${(p) => (p.$right ? "flex-end" : "flex-start")};
+  text-align: ${(p) => (p.$right ? "right" : "left")};
+  color: ${(p) =>
+    p.$accent ? "var(--afs-accent)" : p.$muted ? "var(--afs-muted)" : "inherit"};
+  font-weight: ${(p) => (p.$accent ? 700 : 400)};
+`;
+
+const HudHeaderLink = styled.button`
   background: none;
   border: none;
   padding: 0;
   cursor: pointer;
   color: var(--afs-accent);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
 
   &:hover {
     text-decoration: underline;
   }
 `;
 
-const AgentsPanelList = styled.ul`
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const AgentRow = styled.li`
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px dashed var(--afs-line);
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
-  font-size: 12px;
-
-  &:last-child {
-    border-bottom: none;
-  }
-`;
-
-const AgentDot = styled.span<{ $idle?: boolean }>`
+// Solid row indicator. No animation — only the header HudCursor blinks.
+const HudActiveMark = styled.span<{ $idle: boolean }>`
+  display: inline-block;
   width: 8px;
   height: 8px;
-  flex: 0 0 auto;
   border-radius: 50%;
-  background: ${(p) => (p.$idle ? "var(--afs-muted)" : "#22c55e")};
+  background: ${(p) => (p.$idle ? "var(--afs-line-strong, var(--afs-muted))" : "#22c55e")};
   box-shadow: ${(p) =>
     p.$idle
       ? "none"
-      : "0 0 8px rgba(34, 197, 94, 0.65), 0 0 0 3px rgba(34, 197, 94, 0.18)"};
+      : "0 0 8px rgba(34,197,94,0.65), 0 0 0 2px rgba(34,197,94,0.18)"};
+  flex: 0 0 auto;
 `;
 
-const AgentLabel = styled.span`
-  flex: 0 0 auto;
-  min-width: 14ch;
+const HudAgentName = styled.span`
   color: var(--afs-ink);
-  font-weight: 600;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
-const AgentArrow = styled.span`
-  color: var(--afs-line-strong);
-`;
-
-const AgentWorkspace = styled.span`
-  flex: 0 0 auto;
-  color: var(--afs-accent);
-`;
-
-const AgentMeta = styled.span`
-  display: inline-flex;
+const HudHintBar = styled.div`
+  display: flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
-`;
-
-const AgentTag = styled.span`
-  padding: 1px 6px;
-  border-radius: 4px;
-  border: 1px solid var(--afs-line);
-  color: var(--afs-muted);
+  gap: 8px;
+  padding: 4px 4px 0;
   font-size: 10px;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-`;
-
-const AgentSeen = styled.span`
-  flex: 0 0 8ch;
-  text-align: right;
   color: var(--afs-muted);
-  font-size: 11px;
+  letter-spacing: 0.04em;
 `;
 
-const AgentMore = styled.button`
+const HudHintLink = styled.button`
   background: none;
   border: none;
   padding: 0;
-  margin: 0;
   cursor: pointer;
   color: var(--afs-accent);
-  font-family: var(--afs-mono, "Monaco", "Menlo", monospace);
-  font-size: 12px;
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.04em;
 
   &:hover {
     text-decoration: underline;
   }
+`;
+
+const HudHintSep = styled.span`
+  color: var(--afs-line-strong, var(--afs-muted));
+`;
+
+const HudHintText = styled.span`
+  color: var(--afs-muted);
 `;
 
 const ActivityCardHeader = styled.div`
