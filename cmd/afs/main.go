@@ -146,7 +146,7 @@ func printUsage() {
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "  %sauth%s               %slogin, logout, and inspect authentication%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %ssetup%s              %sconfigure basic connection defaults%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %ssetup%s              %sconfigure the default local mode%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sconfig%s             %sget, set, list, unset, reset config%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sdatabase%s           %sadvanced database operations%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %smcp%s                %sstart the MCP server%s\n\n", bold, reset, dim, reset)
@@ -168,8 +168,8 @@ func setupUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s setup
 
-Open the interactive setup flow for connection settings.
-`, bin)
+Open the interactive setup flow for the default local mode.
+	`, bin)
 }
 
 func statusUsageText(bin string) string {

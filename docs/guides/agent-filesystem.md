@@ -146,7 +146,7 @@ afs mcp --workspace my-project --profile workspace-rw-checkpoint
 | `afs auth login` | Authenticate the CLI to AFS Cloud or a control plane. |
 | `afs auth logout` | Clear cached authentication. |
 | `afs auth status` | Show authentication status. |
-| `afs setup` | Configure first-run settings. |
+| `afs setup` | Configure the default local mode. |
 | `afs status` | Show daemon status and local workspace mounts. |
 | `afs ws mount [workspace] [directory]` | Mount a workspace at a local folder. |
 | `afs ws unmount [workspace|directory]` | Unmount a workspace and preserve local files by default. |
