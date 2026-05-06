@@ -623,7 +623,7 @@ export function AgentsTable({
 
       {/* ---- MAP (TOPOLOGY) VIEW ---- */}
       {!loading && !error && filteredRows.length > 0 && viewMode === "map" && mapAvailable ? (
-        <LiveTopologyCard agents={filteredRows} workspaces={workspaces ?? []} />
+        <LiveTopologyCard agents={filteredRows} workspaces={workspaces} />
       ) : null}
 
       {/* ---- TABLE VIEW ---- */}

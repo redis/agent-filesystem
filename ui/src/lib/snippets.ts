@@ -23,7 +23,7 @@ const BASE = 'https://afs.cloud'
 
 const queryString = (q?: Record<string, string>) => {
   if (!q) return ''
-  const entries = Object.entries(q).filter(([_, v]) => v !== undefined && v !== '')
+  const entries = Object.entries(q).filter(([_, v]) => v !== '')
   if (entries.length === 0) return ''
   return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&')
 }

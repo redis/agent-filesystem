@@ -84,10 +84,6 @@ jobs:
   ui-lint:
     name: UI lint
     runs-on: ubuntu-latest
-    # The lint job is intentionally non-blocking until the 27 baseline
-    # @typescript-eslint/no-unnecessary-condition errors are addressed.
-    # Drop continue-on-error once the baseline is clean.
-    continue-on-error: true
     defaults:
       run:
         working-directory: ui

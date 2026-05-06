@@ -87,7 +87,10 @@ export function WorkspaceTable({
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<WorkspaceSortField>("updatedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const [viewMode, setViewMode] = useStoredViewMode("afs.workspaces.viewMode", "table");
+  const [viewMode, setViewMode] = useStoredViewMode<"table" | "cards">(
+    "afs.workspaces.viewMode",
+    "table",
+  );
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const navigate = useNavigate();
   useMinuteTick();
@@ -271,7 +274,7 @@ export function WorkspaceTable({
                       disabled={isDeleting}
                       onClick={(event) => {
                         event.stopPropagation();
-                        onDeleteWorkspace?.(row.original);
+                        onDeleteWorkspace(row.original);
                       }}
                     >
                       <Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />

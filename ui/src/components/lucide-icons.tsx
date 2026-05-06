@@ -35,12 +35,12 @@ function makeLucideIcon(Icon: LucideIcon, defaultLabel: string) {
     const theme = useTheme();
     const sizeValue =
       customSize ||
-      theme?.core.icon.size[size] ||
-      theme?.core.icon.size.L ||
+      theme.core.icon.size[size] ||
+      theme.core.icon.size.L ||
       20;
     const colorValue =
       customColor ||
-      (color && theme?.semantic.color.icon[color]) ||
+      (color && theme.semantic.color.icon[color]) ||
       "currentColor";
 
     return (

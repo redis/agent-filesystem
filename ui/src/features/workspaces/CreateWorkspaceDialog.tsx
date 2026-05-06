@@ -42,9 +42,12 @@ function eligibleDatabases(databases: AFSDatabaseScopeRecord[]) {
   return databases.filter((database) => database.canCreateWorkspaces);
 }
 
-function preferredDatabase(databases: AFSDatabaseScopeRecord[]) {
+function preferredDatabase(
+  databases: AFSDatabaseScopeRecord[],
+): AFSDatabaseScopeRecord | null {
   const list = eligibleDatabases(databases);
-  return list.find((database) => database.isDefault) ?? list[0] ?? null;
+  if (list.length === 0) return null;
+  return list.find((database) => database.isDefault) ?? list[0];
 }
 
 function isFreeTierLimitError(error: unknown): boolean {
@@ -155,10 +158,8 @@ export function CreateWorkspaceDialog({
     const startTemplate = initialTemplateId
       ? findTemplate(initialTemplateId) ?? null
       : null;
-    const startedFromTemplate =
-      startTemplate != null && startTemplate.id !== "blank";
 
-    if (startedFromTemplate && startTemplate) {
+    if (startTemplate != null && startTemplate.id !== "blank") {
       setView("template-form");
       setSelectedTemplateId(startTemplate.id);
       setName(startTemplate.slug);
@@ -199,7 +200,7 @@ export function CreateWorkspaceDialog({
 
   function handleFolderPicked(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const path = files[0].webkitRelativePath?.split("/")[0] ?? "";
+    const path = files[0].webkitRelativePath.split("/")[0];
     if (!path) return;
     setImportPath(path);
     setImportFileCount(files.length);

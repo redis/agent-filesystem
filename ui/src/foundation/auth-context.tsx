@@ -1,5 +1,5 @@
 import { ClerkProvider, useAuth, useUser } from "@clerk/react";
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { createContext, useContext, useMemo } from "react";
 import type { PropsWithChildren } from "react";
 import { afsApi } from "./api/afs";
@@ -35,7 +35,7 @@ function resolveDisplayName(config: AFSAuthConfig) {
   if (config.user?.email?.trim()) {
     return config.user.email.trim();
   }
-  if (config.user?.subject?.trim()) {
+  if (config.user?.subject.trim()) {
     return config.user.subject.trim();
   }
   if (config.mode === "clerk") {
@@ -124,14 +124,16 @@ function decodeClerkFrontendHost(publishableKey?: string): string | null {
   }
 }
 
+const authConfigQuery = queryOptions({
+  queryKey: ["afs", "auth", "config"],
+  queryFn: () => afsApi.getAuthConfig(),
+  staleTime: 15_000,
+  gcTime: 10 * 60 * 1000,
+  retry: 1,
+});
+
 export function AuthProvider(props: PropsWithChildren) {
-  const authQuery = useQuery({
-    queryKey: ["afs", "auth", "config"],
-    queryFn: () => afsApi.getAuthConfig(),
-    staleTime: 15_000,
-    gcTime: 10 * 60 * 1000,
-    retry: 1,
-  });
+  const authQuery = useQuery(authConfigQuery);
 
   const config = authQuery.data ?? defaultAuthConfig;
   const baseValue = useMemo<AuthContextValue>(() => ({

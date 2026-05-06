@@ -42,7 +42,7 @@ export const Route = createFileRoute("/templates/installed/$workspaceId")({
 function TemplateInstallPage() {
   const navigate = useNavigate();
   const { workspaceId } = Route.useParams();
-  const search = Route.useSearch() ?? {};
+  const search = Route.useSearch();
   const databaseId = search.databaseId ?? null;
 
   const workspaceQuery = useWorkspace(databaseId, workspaceId);
@@ -75,7 +75,7 @@ function TemplateInstallPage() {
     );
   }, [tokensQuery.data, workspace?.templateSlug]);
 
-  const primaryToken = activeTemplateTokens[0] ?? null;
+  const primaryToken = activeTemplateTokens.length > 0 ? activeTemplateTokens[0] : null;
 
   async function repairToken() {
     if (!workspace || !template) return;
