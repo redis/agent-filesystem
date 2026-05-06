@@ -23,7 +23,7 @@ Primary commands:
 | Command | Use it for |
 | --- | --- |
 | `afs auth` | Log in, log out, and inspect authentication. |
-| `afs setup` | Configure basic connection defaults. |
+| `afs setup` | Configure the default local mode. |
 | `afs status` | Show AFS status and mounted workspaces. |
 | `afs ws` | Create, list, mount, unmount, fork, delete, or import workspaces. |
 | `afs fs` | Read, search, and safely write workspace files. |
@@ -102,7 +102,8 @@ the selected cloud database when available.
 afs setup
 ```
 
-Guided configuration for connection basics. Use
+Guided configuration for the default local mode. Use `afs auth login` for
+Cloud or Self-managed connection setup, then use
 `afs ws mount <workspace> <directory>` to mount a workspace when you are ready
 to work, or `afs ws set-default <workspace>` to save a default for commands
 where the workspace argument is optional.

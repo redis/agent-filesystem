@@ -210,3 +210,9 @@ The most important implementation seams are:
   `third_party/go-nfs`, and `tests/bench`). For lightweight local discovery,
   prefer filesystem scanning over `go list` across the whole tree because
   `go list` can trigger dependency downloads in those nested modules.
+- `afs setup` owns only the default local mode prompt. Workspace selection and
+  local directory prompts belong under `afs ws mount`, not setup.
+- If a Vite UI change is present in source but `localhost:5173` still shows old
+  behavior, check for duplicate Vite listeners from sibling worktrees.
+  `localhost` can hit an IPv6 listener from another checkout while
+  `127.0.0.1` hits the current repo.

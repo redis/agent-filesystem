@@ -548,7 +548,7 @@ func promptForMissingUpConfig(cfg *config, presence upConfigPresence, r *bufio.R
 		return false, fmt.Errorf("workspace is required\nRun '%s ws mount <workspace> <directory>'", filepath.Base(os.Args[0]))
 	}
 	if !allowPrompt {
-		return false, fmt.Errorf("config is missing settings required to mount a workspace\nRun '%s setup' or use an interactive terminal so AFS can prompt for the missing database and local path", filepath.Base(os.Args[0]))
+		return false, fmt.Errorf("config is missing settings required to mount a workspace\nRun '%s ws mount <workspace> <directory>' or use an interactive terminal for legacy up prompts", filepath.Base(os.Args[0]))
 	}
 
 	changed := false

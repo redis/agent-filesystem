@@ -50,16 +50,13 @@ function formatOps(value: number): string {
   return `${value}`;
 }
 
-function formatRate(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
-type UsageTier = "ok" | "warn" | "critical";
-
-function tierFor(usageFraction: number): UsageTier {
-  if (usageFraction >= 0.9) return "critical";
-  if (usageFraction >= 0.7) return "warn";
-  return "ok";
+function formatUsedMegabytes(value: number): string {
+  const mb = value / (1024 * 1024);
+  const digits = mb === 0 || mb >= 10 ? 0 : 1;
+  return `${mb.toLocaleString(undefined, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  })} MB`;
 }
 
 function arrayCapabilityLabel(supportsArrays: boolean | undefined) {
@@ -325,79 +322,30 @@ export function DatabaseTable({
           },
         },
 
-        /* ── Usage column: bar + used/max + workspaces summary ── */
+        /* ── Usage column: workspace count + used MB ── */
         {
           id: "usage",
           header: "Usage",
           size: 220,
           enableSorting: false,
           cell: ({ row }) => {
-            const stats = row.original.stats;
-            const maxBytes = stats?.maxMemoryBytes ?? 0;
-            const usedBytes = stats?.usedMemoryBytes ?? 0;
-            const hasLimit = maxBytes > 0;
-            const frac = hasLimit ? Math.min(1, usedBytes / maxBytes) : 0;
-            const tier = hasLimit ? tierFor(frac) : "ok";
-            const pct = Math.round(frac * 100);
-
-            const workspaceSummary = (
-              <UsageSubline>
-                {row.original.workspaceCount} workspace
-                {row.original.workspaceCount === 1 ? "" : "s"}
-                {" · "}
-                {formatBytes(row.original.afsTotalBytes)}
-                {" · "}
-                {row.original.afsFileCount.toLocaleString()} file
-                {row.original.afsFileCount === 1 ? "" : "s"}
-              </UsageSubline>
-            );
-
-            if (stats == null) {
-              return (
-                <UsageStack>
-                  <UsageLine>
-                    <UsageText>Awaiting sample…</UsageText>
-                  </UsageLine>
-                  {workspaceSummary}
-                </UsageStack>
-              );
-            }
-
+            const usedBytes =
+              row.original.stats?.usedMemoryBytes ?? row.original.afsTotalBytes;
             return (
               <UsageStack>
-                <UsageLine>
-                  <UsageBarOuter>
-                    <UsageBarInner
-                      $pct={pct}
-                      $tier={tier}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={pct}
-                      role="progressbar"
-                    />
-                  </UsageBarOuter>
-                  <UsageText>
-                    {hasLimit ? (
-                      <>
-                        <strong>{formatBytes(usedBytes)}</strong>
-                        <Muted> / {formatBytes(maxBytes)}</Muted>
-                        <PctPill $tier={tier}>{pct}%</PctPill>
-                      </>
-                    ) : (
-                      <>
-                        <strong>{formatBytes(usedBytes)}</strong>
-                        <Muted> · no limit</Muted>
-                      </>
-                    )}
-                  </UsageText>
-                </UsageLine>
-                {workspaceSummary}
+                <UsageText>
+                  {row.original.workspaceCount} workspace
+                  {row.original.workspaceCount === 1 ? "" : "s"}
+                </UsageText>
+                <UsageSubline>
+                  {formatUsedMegabytes(usedBytes)} used
+                </UsageSubline>
               </UsageStack>
             );
           },
         },
 
-        /* ── Load column: ops/sec + hit + clients/keys ── */
+        /* ── Load column: ops/sec + clients/keys ── */
         {
           id: "load",
           header: "Load",
@@ -413,13 +361,6 @@ export function DatabaseTable({
                 <LoadLine>
                   <strong>{formatOps(stats.opsPerSec)}</strong>
                   <Muted> ops/s</Muted>
-                  {stats.cacheHitRate > 0 ? (
-                    <>
-                      <Sep>·</Sep>
-                      <strong>{formatRate(stats.cacheHitRate)}</strong>
-                      <Muted> hit</Muted>
-                    </>
-                  ) : null}
                 </LoadLine>
                 <LoadSubline>
                   {stats.connectedClients} client
@@ -835,43 +776,6 @@ const UsageStack = styled.div`
   min-width: 0;
 `;
 
-const UsageLine = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-`;
-
-const UsageBarOuter = styled.div`
-  flex: 0 0 88px;
-  height: 6px;
-  background: rgba(8, 6, 13, 0.07);
-  border-radius: 999px;
-  overflow: hidden;
-`;
-
-const tierColor = (tier: UsageTier): string => {
-  if (tier === "critical") return "#dc2626";
-  if (tier === "warn") return "#f59e0b";
-  return "#22c55e";
-};
-
-const tierSoft = (tier: UsageTier): string => {
-  if (tier === "critical") return "rgba(220, 38, 38, 0.12)";
-  if (tier === "warn") return "rgba(245, 158, 11, 0.15)";
-  return "rgba(34, 197, 94, 0.14)";
-};
-
-const UsageBarInner = styled.div<{ $pct: number; $tier: UsageTier }>`
-  height: 100%;
-  width: ${({ $pct }) => `${$pct}%`};
-  background: ${({ $tier }) => tierColor($tier)};
-  border-radius: 999px;
-  transition:
-    width 400ms ease,
-    background 200ms ease;
-`;
-
 const UsageText = styled.span`
   font-size: 12.5px;
   color: var(--afs-ink, #18181b);
@@ -889,19 +793,6 @@ const UsageText = styled.span`
 
 const Muted = styled.span`
   color: var(--afs-muted, #71717a);
-`;
-
-const PctPill = styled.span<{ $tier: UsageTier }>`
-  display: inline-flex;
-  align-items: center;
-  padding: 0 6px;
-  font-size: 10.5px;
-  font-weight: 700;
-  line-height: 16px;
-  border-radius: 999px;
-  background: ${({ $tier }) => tierSoft($tier)};
-  color: ${({ $tier }) => tierColor($tier)};
-  font-variant-numeric: tabular-nums;
 `;
 
 const UsageSubline = styled.span`
@@ -944,11 +835,6 @@ const LoadSubline = styled.span`
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-`;
-
-const Sep = styled.span`
-  color: var(--afs-muted, #71717a);
-  padding: 0 2px;
 `;
 
 const DimCell = styled.span`
