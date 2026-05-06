@@ -2455,8 +2455,6 @@ func newTestManager(t *testing.T) (*DatabaseManager, string) {
 
 	if err := createWorkspaceWithMetadata(ctx, cfg, store, "repo", workspaceCreateSpec{
 		Description:  "Control plane demo workspace.",
-		DatabaseID:   "db-demo",
-		DatabaseName: "demo-db-us-test-1",
 		CloudAccount: "Redis Cloud / Test",
 		Region:       "us-test-1",
 		Source:       sourceGitImport,

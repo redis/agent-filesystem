@@ -12,14 +12,15 @@ import (
 	"github.com/alicebob/miniredis/v2"
 )
 
-func TestOpenDatabaseManagerStartsWithEmptyRegistry(t *testing.T) {
+func TestOpenDatabaseManagerLeavesEmptyConfigStoreUnregisteredOnStartup(t *testing.T) {
 	t.Helper()
 
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "afs.config.json")
+	mr := miniredis.RunT(t)
 	cfg := Config{
 		RedisConfig: RedisConfig{
-			RedisAddr: "localhost:6380",
+			RedisAddr: mr.Addr(),
 			RedisDB:   0,
 		},
 	}
@@ -42,11 +43,61 @@ func TestOpenDatabaseManagerStartsWithEmptyRegistry(t *testing.T) {
 		t.Fatalf("ListDatabaseProfiles() returned error: %v", err)
 	}
 	if len(profiles) != 0 {
-		t.Fatalf("len(ListDatabaseProfiles()) = %d, want 0 (control plane should start empty)", len(profiles))
+		t.Fatalf("len(ListDatabaseProfiles()) = %d, want 0", len(profiles))
+	}
+}
+
+func TestOpenDatabaseManagerListsExistingWorkspacesWithoutManualDatabaseCreate(t *testing.T) {
+	mr := miniredis.RunT(t)
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "afs.config.json")
+	cfg := Config{
+		RedisConfig: RedisConfig{
+			RedisAddr: mr.Addr(),
+			RedisDB:   0,
+		},
 	}
 
-	if _, err := os.Stat(filepath.Join(dir, "afs.databases.json")); !os.IsNotExist(err) {
-		t.Fatalf("afs.databases.json should not be written, stat err = %v", err)
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("json.Marshal(cfg) returned error: %v", err)
+	}
+	if err := os.WriteFile(configPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	store, closeFn, err := OpenStore(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("OpenStore() returned error: %v", err)
+	}
+	t.Cleanup(closeFn)
+
+	if err := createWorkspaceWithMetadata(context.Background(), cfg, store, "repo", workspaceCreateSpec{
+		Description: "Preexisting local workspace.",
+		Source:      sourceBlank,
+	}); err != nil {
+		t.Fatalf("createWorkspaceWithMetadata() returned error: %v", err)
+	}
+
+	manager, err := OpenDatabaseManager(configPath)
+	if err != nil {
+		t.Fatalf("OpenDatabaseManager() returned error: %v", err)
+	}
+	defer manager.Close()
+
+	wantDatabaseID, _ := activeDatabaseIdentity(cfg)
+	workspaces, err := manager.ListAllWorkspaceSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllWorkspaceSummaries() returned error: %v", err)
+	}
+	if len(workspaces.Items) != 1 {
+		t.Fatalf("len(ListAllWorkspaceSummaries().Items) = %d, want 1", len(workspaces.Items))
+	}
+	if workspaces.Items[0].Name != "repo" {
+		t.Fatalf("workspaces.Items[0].Name = %q, want %q", workspaces.Items[0].Name, "repo")
+	}
+	if workspaces.Items[0].DatabaseID != wantDatabaseID {
+		t.Fatalf("workspaces.Items[0].DatabaseID = %q, want %q", workspaces.Items[0].DatabaseID, wantDatabaseID)
 	}
 }
 

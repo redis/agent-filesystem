@@ -162,18 +162,7 @@ func bootstrapDatabaseProfileFromEnv() (databaseProfile, bool) {
 
 func bootstrapDatabaseProfileFromContext(_ context.Context) (databaseProfile, bool) {
 	if cfg, ok := redisConfigFromAFSEnv(); ok {
-		return databaseProfile{
-			ID:             "local-development",
-			Name:           quickstartLocalDBName,
-			Description:    "Configured from AFS_REDIS_* environment variables.",
-			ManagementType: databaseManagementUserManaged,
-			RedisAddr:      cfg.RedisAddr,
-			RedisUsername:  cfg.RedisUsername,
-			RedisPassword:  cfg.RedisPassword,
-			RedisDB:        cfg.RedisDB,
-			RedisTLS:       cfg.RedisTLS,
-			IsDefault:      true,
-		}, true
+		return bootstrapUserManagedDatabaseProfile(Config{RedisConfig: cfg}, "Configured from AFS_REDIS_* environment variables."), true
 	}
 
 	if cfg, ok := redisConfigFromURL(strings.TrimSpace(os.Getenv("REDIS_URL"))); ok {
@@ -201,10 +190,15 @@ func bootstrapDatabaseProfileFromConfigPath(configPathOverride string) (database
 	if err != nil || !present || strings.TrimSpace(cfg.RedisAddr) == "" {
 		return databaseProfile{}, false
 	}
+	return bootstrapUserManagedDatabaseProfile(cfg, "Configured from afs.config.json."), true
+}
+
+func bootstrapUserManagedDatabaseProfile(cfg Config, description string) databaseProfile {
+	databaseID, _ := activeDatabaseIdentity(cfg)
 	return databaseProfile{
-		ID:             "local-development",
+		ID:             databaseID,
 		Name:           quickstartLocalDBName,
-		Description:    "Configured from afs.config.json.",
+		Description:    description,
 		ManagementType: databaseManagementUserManaged,
 		RedisAddr:      cfg.RedisAddr,
 		RedisUsername:  cfg.RedisUsername,
@@ -212,7 +206,7 @@ func bootstrapDatabaseProfileFromConfigPath(configPathOverride string) (database
 		RedisDB:        cfg.RedisDB,
 		RedisTLS:       cfg.RedisTLS,
 		IsDefault:      true,
-	}, true
+	}
 }
 
 // quickstartWithDatabase creates the getting-started workspace on an existing database.
