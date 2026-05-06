@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import styled, { css, keyframes } from "styled-components";
 import { RedisLogoDarkMinIcon } from "@redis-ui/icons/multicolor";
 import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
-import { BotIcon, FoldersIcon } from "./lucide-icons";
+import { BotIcon, DatabaseIcon, FoldersIcon, LaptopIcon } from "./lucide-icons";
 import { formatBytes } from "../foundation/api/afs";
 import { AgentDetailDialog } from "../foundation/tables/agents-table";
 import {
@@ -31,16 +31,22 @@ type AnimatedTopologyItem<T> = {
 };
 
 type TopologyLine = {
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
+  // Polyline points: 3 points forming a stub-elbow-hub shape.
+  // For agent-side segments: [agentEdge, bend, hub]
+  // For ws-side segments:    [hub, bend, wsEdge]
+  points: [number, number][];
+  // The endpoint that touches an agent or workspace box (gets a static dot).
+  // Hub end has no dot.
+  endpointDot?: [number, number];
+  isAgentSide: boolean;
   agentId: string;
   agentIdx: number;
   workspaceId: string;
   wsIdx: number;
   color: string;
 };
+
+const TOPOLOGY_LINE_STUB = 24;
 
 type HoveredTopologyItem =
   | { kind: "agent"; id: string; workspaceId: string }
@@ -108,9 +114,10 @@ const CardWrap = styled.div`
 
 const CardTitle = styled.h3`
   margin: 0 0 4px;
-  font-size: 14px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--afs-ink, #18181b);
+  letter-spacing: -0.01em;
 `;
 
 const CardSubtitle = styled.p`
@@ -258,16 +265,6 @@ const AgentText = styled.div`
   max-width: 100%;
 `;
 
-const AgentMeta = styled.span`
-  display: block;
-  font-size: 10px;
-  color: var(--afs-muted, #71717a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-`;
-
 const AgentPath = styled.span`
   display: block;
   max-width: 100%;
@@ -282,9 +279,11 @@ const AgentPath = styled.span`
 /* ---- Hub ---- */
 const HubWrap = styled.div`
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   align-self: center;
+  gap: 10px;
   z-index: 2;
 
   @media (max-width: 720px) {
@@ -308,11 +307,31 @@ const HubNode = styled.div`
 `;
 
 const HubLabel = styled.span`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  opacity: 0.9;
+  letter-spacing: 0.02em;
+  opacity: 0.95;
+`;
+
+const HubCaption = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  text-align: center;
+  max-width: 160px;
+`;
+
+const HubCaptionValue = styled.span`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--afs-ink, #18181b);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 `;
 
 /* ---- Workspace nodes ---- */
@@ -400,6 +419,121 @@ const WorkspaceName = styled.span`
 const WorkspaceFiles = styled.span`
   font-size: 10px;
   color: var(--afs-muted, #71717a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+`;
+
+/* ---- Host group (left column) ---- */
+const HostGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--afs-panel-strong) 80%, transparent);
+
+  [data-theme="dark"] & {
+    border-color: color-mix(in srgb, var(--afs-ok, #dcff1e) 45%, transparent);
+  }
+
+  @media (max-width: 720px) {
+    padding: 8px;
+  }
+`;
+
+const HostGroupHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--afs-ink, #18181b);
+
+  [data-theme="dark"] & {
+    color: var(--afs-ok, #dcff1e);
+  }
+`;
+
+const HostGroupName = styled.span`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+/* ---- Database group ---- */
+const DatabaseGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--afs-panel-strong) 80%, transparent);
+
+  [data-theme="dark"] & {
+    border-color: color-mix(in srgb, var(--afs-ok, #dcff1e) 45%, transparent);
+  }
+
+  @media (max-width: 720px) {
+    padding: 8px;
+  }
+`;
+
+const DatabaseGroupHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px;
+  color: var(--afs-ink, #18181b);
+
+  [data-theme="dark"] & {
+    color: var(--afs-ok, #dcff1e);
+  }
+`;
+
+const DatabaseGroupName = styled.span`
+  font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+/* ---- Live status footer pill ---- */
+const LiveStatusFooter = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+`;
+
+const LiveStatusPill = styled.div`
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--afs-line, #e4e4e7);
+  background: var(--afs-panel-strong);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--afs-muted, #71717a);
+`;
+
+const LiveStatusDot = styled.span`
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--afs-ok, #22c55e);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--afs-ok, #22c55e) 70%, transparent);
+  flex-shrink: 0;
 `;
 
 /* ---- SVG overlay for connection lines ---- */
@@ -417,19 +551,30 @@ const SvgOverlay = styled.svg`
   }
 `;
 
-const DashedLine = styled.line<{ $toRight?: boolean; $color: string; $highlighted?: boolean; $animated: boolean }>`
+const DashedPolyline = styled.polyline<{ $color: string; $highlighted?: boolean; $animated: boolean }>`
   stroke: ${({ $color }) => $color};
   color: ${({ $color }) => $color};
   stroke-width: ${({ $highlighted }) => ($highlighted ? 3 : 2)};
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
   stroke-dasharray: 4 4;
   opacity: ${({ $highlighted }) => ($highlighted ? 0.95 : 0.55)};
   filter: ${({ $highlighted }) => ($highlighted ? "drop-shadow(0 0 4px currentColor)" : "none")};
-  animation: ${({ $animated, $toRight }) =>
+  animation: ${({ $animated }) =>
     $animated
       ? css`
-          ${$toRight ? marchRight : marchLeft} 1s linear infinite
+          ${marchRight} 1s linear infinite
         `
       : "none"};
+`;
+
+const EndpointDot = styled.circle<{ $highlighted?: boolean }>`
+  fill: currentColor;
+  stroke: var(--afs-panel-strong);
+  stroke-width: 1.5;
+  opacity: ${({ $highlighted }) => ($highlighted ? 1 : 0.85)};
+  filter: ${({ $highlighted }) => ($highlighted ? "drop-shadow(0 0 4px currentColor)" : "none")};
 `;
 
 const TravelDot = styled.circle`
@@ -461,21 +606,20 @@ function displayLocalPath(path: string): string {
   return path.trim().replace(/^\/Users\/[^/]+\/?/, "~/");
 }
 
+// Topology-specific label: the parent host group already shows the host, and
+// `agentName` often duplicates it as a friendly prefix (e.g. "Macbook Air").
+// Prefer the session name, then the agent name; never return the hostname.
+// When neither is set, fall back to a short session id ("Session: a1b2c3d4").
 function displayAgentPrimaryName(agent: AFSAgentSession): string {
-  return displayAgentIdentityLabel(agent);
-}
-
-function displayAgentMeta(agent: AFSAgentSession, primaryName: string): string {
-  const hostname = agent.hostname.trim();
-  const agentId = agent.agentId?.trim();
-  const parts: string[] = [];
-  if (hostname && !primaryName.includes(hostname)) {
-    parts.push(hostname);
-  }
-  if (agentId && agentId !== primaryName) {
-    parts.push(agentId);
-  }
-  return parts.join(" · ") || agent.sessionId.trim() || "id not reported";
+  const host = agent.hostname?.trim() ?? "";
+  const notHost = (value?: string | null) => {
+    const trimmed = value?.trim();
+    return trimmed && trimmed !== host ? trimmed : undefined;
+  };
+  const named = notHost(agent.sessionName) || notHost(agent.agentName);
+  if (named) return named;
+  const shortId = agent.sessionId?.trim().slice(0, 8);
+  return shortId ? `Session: ${shortId}` : "Session: unknown";
 }
 
 function getAgentTopologyId(agent: AFSAgentSession): string {
@@ -692,6 +836,7 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
     const newLines: TopologyLine[] = [];
 
     // Draw only explicit agent -> workspace connections through the hub.
+    // Each connection becomes two stub-elbow polylines: agent -> hub, hub -> ws.
     connections.forEach(({ agentId, agentIdx, workspaceId, wsIdx, color }) => {
       const aEl = agentRefs.current[agentIdx];
       const wEl = wsRefs.current[wsIdx];
@@ -699,12 +844,21 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
 
       const aRect = aEl.getBoundingClientRect();
       const wRect = wEl.getBoundingClientRect();
+      const ax = aRect.right - cRect.left;
+      const ay = aRect.top + aRect.height / 2 - cRect.top;
+      const wx = wRect.left - cRect.left;
+      const wy = wRect.top + wRect.height / 2 - cRect.top;
+      const aBend = Math.min(ax + TOPOLOGY_LINE_STUB, hubCx);
+      const wBend = Math.max(wx - TOPOLOGY_LINE_STUB, hubCx);
 
       newLines.push({
-        x1: aRect.right - cRect.left,
-        y1: aRect.top + aRect.height / 2 - cRect.top,
-        x2: hubCx,
-        y2: hubCy,
+        points: [
+          [ax, ay],
+          [aBend, ay],
+          [hubCx, hubCy],
+        ],
+        endpointDot: [ax, ay],
+        isAgentSide: true,
         agentId,
         agentIdx,
         workspaceId,
@@ -712,10 +866,13 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
         color,
       });
       newLines.push({
-        x1: hubCx,
-        y1: hubCy,
-        x2: wRect.left - cRect.left,
-        y2: wRect.top + wRect.height / 2 - cRect.top,
+        points: [
+          [hubCx, hubCy],
+          [wBend, wy],
+          [wx, wy],
+        ],
+        endpointDot: [wx, wy],
+        isAgentSide: false,
         agentId,
         agentIdx,
         workspaceId,
@@ -771,6 +928,65 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
   const [hoveredItem, setHoveredItem] = useState<HoveredTopologyItem | null>(null);
   const animateConnectionMotion = connections.length <= TOPOLOGY_MOTION_CONNECTION_LIMIT;
 
+  // Group visible agents by hostname so each "computer" is a single box.
+  // The flat visibleIndex is preserved so agentRefs stays in sync with
+  // connection-line indexing.
+  const agentGroups = useMemo(() => {
+    type Row = {
+      agent: AFSAgentSession;
+      presence: NodePresence;
+      visibleIndex: number;
+    };
+    const groups = new Map<string, { hostname: string; rows: Row[] }>();
+    visibleAgents.forEach(({ item: agent, presence }, visibleIndex) => {
+      const key = agent.hostname.trim() || "Unknown host";
+      let group = groups.get(key);
+      if (!group) {
+        group = { hostname: key, rows: [] };
+        groups.set(key, group);
+      }
+      group.rows.push({ agent, presence, visibleIndex });
+    });
+    return Array.from(groups.values());
+  }, [visibleAgents]);
+
+  // Group visible workspaces by database, preserving the flat visible index
+  // so wsRefs stays in sync with the connection-line indexing.
+  const workspaceGroups = useMemo(() => {
+    type Row = {
+      ws: AFSWorkspaceSummary;
+      presence: NodePresence;
+      visibleIndex: number;
+    };
+    const groups = new Map<
+      string,
+      { databaseId: string; databaseName: string; rows: Row[] }
+    >();
+    visibleWorkspaces.forEach(({ item: ws, presence }, visibleIndex) => {
+      const key = ws.databaseId || "_no_database";
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          databaseId: ws.databaseId,
+          databaseName: ws.databaseName?.trim() || "Unassigned database",
+          rows: [],
+        };
+        groups.set(key, group);
+      }
+      group.rows.push({ ws, presence, visibleIndex });
+    });
+    return Array.from(groups.values());
+  }, [visibleWorkspaces]);
+
+  // The hub represents the AFS control-plane (this server). Show the host
+  // the browser is connected to — that's the ground truth for where agents
+  // and workspaces are routed through.
+  const hubEndpointCaption = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const host = window.location.host || "";
+    return host ? { value: host } : null;
+  }, []);
+
   return (
     <>
     <CardWrap>
@@ -785,22 +1001,32 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
         {/* SVG lines overlay */}
         <SvgOverlay>
           {lines.map((l, i) => {
-            const travelsRight = l.x1 < l.x2;
-            const pathD = `M ${l.x1} ${l.y1} L ${l.x2} ${l.y2}`;
-            const pathBack = `M ${l.x2} ${l.y2} L ${l.x1} ${l.y1}`;
+            const pointsAttr = l.points.map(([x, y]) => `${x},${y}`).join(" ");
+            const pathD = l.points
+              .map(([x, y], idx) => `${idx === 0 ? "M" : "L"} ${x} ${y}`)
+              .join(" ");
+            const pathBack = [...l.points]
+              .reverse()
+              .map(([x, y], idx) => `${idx === 0 ? "M" : "L"} ${x} ${y}`)
+              .join(" ");
             const highlighted = lineIsHighlighted(l, hoveredItem);
             return (
               <g key={i}>
-                <DashedLine
-                  x1={l.x1}
-                  y1={l.y1}
-                  x2={l.x2}
-                  y2={l.y2}
-                  $toRight={travelsRight}
+                <DashedPolyline
+                  points={pointsAttr}
                   $color={l.color}
                   $highlighted={highlighted}
                   $animated={animateConnectionMotion}
                 />
+                {l.endpointDot ? (
+                  <EndpointDot
+                    cx={l.endpointDot[0]}
+                    cy={l.endpointDot[1]}
+                    r={4}
+                    style={{ color: l.color }}
+                    $highlighted={highlighted}
+                  />
+                ) : null}
                 {animateConnectionMotion ? (
                   <>
                     <TravelDot
@@ -836,69 +1062,77 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
           })}
         </SvgOverlay>
 
-        {/* ── Left: Agents ── */}
+        {/* ── Left: Agents grouped by host ── */}
         <Column $align="stretch" $justify="center">
-          <ColumnLabel $align="left">Connected Agents</ColumnLabel>
+          <ColumnLabel $align="left">Hosts / Agents</ColumnLabel>
           {visibleAgents.length === 0 ? (
             <EmptyColumn>No agents connected</EmptyColumn>
           ) : (
-            visibleAgents.map(({ item: agent, presence }, i) => {
-              const agentName = displayAgentPrimaryName(agent);
-              const agentMeta = displayAgentMeta(agent, agentName);
-              const mountedPath = displayLocalPath(agent.localPath);
-              const methodLabel = agent.clientKind.trim() || "agent";
-              const active = agent.state === "active";
-              const highlighted = agentIsHighlighted(agent, hoveredItem);
-              return (
-                <AgentNode
-                  key={agent.sessionId}
-                  $i={i}
-                  $presence={presence}
-                  $highlighted={highlighted}
-                  data-highlighted={highlighted}
-                  type="button"
-                  aria-label={`Open details for ${agentName}`}
-                  title={`Open details for ${agentName}`}
-                  onMouseEnter={() => {
-                    setHoveredItem({
-                      kind: "agent",
-                      id: agent.sessionId,
-                      workspaceId: agent.workspaceId,
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredItem(null);
-                  }}
-                  onFocus={() => {
-                    setHoveredItem({
-                      kind: "agent",
-                      id: agent.sessionId,
-                      workspaceId: agent.workspaceId,
-                    });
-                  }}
-                  onBlur={() => {
-                    setHoveredItem(null);
-                  }}
-                  onClick={() => {
-                    setSelectedAgent(agent);
-                  }}
-                  ref={(el) => {
-                    agentRefs.current[i] = el;
-                  }}
-                >
-                  <NodeIconBox $active={active} title={methodLabel}>
-                    <BotIcon customSize={18} />
-                  </NodeIconBox>
-                  <AgentText>
-                    <AgentLabel title={agentName}>{agentName}</AgentLabel>
-                    <AgentMeta title={agentMeta}>{agentMeta}</AgentMeta>
-                    {mountedPath ? (
-                      <AgentPath title={agent.localPath}>{mountedPath}</AgentPath>
-                    ) : null}
-                  </AgentText>
-                </AgentNode>
-              );
-            })
+            agentGroups.map((group) => (
+              <HostGroup key={group.hostname}>
+                <HostGroupHeader>
+                  <LaptopIcon customSize={14} />
+                  <HostGroupName title={group.hostname}>
+                    {group.hostname}
+                  </HostGroupName>
+                </HostGroupHeader>
+                {group.rows.map(({ agent, presence, visibleIndex: i }) => {
+                  const agentName = displayAgentPrimaryName(agent);
+                  const mountedPath = displayLocalPath(agent.localPath);
+                  const methodLabel = agent.clientKind.trim() || "agent";
+                  const active = agent.state === "active";
+                  const highlighted = agentIsHighlighted(agent, hoveredItem);
+                  return (
+                    <AgentNode
+                      key={agent.sessionId}
+                      $i={i}
+                      $presence={presence}
+                      $highlighted={highlighted}
+                      data-highlighted={highlighted}
+                      type="button"
+                      aria-label={`Open details for ${agentName}`}
+                      title={`Open details for ${agentName}`}
+                      onMouseEnter={() => {
+                        setHoveredItem({
+                          kind: "agent",
+                          id: agent.sessionId,
+                          workspaceId: agent.workspaceId,
+                        });
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredItem(null);
+                      }}
+                      onFocus={() => {
+                        setHoveredItem({
+                          kind: "agent",
+                          id: agent.sessionId,
+                          workspaceId: agent.workspaceId,
+                        });
+                      }}
+                      onBlur={() => {
+                        setHoveredItem(null);
+                      }}
+                      onClick={() => {
+                        setSelectedAgent(agent);
+                      }}
+                      ref={(el) => {
+                        agentRefs.current[i] = el;
+                      }}
+                    >
+                      <NodeIconBox $active={active} title={methodLabel}>
+                        <BotIcon customSize={18} />
+                      </NodeIconBox>
+                      <AgentText>
+                        <AgentLabel title={agentName}>{agentName}</AgentLabel>
+                        {mountedPath ? (
+                          <AgentPath title={agent.localPath}>{mountedPath}</AgentPath>
+                        ) : null}
+                      </AgentText>
+                    </AgentNode>
+                  );
+                })}
+              </HostGroup>
+            ))
           )}
         </Column>
 
@@ -909,70 +1143,92 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
               customSize="36px"
               style={{ filter: "brightness(0) invert(1)" }}
             />
-            <HubLabel>Redis</HubLabel>
+            <HubLabel>control-plane</HubLabel>
           </HubNode>
+          {hubEndpointCaption ? (
+            <HubCaption>
+              <HubCaptionValue title={hubEndpointCaption.value}>
+                {hubEndpointCaption.value}
+              </HubCaptionValue>
+            </HubCaption>
+          ) : null}
         </HubWrap>
 
-        {/* ── Right: Workspaces ── */}
+        {/* ── Right: Databases / Workspaces ── */}
         <Column $align="stretch" $justify="center">
-          <ColumnLabel $align="right">Workspaces</ColumnLabel>
+          <ColumnLabel $align="right">Databases / Workspaces</ColumnLabel>
           {visibleWorkspaces.length === 0 ? (
             <EmptyColumn>No workspaces yet</EmptyColumn>
           ) : (
-            visibleWorkspaces.map(({ item: ws, presence }, i) => {
-              const workspaceLabel = displayWorkspaceName(ws.name);
-              const highlighted = workspaceIsHighlighted(ws, hoveredItem);
-              return (
-                <WorkspaceNode
-                  key={ws.id}
-                  $i={i}
-                  $presence={presence}
-                  $highlighted={highlighted}
-                  data-highlighted={highlighted}
-                  type="button"
-                  aria-label={`Open workspace ${workspaceLabel}`}
-                  title={`Open workspace ${workspaceLabel}`}
-                  onMouseEnter={() => {
-                    setHoveredItem({ kind: "workspace", id: ws.id });
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredItem(null);
-                  }}
-                  onFocus={() => {
-                    setHoveredItem({ kind: "workspace", id: ws.id });
-                  }}
-                  onBlur={() => {
-                    setHoveredItem(null);
-                  }}
-                  onClick={() => {
-                    void navigate({
-                      to: "/workspaces/$workspaceId",
-                      params: { workspaceId: ws.id },
-                      search: { databaseId: ws.databaseId },
-                    });
-                  }}
-                  ref={(el) => {
-                    wsRefs.current[i] = el;
-                  }}
-                >
-                  <NodeIconBox title="Workspace">
-                    <FoldersIcon customSize={18} />
-                  </NodeIconBox>
-                  <WorkspaceMeta>
-                    <WorkspaceName>{workspaceLabel}</WorkspaceName>
-                    <WorkspaceFiles>
-                      {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"}
-                    </WorkspaceFiles>
-                    <WorkspaceFiles>
-                      Size: {formatBytes(ws.totalBytes)}
-                    </WorkspaceFiles>
-                  </WorkspaceMeta>
-                </WorkspaceNode>
-              );
-            })
+            workspaceGroups.map((group) => (
+              <DatabaseGroup key={group.databaseId || "_no_database"}>
+                <DatabaseGroupHeader>
+                  <DatabaseIcon customSize={14} />
+                  <DatabaseGroupName title={group.databaseName}>
+                    {group.databaseName}
+                  </DatabaseGroupName>
+                </DatabaseGroupHeader>
+                {group.rows.map(({ ws, presence, visibleIndex: i }) => {
+                  const workspaceLabel = displayWorkspaceName(ws.name);
+                  const highlighted = workspaceIsHighlighted(ws, hoveredItem);
+                  return (
+                    <WorkspaceNode
+                      key={ws.id}
+                      $i={i}
+                      $presence={presence}
+                      $highlighted={highlighted}
+                      data-highlighted={highlighted}
+                      type="button"
+                      aria-label={`Open workspace ${workspaceLabel}`}
+                      title={`Open workspace ${workspaceLabel}`}
+                      onMouseEnter={() => {
+                        setHoveredItem({ kind: "workspace", id: ws.id });
+                      }}
+                      onMouseLeave={() => {
+                        setHoveredItem(null);
+                      }}
+                      onFocus={() => {
+                        setHoveredItem({ kind: "workspace", id: ws.id });
+                      }}
+                      onBlur={() => {
+                        setHoveredItem(null);
+                      }}
+                      onClick={() => {
+                        void navigate({
+                          to: "/workspaces/$workspaceId",
+                          params: { workspaceId: ws.id },
+                          search: { databaseId: ws.databaseId },
+                        });
+                      }}
+                      ref={(el) => {
+                        wsRefs.current[i] = el;
+                      }}
+                    >
+                      <NodeIconBox title="Workspace">
+                        <FoldersIcon customSize={18} />
+                      </NodeIconBox>
+                      <WorkspaceMeta>
+                        <WorkspaceName>{workspaceLabel}</WorkspaceName>
+                        <WorkspaceFiles>
+                          {ws.fileCount} file{ws.fileCount === 1 ? "" : "s"} ·
+                          {" "}Size: {formatBytes(ws.totalBytes)}
+                        </WorkspaceFiles>
+                      </WorkspaceMeta>
+                    </WorkspaceNode>
+                  );
+                })}
+              </DatabaseGroup>
+            ))
           )}
         </Column>
       </Topology>
+
+      <LiveStatusFooter>
+        <LiveStatusPill role="status" aria-live="polite">
+          <span>live</span>
+          <LiveStatusDot aria-hidden="true" />
+        </LiveStatusPill>
+      </LiveStatusFooter>
     </CardWrap>
       {selectedAgent != null ? (
         <AgentDetailDialog
