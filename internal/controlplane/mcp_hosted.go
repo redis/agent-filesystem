@@ -32,22 +32,6 @@ func (p *hostedMCPProvider) isControlPlane() bool {
 	return isControlPlaneScope(p.scope)
 }
 
-type mcpFileListItem struct {
-	Path       string `json:"path"`
-	Name       string `json:"name"`
-	Kind       string `json:"kind"`
-	Size       int64  `json:"size"`
-	ModifiedAt string `json:"modified_at,omitempty"`
-	Target     string `json:"target,omitempty"`
-}
-
-type mcpGrepMatch struct {
-	Path   string `json:"path"`
-	Line   int64  `json:"line,omitempty"`
-	Text   string `json:"text"`
-	Binary bool   `json:"binary,omitempty"`
-}
-
 func authWrappedMCPHandler(manager *DatabaseManager, auth *AuthHandler) http.Handler {
 	server := &mcpproto.Server{
 		ProtocolVersion: hostedMCPProtocolVersion,
@@ -1712,90 +1696,6 @@ func mcpHistoryDirection(raw string) (bool, error) {
 		return false, nil
 	default:
 		return false, fmt.Errorf("direction must be asc or desc")
-	}
-}
-
-func mcpRequiredString(args map[string]any, key string) (string, error) {
-	value, ok := args[key]
-	if !ok {
-		return "", fmt.Errorf("missing required argument %q", key)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "", fmt.Errorf("argument %q must not be empty", key)
-	}
-	return text, nil
-}
-
-func mcpRequiredText(args map[string]any, key string, allowEmpty bool) (string, error) {
-	value, ok := args[key]
-	if !ok {
-		return "", fmt.Errorf("missing required argument %q", key)
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	if !allowEmpty && strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("argument %q must not be empty", key)
-	}
-	return text, nil
-}
-
-func mcpOptionalString(args map[string]any, key string) (string, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return "", nil
-	}
-	text, ok := value.(string)
-	if !ok {
-		return "", fmt.Errorf("argument %q must be a string", key)
-	}
-	return strings.TrimSpace(text), nil
-}
-
-func mcpStringDefault(args map[string]any, key, fallback string) (string, error) {
-	value, err := mcpOptionalString(args, key)
-	if err != nil {
-		return "", err
-	}
-	if value == "" {
-		return fallback, nil
-	}
-	return value, nil
-}
-
-func mcpBool(args map[string]any, key string, fallback bool) (bool, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return fallback, nil
-	}
-	switch v := value.(type) {
-	case bool:
-		return v, nil
-	default:
-		return false, fmt.Errorf("argument %q must be a boolean", key)
-	}
-}
-
-func mcpInt(args map[string]any, key string, fallback int) (int, error) {
-	value, ok := args[key]
-	if !ok || value == nil {
-		return fallback, nil
-	}
-	switch v := value.(type) {
-	case float64:
-		return int(v), nil
-	case int:
-		return v, nil
-	case int64:
-		return int(v), nil
-	default:
-		return 0, fmt.Errorf("argument %q must be an integer", key)
 	}
 }
 
