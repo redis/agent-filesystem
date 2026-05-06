@@ -611,14 +611,14 @@ function displayLocalPath(path: string): string {
 // Prefer the session name, then the agent name; never return the hostname.
 // When neither is set, fall back to a short session id ("Session: a1b2c3d4").
 function displayAgentPrimaryName(agent: AFSAgentSession): string {
-  const host = agent.hostname?.trim() ?? "";
+  const host = agent.hostname.trim();
   const notHost = (value?: string | null) => {
     const trimmed = value?.trim();
     return trimmed && trimmed !== host ? trimmed : undefined;
   };
   const named = notHost(agent.sessionName) || notHost(agent.agentName);
   if (named) return named;
-  const shortId = agent.sessionId?.trim().slice(0, 8);
+  const shortId = agent.sessionId.trim().slice(0, 8);
   return shortId ? `Session: ${shortId}` : "Session: unknown";
 }
 
@@ -968,7 +968,7 @@ export function LiveTopologyCard({ agents, workspaces }: Props) {
       if (!group) {
         group = {
           databaseId: ws.databaseId,
-          databaseName: ws.databaseName?.trim() || "Unassigned database",
+          databaseName: ws.databaseName.trim() || "Unassigned database",
           rows: [],
         };
         groups.set(key, group);
