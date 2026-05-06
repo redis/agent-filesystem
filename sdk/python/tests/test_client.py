@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from redis_afs.client import AFSError, FSClient, MCPHttpClient, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
+from redis_afs.client import AFSError, CheckpointClient, FSClient, MCPHttpClient, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
 
 
 class FakeMCP:
@@ -32,6 +32,8 @@ class FakeMCP:
             return {"entries": entries}
         if name == "checkpoint_create":
             return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+        if name == "checkpoint_restore":
+            return {"workspace": "workspace", "checkpoint": arguments["checkpoint"], "restored": True}
         raise AssertionError(f"unexpected tool {name}")
 
 
@@ -90,6 +92,8 @@ class FakeMountedMCPHttpClient:
             return {"entries": entries}
         if name == "checkpoint_create":
             return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+        if name == "checkpoint_restore":
+            return {"workspace": "workspace", "checkpoint": arguments["checkpoint"], "restored": True}
         raise AssertionError(f"unexpected tool {name}")
 
 
@@ -144,6 +148,17 @@ class MountedFSTest(unittest.TestCase):
 
 
 class EndpointTest(unittest.TestCase):
+    def test_checkpoint_create_and_restore_round_trip(self):
+        checkpoint = CheckpointClient(FakeMCP())
+
+        created = checkpoint.create(workspace="repo", checkpoint="unchanged-head")
+        restored = checkpoint.restore(workspace="repo", checkpoint="unchanged-head")
+
+        self.assertTrue(created["created"])
+        self.assertEqual(created["checkpoint"], "unchanged-head")
+        self.assertTrue(restored["restored"])
+        self.assertEqual(restored["checkpoint"], "unchanged-head")
+
     def test_normalizes_mcp_endpoint(self):
         self.assertEqual(_normalize_mcp_endpoint("https://afs.cloud"), "https://afs.cloud/mcp")
         self.assertEqual(_normalize_mcp_endpoint("https://afs.cloud/mcp"), "https://afs.cloud/mcp")

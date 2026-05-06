@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,10 @@ func configPath() string {
 	if cfgPathOverride != "" {
 		return cfgPathOverride
 	}
+	return defaultConfigPath()
+}
+
+func defaultConfigPath() string {
 	exe, err := executablePath()
 	if err != nil {
 		return "afs.config.json"
@@ -477,24 +482,50 @@ func defaultWorkRoot() string {
 	return filepath.Join(stateDir(), "workspaces")
 }
 
-func statePath() string {
+func defaultStatePath() string {
 	return filepath.Join(stateDir(), "state.json")
 }
 
+func statePathForConfig(configFile string) string {
+	cleanConfig := cleanConfigPath(configFile)
+	if cleanConfig == "" || cleanConfig == cleanConfigPath(defaultConfigPath()) {
+		return defaultStatePath()
+	}
+	sum := sha256.Sum256([]byte(cleanConfig))
+	return filepath.Join(stateDir(), "configs", hex.EncodeToString(sum[:8])+".json")
+}
+
+func statePath() string {
+	return statePathForConfig(configPath())
+}
+
 func saveState(st state) error {
-	if err := os.MkdirAll(stateDir(), 0o700); err != nil {
+	target := statePath()
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return err
 	}
 	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(statePath(), b, 0o600)
+	return os.WriteFile(target, b, 0o600)
 }
 
 func loadState() (state, error) {
+	if st, err := loadStateFromPath(statePath()); err == nil {
+		return st, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return state{}, err
+	}
+	if sameConfigPath(statePath(), defaultStatePath()) {
+		return state{}, os.ErrNotExist
+	}
+	return loadStateFromPath(defaultStatePath())
+}
+
+func loadStateFromPath(path string) (state, error) {
 	var st state
-	b, err := os.ReadFile(statePath())
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return st, err
 	}
