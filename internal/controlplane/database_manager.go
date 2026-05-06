@@ -164,12 +164,20 @@ func OpenDatabaseManager(configPathOverride string) (*DatabaseManager, error) {
 		manager.profiles[profile.ID] = profile
 		manager.order = append(manager.order, profile.ID)
 	}
-	manager.ensureDefaultDatabaseLocked()
-
-	if err := manager.saveRegistryLocked(); err != nil {
+	manager.mu.Lock()
+	if err := manager.ensureStartupBootstrapDatabaseLocked(context.Background()); err != nil {
+		manager.mu.Unlock()
 		_ = manager.catalog.Close()
 		return nil, err
 	}
+	manager.ensureDefaultDatabaseLocked()
+
+	if err := manager.saveRegistryLocked(); err != nil {
+		manager.mu.Unlock()
+		_ = manager.catalog.Close()
+		return nil, err
+	}
+	manager.mu.Unlock()
 	if err := manager.refreshWorkspaceCatalog(context.Background()); err != nil {
 		manager.Close()
 		return nil, err
@@ -398,11 +406,47 @@ func (m *DatabaseManager) ensureBootstrapDatabase(ctx context.Context) error {
 	return m.ensureBootstrapDatabaseLocked(ctx)
 }
 
+func (m *DatabaseManager) ensureStartupBootstrapDatabaseLocked(ctx context.Context) error {
+	profile, ok := m.bootstrapDatabaseProfile(ctx)
+	if !ok {
+		return nil
+	}
+	profile, hasWorkspaces := adoptBootstrapWorkspaceIdentity(ctx, profile)
+	if !hasWorkspaces {
+		return nil
+	}
+	if err := validateDatabaseProfile(profile); err != nil {
+		return err
+	}
+
+	changed := false
+	if updated := m.normalizeBootstrapProfilesLocked(profile); updated {
+		changed = true
+	}
+	if existing, exists := m.profiles[profile.ID]; exists {
+		if existing != profile {
+			m.profiles[profile.ID] = profile
+			changed = true
+		}
+		if changed {
+			m.ensureDefaultDatabaseLocked()
+			return m.saveRegistryLocked()
+		}
+		return nil
+	}
+
+	m.profiles[profile.ID] = profile
+	m.order = append(m.order, profile.ID)
+	m.ensureDefaultDatabaseLocked()
+	return m.saveRegistryLocked()
+}
+
 func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) error {
 	profile, ok := m.bootstrapDatabaseProfile(ctx)
 	if !ok {
 		return nil
 	}
+	profile, _ = adoptBootstrapWorkspaceIdentity(ctx, profile)
 	if err := validateDatabaseProfile(profile); err != nil {
 		return err
 	}
@@ -433,6 +477,47 @@ func (m *DatabaseManager) ensureBootstrapDatabaseLocked(ctx context.Context) err
 		return err
 	}
 	return nil
+}
+
+func adoptBootstrapWorkspaceIdentity(ctx context.Context, profile databaseProfile) (databaseProfile, bool) {
+	if normalizedDatabaseManagementType(profile.ManagementType) != databaseManagementUserManaged {
+		return profile, false
+	}
+
+	runtime, err := openDatabaseRuntime(ctx, profile)
+	if err != nil {
+		return profile, false
+	}
+	defer runtime.closeFn()
+
+	metas, err := runtime.store.ListWorkspaces(ctx)
+	if err != nil || len(metas) == 0 {
+		return profile, false
+	}
+
+	var databaseID string
+	var databaseName string
+	for _, meta := range metas {
+		meta = applyWorkspaceMetaDefaults(runtime.cfg, meta)
+		if strings.TrimSpace(meta.DatabaseID) == "" || strings.TrimSpace(meta.DatabaseName) == "" {
+			return profile, true
+		}
+		if databaseID == "" {
+			databaseID = strings.TrimSpace(meta.DatabaseID)
+			databaseName = strings.TrimSpace(meta.DatabaseName)
+			continue
+		}
+		if strings.TrimSpace(meta.DatabaseID) != databaseID || strings.TrimSpace(meta.DatabaseName) != databaseName {
+			return profile, true
+		}
+	}
+	if databaseID == "" || databaseName == "" {
+		return profile, true
+	}
+
+	profile.ID = databaseID
+	profile.Name = databaseName
+	return profile, true
 }
 
 func (m *DatabaseManager) bootstrapDatabaseProfile(ctx context.Context) (databaseProfile, bool) {
