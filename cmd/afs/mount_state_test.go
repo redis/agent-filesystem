@@ -106,6 +106,15 @@ func TestCmdStatusPrintsAlignedMountTable(t *testing.T) {
 	if strings.Contains(stripAnsi(out), "AFS Not Running") {
 		t.Fatalf("status output should not say daemon is absent when mount daemons are running:\n%s", out)
 	}
+	statusSection := stripAnsi(strings.Split(out, "Mounted workspaces")[0])
+	for _, label := range []string{"workspace", "mode", "daemon"} {
+		if statusSectionHasLabel(statusSection, label) {
+			t.Fatalf("status summary should not duplicate %s row when mount table is present:\n%s", label, out)
+		}
+	}
+	if statusSectionHasLabel(statusSection, "local") {
+		t.Fatalf("status summary should not duplicate local path when mount table is present:\n%s", out)
+	}
 	if mountLine+3 >= len(lines) {
 		t.Fatalf("mount table incomplete:\n%s", out)
 	}
@@ -286,4 +295,13 @@ func indexLine(lines []string, want string) int {
 		}
 	}
 	return -1
+}
+
+func statusSectionHasLabel(section, label string) bool {
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), label+"  ") {
+			return true
+		}
+	}
+	return false
 }

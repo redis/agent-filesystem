@@ -326,11 +326,12 @@ func cmdStatus() error {
 
 func cmdStatusWithOptions(opts statusOptions) error {
 	reg, regErr := loadMountRegistry()
+	hasMountRecords := regErr == nil && len(reg.Mounts) > 0
 	processPIDs, _ := statusSyncDaemonPIDs()
 	st, err := loadState()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if regErr == nil && len(reg.Mounts) > 0 {
+			if hasMountRecords {
 				if err := cmdStatusFromMountRegistry(reg, processPIDs); err != nil {
 					return err
 				}
@@ -345,12 +346,12 @@ func cmdStatusWithOptions(opts statusOptions) error {
 			return err
 		}
 	} else if strings.TrimSpace(st.Mode) == modeSync || (strings.TrimSpace(st.Mode) == "" && st.SyncPID > 0) {
-		cmdStatusSync(st, processPIDs)
-	} else if err := cmdStatusMount(st); err != nil {
+		cmdStatusSync(st, processPIDs, hasMountRecords)
+	} else if err := cmdStatusMount(st, hasMountRecords); err != nil {
 		return err
 	}
 
-	if regErr == nil && len(reg.Mounts) > 0 {
+	if hasMountRecords {
 		printMountStatus(reg, opts.verbose)
 	}
 	return nil
@@ -372,13 +373,26 @@ func cmdStatusFromMountRegistry(reg mountRegistry, processPIDs []int) error {
 	title := statusTitleForPIDs(runningPIDs)
 
 	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, cfg.CurrentWorkspace, localSurfacePath(cfg), mode, backendName, cfg.RedisAddr, cfg.RedisDB, len(runningPIDs) > 0))
-	rows = append(rows, outputRow{Label: "daemon", Value: daemonStatusSummary(runningPIDs)})
+	rows = omitMountedWorkspaceSummaryRows(rows)
 	if unmanaged := unmanagedSyncDaemonPIDs(processPIDs, mountPIDs); len(unmanaged) > 0 {
 		rows = append(rows, outputRow{Label: "unmanaged daemons", Value: pidsLabel(unmanaged)})
 	}
 	rows = appendAuthStatusRows(rows)
 	printSection(title, rows)
 	return nil
+}
+
+func omitMountedWorkspaceSummaryRows(rows []outputRow) []outputRow {
+	filtered := make([]outputRow, 0, len(rows))
+	for _, row := range rows {
+		switch row.Label {
+		case "workspace", "local", "mode":
+			continue
+		default:
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 func cmdStatusFromSyncDaemons(pids []int) error {
@@ -742,7 +756,7 @@ func cmdStatusNotRunning() error {
 }
 
 // cmdStatusSync renders status for a running sync daemon.
-func cmdStatusSync(st state, processPIDs []int) {
+func cmdStatusSync(st state, processPIDs []int, hasMountRecords bool) {
 	alive := st.SyncPID > 0 && processAlive(st.SyncPID)
 	cfg := loadConfigOrDefault()
 	if err := resolveConfigPaths(&cfg); err != nil {
@@ -750,7 +764,7 @@ func cmdStatusSync(st state, processPIDs []int) {
 	}
 	title := statusTitleForAlive(alive, st.SyncPID)
 	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, st.CurrentWorkspace, st.LocalPath, modeSync, "", st.RedisAddr, st.RedisDB, alive))
-	if ws := strings.TrimSpace(st.CurrentWorkspace); ws != "" {
+	if ws := strings.TrimSpace(st.CurrentWorkspace); ws != "" && !hasMountRecords {
 		rows = append([]outputRow{{Label: "workspace", Value: ws}}, rows...)
 	}
 	managedPIDs := []int{}
@@ -778,7 +792,7 @@ func cmdStatusSync(st state, processPIDs []int) {
 }
 
 // cmdStatusMount renders status for mount mode.
-func cmdStatusMount(st state) error {
+func cmdStatusMount(st state, hasMountRecords bool) error {
 	backend, backendName, err := backendForState(st)
 	if err != nil {
 		return err
@@ -804,6 +818,9 @@ func cmdStatusMount(st state) error {
 	title := statusTitleForAlive(alive, st.MountPID)
 
 	rows := statusDisplayRows(cfg, runtimeStatusRows(cfg, workspace, localPath, modeMount, backendName, st.RedisAddr, st.RedisDB, alive))
+	if hasMountRecords {
+		rows = omitMountedWorkspaceSummaryRows(rows)
+	}
 	rows = appendAuthStatusRows(rows)
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)

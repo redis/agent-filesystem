@@ -107,6 +107,15 @@ func TestSaveConfigPersistsDefaultWorkspaceOutsideLegacyRuntimeKeys(t *testing.T
 	if workspace["default"] != "demo" || workspace["defaultID"] != "ws_demo" {
 		t.Fatalf("workspace config = %#v, want demo/ws_demo", workspace)
 	}
+	runtime, ok := saved["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("config should persist runtime mount/log settings under runtime key: %s", string(raw))
+	}
+	for _, key := range []string{"currentWorkspace", "currentWorkspaceID"} {
+		if _, ok := runtime[key]; ok {
+			t.Fatalf("runtime config should not persist workspace key %q: %s", key, string(raw))
+		}
+	}
 	loaded, err := loadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig() returned error: %v", err)
@@ -614,15 +623,19 @@ func TestLoadConfigForUpPromptsForMissingDatabaseAndMountpoint(t *testing.T) {
 	}
 
 	raw := `{
-  "redis": {
-    "addr": "` + mr.Addr() + `"
-  },
-  "currentWorkspace": "demo",
-  "mount": {
-    "backend": "nfs",
-    "nfsBin": "/usr/bin/true"
-  }
-}`
+	  "redis": {
+	    "addr": "` + mr.Addr() + `"
+	  },
+	  "workspace": {
+	    "default": "demo"
+	  },
+	  "runtime": {
+	    "mount": {
+	      "backend": "nfs",
+	      "nfsBin": "/usr/bin/true"
+	    }
+	  }
+	}`
 	if err := os.WriteFile(configFile, []byte(raw), 0o644); err != nil {
 		t.Fatalf("WriteFile(config) returned error: %v", err)
 	}

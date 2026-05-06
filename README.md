@@ -171,18 +171,22 @@ The current config shape is nested and workspace-oriented:
     "tls": false
   },
   "mode": "sync",
-  "currentWorkspace": "my-repo",
-  "mount": {
-    "backend": "none",
-    "allowOther": false,
-    "mountBin": "",
-    "nfsBin": "",
-    "nfsHost": "127.0.0.1",
-    "nfsPort": 20490
+  "workspace": {
+    "default": "my-repo"
   },
-  "logs": {
-    "mount": "/tmp/afs-mount.log",
-    "sync": "/tmp/afs-sync.log"
+  "runtime": {
+    "mount": {
+      "backend": "none",
+      "allowOther": false,
+      "mountBin": "",
+      "nfsBin": "",
+      "nfsHost": "127.0.0.1",
+      "nfsPort": 20490
+    },
+    "logs": {
+      "mount": "/tmp/afs-mount.log",
+      "sync": "/tmp/afs-sync.log"
+    }
   },
   "sync": {
     "fileSizeCapMB": 2048

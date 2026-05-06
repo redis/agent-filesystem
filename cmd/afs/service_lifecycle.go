@@ -195,11 +195,16 @@ func unmountLegacyState(deleteLocal bool) error {
 }
 
 func startServices(cfg config) error {
+	_, err := startMountServices(cfg, "")
+	return err
+}
+
+func startMountServices(cfg config, sessionName string) (state, error) {
 	ctx := context.Background()
 
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
-		return err
+		return state{}, err
 	}
 
 	runtimeCfg := cfg
@@ -213,10 +218,10 @@ func startServices(cfg config) error {
 
 	if productMode == productModeSelfHosted || productMode == productModeCloud {
 		prepareStep := startStep("Opening workspace session")
-		bootstrap, closeFn, err := prepareMountBootstrap(ctx, cfg)
+		bootstrap, closeFn, err := prepareMountBootstrap(ctx, cfg, sessionName)
 		if err != nil {
 			prepareStep.fail(err.Error())
-			return err
+			return state{}, err
 		}
 		defer closeFn()
 
@@ -252,13 +257,13 @@ func startServices(cfg config) error {
 	defer cancel()
 	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		s.fail(fmt.Sprintf("cannot reach %s", runtimeCfg.RedisAddr))
-		return fmt.Errorf("cannot connect to Redis at %s: %w", runtimeCfg.RedisAddr, err)
+		return state{}, fmt.Errorf("cannot connect to Redis at %s: %w", runtimeCfg.RedisAddr, err)
 	}
 	s.succeed(runtimeCfg.RedisAddr)
 
 	backend, backendName, err := backendForConfig(runtimeCfg)
 	if err != nil {
-		return err
+		return state{}, err
 	}
 	if backendName == mountBackendNone {
 		if managedSessionActive {
@@ -283,11 +288,11 @@ func startServices(cfg config) error {
 			MountBin:             runtimeCfg.MountBin,
 		}
 		if err := saveState(st); err != nil {
-			return err
+			return state{}, err
 		}
 		runtimeCfg.CurrentWorkspace = workspace
 		printReadyBox(runtimeCfg, backendName, "")
-		return nil
+		return st, nil
 	}
 
 	store := newAFSStore(rdb)
@@ -296,17 +301,17 @@ func startServices(cfg config) error {
 		workspace, err = ensureMountWorkspace(ctx, runtimeCfg, store)
 		if err != nil {
 			workspaceStep.fail(err.Error())
-			return fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
+			return state{}, fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
 		}
 		workspaceStep.succeed(workspace)
 		if err := store.checkImportLock(ctx, workspace); err != nil {
-			return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
+			return state{}, fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
 		}
 		prepareStep := startStep("Opening live workspace")
 		seededKey, headSavepoint, initialized, err := seedWorkspaceMountKey(ctx, store, workspace)
 		if err != nil {
 			prepareStep.fail(err.Error())
-			return err
+			return state{}, err
 		}
 		mountKey = seededKey
 		mountedHeadSavepoint = headSavepoint
@@ -317,7 +322,7 @@ func startServices(cfg config) error {
 		}
 	} else {
 		if err := store.checkImportLock(ctx, workspace); err != nil {
-			return fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
+			return state{}, fmt.Errorf("cannot mount workspace %q: %w", workspace, err)
 		}
 	}
 
@@ -325,7 +330,7 @@ func startServices(cfg config) error {
 	mountCfg.RedisKey = mountKey
 	mountCfg, err = prepareRuntimeMountConfig(mountCfg, backendName)
 	if err != nil {
-		return err
+		return state{}, err
 	}
 
 	s = startStep("Mounting filesystem")
@@ -334,21 +339,21 @@ func startServices(cfg config) error {
 		createdLocalPath = true
 	} else if statErr != nil {
 		s.fail(statErr.Error())
-		return fmt.Errorf("check mountpoint: %w", statErr)
+		return state{}, fmt.Errorf("check mountpoint: %w", statErr)
 	}
 	if err := os.MkdirAll(mountCfg.LocalPath, 0o755); err != nil {
 		s.fail(err.Error())
-		return fmt.Errorf("create mountpoint: %w", err)
+		return state{}, fmt.Errorf("create mountpoint: %w", err)
 	}
 
 	started, err := backend.Start(mountCfg)
 	if err != nil {
 		s.fail(err.Error())
-		return err
+		return state{}, err
 	}
 	if err := backend.WaitForMount(mountCfg, started, 6*time.Second); err != nil {
 		s.fail("timeout")
-		return fmt.Errorf("mount did not become ready: %w", err)
+		return state{}, fmt.Errorf("mount did not become ready: %w", err)
 	}
 	s.succeed(mountCfg.LocalPath)
 
@@ -375,7 +380,7 @@ func startServices(cfg config) error {
 		MountBin:             runtimeCfg.MountBin,
 	}
 	if err := saveState(st); err != nil {
-		return err
+		return state{}, err
 	}
 
 	if managedSessionID != "" && managedHeartbeatEvery > 0 && started.PID > 0 {
@@ -398,10 +403,10 @@ func startServices(cfg config) error {
 
 	runtimeCfg.CurrentWorkspace = workspace
 	printReadyBox(runtimeCfg, backendName, started.Endpoint)
-	return nil
+	return st, nil
 }
 
-func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, func(), error) {
+func prepareMountBootstrap(ctx context.Context, cfg config, sessionName ...string) (mountBootstrap, func(), error) {
 	resolvedCfg, service, closeFn, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
 		return mountBootstrap{}, func() {}, err
@@ -422,7 +427,7 @@ func prepareMountBootstrap(ctx context.Context, cfg config) (mountBootstrap, fun
 		return mountBootstrap{}, func() {}, fmt.Errorf("a workspace is required before AFS can mount a filesystem: %w", err)
 	}
 
-	sessionInput := managedWorkspaceSessionRequest(resolvedCfg)
+	sessionInput := managedWorkspaceSessionRequest(resolvedCfg, sessionName...)
 	session, err := service.CreateWorkspaceSession(ctx, selection.ID, sessionInput)
 	if err != nil {
 		closeFn()

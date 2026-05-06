@@ -1,12 +1,107 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 )
+
+func TestMountWorkspaceUsesConfiguredLiveMountMode(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	sourceDir := t.TempDir()
+	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "hello\n")
+	seedWorkspaceFromDirectory(t, newAFSStore(rdb), "repo", "initial", sourceDir)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.Mode = modeMount
+	cfg.MountBackend = mountBackendNFS
+	cfg.NFSBin = "/bin/true"
+	saveTempConfig(t, cfg)
+
+	origStartMount := startMountServicesForWorkspaceMount
+	origStartSync := startSyncMountForWorkspaceMount
+	t.Cleanup(func() {
+		startMountServicesForWorkspaceMount = origStartMount
+		startSyncMountForWorkspaceMount = origStartSync
+	})
+
+	var captured config
+	var capturedSession string
+	startMountServicesForWorkspaceMount = func(cfg config, sessionName string) (state, error) {
+		captured = cfg
+		capturedSession = sessionName
+		return state{
+			StartedAt:        time.Now().UTC(),
+			ProductMode:      cfg.ProductMode,
+			RedisAddr:        cfg.RedisAddr,
+			RedisDB:          cfg.RedisDB,
+			CurrentWorkspace: cfg.CurrentWorkspace,
+			MountPID:         4242,
+			MountBackend:     cfg.MountBackend,
+			LocalPath:        cfg.LocalPath,
+			Mode:             modeMount,
+			RedisKey:         "ws_repo",
+			ReadOnly:         cfg.ReadOnly,
+		}, nil
+	}
+	startSyncMountForWorkspaceMount = func(ctx context.Context, cfg config, selection workspaceSelection, opts mountOptions) error {
+		t.Fatalf("startSyncMount called for mode=mount config: cfg=%+v selection=%+v opts=%+v", cfg, selection, opts)
+		return nil
+	}
+
+	localPath := filepath.Join(t.TempDir(), "repo")
+	if err := mountWorkspace(mountOptions{
+		workspace:   "repo",
+		directory:   localPath,
+		sessionName: "live edit",
+		readonly:    true,
+	}); err != nil {
+		t.Fatalf("mountWorkspace() returned error: %v", err)
+	}
+
+	if captured.Mode != modeMount {
+		t.Fatalf("captured Mode = %q, want %q", captured.Mode, modeMount)
+	}
+	if captured.MountBackend != mountBackendNFS {
+		t.Fatalf("captured MountBackend = %q, want %q", captured.MountBackend, mountBackendNFS)
+	}
+	if captured.LocalPath != localPath {
+		t.Fatalf("captured LocalPath = %q, want %q", captured.LocalPath, localPath)
+	}
+	if !captured.ReadOnly {
+		t.Fatal("captured ReadOnly = false, want true")
+	}
+	if capturedSession != "live edit" {
+		t.Fatalf("captured sessionName = %q, want live edit", capturedSession)
+	}
+
+	reg, err := loadMountRegistry()
+	if err != nil {
+		t.Fatalf("loadMountRegistry() returned error: %v", err)
+	}
+	rec, ok := mountByPath(reg, localPath)
+	if !ok {
+		t.Fatalf("expected live mount registry record at %s; got %#v", localPath, reg.Mounts)
+	}
+	if rec.Mode != modeMount || rec.MountBackend != mountBackendNFS {
+		t.Fatalf("mount registry mode/backend = %q/%q, want %q/%q", rec.Mode, rec.MountBackend, modeMount, mountBackendNFS)
+	}
+}
 
 func TestParseMountOptionsAllowsOptionalDirectory(t *testing.T) {
 	t.Helper()

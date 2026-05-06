@@ -25,6 +25,7 @@ type mountRecord struct {
 	WorkspaceID          string    `json:"workspace_id,omitempty"`
 	LocalPath            string    `json:"local_path"`
 	Mode                 string    `json:"mode"`
+	MountBackend         string    `json:"mount_backend,omitempty"`
 	ProductMode          string    `json:"product_mode,omitempty"`
 	ControlPlaneURL      string    `json:"control_plane_url,omitempty"`
 	ControlPlaneDatabase string    `json:"control_plane_database,omitempty"`

@@ -34,6 +34,11 @@ type unmountOptions struct {
 	deleteLocal bool
 }
 
+var (
+	startMountServicesForWorkspaceMount = startMountServices
+	startSyncMountForWorkspaceMount     = startSyncMount
+)
+
 func cmdMountArgs(args []string) error {
 	if len(args) > 0 && isHelpArg(args[0]) {
 		fmt.Fprint(os.Stderr, mountUsageText(filepath.Base(os.Args[0])))
@@ -165,11 +170,22 @@ func mountWorkspace(opts mountOptions) error {
 	if err != nil {
 		return err
 	}
-	cfg.Mode = modeSync
-	cfg.MountBackend = mountBackendNone
+	mode, err := effectiveMode(cfg)
+	if err != nil {
+		return err
+	}
+	if mode == modeNone {
+		return fmt.Errorf("mode is set to none; update config first")
+	}
 	cfg.CurrentWorkspace = opts.workspace
 	cfg.CurrentWorkspaceID = ""
 	cfg.LocalPath = localPath
+	if mode == modeSync {
+		cfg.Mode = modeSync
+		cfg.MountBackend = mountBackendNone
+	} else {
+		cfg.Mode = modeMount
+	}
 
 	ctx := context.Background()
 	resolvedCfg, service, closeStore, err := openAFSControlPlaneForConfig(ctx, cfg)
@@ -189,9 +205,80 @@ func mountWorkspace(opts mountOptions) error {
 	resolvedCfg.CurrentWorkspace = selection.Name
 	resolvedCfg.CurrentWorkspaceID = selection.ID
 	resolvedCfg.LocalPath = localPath
+	if mode == modeMount {
+		if err := applyWorkspaceSelection(&resolvedCfg, selection); err != nil {
+			return err
+		}
+		resolvedCfg.LocalPath = localPath
+		resolvedCfg.Mode = modeMount
+		resolvedCfg.ReadOnly = opts.readonly
+		return startLiveMount(resolvedCfg, selection, opts)
+	}
 	resolvedCfg.Mode = modeSync
 	resolvedCfg.MountBackend = mountBackendNone
-	return startSyncMount(ctx, resolvedCfg, selection, opts)
+	return startSyncMountForWorkspaceMount(ctx, resolvedCfg, selection, opts)
+}
+
+func startLiveMount(cfg config, selection workspaceSelection, opts mountOptions) error {
+	if opts.dryRun {
+		return fmt.Errorf("--dry-run is only available for sync-mode mounts")
+	}
+	if strings.TrimSpace(cfg.LocalPath) == "" {
+		return errors.New("mount requires a local directory")
+	}
+	if err := validateUpModeSelection(cfg); err != nil {
+		return err
+	}
+	st, err := startMountServicesForWorkspaceMount(cfg, opts.sessionName)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(st.CurrentWorkspace) == "" {
+		st.CurrentWorkspace = selection.Name
+	}
+	if strings.TrimSpace(st.CurrentWorkspaceID) == "" {
+		st.CurrentWorkspaceID = selection.ID
+	}
+	if err := registerLiveMount(st); err != nil {
+		_ = stopMount(mountRecordFromLiveState(st, ""), false)
+		return err
+	}
+	recordMountShellDirectory(st.LocalPath)
+	return nil
+}
+
+func registerLiveMount(st state) error {
+	reg, err := loadMountRegistry()
+	if err != nil {
+		return err
+	}
+	id, err := randomSuffix()
+	if err != nil {
+		return err
+	}
+	upsertMount(&reg, mountRecordFromLiveState(st, "mnt_"+id))
+	return saveMountRegistry(reg)
+}
+
+func mountRecordFromLiveState(st state, id string) mountRecord {
+	return mountRecord{
+		ID:                   id,
+		Workspace:            st.CurrentWorkspace,
+		WorkspaceID:          st.CurrentWorkspaceID,
+		LocalPath:            st.LocalPath,
+		Mode:                 modeMount,
+		MountBackend:         st.MountBackend,
+		ProductMode:          st.ProductMode,
+		ControlPlaneURL:      st.ControlPlaneURL,
+		ControlPlaneDatabase: st.ControlPlaneDatabase,
+		SessionID:            st.SessionID,
+		RedisAddr:            st.RedisAddr,
+		RedisDB:              st.RedisDB,
+		RedisKey:             st.RedisKey,
+		PID:                  st.MountPID,
+		ReadOnly:             st.ReadOnly,
+		StartedAt:            st.StartedAt,
+	}
 }
 
 func startSyncMount(ctx context.Context, cfg config, selection workspaceSelection, opts mountOptions) error {
@@ -829,6 +916,18 @@ func unmountPromptRows(records []mountRecord) [][]string {
 }
 
 func stopMount(rec mountRecord, deleteLocal bool) error {
+	if strings.TrimSpace(rec.Mode) == modeMount {
+		cfg := configFromMount(rec)
+		backend, _, err := backendForConfig(cfg)
+		if err != nil {
+			return err
+		}
+		if localPath := strings.TrimSpace(rec.LocalPath); localPath != "" && backend.IsMounted(localPath) {
+			if err := backend.Unmount(localPath); err != nil {
+				return err
+			}
+		}
+	}
 	if rec.PID > 0 && processAlive(rec.PID) {
 		if err := terminatePID(rec.PID, 5*time.Second); err != nil {
 			return err
@@ -879,6 +978,9 @@ func configFromMount(rec mountRecord) config {
 	cfg.CurrentWorkspaceID = rec.WorkspaceID
 	cfg.LocalPath = rec.LocalPath
 	cfg.Mode = rec.Mode
+	if strings.TrimSpace(rec.MountBackend) != "" {
+		cfg.MountBackend = rec.MountBackend
+	}
 	cfg.SyncLog = rec.SyncLog
 	return cfg
 }

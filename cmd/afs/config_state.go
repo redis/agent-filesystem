@@ -69,10 +69,8 @@ type persistedConfig struct {
 }
 
 type persistedRuntime struct {
-	CurrentWorkspace   string        `json:"currentWorkspace,omitempty"`
-	CurrentWorkspaceID string        `json:"currentWorkspaceID,omitempty"`
-	Mount              mountSettings `json:"mount,omitempty"`
-	Logs               logSettings   `json:"logs,omitempty"`
+	Mount mountSettings `json:"mount,omitempty"`
+	Logs  logSettings   `json:"logs,omitempty"`
 }
 
 func persistedConfigFromRuntime(cfg config) persistedConfig {
@@ -113,10 +111,8 @@ func persistedConfigFromRuntime(cfg config) persistedConfig {
 		out.Sync = &syncSettings{SyncFileSizeCapMB: cfg.SyncFileSizeCapMB}
 	}
 	out.Runtime = &persistedRuntime{
-		CurrentWorkspace:   strings.TrimSpace(cfg.CurrentWorkspace),
-		CurrentWorkspaceID: strings.TrimSpace(cfg.CurrentWorkspaceID),
-		Mount:              persistedMountSettings(cfg.mountSettings),
-		Logs:               cfg.logSettings,
+		Mount: persistedMountSettings(cfg.mountSettings),
+		Logs:  cfg.logSettings,
 	}
 	return out
 }
@@ -163,15 +159,6 @@ func loadConfig() (config, error) {
 	}
 	cfg.CurrentWorkspace = strings.TrimSpace(raw.Workspace.DefaultWorkspace)
 	cfg.CurrentWorkspaceID = strings.TrimSpace(raw.Workspace.DefaultWorkspaceID)
-	if cfg.CurrentWorkspace == "" && cfg.CurrentWorkspaceID == "" {
-		if raw.Runtime != nil {
-			cfg.CurrentWorkspace = strings.TrimSpace(raw.Runtime.CurrentWorkspace)
-			cfg.CurrentWorkspaceID = strings.TrimSpace(raw.Runtime.CurrentWorkspaceID)
-		} else {
-			cfg.CurrentWorkspace = legacy.CurrentWorkspace
-			cfg.CurrentWorkspaceID = legacy.CurrentWorkspaceID
-		}
-	}
 
 	if raw.Runtime != nil {
 		cfg.LocalPath = ""

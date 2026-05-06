@@ -212,6 +212,9 @@ The most important implementation seams are:
   `go list` can trigger dependency downloads in those nested modules.
 - `afs setup` owns only the default local mode prompt. Workspace selection and
   local directory prompts belong under `afs ws mount`, not setup.
+- `example.afs.config.json` should mirror the canonical persisted config shape:
+  an empty `workspace.default` to force an explicit user choice; no root
+  `currentWorkspace` or `localPath` keys.
 - If a Vite UI change is present in source but `localhost:5173` still shows old
   behavior, check for duplicate Vite listeners from sibling worktrees.
   `localhost` can hit an IPv6 listener from another checkout while
