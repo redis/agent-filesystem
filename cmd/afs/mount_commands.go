@@ -26,6 +26,7 @@ type mountOptions struct {
 	verbose     bool
 	dryRun      bool
 	yes         bool
+	readonly    bool
 }
 
 type unmountOptions struct {
@@ -85,6 +86,8 @@ func parseMountOptions(args []string) (mountOptions, error) {
 			opts.dryRun = true
 		case "--yes", "-y":
 			opts.yes = true
+		case "--readonly":
+			opts.readonly = true
 		case "--session":
 			i++
 			if i >= len(args) || strings.TrimSpace(args[i]) == "" {
@@ -224,6 +227,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 	runtimeCfg.CurrentWorkspace = selection.Name
 	runtimeCfg.CurrentWorkspaceID = selection.ID
 	runtimeCfg.LocalPath = localRoot
+	runtimeCfg.ReadOnly = opts.readonly
 	ctx = withSessionID(ctx, bootstrap.sessionID)
 
 	rdb := redis.NewClient(buildRedisOptions(runtimeCfg, 4))
@@ -400,8 +404,11 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 		{Label: "path", Value: compactDisplayPath(localRoot)},
 		{Label: "mode", Value: "sync"},
 		{Label: "files", Value: entryCount},
-		{Label: "unmount", Value: filepath.Base(os.Args[0]) + " ws unmount " + shellQuote(bootstrap.workspace)},
 	}
+	if runtimeCfg.ReadOnly {
+		rows = append(rows, outputRow{Label: "readonly", Value: "yes"})
+	}
+	rows = append(rows, outputRow{Label: "unmount", Value: filepath.Base(os.Args[0]) + " ws unmount " + shellQuote(bootstrap.workspace)})
 	if opts.verbose && strings.TrimSpace(bootstrap.sessionID) != "" {
 		rows = append(rows, outputRow{Label: "session", Value: strings.TrimSpace(bootstrap.sessionID)})
 	}
@@ -922,11 +929,12 @@ func countMountableLocalEntries(root string) (int, error) {
 
 func mountUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws mount [--dry-run] [--yes] [--verbose] [--session <name>] [<workspace> [directory]]
+  %s ws mount [--dry-run] [--yes] [--readonly] [--verbose] [--session <name>] [<workspace> [directory]]
 
 Mount a workspace to a local directory using sync mode.
 With no workspace, lists workspaces and prompts for a selection.
 With no directory, prompts for a local folder.
+Use --readonly to make this mount refuse local writes.
 Use --session to name this mount session separately from agent.name.
 When mounting to a populated local folder, AFS shows the safe reconciliation
 plan and asks before uploading or downloading files. Use --yes to accept a

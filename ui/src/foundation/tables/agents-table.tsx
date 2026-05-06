@@ -10,7 +10,11 @@ import styled, { keyframes, css } from "styled-components";
 import { BotIcon } from "../../components/lucide-icons";
 import { SurfaceCard } from "../../components/card-shell";
 import { LiveTopologyCard } from "../../components/live-topology-card";
-import { filterAndSortAgents, normalizeSearchValue } from "./agents-table-utils";
+import {
+  displayAgentIdentityLabel,
+  filterAndSortAgents,
+  normalizeSearchValue,
+} from "./agents-table-utils";
 import type { AgentSortField } from "./agents-table-utils";
 import { StatusNameCell, StatusNameLine } from "./status-name-cell";
 import {
@@ -170,6 +174,15 @@ const DetailValue = styled.span`
   color: var(--afs-ink, #18181b);
   font-size: 14px;
   word-break: break-all;
+`;
+
+const DetailTimeValue = styled(DetailValue)`
+  white-space: nowrap;
+  word-break: normal;
+`;
+
+const TableTimeText = styled(Typography.Body)`
+  white-space: nowrap;
 `;
 
 /* ---- Card view ---- */
@@ -393,15 +406,15 @@ export function AgentDetailDialog({
           </DetailField>
           <DetailField>
             <DetailLabel>Started</DetailLabel>
-            <DetailValue>{new Date(agent.startedAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.startedAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Last Seen</DetailLabel>
-            <DetailValue>{new Date(agent.lastSeenAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.lastSeenAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
           <DetailField>
             <DetailLabel>Lease Expires</DetailLabel>
-            <DetailValue>{new Date(agent.leaseExpiresAt).toLocaleString()}</DetailValue>
+            <DetailTimeValue>{new Date(agent.leaseExpiresAt).toLocaleString()}</DetailTimeValue>
           </DetailField>
         </DetailGrid>
 
@@ -437,8 +450,8 @@ export function AgentsTable({
   onOpenWorkspace,
 }: Props) {
   const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<AgentSortField>("lastSeenAt");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [sortBy, setSortBy] = useState<AgentSortField>("agentName");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   // viewMode = "map" | "table". Default to map (topology graphic).
   // The hook persists whichever value is set; legacy stored "cards" or
   // anything else is sanitized away by the validModes whitelist.
@@ -469,12 +482,12 @@ export function AgentsTable({
       [
         {
           accessorKey: "agentName",
-          header: "Agent Name",
-          size: 180,
+          header: "Name",
+          size: 240,
           enableSorting: true,
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
-            const agentName = displayAgentName(row.original);
+            const identityLabel = displayAgentIdentityLabel(row.original);
             return (
               <StatusNameCell
                 active={active}
@@ -483,8 +496,8 @@ export function AgentsTable({
                 statusTitle={active ? "Active" : "Inactive"}
               >
                 <StatusNameLine>
-                  <TablePrimaryText title={agentName || "Agent name not set"}>
-                    {agentName || "—"}
+                  <TablePrimaryText title={identityLabel}>
+                    {identityLabel}
                   </TablePrimaryText>
                 </StatusNameLine>
               </StatusNameCell>
@@ -568,12 +581,12 @@ export function AgentsTable({
           cell: ({ row }) => {
             const active = isAgentActive(row.original);
             return (
-              <Typography.Body
+              <TableTimeText
                 component="span"
                 color={active ? undefined : "secondary"}
               >
                 {active ? "Active now" : timeAgo(row.original.lastSeenAt)}
-              </Typography.Body>
+              </TableTimeText>
             );
           },
         },
@@ -623,7 +636,7 @@ export function AgentsTable({
 
       {/* ---- MAP (TOPOLOGY) VIEW ---- */}
       {!loading && !error && filteredRows.length > 0 && viewMode === "map" && mapAvailable ? (
-        <LiveTopologyCard agents={filteredRows} workspaces={workspaces ?? []} />
+        <LiveTopologyCard agents={filteredRows} workspaces={workspaces} />
       ) : null}
 
       {/* ---- TABLE VIEW ---- */}
@@ -637,8 +650,8 @@ export function AgentsTable({
               manualSorting
               onSortingChange={(nextState) => {
                 if (nextState.length === 0) {
-                  setSortBy("lastSeenAt");
-                  setSortDirection("desc");
+                  setSortBy("agentName");
+                  setSortDirection("asc");
                   return;
                 }
                 const next = nextState[0];

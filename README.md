@@ -172,10 +172,8 @@ The current config shape is nested and workspace-oriented:
   },
   "mode": "sync",
   "currentWorkspace": "my-repo",
-  "localPath": "~/afs",
   "mount": {
     "backend": "none",
-    "readOnly": false,
     "allowOther": false,
     "mountBin": "",
     "nfsBin": "",

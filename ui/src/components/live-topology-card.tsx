@@ -6,6 +6,10 @@ import type { AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/a
 import { BotIcon, FoldersIcon } from "./lucide-icons";
 import { formatBytes } from "../foundation/api/afs";
 import { AgentDetailDialog } from "../foundation/tables/agents-table";
+import {
+  compareAgentsByIdentity,
+  displayAgentIdentityLabel,
+} from "../foundation/tables/agents-table-utils";
 import { displayWorkspaceName } from "../foundation/workspace-display";
 
 /* ------------------------------------------------------------------ */
@@ -458,37 +462,17 @@ function displayLocalPath(path: string): string {
 }
 
 function displayAgentPrimaryName(agent: AFSAgentSession): string {
-  const sessionName = agent.sessionName?.trim();
-  if (sessionName) {
-    return sessionName;
-  }
-  return (
-    agent.agentName?.trim() ||
-    agent.label?.trim() ||
-    agent.hostname.trim() ||
-    agent.agentId?.trim() ||
-    agent.sessionId.trim() ||
-    "unknown agent"
-  );
+  return displayAgentIdentityLabel(agent);
 }
 
 function displayAgentMeta(agent: AFSAgentSession, primaryName: string): string {
-  const sessionName = agent.sessionName?.trim();
-  const agentName = agent.agentName?.trim();
   const hostname = agent.hostname.trim();
   const agentId = agent.agentId?.trim();
   const parts: string[] = [];
-  if (sessionName && agentName) {
-    parts.push(agentName);
-  } else if (sessionName && !agentName && agentId) {
-    parts.push(agentId);
-  } else if (agentName && agentName !== primaryName) {
-    parts.push(agentName);
-  }
-  if (hostname && hostname !== primaryName && !parts.includes(hostname)) {
+  if (hostname && !primaryName.includes(hostname)) {
     parts.push(hostname);
   }
-  if (agentId && agentId !== primaryName && !parts.includes(agentId)) {
+  if (agentId && agentId !== primaryName) {
     parts.push(agentId);
   }
   return parts.join(" · ") || agent.sessionId.trim() || "id not reported";
@@ -534,21 +518,8 @@ function sortWorkspacesForTopology(
   return [...connected, ...disconnected];
 }
 
-function sortAgentsForTopology(
-  agents: AFSAgentSession[],
-  sortedWorkspaces: AFSWorkspaceSummary[],
-): AFSAgentSession[] {
-  const workspaceRank = new Map(sortedWorkspaces.map((workspace, index) => [workspace.id, index]));
-
-  return agents
-    .map((agent, index) => ({ agent, index }))
-    .sort((a, b) => {
-      const aRank = workspaceRank.get(a.agent.workspaceId) ?? Number.MAX_SAFE_INTEGER;
-      const bRank = workspaceRank.get(b.agent.workspaceId) ?? Number.MAX_SAFE_INTEGER;
-      if (aRank !== bRank) return aRank - bRank;
-      return a.index - b.index;
-    })
-    .map(({ agent }) => agent);
+function sortAgentsForTopology(agents: AFSAgentSession[]): AFSAgentSession[] {
+  return [...agents].sort(compareAgentsByIdentity);
 }
 
 function agentIsHighlighted(agent: AFSAgentSession, hovered: HoveredTopologyItem | null): boolean {
@@ -647,13 +618,13 @@ type Props = {
 
 export function LiveTopologyCard({ agents, workspaces }: Props) {
   const navigate = useNavigate();
-  const sortedWorkspaces = useMemo(
-    () => sortWorkspacesForTopology(agents, workspaces),
-    [agents, workspaces],
-  );
   const sortedAgents = useMemo(
-    () => sortAgentsForTopology(agents, sortedWorkspaces),
-    [agents, sortedWorkspaces],
+    () => sortAgentsForTopology(agents),
+    [agents],
+  );
+  const sortedWorkspaces = useMemo(
+    () => sortWorkspacesForTopology(sortedAgents, workspaces),
+    [sortedAgents, workspaces],
   );
   const animatedAgents = useAnimatedTopologyItems(sortedAgents, getAgentTopologyId);
   const animatedWorkspaces = useAnimatedTopologyItems(sortedWorkspaces, getWorkspaceTopologyId);

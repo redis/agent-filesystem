@@ -198,6 +198,11 @@ The most important implementation seams are:
   mount target.
 - TanStack route files should only export their `Route`. Move shared route UI
   into `ui/src/features/` instead of importing from another route file.
+- Active-agent UI fixes may need both the Agents table and the Monitor compact
+  card. The Monitor page active-agents card lives in `ui/src/routes/index.tsx`
+  and renders relative time in `AgentSeen`.
+- Do not sort active-agent lists by `lastSeenAt`; heartbeat/time updates make
+  rows jump around. Use a stable identity/display label sort for live lists.
 - Template source files live under `templates/<template-id>/`. After changing
   template manifests, seed files, skills, or commands, run
   `npm run templates:generate` from `ui/` or `make templates-generate`.

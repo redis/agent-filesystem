@@ -11,7 +11,7 @@ import (
 func TestParseMountOptionsAllowsOptionalDirectory(t *testing.T) {
 	t.Helper()
 
-	opts, err := parseMountOptions([]string{"--dry-run", "--yes", "--verbose", "--session", "auth refactor", "notes", "~/notes"})
+	opts, err := parseMountOptions([]string{"--dry-run", "--yes", "--readonly", "--verbose", "--session", "auth refactor", "notes", "~/notes"})
 	if err != nil {
 		t.Fatalf("parseMountOptions() returned error: %v", err)
 	}
@@ -21,8 +21,8 @@ func TestParseMountOptionsAllowsOptionalDirectory(t *testing.T) {
 	if opts.sessionName != "auth refactor" {
 		t.Fatalf("sessionName = %q, want auth refactor", opts.sessionName)
 	}
-	if !opts.dryRun || !opts.yes || !opts.verbose {
-		t.Fatalf("parseMountOptions() flags = dryRun:%v yes:%v verbose:%v, want true/true/true", opts.dryRun, opts.yes, opts.verbose)
+	if !opts.dryRun || !opts.yes || !opts.readonly || !opts.verbose {
+		t.Fatalf("parseMountOptions() flags = dryRun:%v yes:%v readonly:%v verbose:%v, want true/true/true/true", opts.dryRun, opts.yes, opts.readonly, opts.verbose)
 	}
 
 	opts, err = parseMountOptions([]string{"notes"})

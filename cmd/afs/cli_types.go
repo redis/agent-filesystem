@@ -17,7 +17,7 @@ type redisConfig struct {
 
 type mountSettings struct {
 	MountBackend string `json:"backend"`
-	ReadOnly     bool   `json:"readOnly"`
+	ReadOnly     bool   `json:"readOnly,omitempty"`
 	AllowOther   bool   `json:"allowOther"`
 	MountBin     string `json:"mountBin"`
 	NFSBin       string `json:"nfsBin"`
