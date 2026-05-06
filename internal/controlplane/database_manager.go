@@ -1161,7 +1161,25 @@ func (m *DatabaseManager) ListChangelog(ctx context.Context, databaseID, workspa
 	if err != nil {
 		return ChangelogListResponse{}, err
 	}
-	return service.ListChangelog(ctx, route.WorkspaceID, req)
+	response, err := service.ListChangelog(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	m.attachDatabaseToChangelog(&response, route.DatabaseID)
+	return response, nil
+}
+
+func (m *DatabaseManager) ListResolvedChangelog(ctx context.Context, workspace string, req ChangelogListRequest) (ChangelogListResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	response, err := service.ListChangelog(ctx, route.WorkspaceID, req)
+	if err != nil {
+		return ChangelogListResponse{}, err
+	}
+	m.attachDatabaseToChangelog(&response, route.DatabaseID)
+	return response, nil
 }
 
 // GetSessionChangelogSummary returns the per-session rollup (op counts, delta bytes).
@@ -1173,9 +1191,25 @@ func (m *DatabaseManager) GetSessionChangelogSummary(ctx context.Context, databa
 	return service.GetSessionChangelogSummary(ctx, route.WorkspaceID, sessionID)
 }
 
+func (m *DatabaseManager) GetResolvedSessionChangelogSummary(ctx context.Context, workspace, sessionID string) (SessionChangelogSummary, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return SessionChangelogSummary{}, err
+	}
+	return service.GetSessionChangelogSummary(ctx, route.WorkspaceID, sessionID)
+}
+
 // GetPathLastWriter returns the last-writer metadata for a single path.
 func (m *DatabaseManager) GetPathLastWriter(ctx context.Context, databaseID, workspace, path string) (PathLastWriter, error) {
 	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return PathLastWriter{}, err
+	}
+	return service.GetPathLastWriter(ctx, route.WorkspaceID, path)
+}
+
+func (m *DatabaseManager) GetResolvedPathLastWriter(ctx context.Context, workspace, path string) (PathLastWriter, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
 		return PathLastWriter{}, err
 	}

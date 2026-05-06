@@ -815,8 +815,9 @@ func (s *afsMCPServer) toolCheckpointCreate(ctx context.Context, args map[string
 		return nil, err
 	}
 	saved, err := saveAFSWorkspaceOrLiveRoot(ctx, s.cfg, s.store, workspace, checkpointID, false, controlplane.SaveCheckpointFromLiveOptions{
-		Kind:   controlplane.CheckpointKindManual,
-		Source: controlplane.CheckpointSourceMCP,
+		Kind:           controlplane.CheckpointKindManual,
+		Source:         controlplane.CheckpointSourceMCP,
+		AllowUnchanged: true,
 	})
 	if err != nil {
 		return nil, err

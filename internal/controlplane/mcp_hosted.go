@@ -536,8 +536,9 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 				if err = validateHostedMCPName("checkpoint", checkpointID); err == nil {
 					var saved bool
 					saved, err = p.manager.SaveCheckpointFromLiveWithOptions(ctx, p.databaseID, p.workspace, checkpointID, SaveCheckpointFromLiveOptions{
-						Kind:   CheckpointKindManual,
-						Source: CheckpointSourceMCP,
+						Kind:           CheckpointKindManual,
+						Source:         CheckpointSourceMCP,
+						AllowUnchanged: true,
 					})
 					value = map[string]any{
 						"workspace":   p.workspace,

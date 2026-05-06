@@ -764,6 +764,108 @@ func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {
 	}
 }
 
+func TestHTTPWorkspaceFirstChangeRoutesResolveOpaqueWorkspaceID(t *testing.T) {
+	t.Helper()
+
+	ctx := context.Background()
+	manager, databaseID := newTestManager(t)
+	detail, err := manager.GetWorkspace(ctx, databaseID, "repo")
+	if err != nil {
+		t.Fatalf("GetWorkspace() returned error: %v", err)
+	}
+	if !strings.HasPrefix(detail.ID, "ws_") {
+		t.Fatalf("detail.ID = %q, want opaque workspace id", detail.ID)
+	}
+
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("serviceFor() returned error: %v", err)
+	}
+
+	const (
+		sessionID = "sess-workspace-first"
+		path      = "/notes/opaque-route.txt"
+	)
+	WriteChangeEntries(ctx, service.store.rdb, detail.ID, []ChangeEntry{{
+		SessionID:   sessionID,
+		AgentID:     "agt-http",
+		Op:          ChangeOpPut,
+		Path:        path,
+		DeltaBytes:  17,
+		ContentHash: "blob-opaque",
+		Source:      ChangeSourceMCP,
+	}})
+
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/v1/workspaces/" + detail.ID + "/changes?limit=10")
+	if err != nil {
+		t.Fatalf("GET workspace-first changes returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET workspace-first changes status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var changes ChangelogListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&changes); err != nil {
+		t.Fatalf("Decode(workspace-first changes) returned error: %v", err)
+	}
+	if len(changes.Entries) != 1 {
+		t.Fatalf("len(workspace-first changes.entries) = %d, want 1", len(changes.Entries))
+	}
+	if changes.Entries[0].Path != path || changes.Entries[0].SessionID != sessionID {
+		t.Fatalf("workspace-first change entry = %#v, want path/session %q/%q", changes.Entries[0], path, sessionID)
+	}
+	if changes.Entries[0].DatabaseID != databaseID {
+		t.Fatalf("workspace-first change database_id = %q, want %q", changes.Entries[0].DatabaseID, databaseID)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/" + detail.ID + "/path-last?path=" + url.QueryEscape(path))
+	if err != nil {
+		t.Fatalf("GET workspace-first path-last returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET workspace-first path-last status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var last PathLastWriter
+	if err := json.NewDecoder(resp.Body).Decode(&last); err != nil {
+		t.Fatalf("Decode(workspace-first path-last) returned error: %v", err)
+	}
+	if last.Path != path || last.SessionID != sessionID || last.Op != ChangeOpPut || last.ContentHash != "blob-opaque" {
+		t.Fatalf("workspace-first path-last = %#v, want path/session/op/hash %q/%q/%q/%q", last, path, sessionID, ChangeOpPut, "blob-opaque")
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/" + detail.ID + "/sessions/" + sessionID + "/summary")
+	if err != nil {
+		t.Fatalf("GET workspace-first session summary returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET workspace-first session summary status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var summary SessionChangelogSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		t.Fatalf("Decode(workspace-first session summary) returned error: %v", err)
+	}
+	if summary.SessionID != sessionID {
+		t.Fatalf("workspace-first session summary session_id = %q, want %q", summary.SessionID, sessionID)
+	}
+	if summary.OpCounts[ChangeOpPut] != 1 {
+		t.Fatalf("workspace-first session summary put count = %d, want 1", summary.OpCounts[ChangeOpPut])
+	}
+	if summary.DeltaBytes != 17 {
+		t.Fatalf("workspace-first session summary delta_bytes = %d, want 17", summary.DeltaBytes)
+	}
+}
+
 func TestHTTPUpdateWorkspaceRenamesOpaqueWorkspace(t *testing.T) {
 	t.Helper()
 

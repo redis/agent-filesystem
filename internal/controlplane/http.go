@@ -1949,6 +1949,64 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/changes"):
+		workspace := strings.TrimSuffix(workspacePath, "/changes")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		limit, err := queryInt(r, "limit", 100)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		req := ChangelogListRequest{
+			SessionID: strings.TrimSpace(r.URL.Query().Get("session_id")),
+			Path:      strings.TrimSpace(r.URL.Query().Get("path")),
+			Since:     strings.TrimSpace(r.URL.Query().Get("since")),
+			Until:     strings.TrimSpace(r.URL.Query().Get("until")),
+			Limit:     limit,
+			Reverse:   strings.EqualFold(r.URL.Query().Get("direction"), "desc"),
+		}
+		response, err := manager.ListResolvedChangelog(r.Context(), workspace, req)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.Contains(workspacePath, "/sessions/") && strings.HasSuffix(workspacePath, "/summary"):
+		parts := strings.Split(strings.Trim(workspacePath, "/"), "/")
+		if len(parts) != 4 || parts[1] != "sessions" || parts[3] != "summary" {
+			writeError(w, os.ErrNotExist)
+			return
+		}
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.GetResolvedSessionChangelogSummary(r.Context(), parts[0], parts[2])
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/path-last"):
+		workspace := strings.TrimSuffix(workspacePath, "/path-last")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		path := strings.TrimSpace(r.URL.Query().Get("path"))
+		if path == "" {
+			writeError(w, fmt.Errorf("path query parameter is required"))
+			return
+		}
+		response, err := manager.GetResolvedPathLastWriter(r.Context(), workspace, path)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	case strings.HasSuffix(workspacePath, "/mcp-tokens"):
 		workspace := strings.TrimSuffix(workspacePath, "/mcp-tokens")
 		switch r.Method {

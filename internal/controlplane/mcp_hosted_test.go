@@ -79,6 +79,43 @@ func TestHostedMCPFileCreateExclusiveFailsWhenFileExists(t *testing.T) {
 	}
 }
 
+func TestHostedMCPCheckpointCreateAllowsUnchangedWorkspace(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+		profile:    MCPProfileWorkspaceRWCheckpoint,
+	}
+
+	checkpointResult := provider.CallTool(context.Background(), "checkpoint_create", map[string]any{
+		"checkpoint": "unchanged-head",
+	})
+	if checkpointResult.IsError {
+		t.Fatalf("checkpoint_create on unchanged workspace returned error result: %+v", checkpointResult)
+	}
+
+	var checkpointPayload map[string]any
+	if err := decodeHostedStructuredContent(checkpointResult.StructuredContent, &checkpointPayload); err != nil {
+		t.Fatalf("decodeHostedStructuredContent(checkpoint unchanged) returned error: %v", err)
+	}
+	if created, _ := checkpointPayload["created"].(bool); !created {
+		t.Fatalf("checkpoint_create created = %#v, want true", checkpointPayload["created"])
+	}
+	if checkpoint, _ := checkpointPayload["checkpoint"].(string); checkpoint != "unchanged-head" {
+		t.Fatalf("checkpoint_create checkpoint = %#v, want %q", checkpointPayload["checkpoint"], "unchanged-head")
+	}
+
+	restoreResult := provider.CallTool(context.Background(), "checkpoint_restore", map[string]any{
+		"checkpoint": "unchanged-head",
+	})
+	if restoreResult.IsError {
+		t.Fatalf("checkpoint_restore after unchanged create returned error result: %+v", restoreResult)
+	}
+}
+
 func TestHostedMCPWorkspaceVersioningPolicyToolsRoundTrip(t *testing.T) {
 	t.Helper()
 

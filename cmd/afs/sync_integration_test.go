@@ -1316,6 +1316,77 @@ func TestCmdFileCreateExclusiveRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCmdFileCreateExclusiveUsesConfigScopedState(t *testing.T) {
+	t.Helper()
+
+	env := newSyncTestEnv(t)
+	env.startDaemon(t)
+	defer env.stopDaemon()
+
+	oldCfgPathOverride := cfgPathOverride
+	cfgPathOverride = filepath.Join(t.TempDir(), "afs.config.json")
+	t.Cleanup(func() {
+		cfgPathOverride = oldCfgPathOverride
+	})
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeLocal
+	cfg.Mode = modeSync
+	cfg.RedisAddr = env.mr.Addr()
+	cfg.RedisDB = 0
+	cfg.LocalPath = env.localRoot
+	cfg.CurrentWorkspace = env.workspace
+	if err := saveConfig(cfg); err != nil {
+		t.Fatalf("saveConfig() returned error: %v", err)
+	}
+
+	st := state{
+		ProductMode:      productModeLocal,
+		RedisAddr:        env.mr.Addr(),
+		RedisDB:          0,
+		CurrentWorkspace: env.workspace,
+		LocalPath:        env.localRoot,
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+	}
+	if err := saveState(st); err != nil {
+		t.Fatalf("saveState() returned error: %v", err)
+	}
+	if sameConfigPath(statePath(), defaultStatePath()) {
+		t.Fatalf("statePath() = %q, want config-scoped path distinct from legacy %q", statePath(), defaultStatePath())
+	}
+
+	legacyState := state{
+		ProductMode:      productModeLocal,
+		RedisAddr:        "127.0.0.1:1",
+		RedisDB:          99,
+		CurrentWorkspace: "legacy-workspace",
+		LocalPath:        t.TempDir(),
+		Mode:             modeSync,
+		SyncPID:          os.Getpid(),
+	}
+	rawLegacyState, err := json.MarshalIndent(legacyState, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(legacyState) returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(defaultStatePath()), 0o700); err != nil {
+		t.Fatalf("MkdirAll(defaultStatePath dir) returned error: %v", err)
+	}
+	if err := os.WriteFile(defaultStatePath(), rawLegacyState, 0o600); err != nil {
+		t.Fatalf("WriteFile(defaultStatePath) returned error: %v", err)
+	}
+
+	if err := cmdFS([]string{"fs", "create-exclusive", "--content", "agent-c\n", "/tasks/003.claim"}); err != nil {
+		t.Fatalf("cmdFS(create-exclusive with config-scoped state) returned error: %v", err)
+	}
+	assertEventually(t, 3*time.Second, "remote 003.claim", func() bool {
+		return env.remoteExists(t, "tasks/003.claim")
+	})
+	if got := env.readRemoteFile(t, "tasks/003.claim"); got != "agent-c\n" {
+		t.Fatalf("remote content = %q, want %q", got, "agent-c\n")
+	}
+}
+
 // Scenario 1 (burst variant): a batch of files written before startup all
 // land remotely, and the steady-state has no spurious echo loops.
 func TestSyncStartupUploadBurst(t *testing.T) {
