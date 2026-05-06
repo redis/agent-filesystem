@@ -1,7 +1,8 @@
 import { Button, Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import styled from "styled-components";
 import {
@@ -14,8 +15,10 @@ import {
 } from "../../components/afs-kit";
 import { PlugIcon } from "../../components/lucide-icons";
 import { getControlPlaneURL } from "../api/afs";
-import { isControlPlaneScope, type AFSMCPProfile, type AFSMCPToken } from "../types/afs";
+import { isControlPlaneScope } from "../types/afs";
+import type { AFSMCPProfile, AFSMCPToken } from "../types/afs";
 import { findTemplate } from "../../features/templates/templates-data";
+import { compareValues } from "../sort-compare";
 import * as S from "./workspace-table.styles";
 
 type AccessTokenSortField = "name" | "workspaceName" | "lastUsedAt" | "expiresAt" | "createdAt";
@@ -31,18 +34,6 @@ type Props = {
   onRevoke: (token: AFSMCPToken) => void;
   revoking?: boolean;
 };
-
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-  return direction === "asc" ? result : result * -1;
-}
 
 function formatProfile(profile: AFSMCPProfile) {
   switch (profile) {

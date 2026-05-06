@@ -1,11 +1,6 @@
 import { Button, Select } from "@redis-ui/components";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import styled from "styled-components";
 import {
@@ -23,20 +18,15 @@ import {
 } from "../../components/afs-kit";
 import { SurfaceCard } from "../../components/card-shell";
 import { getControlPlaneURL } from "../../foundation/api/afs";
-import {
-  type AFSDatabaseScopeRecord,
-  useDatabaseScope,
-} from "../../foundation/database-scope";
+import { useDatabaseScope } from "../../foundation/database-scope";
+import type { AFSDatabaseScopeRecord } from "../../foundation/database-scope";
 import {
   useCreateMCPAccessTokenMutation,
   useCreateWorkspaceMutation,
   useImportLocalMutation,
 } from "../../foundation/hooks/use-afs";
-import {
-  findTemplate,
-  type Template,
-  type TemplateSeedFile,
-} from "../templates/templates-data";
+import { findTemplate } from "../templates/templates-data";
+import type { Template, TemplateSeedFile } from "../templates/templates-data";
 
 type SeedMode = "blank" | "import";
 type View = "chooser" | "template-form";
@@ -458,7 +448,7 @@ export function CreateWorkspaceDialog({
                   label: `${database.displayName || database.databaseName}${database.isDefault ? " (default)" : ""}`,
                 }))}
                 value={databaseId}
-                onChange={(next) => setDatabaseId(next as string)}
+                onChange={(next) => setDatabaseId(next)}
               />
             </Field>
           ) : null}
@@ -589,7 +579,7 @@ export function CreateWorkspaceDialog({
                 label: `${database.displayName || database.databaseName}${database.isDefault ? " (default)" : ""}`,
               }))}
               value={databaseId}
-              onChange={(next) => setDatabaseId(next as string)}
+              onChange={(next) => setDatabaseId(next)}
             />
           </Field>
         ) : null}

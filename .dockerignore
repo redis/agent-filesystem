@@ -10,10 +10,6 @@ __pycache__/
 
 # Local build artifacts
 /afs
-/afs-server
-/redis-qmd
-/module/*.so
-/module/*.xo
 /mount/agent-filesystem-mount
 /mount/agent-filesystem-nfs
 /sandbox/sandbox
@@ -33,6 +29,5 @@ __pycache__/
 afs.config.json
 afs.databases.json
 
-# Retired root note/artifact folders
+# Retired root note folder; plans/ stays in the build context.
 /tasks
-/plans

@@ -21,7 +21,7 @@ Both ramps should converge on the same steady state:
 
 As of 2026-04-17, the hosted production deploy now has these pieces in place:
 
-- Vercel preview deploys boot from [main.go](/Users/rowantrollope/git/agent-filesystem/deploy/vercel/main.go)
+- Vercel preview deploys boot from [main.go](../deploy/vercel/main.go)
 - control-plane catalog uses Neon/Postgres in hosted mode
 - workspace data plane uses Redis Cloud via `REDIS_URL`
 - first-run hosted bootstrap auto-seeds a managed database profile when the
@@ -161,8 +161,7 @@ The next major milestone is:
 4. workspace ownership and authorization checks
 5. browser-authenticated CLI handoff
 
-See [auth-plan.md](/Users/rowantrollope/git/agent-filesystem/deploy/vercel/auth-plan.md)
-for the recommended hosted auth direction.
+See [cloud-auth.md](cloud-auth.md) for the recommended hosted auth direction.
 
 Important deployment rule:
 

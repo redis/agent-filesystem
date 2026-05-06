@@ -2,7 +2,8 @@ import type { ReactNode } from "react";
 import styled from "styled-components";
 import { useStoredViewMode } from "../../foundation/hooks/use-stored-view-mode";
 import { SiteAgentPane } from "./PublicAgentPane";
-import { SiteModeContext, type SiteMode } from "./site-mode-context";
+import { SiteModeContext } from "./site-mode-context";
+import type { SiteMode } from "./site-mode-context";
 import { SiteModeSwitch } from "./SiteModeSwitch";
 
 export function SiteModeFrame({ children }: { children: ReactNode }) {

@@ -24,6 +24,7 @@ import {
   useRestoreSavepointMutation,
   useWorkspaceDiff,
 } from "../../foundation/hooks/use-afs";
+import { compareValues } from "../../foundation/sort-compare";
 import { shortDateTime } from "../../foundation/time-format";
 import * as S from "../../foundation/tables/workspace-table.styles";
 import { getActiveWorkspaceView } from "../../foundation/workspace-browser-views";
@@ -388,19 +389,6 @@ export function CheckpointsTab({ workspace, onBrowserViewChange, onTabChange }: 
       ) : null}
     </>
   );
-}
-
-function compareValues(
-  left: string | number,
-  right: string | number,
-  direction: "asc" | "desc",
-) {
-  const result =
-    typeof left === "number" && typeof right === "number"
-      ? left - right
-      : String(left).localeCompare(String(right));
-
-  return direction === "asc" ? result : result * -1;
 }
 
 function checkpointSortValue(savepoint: AFSSavepoint, field: CheckpointSortField): string | number {

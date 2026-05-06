@@ -26,7 +26,8 @@ import {
   useWorkspaceSummaries,
 } from "../foundation/hooks/use-afs";
 import { AccessTokensTable } from "../foundation/tables/access-tokens-table";
-import { isControlPlaneScope, type AFSMCPToken } from "../foundation/types/afs";
+import { isControlPlaneScope } from "../foundation/types/afs";
+import type { AFSMCPToken } from "../foundation/types/afs";
 import { useDrawerCommands } from "../foundation/drawer-context";
 import type { CommandsDrawerConfig } from "../foundation/drawer-context";
 

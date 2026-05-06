@@ -1,6 +1,6 @@
 import type { ComponentType, SVGProps } from "react";
 import type { MonochromeIconProps } from "@redis-ui/icons";
-import { useTheme } from "@redislabsdev/redis-ui-styles";
+import { useTheme } from "@redis-ui/styles";
 import {
   Bell,
   BookOpen,

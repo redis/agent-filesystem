@@ -51,7 +51,10 @@ func (fh *FileHandle) Write(ctx context.Context, data []byte, off int64) (uint32
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
 
-	if err := fh.client.WriteInodeAt(ctx, fh.inode, data, off); err != nil {
+	// Use *AtPath so the per-path attribute cache is updated in place rather
+	// than wiped. Without this, every FUSE write triggered a whole-cache
+	// invalidatePrefix("/") inside finishRangeWriteCache.
+	if err := fh.client.WriteInodeAtPath(ctx, fh.inode, fh.path, data, off); err != nil {
 		return 0, mapError(err)
 	}
 	fh.node.root().invalidatePath(fh.path)

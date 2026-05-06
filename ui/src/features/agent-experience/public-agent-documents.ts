@@ -1,4 +1,5 @@
-import { docsTopicById, docsTopics, type DocsTopic, type DocsTopicId } from "../docs/docs-topics";
+import { docsTopicById, docsTopics } from "../docs/docs-topics";
+import type { DocsTopic, DocsTopicId } from "../docs/docs-topics";
 import { bottomNavigationItems, navigationItems, resolveNavigationTitleParts } from "../../layout/navigation-items";
 import { publicNavItems, publicRepoLink } from "../../layout/public-navigation";
 import { canonicalWorkspaceName, displayWorkspaceName } from "../../foundation/workspace-display";

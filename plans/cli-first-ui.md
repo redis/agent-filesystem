@@ -69,18 +69,6 @@ These ship into `internal/controlplane/` independently. The inspector tolerates 
 - [ ] SSE on `/v1/activity` and `/v1/sessions`. ~3 days each.
 - [ ] `POST /v1/auth/exchange` for same-origin Clerk → token bridge. ~2 days.
 
-### Phase 4 — Embedded Console (abandoned)
-
-Tried to ship a Redis-Insight-style embedded terminal on the Inspector page (built and removed 2026-05-02). Strict-CLI-only commands, ghost-text autocomplete, plain-text output. Output was technically correct but the result didn't earn its place — felt like a half-shell rather than the protagonist. Removed in full.
-
-If we revisit: rather than partial-shell-in-the-browser, lean into the real CLI from a dedicated route (e.g. an inline-rendered `xterm.js` connected to a websocket-backed PTY running on the control plane in a sandbox). That would be a real terminal, not an emulation. Not on the current branch.
-
-### Phase 5 — Backend contracts (parallel, 2–3 weeks)
-
-The contracts surfaced by `agent-site/` need to land in `internal/controlplane/`. These are independent of the UI repositioning but make the inspector + console more useful as they ship:
-
-- Receipts on changelog stream, `/why/:action_id`, ETag/If-Match middleware, X-AFS-Cost middleware, X-AFS-DryRun, SSE on `/v1/activity`, `POST /v1/auth/exchange`. (See earlier plan for details.)
-
 ### Phase 6 — Cutover (3–4 days)
 
 - [ ] Final demo of new `ui/` vs old `ui/` (worktree) — confirm CLI-first feel
@@ -95,6 +83,7 @@ The contracts surfaced by `agent-site/` need to land in `internal/controlplane/`
 
 ## Decisions / Blockers
 
+- **Embedded Console attempt — abandoned 2026-05-02.** Tried a Redis-Insight-style embedded terminal on the Inspector page: strict-CLI-only commands, ghost-text autocomplete, plain-text output. Output was technically correct but the result didn't earn its place — felt like a half-shell rather than the protagonist. Removed in full. If we revisit, lean into the real CLI from a dedicated route (e.g. an inline-rendered `xterm.js` connected to a websocket-backed PTY running on the control plane in a sandbox) — a real terminal, not an emulation. Not on the current branch.
 - **Branch over parallel directory** — decided 2026-05-01. Reasons: avoid duplicated Clerk/router/query plumbing; avoid maintaining 3 UIs during transition; PRs review as refactor diffs; cutover is just `git merge` not a directory rename. Side-by-side need is met by `git worktree add ../afs-main main`.
 - **Inspector path** — leaning `/inspect` over `/dashboard` or `/`. Verb-y, observability-honest. Decide before Phase 4.
 - **First-run experience** — leaning toward "your CLI hasn't done anything yet" hero (no auto-provisioned starter workspace) to reinforce CLI-first story on day one. Open question.

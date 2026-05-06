@@ -1,9 +1,10 @@
 # Redis Array Backend
 
-Status: active
+Status: archived
 Owner: codex
 Created: 2026-05-05
 Updated: 2026-05-05
+Archived: 2026-05-05
 
 ## Goal
 
