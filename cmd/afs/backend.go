@@ -119,6 +119,7 @@ func rewriteManagedRedisAddrForLocalhost(controlPlaneURL, redisAddr string) stri
 type afsControlPlane interface {
 	ListWorkspaceSummaries(ctx context.Context) (controlplane.WorkspaceListResponse, error)
 	GetWorkspace(ctx context.Context, workspace string) (controlplane.WorkspaceDetail, error)
+	GetWorkspaceConfig(ctx context.Context, workspace string) (controlplane.WorkspaceConfig, error)
 	GetWorkspaceVersioningPolicy(ctx context.Context, workspace string) (controlplane.WorkspaceVersioningPolicy, error)
 	GetFileHistory(ctx context.Context, workspace, rawPath string, newestFirst bool) (controlplane.FileHistoryResponse, error)
 	GetFileHistoryPage(ctx context.Context, workspace string, req controlplane.FileHistoryRequest) (controlplane.FileHistoryResponse, error)
@@ -129,6 +130,7 @@ type afsControlPlane interface {
 	UndeleteFileVersion(ctx context.Context, workspace, rawPath string, selector controlplane.FileVersionSelector) (controlplane.FileVersionUndeleteResponse, error)
 	CreateWorkspace(ctx context.Context, input controlplane.CreateWorkspaceRequest) (controlplane.WorkspaceDetail, error)
 	ImportWorkspace(ctx context.Context, input controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error)
+	UpdateWorkspaceConfig(ctx context.Context, workspace string, cfg controlplane.WorkspaceConfig) (controlplane.WorkspaceConfig, error)
 	UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error)
 	DeleteWorkspace(ctx context.Context, workspace string) error
 	CreateWorkspaceSession(ctx context.Context, workspace string, input controlplane.CreateWorkspaceSessionRequest) (controlplane.WorkspaceSession, error)

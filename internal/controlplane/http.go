@@ -1378,6 +1378,31 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/config"):
+		workspace := strings.TrimSuffix(workspacePath, "/config")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetWorkspaceConfig(r.Context(), databaseID, workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input WorkspaceConfig
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateWorkspaceConfig(r.Context(), databaseID, workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
 	case strings.HasSuffix(workspacePath, "/versioning"):
 		workspace := strings.TrimSuffix(workspacePath, "/versioning")
 		switch r.Method {
@@ -1875,6 +1900,31 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/config"):
+		workspace := strings.TrimSuffix(workspacePath, "/config")
+		switch r.Method {
+		case http.MethodGet:
+			response, err := manager.GetResolvedWorkspaceConfig(r.Context(), workspace)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		case http.MethodPut:
+			var input WorkspaceConfig
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+			response, err := manager.UpdateResolvedWorkspaceConfig(r.Context(), workspace, input)
+			if err != nil {
+				writeError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, response)
+		default:
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+		}
 	case strings.HasSuffix(workspacePath, "/versioning"):
 		workspace := strings.TrimSuffix(workspacePath, "/versioning")
 		switch r.Method {

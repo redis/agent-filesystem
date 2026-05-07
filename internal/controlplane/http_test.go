@@ -534,6 +534,57 @@ func TestHTTPWorkspaceVersioningPolicyRoutes(t *testing.T) {
 	}
 }
 
+func TestHTTPWorkspaceConfigRoutes(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	payload := `{"versioning":{"mode":"all"},"query":{"embeddings":{"enabled":true,"model":"embeddinggemma","chunk_strategy":"auto"}}}`
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/v1/databases/"+databaseID+"/workspaces/repo/config", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("NewRequest(PUT scoped config) returned error: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PUT scoped workspace config returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("PUT scoped workspace config status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var updated WorkspaceConfig
+	if err := json.NewDecoder(resp.Body).Decode(&updated); err != nil {
+		t.Fatalf("Decode(updated scoped config) returned error: %v", err)
+	}
+	if updated.Versioning.Mode != WorkspaceVersioningModeAll {
+		t.Fatalf("updated versioning mode = %q, want %q", updated.Versioning.Mode, WorkspaceVersioningModeAll)
+	}
+	if !updated.Query.Embeddings.Enabled || updated.Query.Embeddings.Model != "embeddinggemma" {
+		t.Fatalf("updated query embeddings = %+v, want enabled embeddinggemma", updated.Query.Embeddings)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/repo/config")
+	if err != nil {
+		t.Fatalf("GET resolved workspace config returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET resolved workspace config status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var resolved WorkspaceConfig
+	if err := json.NewDecoder(resp.Body).Decode(&resolved); err != nil {
+		t.Fatalf("Decode(resolved config) returned error: %v", err)
+	}
+	if !reflect.DeepEqual(resolved, updated) {
+		t.Fatalf("resolved config = %+v, want %+v", resolved, updated)
+	}
+}
+
 func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {
 	t.Helper()
 

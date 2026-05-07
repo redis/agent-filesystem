@@ -465,6 +465,10 @@ func (s *Service) GetWorkspaceVersioningPolicy(ctx context.Context, workspace st
 	return s.store.GetWorkspaceVersioningPolicy(ctx, workspace)
 }
 
+func (s *Service) GetWorkspaceConfig(ctx context.Context, workspace string) (WorkspaceConfig, error) {
+	return s.store.GetWorkspaceConfig(ctx, workspace)
+}
+
 func (s *Service) UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy WorkspaceVersioningPolicy) (WorkspaceVersioningPolicy, error) {
 	normalized := NormalizeWorkspaceVersioningPolicy(policy)
 	if err := ValidateWorkspaceVersioningPolicy(normalized); err != nil {
@@ -472,6 +476,17 @@ func (s *Service) UpdateWorkspaceVersioningPolicy(ctx context.Context, workspace
 	}
 	if err := s.store.PutWorkspaceVersioningPolicy(ctx, workspace, normalized); err != nil {
 		return WorkspaceVersioningPolicy{}, err
+	}
+	return normalized, nil
+}
+
+func (s *Service) UpdateWorkspaceConfig(ctx context.Context, workspace string, cfg WorkspaceConfig) (WorkspaceConfig, error) {
+	normalized := NormalizeWorkspaceConfig(cfg)
+	if err := ValidateWorkspaceConfig(normalized); err != nil {
+		return WorkspaceConfig{}, err
+	}
+	if err := s.store.PutWorkspaceConfig(ctx, workspace, normalized); err != nil {
+		return WorkspaceConfig{}, err
 	}
 	return normalized, nil
 }

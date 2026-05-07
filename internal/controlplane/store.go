@@ -298,6 +298,48 @@ func (s *Store) GetWorkspaceMeta(ctx context.Context, workspace string) (Workspa
 	return meta, err
 }
 
+func (s *Store) PutWorkspaceConfig(ctx context.Context, workspace string, cfg WorkspaceConfig) error {
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return err
+	}
+	normalized := NormalizeWorkspaceConfig(cfg)
+	if err := ValidateWorkspaceConfig(normalized); err != nil {
+		return err
+	}
+	if err := s.PutWorkspaceVersioningPolicy(ctx, storageID, normalized.Versioning); err != nil {
+		return err
+	}
+	record := workspaceConfigRecord{Query: normalized.Query}
+	return setJSON(ctx, s.rdb, workspaceConfigKey(storageID), record)
+}
+
+func (s *Store) GetWorkspaceConfig(ctx context.Context, workspace string) (WorkspaceConfig, error) {
+	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	cfg := DefaultWorkspaceConfig()
+	policy, err := s.GetWorkspaceVersioningPolicy(ctx, storageID)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	cfg.Versioning = policy
+	record, err := getJSON[workspaceConfigRecord](ctx, s.rdb, workspaceConfigKey(storageID))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return NormalizeWorkspaceConfig(cfg), nil
+		}
+		return WorkspaceConfig{}, err
+	}
+	cfg.Query = record.Query
+	normalized := NormalizeWorkspaceConfig(cfg)
+	if err := ValidateWorkspaceConfig(normalized); err != nil {
+		return WorkspaceConfig{}, err
+	}
+	return normalized, nil
+}
+
 func (s *Store) PutWorkspaceVersioningPolicy(ctx context.Context, workspace string, policy WorkspaceVersioningPolicy) error {
 	_, storageID, err := s.resolveWorkspaceMeta(ctx, workspace)
 	if err != nil {
@@ -865,8 +907,16 @@ func WorkspaceVersioningPolicyKey(workspace string) string {
 	return workspaceVersioningPolicyKey(workspace)
 }
 
+func WorkspaceConfigKey(workspace string) string {
+	return workspaceConfigKey(workspace)
+}
+
 func workspaceMetaKey(workspace string) string {
 	return fmt.Sprintf("afs:{%s}:workspace:meta", workspace)
+}
+
+func workspaceConfigKey(workspace string) string {
+	return fmt.Sprintf("afs:{%s}:workspace:config", workspace)
 }
 
 func workspaceVersioningPolicyKey(workspace string) string {

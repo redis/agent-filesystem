@@ -702,6 +702,14 @@ func (m *DatabaseManager) GetWorkspaceVersioningPolicy(ctx context.Context, data
 	return service.GetWorkspaceVersioningPolicy(ctx, route.WorkspaceID)
 }
 
+func (m *DatabaseManager) GetWorkspaceConfig(ctx context.Context, databaseID, workspace string) (WorkspaceConfig, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	return service.GetWorkspaceConfig(ctx, route.WorkspaceID)
+}
+
 func (m *DatabaseManager) GetResolvedWorkspace(ctx context.Context, workspace string) (workspaceDetail, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -726,6 +734,14 @@ func (m *DatabaseManager) GetResolvedWorkspaceVersioningPolicy(ctx context.Conte
 		return WorkspaceVersioningPolicy{}, err
 	}
 	return service.GetWorkspaceVersioningPolicy(ctx, route.WorkspaceID)
+}
+
+func (m *DatabaseManager) GetResolvedWorkspaceConfig(ctx context.Context, workspace string) (WorkspaceConfig, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	return service.GetWorkspaceConfig(ctx, route.WorkspaceID)
 }
 
 func (m *DatabaseManager) CreateWorkspace(ctx context.Context, databaseID string, input createWorkspaceRequest) (workspaceDetail, error) {
@@ -825,6 +841,14 @@ func (m *DatabaseManager) UpdateWorkspaceVersioningPolicy(ctx context.Context, d
 	return service.UpdateWorkspaceVersioningPolicy(ctx, route.WorkspaceID, policy)
 }
 
+func (m *DatabaseManager) UpdateWorkspaceConfig(ctx context.Context, databaseID, workspace string, cfg WorkspaceConfig) (WorkspaceConfig, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	return service.UpdateWorkspaceConfig(ctx, route.WorkspaceID, cfg)
+}
+
 func (m *DatabaseManager) UpdateResolvedWorkspace(ctx context.Context, workspace string, input updateWorkspaceRequest) (workspaceDetail, error) {
 	service, profile, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -852,6 +876,14 @@ func (m *DatabaseManager) UpdateResolvedWorkspaceVersioningPolicy(ctx context.Co
 		return WorkspaceVersioningPolicy{}, err
 	}
 	return service.UpdateWorkspaceVersioningPolicy(ctx, route.WorkspaceID, policy)
+}
+
+func (m *DatabaseManager) UpdateResolvedWorkspaceConfig(ctx context.Context, workspace string, cfg WorkspaceConfig) (WorkspaceConfig, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceConfig{}, err
+	}
+	return service.UpdateWorkspaceConfig(ctx, route.WorkspaceID, cfg)
 }
 
 func (m *DatabaseManager) DeleteWorkspace(ctx context.Context, databaseID, workspace string) error {

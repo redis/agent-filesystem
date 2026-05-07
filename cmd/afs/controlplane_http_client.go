@@ -150,6 +150,12 @@ func (c *httpControlPlaneClient) GetWorkspace(ctx context.Context, workspace str
 	return out, err
 }
 
+func (c *httpControlPlaneClient) GetWorkspaceConfig(ctx context.Context, workspace string) (controlplane.WorkspaceConfig, error) {
+	var out controlplane.WorkspaceConfig
+	err := c.doJSON(ctx, http.MethodGet, c.workspacePath(workspace, "config"), nil, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) GetWorkspaceVersioningPolicy(ctx context.Context, workspace string) (controlplane.WorkspaceVersioningPolicy, error) {
 	var out controlplane.WorkspaceVersioningPolicy
 	err := c.doJSON(ctx, http.MethodGet, c.workspacePath(workspace, "versioning"), nil, &out, http.StatusOK)
@@ -247,6 +253,12 @@ func (c *httpControlPlaneClient) ImportWorkspace(ctx context.Context, input cont
 		return out, err
 	}
 	err = c.doJSONWithClient(ctx, c.importer, http.MethodPost, c.scopedPathFor(databaseID, "workspaces:import"), input, &out, http.StatusCreated)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) UpdateWorkspaceConfig(ctx context.Context, workspace string, cfg controlplane.WorkspaceConfig) (controlplane.WorkspaceConfig, error) {
+	var out controlplane.WorkspaceConfig
+	err := c.doJSON(ctx, http.MethodPut, c.workspacePath(workspace, "config"), cfg, &out, http.StatusOK)
 	return out, err
 }
 

@@ -1,28 +1,35 @@
-# QMD-Inspired `file_query`
+# QMD-Inspired Workspace Query
 
 Status: active
 Owner: rowan / Codex
 Created: 2026-05-06
-Updated: 2026-05-06
+Updated: 2026-05-07
 
 ## Goal
 
-Add a QMD-inspired workspace query surface that lets humans and agents search
-for ideas, concepts, and implementation intent across AFS workspaces.
+Add QMD-inspired workspace query surfaces that let humans and agents search for
+exact text, semantic meaning, and hybrid conceptual matches across AFS
+workspaces.
 
-`file_query` is intentionally separate from `file_grep`. Grep remains the
-deterministic text-search tool for exact strings, regex, glob matching, counts,
-and line-oriented matches. `file_query` is the ranked retrieval tool for
-lexical search, local vector similarity, typed query documents, and hybrid
-search.
+`file_grep` remains the deterministic text-search tool for exact strings,
+regex, glob matching, counts, and line-oriented matches. `file_query` becomes
+the ranked retrieval tool for lexical search, local vector similarity, typed
+query documents, and hybrid search. `vsearch` is the explicit vector-only CLI
+path.
 
 The design is inspired by Tobi Lutke's QMD command split:
 
 - `qmd search` -> lexical ranked search.
 - `qmd vsearch` -> vector-only semantic search.
-- `qmd query` -> recommended hybrid search.
 - `qmd embed` -> generate or refresh local embeddings.
+- `qmd query` -> recommended hybrid search.
 - QMD typed query documents: `lex:`, `vec:`, `hyde:`, and `intent:`.
+
+AFS keeps the public model crisp:
+
+- `grep` -> exact deterministic evidence.
+- `vsearch` -> semantic vector results.
+- `query` -> recommended hybrid retrieval.
 
 ## Scope
 
@@ -30,16 +37,22 @@ In scope:
 
 - Add a new MCP `file_query` tool for local and hosted MCP.
 - Add CLI commands:
-  - `afs fs <workspace> search`
+  - `afs grep`
+  - `afs vsearch`
+  - `afs query`
   - `afs fs <workspace> vsearch`
   - `afs fs <workspace> query`
-  - `afs fs <workspace> embed`
+- Add a workspace config surface, modeled after top-level `afs config`, so
+  workspace settings use one key-based API instead of one subcommand family per
+  feature.
+- Add vector-index operations under `vsearch` for status, rebuild, and cleanup.
 - Use Redis Search / `FT.SEARCH` as the canonical search backend, with
   `FT.HYBRID` as an optimization where available.
 - Store embeddings as chunk-level Redis HASH documents indexed by RediSearch
   vector fields.
 - Use a local GGUF embedding model by default, matching QMD's local-first
   posture.
+- Let users enable or disable vector embeddings per workspace.
 - Enqueue embedding work from control-plane materialization and sync/mount write
   paths without blocking file writes.
 - Provide status, rebuild, stale-index, and explain/profiling surfaces.
@@ -49,8 +62,7 @@ Out of scope:
 - Replacing or weakening `afs fs grep` / MCP `file_grep`.
 - Redis VectorSets as the primary backend.
 - Hosted cloud embeddings as the default.
-- Full LLM reranking in the first production slice. Keep the interface ready
-  for it, but ship hybrid retrieval first.
+- Full LLM reranking in the first production slice.
 - UI search surfaces. This plan is CLI/MCP/backend-first.
 
 ## User Interface
@@ -65,10 +77,12 @@ afs fs repo grep -E "error|warning" --path /internal
 afs fs repo grep -l -i "disk full"
 ```
 
-Add QMD-style ranked search commands:
+Add QMD-style semantic and hybrid commands:
 
 ```bash
-afs fs repo search "workspace dirty marker"
+afs grep "DirtyHint"
+afs vsearch "how does the UI know a workspace has unsaved changes?"
+afs query "how does auth attach tenant scope to a workspace?"
 afs fs repo vsearch "how does the UI know a workspace has unsaved changes?"
 afs fs repo query "how does auth attach tenant scope to a workspace?"
 ```
@@ -81,7 +95,7 @@ afs fs repo query $'intent: AFS live mount setup\nlex: "mount backend"\nvec: whe
 afs fs repo query $'hyde: The setup command stores a selected live mount backend in local configuration.'
 ```
 
-Shared search options:
+Shared query options:
 
 ```bash
 --path <workspace-path>
@@ -100,17 +114,26 @@ Shared search options:
 --chunk-strategy <regex|auto>
 ```
 
-Embedding commands:
+Workspace config:
 
 ```bash
-afs fs repo embed
-afs fs repo embed --wait
-afs fs repo embed --force
-afs fs repo embed --path /cmd/afs
-afs fs repo embed --model embeddinggemma
-afs fs repo embed --chunk-strategy auto
-afs fs repo embed status
-afs fs repo embed clean
+afs ws config repo list
+afs ws config repo get query.embeddings.enabled
+afs ws config repo set query.embeddings.enabled true
+afs ws config repo set query.embeddings.model embeddinggemma
+afs ws config repo set query.embeddings.chunkStrategy auto
+afs ws config repo unset query.embeddings.model
+```
+
+Vector index operations:
+
+```bash
+afs vsearch status
+afs vsearch rebuild --wait
+afs vsearch rebuild --force
+afs vsearch rebuild --path /cmd/afs
+afs vsearch clean
+afs fs repo vsearch status
 ```
 
 ### MCP
@@ -254,8 +277,8 @@ type Engine interface {
 ```
 
 Testing uses a deterministic fake embedder. If the local model is unavailable,
-`search` still works, `query` falls back to lexical-only results with a clear
-warning, and `vsearch` returns a structured "embeddings unavailable" error.
+`query` falls back to lexical-only results with a clear warning, and `vsearch`
+returns a structured "embeddings unavailable" error.
 
 ### Chunking
 
@@ -309,7 +332,7 @@ vector namespace and enqueue a rebuild.
 
 ### Query Flow
 
-`search`:
+Lexical retrieval inside `query`:
 
 1. Parse lexical query.
 2. Query RediSearch text fields.
@@ -339,9 +362,15 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 
 ### Phase 1 - Contracts and shared query core
 
-- [ ] Add this plan to `plans/`.
+- [x] Add this plan to `plans/`.
+- [x] Add workspace config request/response structs and key validation for
+      `afs ws config <workspace> get|set|list|unset`.
+- [x] Add query embedding config keys:
+      `query.embeddings.enabled`, `query.embeddings.model`, and
+      `query.embeddings.chunkStrategy`.
 - [ ] Define `file_query` MCP request/response structs in a shared package.
-- [ ] Define CLI option structs for `search`, `vsearch`, `query`, and `embed`.
+- [ ] Define CLI option structs for `vsearch`, `query`, and vector-index
+      management.
 - [ ] Implement typed query parsing for `lex:`, `vec:`, `hyde:`, and `intent:`.
 - [ ] Add unit tests for query parsing, invalid mixed query documents, balanced
       quote checks, and line constraints.
@@ -364,7 +393,7 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [ ] Add local GGUF model config and model identity/dimension handling.
 - [ ] Add model cache path and environment overrides.
 - [ ] Add clear errors for missing model/runtime.
-- [ ] Add model-change detection that requires `embed --force`.
+- [ ] Add model-change detection that requires `vsearch rebuild --force`.
 
 ### Phase 4 - Chunking
 
@@ -379,18 +408,22 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 ### Phase 5 - Embedding worker and write hooks
 
 - [ ] Add embedding pending queue and metadata keys.
+- [ ] Gate enqueue/rebuild behavior on workspace config
+      `query.embeddings.enabled`.
 - [ ] Hook control-plane workspace materialization/import to enqueue vector work.
 - [ ] Hook mount/sync write paths to enqueue vector work after content changes.
 - [ ] Add delete and rename handling.
-- [ ] Add `afs fs <workspace> embed` to process pending work.
-- [ ] Add `afs fs <workspace> embed --wait`, `--force`, `status`, and `clean`.
+- [ ] Add `afs fs <workspace> vsearch rebuild` to process pending work.
+- [ ] Add `afs fs <workspace> vsearch status`, `rebuild`, and `clean`.
 - [ ] Ensure writes never block on model download or embedding inference.
 
-### Phase 6 - CLI search commands
+### Phase 6 - CLI query commands
 
-- [ ] Add `afs fs <workspace> search`.
+- [ ] Add top-level `afs grep` as the active-workspace shorthand for existing
+      deterministic grep behavior.
 - [ ] Add `afs fs <workspace> vsearch`.
 - [ ] Add `afs fs <workspace> query`.
+- [ ] Add top-level `afs vsearch` and `afs query` active-workspace shorthands.
 - [ ] Support shared output options: `--json`, `--files`, `--md`, `--full`,
       `--line-numbers`, `--explain`, `--limit`, `--all`, and `--min-score`.
 - [ ] Add profile timings similar to `AFS_GREP_PROFILE`.
@@ -428,14 +461,24 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 
 ## In Flight
 
-- Plan created. Implementation not started.
+- First implementation slice landed: `afs ws config <workspace>
+  get|set|unset|list` with JSON output, versioning keys, and query embedding
+  keys.
+- Retired the old `afs ws versioning` CLI path so versioning now follows the
+  workspace config API shape.
 
 ## Decisions / Blockers
 
 - **Separate tool boundary.** `file_query` is a new ranked retrieval surface.
   `file_grep` remains deterministic and line-oriented.
-- **Separate CLI verbs.** Follow QMD with `search`, `vsearch`, `query`, and
-  `embed` rather than one overloaded `search --mode ...` command.
+- **Separate CLI verbs.** Use `grep`, `vsearch`, and `query`: exact evidence,
+  vector-only semantic search, and the recommended hybrid query path.
+- **Vector management is split by responsibility.** Enable, disable, and
+  model/chunk settings live under `afs ws config`; rebuild, status, and clean
+  commands live under `vsearch`.
+- **Workspace settings use one key-based API.** New query/embedding settings
+  should go through `afs ws config <workspace> get|set|list|unset`, not a dedicated
+  `afs ws query` command.
 - **Redis Search first.** Use chunk HASHes plus RediSearch vector fields.
   VectorSets are not the primary backend because AFS needs rich path filters,
   lexical search, hybrid ranking, and explainability.
@@ -452,17 +495,18 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 
 ## Verification
 
-- [ ] `make commands`
-- [ ] Targeted CLI tests under `./cmd/afs/...`
-- [ ] Targeted control-plane tests under `./internal/controlplane/...`
+- [x] `make commands`
+- [x] `make test`
+- [x] Targeted CLI tests under `./cmd/afs/...`
+- [x] Targeted control-plane tests under `./internal/controlplane/...`
 - [ ] Targeted vector/query package unit tests.
 - [ ] `cd mount && go test ./...` after write-hook changes.
 - [ ] MCP local and hosted tool tests pass.
 - [ ] Manual smoke:
 
 ```bash
-afs fs getting-started embed --force --wait
-afs fs getting-started search "workspace"
+afs ws config getting-started set query.embeddings.enabled true
+afs fs getting-started vsearch rebuild --force --wait
 afs fs getting-started vsearch "how do I save a snapshot?"
 afs fs getting-started query "how do checkpoints work?"
 afs fs getting-started query $'lex: checkpoint\nvec: how do I save a snapshot?'

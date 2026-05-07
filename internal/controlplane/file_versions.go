@@ -932,6 +932,13 @@ func (s *Store) CloneFileVersionHistory(ctx context.Context, sourceStorageID, de
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	if config, err := getJSON[workspaceConfigRecord](ctx, s.rdb, workspaceConfigKey(sourceStorageID)); err == nil {
+		if err := setJSON(ctx, s.rdb, workspaceConfigKey(destStorageID), config); err != nil {
+			return err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 
 	pathFileIDs, err := s.rdb.HGetAll(ctx, workspacePathFileIDsKey(sourceStorageID)).Result()
 	if err != nil {

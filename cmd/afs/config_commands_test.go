@@ -925,7 +925,7 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 
 	for _, want := range []string{
 		"workspace <subcommand>",
-		"versioning <get|set>",
+		"config <workspace> <get|set|unset|list>",
 		"default",
 		"set-default <workspace>",
 		"unset-default",
@@ -941,7 +941,7 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 	if strings.Contains(out, "run [workspace]") {
 		t.Fatalf("workspace help output = %q, did not expect removed run subcommand", out)
 	}
-	for _, removed := range []string{"use <workspace>", "current                                      Show"} {
+	for _, removed := range []string{"use <workspace>", "current                                      Show", "versioning <get|set>"} {
 		if strings.Contains(out, removed) {
 			t.Fatalf("workspace help output = %q, did not expect removed subcommand %q", out, removed)
 		}
@@ -968,7 +968,7 @@ func TestCmdWorkspaceRunReportsRemovedCommand(t *testing.T) {
 func TestCmdWorkspaceUseAndCurrentAreNotSupported(t *testing.T) {
 	t.Helper()
 
-	for _, subcommand := range []string{"use", "current"} {
+	for _, subcommand := range []string{"use", "current", "versioning"} {
 		err := cmdWorkspace([]string{"workspace", subcommand})
 		if err == nil {
 			t.Fatalf("cmdWorkspace(%s) returned nil error, want unsupported-command error", subcommand)

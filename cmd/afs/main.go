@@ -109,7 +109,7 @@ func isWorkspaceRootShortcut(command string) bool {
 	switch command {
 	case "mount", "unmount", "create", "list", "clone", "default",
 		"set-default", "unset-default", "info", "import", "fork",
-		"versioning", "delete":
+		"delete":
 		return true
 	default:
 		return false
@@ -142,7 +142,7 @@ func printUsage() {
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sstatus%s             %sshow AFS status and local workspace mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, create, list, clone, defaults, import, fork, versioning%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, create, list, clone, defaults, import, fork, config%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sread, search, and safely write workspace files%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %scp%s (checkpoint)    %screate, list, show, diff, restore%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
@@ -155,7 +155,7 @@ func printUsage() {
 
 	fmt.Fprintf(w, "%sWorkspace Shortcuts:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sOmit \"ws\" for:%s mount, unmount, create, list, clone, default, set-default,\n", dim, reset)
-	fmt.Fprintf(w, "                 unset-default, info, import, fork, versioning, delete\n")
+	fmt.Fprintf(w, "                 unset-default, info, import, fork, delete\n")
 	fmt.Fprintf(w, "  %sExample:%s %s%s mount demo ~/demo%s  %s(same as %s ws mount demo ~/demo)%s\n\n", dim, reset, orange, bin, reset, dim, bin, reset)
 
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)

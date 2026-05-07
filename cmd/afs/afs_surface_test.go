@@ -31,13 +31,13 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	for _, command := range []string{
 		"mount", "unmount", "create", "list", "clone", "default",
 		"set-default", "unset-default", "info", "import", "fork",
-		"versioning", "delete",
+		"delete",
 	} {
 		if !isWorkspaceRootShortcut(command) {
 			t.Fatalf("isWorkspaceRootShortcut(%q) = false, want true", command)
 		}
 	}
-	for _, command := range []string{"status", "fs", "cp", "log", "config", "reset"} {
+	for _, command := range []string{"status", "fs", "cp", "log", "config", "reset", "versioning"} {
 		if isWorkspaceRootShortcut(command) {
 			t.Fatalf("isWorkspaceRootShortcut(%q) = true, want false", command)
 		}
@@ -53,7 +53,7 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	for _, documented := range []string{
 		"Workspace Shortcuts", "mount", "unmount", "create", "list", "clone",
 		"default", "set-default", "unset-default", "info", "import", "fork",
-		"versioning", "delete",
+		"delete",
 	} {
 		if !strings.Contains(out, documented) {
 			t.Fatalf("top-level help should document workspace shortcut %q:\n%s", documented, out)

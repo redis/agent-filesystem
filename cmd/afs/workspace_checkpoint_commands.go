@@ -46,8 +46,8 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceList(args)
 	case "clone":
 		return cmdWorkspaceClone(args)
-	case "versioning":
-		return cmdWorkspaceVersioning(args)
+	case "config":
+		return cmdWorkspaceConfig(args)
 	case "default":
 		return cmdWorkspaceDefault(args)
 	case "set-default":
@@ -1884,7 +1884,7 @@ Subcommands:
   unmount [--delete] [<workspace|directory>]    Unmount a workspace
   create <workspace>                           Create an empty workspace
   list                                         List workspaces
-  versioning <get|set>                         Show or update file versioning policy
+  config <workspace> <get|set|unset|list>      Show or update workspace config
   clone [workspace] <directory>                Clone a workspace to a local folder
   default                                      Show the effective default workspace
   set-default <workspace>                      Save a default workspace for omitted args

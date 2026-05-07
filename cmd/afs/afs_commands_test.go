@@ -28,6 +28,10 @@ func (s stubAFSControlPlane) GetWorkspace(context.Context, string) (controlplane
 	return controlplane.WorkspaceDetail{}, fmt.Errorf("unexpected GetWorkspace call")
 }
 
+func (s stubAFSControlPlane) GetWorkspaceConfig(context.Context, string) (controlplane.WorkspaceConfig, error) {
+	return controlplane.WorkspaceConfig{}, fmt.Errorf("unexpected GetWorkspaceConfig call")
+}
+
 func (s stubAFSControlPlane) GetWorkspaceVersioningPolicy(context.Context, string) (controlplane.WorkspaceVersioningPolicy, error) {
 	return controlplane.WorkspaceVersioningPolicy{}, fmt.Errorf("unexpected GetWorkspaceVersioningPolicy call")
 }
@@ -66,6 +70,10 @@ func (s stubAFSControlPlane) CreateWorkspace(context.Context, controlplane.Creat
 
 func (s stubAFSControlPlane) ImportWorkspace(context.Context, controlplane.ImportWorkspaceRequest) (controlplane.ImportWorkspaceResponse, error) {
 	return controlplane.ImportWorkspaceResponse{}, fmt.Errorf("unexpected ImportWorkspace call")
+}
+
+func (s stubAFSControlPlane) UpdateWorkspaceConfig(context.Context, string, controlplane.WorkspaceConfig) (controlplane.WorkspaceConfig, error) {
+	return controlplane.WorkspaceConfig{}, fmt.Errorf("unexpected UpdateWorkspaceConfig call")
 }
 
 func (s stubAFSControlPlane) UpdateWorkspaceVersioningPolicy(context.Context, string, controlplane.WorkspaceVersioningPolicy) (controlplane.WorkspaceVersioningPolicy, error) {
