@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -93,5 +94,41 @@ func TestWorkspaceCreateSelfHostedUsesDefaultOrExplicitDatabase(t *testing.T) {
 	}
 	if created.DatabaseID != secondaryDatabaseID {
 		t.Fatalf("explicit-created database_id = %q, want %q", created.DatabaseID, secondaryDatabaseID)
+	}
+}
+
+func TestWorkspaceCreateSelfHostedFallsBackWhenConfiguredDatabaseMissing(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = "afs-cloud"
+	saveTempConfig(t, cfg)
+
+	if err := cmdWorkspace([]string{"workspace", "create", "stale-config-created"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	resp, err := http.Get(server.URL + "/v1/workspaces/stale-config-created")
+	if err != nil {
+		t.Fatalf("GET /v1/workspaces/stale-config-created returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET /v1/workspaces/stale-config-created status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+
+	var created struct {
+		DatabaseID string `json:"database_id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("Decode(stale-config-created) returned error: %v", err)
+	}
+	if created.DatabaseID == "" || created.DatabaseID == "afs-cloud" {
+		t.Fatalf("created database_id = %q, want the control-plane database, not stale config", created.DatabaseID)
 	}
 }

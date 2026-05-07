@@ -32,6 +32,7 @@ Primary commands:
 | `afs log` | Read workspace file-change logs and summaries. |
 | `afs config` | Read, persist, and reset local configuration. |
 | `afs mcp` | Start the workspace-first MCP server over stdio. |
+| `afs skill` | Show or install the packaged AFS skill. |
 
 ## Authentication
 
@@ -243,7 +244,7 @@ Subcommands:
 | Command | Meaning |
 | --- | --- |
 | `afs ws create [--database <database>] <workspace>` | Create an empty workspace with an initial checkpoint named `initial`. |
-| `afs ws list` | List workspaces. |
+| `afs ws list [--json]` | List workspaces. |
 | `afs ws default` | Show the saved default and the effective workspace AFS will use for omitted workspace arguments. |
 | `afs ws set-default <workspace>` | Save a default workspace for commands that allow the workspace argument to be omitted. |
 | `afs ws unset-default` | Clear the saved default workspace. |
@@ -427,8 +428,11 @@ Flags:
 | `--all` | Return all results. |
 | `--min-score <num>` | Minimum score. |
 | `--json` | Write JSON output. |
-| `--files` | Show only files. |
+| `--files` | Write QMD-style `#id,score,afs://workspace/path` lines. |
+| `--paths` | Show only matching workspace paths. |
+| `--csv` | Write CSV output. |
 | `--md` | Write Markdown output. |
+| `--xml` | Write XML output. |
 | `--full` | Include full content. |
 | `--line-numbers` | Include line numbers. |
 | `--explain` | Include retrieval explanation when available. |
@@ -444,6 +448,8 @@ Typed query documents are supported on the default `query` mode:
 ```bash
 afs fs repo query $'lex: checkpoint\nvec: how do I save a snapshot?'
 afs fs repo query $'intent: mount setup\nlex: "mount backend"\nhyde: setup stores the selected backend in config'
+afs fs repo query --files "checkpoint recovery"
+afs fs repo query --paths "checkpoint recovery"
 ```
 
 Top-level shortcuts are also available:
@@ -499,6 +505,48 @@ afs log summary <session-id>
 
 ## File Operations
 
+### `afs fs ls`
+
+```bash
+afs fs [workspace] ls [path] [--json|--files]
+```
+
+Lists files under a workspace path. `--json` returns the same workspace/path
+envelope plus tree items. `--files` prints only workspace paths.
+
+### `afs fs get`
+
+```bash
+afs fs [workspace] get <path>[:line] [--from <line>] [-l <lines>] [--line-numbers]
+```
+
+Prints a workspace text file, optionally sliced to a line range. This is the
+QMD-style targeted read surface for agents that need a small part of a file.
+
+Examples:
+
+```bash
+afs fs repo get README.md:120 -l 30
+afs fs repo get docs/guide.md --from 40 -l 10 --line-numbers
+```
+
+### `afs fs multi-get`
+
+```bash
+afs fs [workspace] multi-get <pattern> [-l <lines>] [--max-bytes <bytes>] [--json|--csv|--md|--xml|--files]
+```
+
+Fetches multiple workspace text files by glob or comma-separated path list.
+Default output uses QMD-style file separators. Use structured formats for agent
+consumption.
+
+Examples:
+
+```bash
+afs fs repo multi-get 'docs/*.md' --md
+afs fs repo multi-get README.md,docs/guide.md --json
+```
+
 ### `afs fs create-exclusive`
 
 ```bash
@@ -547,3 +595,24 @@ Example MCP config:
   }
 }
 ```
+
+## Agent Skill
+
+```bash
+afs skill <show|install> [options]
+afs --skill
+```
+
+`afs skill show` prints the packaged AFS skill. `afs --skill` is an alias for
+`afs skill show`.
+
+`afs skill install` installs the packaged skill into `./.agents/skills/afs`.
+Use `afs skill install --global` to install into `~/.agents/skills/afs`.
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--global` | Install into `~/.agents/skills/afs`. |
+| `--yes` | Also create the `.claude/skills/afs` symlink. |
+| `-f`, `--force` | Replace an existing install or symlink. |

@@ -9,6 +9,7 @@ import {
   LifeBuoy,
   LogIn,
   RotateCcw,
+  Search,
   Terminal,
   UserPlus,
 } from "lucide-react";
@@ -27,6 +28,11 @@ const featureCards = [
     title: "Checkpoint useful state",
     icon: RotateCcw,
     body: "File edits update the live workspace immediately. Checkpoints are explicit restore points when the state is worth saving.",
+  },
+  {
+    title: "Search every workspace",
+    icon: Search,
+    body: "RedisSearch and BM25 are built in, so agents can use exact grep evidence or ranked query results without crawling every file first.",
   },
   {
     title: "Fork parallel work",
@@ -97,8 +103,8 @@ export function PublicLandingPage() {
             <span>auto-checkpoint surprises</span>
           </HeroFact>
           <HeroFact>
-            <strong>Redis</strong>
-            <span>stores manifests, blobs, activity</span>
+            <strong>BM25</strong>
+            <span>RedisSearch built into workspace query</span>
           </HeroFact>
         </HeroFacts>
       </HeroSection>
@@ -119,6 +125,8 @@ export function PublicLandingPage() {
           <TerminalLine><Prompt>$</Prompt> afs auth login</TerminalLine>
           <TerminalLine><Prompt>$</Prompt> afs ws mount getting-started ~/getting-started</TerminalLine>
           <TerminalOutput><Ok>ok</Ok> mounted getting-started at ~/getting-started</TerminalOutput>
+          <TerminalLine><Prompt>$</Prompt> afs fs getting-started query "where is auth configured?"</TerminalLine>
+          <TerminalOutput><Info>bm25</Info> RedisSearch ranked matches across workspace files</TerminalOutput>
           <TerminalGap />
           <TerminalComment># repo start</TerminalComment>
           <TerminalLine><Prompt>$</Prompt> git clone https://github.com/redis/agent-filesystem.git</TerminalLine>
@@ -556,9 +564,13 @@ const SectionText = styled.p`
 
 const FeatureGrid = styled.section`
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
   margin-top: 32px;
+
+  @media (max-width: 1180px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 
   @media (max-width: 860px) {
     grid-template-columns: 1fr;

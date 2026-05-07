@@ -64,6 +64,18 @@ vi.mock("../../foundation/hooks/use-afs", () => ({
     isLoading: false,
     isError: false,
   }),
+  useWorkspaceQueryIndexStatus: () => ({
+    data: {
+      state: "ready",
+      keyword: {
+        indexName: "afs:qidx:{workspace-1}:v3",
+        ready: 2,
+        chunks: 4,
+      },
+    },
+    isLoading: false,
+    isError: false,
+  }),
   useUpdateWorkspaceVersioningPolicyMutation: () => ({
     mutateAsync,
     isPending: false,
@@ -103,9 +115,13 @@ describe("SettingsTab versioning controls", () => {
     expect(screen.getByText("db")).toBeInTheDocument();
     expect(screen.getByText("File storage")).toBeInTheDocument();
     expect(screen.getByText("Redis Array")).toBeInTheDocument();
-    expect(screen.getByText("Search index")).toBeInTheDocument();
+    expect(screen.getByText("Exact search index")).toBeInTheDocument();
+    expect(screen.getByText("Search Index")).toBeInTheDocument();
     expect(
       screen.getByText("Search index is ready with 2 indexed documents."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/RedisSearch BM25 query is ready/),
     ).toBeInTheDocument();
     expect(
       screen.getByText("afs:{workspace-1}:search_index_v1"),

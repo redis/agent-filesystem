@@ -168,6 +168,9 @@ The most important implementation seams are:
 
 ## Lessons Learned
 
+- Search/BM25 promotion in the Cloud UI should stay restrained and
+  operational: prefer compact status text in existing workspace and monitor
+  surfaces over extra badge rows or standalone promo cards.
 - Tenant-scoped client routes must run through the same auth middleware as admin
   routes before they resolve workspace names. Otherwise bearer tokens do not
   attach an auth subject and duplicate workspace-name errors can expose
@@ -256,3 +259,5 @@ The most important implementation seams are:
 - Workspace file/query CLI calls use resolved workspace routes under
   `/v1/workspaces/<id>/...`; when adding a scoped database route, add the
   matching resolved route and a regression test for workspace IDs.
+- Do not restart the user's running control plane automatically. Rebuild
+  binaries when needed, but let the user restart `afs-control-plane`.

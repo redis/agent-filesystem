@@ -24,6 +24,9 @@ const (
 	MaxIndexedFileBytes = 1 << 20
 	MaxChunkBytes       = 8 << 10
 	MaxChunkLines       = 120
+	SnippetMaxBytes     = 500
+	SnippetBeforeLines  = 1
+	SnippetAfterLines   = 2
 	ProjectionVersion   = "3"
 
 	StateStale       = "stale"
@@ -307,13 +310,14 @@ func Inspect(ctx context.Context, rdb *redis.Client, fsKey, scopePath string) (S
 	if !ok {
 		status.State = "unavailable"
 	}
-	pending, err := PendingCount(ctx, rdb, fsKey)
+	pendingIDs, err := PendingIDs(ctx, rdb, fsKey)
 	if err != nil {
 		return status, err
 	}
-	status.Pending = pending
+	status.Pending = len(pendingIDs)
 
 	if err := scanFiles(ctx, rdb, fsKey, scopePath, func(fields map[string]string) error {
+		_, isPending := pendingIDs[strings.TrimSpace(fields["id"])]
 		status.Files++
 		status.Chunks += atoi(fields["query_chunk_count"])
 		version := strings.TrimSpace(fields["query_index_version"])
@@ -325,7 +329,9 @@ func Inspect(ctx context.Context, rdb *redis.Client, fsKey, scopePath string) (S
 				status.Unindexed++
 			}
 		case StateStale:
-			status.Stale++
+			if !isPending {
+				status.Stale++
+			}
 		case StateSkipped:
 			if version == ProjectionVersion {
 				status.Skipped++
@@ -639,24 +645,36 @@ func Search(ctx context.Context, rdb *redis.Client, fsKey string, spec SearchSpe
 		if score < opts.MinScore {
 			continue
 		}
-		snippet := doc.Fields["preview"]
+		chunkStartLine := atoi(doc.Fields["start_line"])
+		chunkEndLine := atoi(doc.Fields["end_line"])
+		snippet := doc.Fields["text"]
+		startLine := chunkStartLine
+		endLine := chunkEndLine
+		metadata := map[string]any{
+			"inode_id":     doc.Fields["inode_id"],
+			"content_hash": doc.Fields["content_hash"],
+			"seq":          atoi(doc.Fields["seq"]),
+			"backend":      "redissearch",
+		}
 		if opts.Full {
 			snippet = doc.Fields["text"]
+		} else {
+			focused := extractSnippet(doc.Fields["text"], spec.Positive, chunkStartLine, SnippetMaxBytes)
+			snippet = focused.Text
+			startLine = focused.MatchLine
+			endLine = focused.MatchLine
+			metadata["snippet_start_line"] = focused.StartLine
+			metadata["snippet_end_line"] = focused.EndLine
 		}
 		out = append(out, mcptools.FileQueryResult{
 			Path:        doc.Fields["path"],
 			ChunkID:     doc.ID,
-			StartLine:   atoi(doc.Fields["start_line"]),
-			EndLine:     atoi(doc.Fields["end_line"]),
+			StartLine:   startLine,
+			EndLine:     endLine,
 			Score:       score,
 			Snippet:     snippet,
 			SearchTypes: append([]string(nil), spec.SearchTypes...),
-			Metadata: map[string]any{
-				"inode_id":     doc.Fields["inode_id"],
-				"content_hash": doc.Fields["content_hash"],
-				"seq":          atoi(doc.Fields["seq"]),
-				"backend":      "redissearch",
-			},
+			Metadata:    metadata,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -858,6 +876,26 @@ func PendingCount(ctx context.Context, rdb *redis.Client, fsKey string) (int, er
 	return int(n), err
 }
 
+func PendingIDs(ctx context.Context, rdb *redis.Client, fsKey string) (map[string]struct{}, error) {
+	out := make(map[string]struct{})
+	var cursor uint64
+	for {
+		values, next, err := rdb.SScan(ctx, DirtySetKey(fsKey), cursor, "", 500).Result()
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" {
+				out[value] = struct{}{}
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return out, nil
+		}
+	}
+}
+
 func IndexedPathAncestors(p string) string {
 	trimmed := strings.TrimSpace(normalizePath(p))
 	if trimmed == "" || trimmed == "/" {
@@ -1047,7 +1085,7 @@ func pathInScope(filePath, scopePath string) bool {
 }
 
 func searchReturns(full bool) []redis.FTSearchReturn {
-	fields := []redis.FTSearchReturn{
+	return []redis.FTSearchReturn{
 		{FieldName: "path"},
 		{FieldName: "inode_id"},
 		{FieldName: "content_hash"},
@@ -1055,11 +1093,8 @@ func searchReturns(full bool) []redis.FTSearchReturn {
 		{FieldName: "start_line"},
 		{FieldName: "end_line"},
 		{FieldName: "preview"},
+		{FieldName: "text"},
 	}
-	if full {
-		fields = append(fields, redis.FTSearchReturn{FieldName: "text"})
-	}
-	return fields
 }
 
 func splitLines(text string) []string {
@@ -1074,6 +1109,71 @@ func splitLines(text string) []string {
 
 func previewText(text string) string {
 	return strings.TrimSpace(text)
+}
+
+type snippet struct {
+	Text      string
+	MatchLine int
+	StartLine int
+	EndLine   int
+}
+
+func extractSnippet(text string, terms []string, baseLine, maxBytes int) snippet {
+	lines := splitLines(strings.TrimRight(text, "\n"))
+	if len(lines) == 0 {
+		return snippet{MatchLine: baseLine, StartLine: baseLine, EndLine: baseLine}
+	}
+	bestIndex := 0
+	bestScore := -1
+	for i, line := range lines {
+		score := snippetLineScore(line, terms)
+		if score > bestScore {
+			bestScore = score
+			bestIndex = i
+		}
+	}
+	start := max(0, bestIndex-SnippetBeforeLines)
+	end := min(len(lines), bestIndex+SnippetAfterLines+1)
+	snippetLines := append([]string(nil), lines[start:end]...)
+	snippetText := strings.TrimRight(strings.Join(snippetLines, "\n"), "\n")
+	if maxBytes > 0 && len(snippetText) > maxBytes {
+		snippetText = truncateUTF8(snippetText, maxBytes)
+	}
+	startLine := baseLine + start
+	endLine := baseLine + end - 1
+	return snippet{
+		Text:      snippetText,
+		MatchLine: baseLine + bestIndex,
+		StartLine: startLine,
+		EndLine:   endLine,
+	}
+}
+
+func snippetLineScore(line string, terms []string) int {
+	lower := strings.ToLower(line)
+	score := 0
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		score += strings.Count(lower, term)
+	}
+	return score
+}
+
+func truncateUTF8(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	if maxBytes <= 3 {
+		return strings.Repeat(".", maxBytes)
+	}
+	cut := maxBytes - 3
+	for cut > 0 && !utf8.ValidString(text[:cut]) {
+		cut--
+	}
+	return text[:cut] + "..."
 }
 
 func contentHash(data []byte) string {

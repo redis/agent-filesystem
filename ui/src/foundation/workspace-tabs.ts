@@ -1,9 +1,9 @@
 import { z } from "zod";
 
-export const studioTabValues = ["browse", "checkpoints", "changes", "settings"] as const;
-const studioTabSearchValues = ["browse", "checkpoints", "activity", "changes", "settings"] as const;
+export const studioTabValues = ["browse", "search", "checkpoints", "changes", "settings"] as const;
+const studioTabSearchValues = ["browse", "search", "checkpoints", "activity", "changes", "settings"] as const;
 
-export type StudioTab = (typeof studioTabValues)[number];
+export type StudioTab = (typeof studioTabSearchValues)[number];
 
 export const studioTabSchema = z.enum(studioTabSearchValues);
 

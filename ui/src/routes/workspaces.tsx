@@ -24,12 +24,14 @@ import {
   workspaceSummariesQueryOptions,
 } from "../foundation/hooks/use-afs";
 import {
+  useDatabaseScope,
   useScopedAgents,
   useScopedWorkspaceSummaries,
 } from "../foundation/database-scope";
 import { queryClient } from "../foundation/query-client";
 import { WorkspaceTable } from "../foundation/tables/workspace-table";
 import type { AFSWorkspaceSummary } from "../foundation/types/afs";
+import type { StudioTab } from "../foundation/workspace-tabs";
 import { useDrawer, useDrawerCommands } from "../foundation/drawer-context";
 import type { CommandsDrawerConfig } from "../foundation/drawer-context";
 
@@ -85,6 +87,7 @@ function WorkspacesPage() {
   const router = useRouter();
   const workspacesQuery = useScopedWorkspaceSummaries();
   const agentsQuery = useScopedAgents();
+  const { databases } = useDatabaseScope();
   // Register contextual commands so the global Help button opens this page's
   // workspace command reference. Memoized so the registration is stable.
   const drawerConfig = useMemo(() => WORKSPACE_COMMANDS, []);
@@ -109,6 +112,9 @@ function WorkspacesPage() {
     },
     {},
   );
+  const databaseSearchSupportById = Object.fromEntries(
+    databases.map((database) => [database.id, database.supportsSearch]),
+  );
 
   function openWorkspace(workspace: AFSWorkspaceSummary) {
     void navigate({
@@ -128,7 +134,7 @@ function WorkspacesPage() {
 
   function openWorkspaceTab(
     workspace: AFSWorkspaceSummary,
-    tab: "browse" | "checkpoints" | "changes" | "settings",
+    tab: StudioTab,
   ) {
     void navigate({
       to: "/workspaces/$workspaceId",
@@ -148,6 +154,7 @@ function WorkspacesPage() {
         error={workspacesQuery.isError}
         fillAvailableHeight
         connectedAgentsByWorkspace={connectedAgentsByWorkspace}
+        databaseSearchSupportById={databaseSearchSupportById}
         onOpenWorkspace={openWorkspace}
         onPreviewWorkspace={previewWorkspace}
         onOpenWorkspaceTab={openWorkspaceTab}

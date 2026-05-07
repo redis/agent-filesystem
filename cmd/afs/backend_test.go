@@ -135,6 +135,39 @@ func TestOpenAFSControlPlaneSelfHostedSingleDatabaseStillWorksWithoutConfiguredD
 	}
 }
 
+func TestOpenAFSControlPlaneSelfHostedClearsMissingConfiguredDatabase(t *testing.T) {
+	t.Helper()
+
+	server := newSelfHostedControlPlaneServer(t)
+
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeSelfHosted
+	cfg.URL = server.URL
+	cfg.DatabaseID = "afs-cloud"
+	saveTempConfig(t, cfg)
+
+	loadedCfg, service, closeFn, err := openAFSControlPlane(context.Background())
+	if err != nil {
+		t.Fatalf("openAFSControlPlane() returned error: %v", err)
+	}
+	defer closeFn()
+	if strings.TrimSpace(loadedCfg.DatabaseID) != "" {
+		t.Fatalf("loadedCfg.DatabaseID = %q, want empty after stale configured database is ignored", loadedCfg.DatabaseID)
+	}
+
+	session, err := service.CreateWorkspaceSession(context.Background(), "repo", controlplane.CreateWorkspaceSessionRequest{
+		ClientKind: "sync",
+		Hostname:   "test-host",
+		LocalPath:  "/tmp/repo",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceSession() returned error: %v", err)
+	}
+	if session.DatabaseID == "afs-cloud" || strings.TrimSpace(session.DatabaseID) == "" {
+		t.Fatalf("session database_id = %q, want resolved control-plane database", session.DatabaseID)
+	}
+}
+
 func TestPrepareSyncBootstrapSelfHostedResolvesWorkspaceAcrossDatabases(t *testing.T) {
 	t.Helper()
 

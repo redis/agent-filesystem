@@ -12,6 +12,7 @@ import { useDrawer } from "../foundation/drawer-context";
 import { afsApi } from "../foundation/api/afs";
 import { useAuthSession } from "../foundation/auth-context";
 import { useDatabaseScope, useScopedActivity, useScopedAgents, useScopedWorkspaceSummaries } from "../foundation/database-scope";
+import type { AFSDatabaseScopeRecord } from "../foundation/database-scope";
 import { ActivityTable } from "../foundation/tables/activity-table";
 import type { AFSActivityEvent, AFSAgentSession, AFSWorkspaceSummary } from "../foundation/types/afs";
 import { queryClient } from "../foundation/query-client";
@@ -89,6 +90,7 @@ function OverviewPage() {
     <InspectorView
       workspaces={workspaces}
       agents={agentsQuery.data}
+      databases={databases}
       onChoosePath={handleChoosePath}
     />
   );
@@ -103,10 +105,12 @@ function OverviewPage() {
 function InspectorView({
   workspaces,
   agents,
+  databases,
   onChoosePath,
 }: {
   workspaces: AFSWorkspaceSummary[];
   agents: AFSAgentSession[];
+  databases: AFSDatabaseScopeRecord[];
   onChoosePath: (path: OnboardingPath) => void;
 }) {
   const navigate = useNavigate();
@@ -116,6 +120,7 @@ function InspectorView({
   const hasQuickstartWorkspace = workspaces.some(
     (workspace) => workspace.name === "getting-started",
   );
+  const searchCapability = buildSearchCapability(workspaces, databases);
 
   function openActivity(event: AFSActivityEvent) {
     if (!event.workspaceId) return;
@@ -147,8 +152,8 @@ function InspectorView({
         <ActivityCardHeader>
           <ActivityCardEyebrow>Live activity</ActivityCardEyebrow>
           <ActivityCardSub>
-            What your CLI and agents are doing right now. Tail the full stream
-            on any workspace.
+            Search index: {searchCapability.readiness}. What your CLI and
+            agents are doing right now.
           </ActivityCardSub>
         </ActivityCardHeader>
         <ActivityTable
@@ -177,6 +182,63 @@ function InspectorView({
       </TemplatesLinkCard>
     </PageStack>
   );
+}
+
+function buildSearchCapability(
+  workspaces: AFSWorkspaceSummary[],
+  databases: AFSDatabaseScopeRecord[],
+) {
+  const searchSupportByDatabase = new Map(
+    databases.map((database) => [database.id, database.supportsSearch]),
+  );
+  const knownSearchDatabases = databases.filter(
+    (database) => database.supportsSearch !== undefined,
+  ).length;
+  const readyDatabases = databases.filter(
+    (database) => database.supportsSearch === true && database.isHealthy,
+  ).length;
+  const searchableWorkspaces =
+    knownSearchDatabases > 0
+      ? workspaces.filter(
+          (workspace) => searchSupportByDatabase.get(workspace.databaseId) === true,
+        ).length
+      : null;
+  const workspaceValue =
+    searchableWorkspaces == null ? "checking" : String(searchableWorkspaces);
+  const workspaceLabel =
+    searchableWorkspaces == null
+      ? `${workspaces.length} workspace${workspaces.length === 1 ? "" : "s"} in scope`
+      : `searchable workspace${searchableWorkspaces === 1 ? "" : "s"}`;
+
+  if (readyDatabases > 0) {
+    return {
+      workspaceValue,
+      workspaceLabel,
+      readiness: `${readyDatabases}/${databases.length} Redis DB${
+        databases.length === 1 ? "" : "s"
+      } ready`,
+      detail: "RedisSearch query engine with BM25 ranking",
+      tone: "ready" as const,
+    };
+  }
+
+  if (knownSearchDatabases === 0) {
+    return {
+      workspaceValue,
+      workspaceLabel,
+      readiness: "Checking RedisSearch",
+      detail: "Catalog has not reported search support yet",
+      tone: "checking" as const,
+    };
+  }
+
+  return {
+    workspaceValue,
+    workspaceLabel,
+    readiness: "RedisSearch unavailable",
+    detail: "Exact file tools still work; BM25 needs Search support",
+    tone: "blocked" as const,
+  };
 }
 
 function compareMonitorAgents(a: AFSAgentSession, b: AFSAgentSession) {

@@ -176,6 +176,15 @@ function MCPPage() {
 
       <MCPConnectionPanel />
 
+      <NoticeCard $tone="neutral" role="status">
+        <NoticeTitle>Agent search tools are built in</NoticeTitle>
+        <NoticeBody>
+          Workspace MCP tokens expose file_grep for exact evidence and file_query
+          for RedisSearch BM25 ranked retrieval across Markdown, JSON, logs, and
+          other text files.
+        </NoticeBody>
+      </NoticeCard>
+
       {isFiltered ? (
         <InlineActions>
           <Button

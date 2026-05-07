@@ -50,11 +50,12 @@ type Props = {
   workspace: AFSWorkspaceDetail;
   browserView: AFSWorkspaceView;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
+  onAskWorkspace?: (path: string) => void;
 };
 
 /* ─── Component ──────────────────────────────────────────────────────── */
 
-export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props) {
+export function FilesTab({ workspace, browserView, onBrowserViewChange, onAskWorkspace }: Props) {
   const updateFile = useUpdateWorkspaceFileMutation();
 
   const [currentPath, setCurrentPath] = useState("/");
@@ -179,6 +180,15 @@ export function FilesTab({ workspace, browserView, onBrowserViewChange }: Props)
             })}
           </Breadcrumb>
         </ToolbarLeft>
+        {onAskWorkspace ? (
+          <Button
+            size="medium"
+            variant="secondary-fill"
+            onClick={() => onAskWorkspace(currentPath)}
+          >
+            Ask workspace
+          </Button>
+        ) : null}
       </RepoToolbar>
 
       {/* ─── File table ─── */}

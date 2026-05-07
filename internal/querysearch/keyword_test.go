@@ -58,6 +58,36 @@ func TestRankKeywordTargetsUsesLogicalSnippetFromJSONLRecord(t *testing.T) {
 	}
 }
 
+func TestRankKeywordTargetsUsesFocusedContextWindow(t *testing.T) {
+	spec := KeywordSpecFromRequest(mcptools.FileQueryRequest{Query: "checkpoint"})
+	results := RankKeywordTargets([]Target{
+		{Path: "/docs/guide.md", Content: []byte(strings.Join([]string{
+			"intro",
+			"setup notes",
+			"checkpoint savepoint recovery",
+			"restore workspace",
+			"final note",
+			"extra line",
+		}, "\n"))},
+	}, spec, KeywordOptions{Limit: 10})
+
+	if len(results) != 1 {
+		t.Fatalf("results = %#v, want one hit", results)
+	}
+	want := strings.Join([]string{
+		"setup notes",
+		"checkpoint savepoint recovery",
+		"restore workspace",
+		"final note",
+	}, "\n")
+	if results[0].Snippet != want {
+		t.Fatalf("snippet = %q, want %q", results[0].Snippet, want)
+	}
+	if results[0].Metadata["snippet_start_line"] != 2 || results[0].Metadata["snippet_end_line"] != 5 {
+		t.Fatalf("metadata = %#v, want snippet line range 2-5", results[0].Metadata)
+	}
+}
+
 func TestKeywordSpecFromRequestKeepsAllStopWordNaturalQuery(t *testing.T) {
 	spec := KeywordSpecFromRequest(mcptools.FileQueryRequest{Query: "What is this"})
 	if len(spec.Positive) == 0 {

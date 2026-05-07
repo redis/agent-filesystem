@@ -70,6 +70,10 @@ func cmdFS(args []string) error {
 			return cmdFileShow(fsFileCommandArgs("show", parsed.workspace, parsed.args))
 		}
 		return cmdFSCat(parsed.workspace, parsed.args)
+	case "get":
+		return cmdFSGet(parsed.workspace, parsed.args)
+	case "multi-get":
+		return cmdFSMultiGet(parsed.workspace, parsed.args)
 	case "find":
 		return cmdFSFind(parsed.workspace, parsed.args)
 	case "create-exclusive":
@@ -149,7 +153,7 @@ func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
 
 func isFSSubcommand(command string) bool {
 	switch command {
-	case "ls", "cat", "find", "create-exclusive", "history", "diff", "restore", "undelete", "grep", "query":
+	case "ls", "cat", "get", "multi-get", "find", "create-exclusive", "history", "diff", "restore", "undelete", "grep", "query":
 		return true
 	default:
 		return false
@@ -245,6 +249,8 @@ Read, search, and safely write workspace files.
 Subcommands:
   ls                 List workspace files
   cat                Print a workspace file
+  get                Print a file or line slice
+  multi-get          Fetch several files by glob or comma list
   find               Find workspace paths by name
   grep               Exact line-oriented content search
   query              Ranked workspace query (hybrid by default)
@@ -258,13 +264,15 @@ Examples:
   %s fs demo ls
   %s fs ls
   %s fs demo cat README.md
+  %s fs demo get README.md:10 -l 20
+  %s fs demo multi-get 'docs/*.md' --md
   %s fs demo cat README.md --version <version-id>
   %s fs demo history README.md
   %s fs demo find . -name '*.md' -print
   %s fs demo grep Redis
   %s fs demo query "how do checkpoints work?"
   %s fs demo query --semantic "where is workspace config handled?"
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {

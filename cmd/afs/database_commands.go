@@ -155,23 +155,57 @@ func resolveManagedDatabaseForWrite(ctx context.Context, cfg config, client *htt
 		return resolveDatabaseReference(explicit, response.Items)
 	}
 	if configuredID := strings.TrimSpace(cfg.DatabaseID); configuredID != "" {
-		return resolveDatabaseReference(configuredID, response.Items)
+		database, found, err := findDatabaseReference(configuredID, response.Items)
+		if err != nil {
+			return controlplane.DatabaseRecord{}, err
+		}
+		if found {
+			return database, nil
+		}
+		database, err = selectManagedDatabaseForWrite(client, response.Items, action)
+		if err != nil {
+			return controlplane.DatabaseRecord{}, fmt.Errorf("configured database %q does not exist on control plane at %s; %w", configuredID, client.baseURL, err)
+		}
+		return database, nil
 	}
-	switch len(response.Items) {
+	return selectManagedDatabaseForWrite(client, response.Items, action)
+}
+
+func selectManagedDatabaseForWrite(client *httpControlPlaneClient, items []controlplane.DatabaseRecord, action string) (controlplane.DatabaseRecord, error) {
+	switch len(items) {
 	case 0:
 		return controlplane.DatabaseRecord{}, fmt.Errorf("control plane at %s returned no databases", client.baseURL)
 	case 1:
-		return response.Items[0], nil
+		return items[0], nil
 	}
-	for _, item := range response.Items {
+	for _, item := range items {
 		if item.IsDefault {
 			return item, nil
 		}
 	}
 	if !isInteractiveTerminal() {
-		return controlplane.DatabaseRecord{}, fmt.Errorf("control plane at %s has %d databases and no default database is set; choose one with --database or run '%s database use <id>'", client.baseURL, len(response.Items), filepath.Base(os.Args[0]))
+		return controlplane.DatabaseRecord{}, fmt.Errorf("control plane at %s has %d databases and no default database is set; choose one with --database or run '%s database use <id>'", client.baseURL, len(items), filepath.Base(os.Args[0]))
 	}
-	return promptDatabaseSelection(action, response.Items)
+	return promptDatabaseSelection(action, items)
+}
+
+func resolveManagedDatabaseScope(ctx context.Context, cfg config, client *httpControlPlaneClient) (string, error) {
+	configuredID := strings.TrimSpace(cfg.DatabaseID)
+	if configuredID == "" {
+		return "", nil
+	}
+	response, err := client.listDatabases(ctx)
+	if err != nil {
+		return "", err
+	}
+	database, found, err := findDatabaseReference(configuredID, response.Items)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", nil
+	}
+	return database.ID, nil
 }
 
 func promptDatabaseSelection(action string, items []controlplane.DatabaseRecord) (controlplane.DatabaseRecord, error) {
@@ -237,13 +271,24 @@ func resolvePromptDatabaseChoice(choice string, items []controlplane.DatabaseRec
 }
 
 func resolveDatabaseReference(ref string, items []controlplane.DatabaseRecord) (controlplane.DatabaseRecord, error) {
+	database, found, err := findDatabaseReference(ref, items)
+	if err != nil {
+		return controlplane.DatabaseRecord{}, err
+	}
+	if !found {
+		return controlplane.DatabaseRecord{}, fmt.Errorf("database %q does not exist", strings.TrimSpace(ref))
+	}
+	return database, nil
+}
+
+func findDatabaseReference(ref string, items []controlplane.DatabaseRecord) (controlplane.DatabaseRecord, bool, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return controlplane.DatabaseRecord{}, fmt.Errorf("database is required")
+		return controlplane.DatabaseRecord{}, false, fmt.Errorf("database is required")
 	}
 	for _, item := range items {
 		if item.ID == ref {
-			return item, nil
+			return item, true, nil
 		}
 	}
 
@@ -255,16 +300,16 @@ func resolveDatabaseReference(ref string, items []controlplane.DatabaseRecord) (
 	}
 	switch len(matches) {
 	case 0:
-		return controlplane.DatabaseRecord{}, fmt.Errorf("database %q does not exist", ref)
+		return controlplane.DatabaseRecord{}, false, nil
 	case 1:
-		return matches[0], nil
+		return matches[0], true, nil
 	default:
 		ids := make([]string, 0, len(matches))
 		for _, item := range matches {
 			ids = append(ids, item.ID)
 		}
 		sort.Strings(ids)
-		return controlplane.DatabaseRecord{}, fmt.Errorf("database %q exists multiple times; use a database id instead: %s", ref, strings.Join(ids, ", "))
+		return controlplane.DatabaseRecord{}, false, fmt.Errorf("database %q exists multiple times; use a database id instead: %s", ref, strings.Join(ids, ", "))
 	}
 }
 

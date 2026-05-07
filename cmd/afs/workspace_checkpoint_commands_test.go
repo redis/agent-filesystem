@@ -75,6 +75,29 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 		t.Fatalf("cmdWorkspace(list) output = %q, did not expect checkpoint-count column", listOutput)
 	}
 
+	listJSONOutput, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"workspace", "list", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(list --json) returned error: %v", err)
+	}
+	var listJSON struct {
+		Items []struct {
+			ID       string `json:"id"`
+			Name     string `json:"name"`
+			Selected bool   `json:"selected"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listJSONOutput), &listJSON); err != nil {
+		t.Fatalf("Unmarshal(workspace list json) returned error: %v\n%s", err, listJSONOutput)
+	}
+	if len(listJSON.Items) != 2 {
+		t.Fatalf("workspace list json = %#v, want two workspaces", listJSON)
+	}
+	if listJSON.Items[0].ID == "" || listJSON.Items[0].Name == "" {
+		t.Fatalf("workspace list json = %#v, want ids and names", listJSON)
+	}
+
 	stripped := stripAnsi(listOutput)
 	if !strings.Contains(stripped, "Workspace") || !strings.Contains(stripped, "Mounted") || !strings.Contains(stripped, "Database") || !strings.Contains(stripped, "Updated") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want table headers", listOutput)

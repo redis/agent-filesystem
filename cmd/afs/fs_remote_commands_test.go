@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -88,6 +89,37 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 		}
 	}
 
+	listJSONOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "ls", "--json", "/"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(ls --json) returned error: %v", err)
+	}
+	var listPayload struct {
+		Workspace string `json:"workspace"`
+		Path      string `json:"path"`
+		Items     []struct {
+			Path string `json:"path"`
+			Kind string `json:"kind"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listJSONOutput), &listPayload); err != nil {
+		t.Fatalf("Unmarshal(ls json) returned error: %v\n%s", err, listJSONOutput)
+	}
+	if listPayload.Workspace != "repo" || listPayload.Path != "/" || len(listPayload.Items) == 0 {
+		t.Fatalf("list json = %+v, want repo root entries", listPayload)
+	}
+
+	listFilesOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "ls", "--files", "/"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(ls --files) returned error: %v", err)
+	}
+	if !strings.Contains(listFilesOutput, "/README.md") || !strings.Contains(listFilesOutput, "/notes") {
+		t.Fatalf("cmdFS(ls --files) output = %q, want entry paths", listFilesOutput)
+	}
+
 	catOutput, err := captureStdout(t, func() error {
 		return cmdFS([]string{"fs", "repo", "cat", "notes/todo.md"})
 	})
@@ -96,6 +128,43 @@ func TestFSRemoteCommandsListCatAndFind(t *testing.T) {
 	}
 	if catOutput != "- item\n" {
 		t.Fatalf("cmdFS(cat) output = %q, want todo content", catOutput)
+	}
+
+	getOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "get", "notes/todo.md:1", "-l", "1", "--line-numbers"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(get) returned error: %v", err)
+	}
+	if getOutput != "1: - item\n" {
+		t.Fatalf("cmdFS(get) output = %q, want line-numbered slice", getOutput)
+	}
+
+	multiGetJSONOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "multi-get", "notes/*.md", "-l", "1", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(multi-get --json) returned error: %v", err)
+	}
+	var multiGetPayload []struct {
+		File string `json:"file"`
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(multiGetJSONOutput), &multiGetPayload); err != nil {
+		t.Fatalf("Unmarshal(multi-get json) returned error: %v\n%s", err, multiGetJSONOutput)
+	}
+	if len(multiGetPayload) != 1 || multiGetPayload[0].File != "afs://repo/notes/todo.md" || !strings.Contains(multiGetPayload[0].Body, "- item") {
+		t.Fatalf("multi-get json = %#v, want todo document", multiGetPayload)
+	}
+
+	multiGetFilesOutput, err := captureStdout(t, func() error {
+		return cmdFS([]string{"fs", "repo", "multi-get", "notes/todo.md,README.md", "--files"})
+	})
+	if err != nil {
+		t.Fatalf("cmdFS(multi-get --files) returned error: %v", err)
+	}
+	if !strings.Contains(multiGetFilesOutput, "afs://repo/notes/todo.md") || !strings.Contains(multiGetFilesOutput, "afs://repo/README.md") {
+		t.Fatalf("multi-get files = %q, want afs URIs", multiGetFilesOutput)
 	}
 
 	findOutput, err := captureStdout(t, func() error {

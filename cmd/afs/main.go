@@ -36,6 +36,10 @@ func main() {
 	}
 
 	switch args[0] {
+	case "--skill":
+		if err := cmdSkill([]string{"skill", "show"}); err != nil {
+			fatal(err)
+		}
 	case "auth":
 		if err := cmdAuth(args); err != nil {
 			fatal(err)
@@ -70,6 +74,10 @@ func main() {
 		}
 	case "mcp":
 		if err := cmdMCP(args); err != nil {
+			fatal(err)
+		}
+	case "skill":
+		if err := cmdSkill(args); err != nil {
 			fatal(err)
 		}
 	case "ws":
@@ -159,7 +167,8 @@ func printUsage() {
 	fmt.Fprintf(w, "  %ssetup%s              %sconfigure the default local mode%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sconfig%s             %sget, set, list, unset, reset config%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sdatabase%s           %sadvanced database operations%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %smcp%s                %sstart the MCP server%s\n\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %smcp%s                %sstart the MCP server%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sskill%s              %sshow or install the packaged AFS skill%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "%sWorkspace Shortcuts:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sOmit \"ws\" for:%s mount, unmount, create, list, clone, default, set-default,\n", dim, reset)
@@ -180,6 +189,13 @@ func printUsage() {
 	fmt.Fprintf(w, "  %sFresh setup:%s %s%s auth login%s → %s%s mount getting-started ~/getting-started%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
 	fmt.Fprintf(w, "  %sNew workspace:%s %s%s create demo%s → %s%s mount demo ~/demo%s\n", dim, reset, orange, bin, reset, orange, bin, reset)
 	fmt.Fprintf(w, "  %sImport existing files:%s %s%s import --mount-at-source demo ~/src/demo%s\n\n", dim, reset, orange, bin, reset)
+
+	fmt.Fprintf(w, "%sAI Agents:%s\n", bold, reset)
+	fmt.Fprintf(w, "  - Run `%s mcp` to expose the MCP server (stdio) to agents.\n", bin)
+	fmt.Fprintf(w, "  - `%s skill install` installs the AFS skill into ./.agents/skills/afs.\n", bin)
+	fmt.Fprintf(w, "  - Use `%s skill install --global` for ~/.agents/skills/afs.\n", bin)
+	fmt.Fprintf(w, "  - `%s --skill` is kept as an alias for `%s skill show`.\n", bin, bin)
+	fmt.Fprintf(w, "  - Advanced: `%s mcp --workspace <name> --profile <profile>` scopes agent access.\n\n", bin)
 
 	fmt.Fprintf(w, "%sConfig:%s %s%s%s\n", bold, reset, dim, compactDisplayPath(configPath()), reset)
 }

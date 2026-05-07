@@ -10,6 +10,8 @@ import type {
   AFSDiffEntry,
   AFSEventEntry,
   AFSEventListResponse,
+  AFSFileQueryRequest,
+  AFSFileQueryResponse,
   AFSMCPToken,
   AFSTextDiff,
   CreateSavepointInput,
@@ -35,8 +37,11 @@ import type {
   AFSTreeResponse,
   AFSWorkspace,
   AFSWorkspaceCapabilities,
+  AFSWorkspaceConfig,
   AFSWorkspaceDetail,
   AFSWorkspaceDiffResponse,
+  AFSWorkspaceQueryIndexRebuildResponse,
+  AFSWorkspaceQueryIndexStatus,
   AFSWorkspaceSource,
   AFSWorkspaceSummary,
   AFSWorkspaceVersioningPolicy,
@@ -44,12 +49,17 @@ import type {
   DiffFileVersionsInput,
   GetFileHistoryInput,
   GetFileVersionContentInput,
+  GetWorkspaceConfigInput,
+  GetWorkspaceQueryIndexStatusInput,
   GetWorkspaceVersioningPolicyInput,
+  QueryWorkspaceInput,
+  RebuildWorkspaceQueryIndexInput,
   RestoreSavepointInput,
   SaveDatabaseInput,
   RestoreFileVersionInput,
   UndeleteFileVersionInput,
   UpdateWorkspaceInput,
+  UpdateWorkspaceConfigInput,
   UpdateWorkspaceFileInput,
   UpdateWorkspaceVersioningPolicyInput,
   QuickstartInput,
@@ -65,6 +75,7 @@ import type {
 const STORAGE_KEY = "afs-ui-demo-state-v1";
 const DATABASE_STORAGE_KEY = "afs-ui-demo-databases-v1";
 const VERSIONING_POLICY_STORAGE_KEY = "afs-ui-demo-versioning-policies-v1";
+const WORKSPACE_CONFIG_STORAGE_KEY = "afs-ui-demo-workspace-config-v1";
 const DEMO_DELAY_MS = 120;
 const CLIENT_MODE_OVERRIDE = String(import.meta.env.VITE_AFS_CLIENT_MODE ?? "")
   .trim()
@@ -94,6 +105,12 @@ type AFSClient = {
   updateWorkspaceFile: (
     input: UpdateWorkspaceFileInput,
   ) => Promise<AFSWorkspaceDetail | null>;
+  getWorkspaceConfig: (
+    input: GetWorkspaceConfigInput,
+  ) => Promise<AFSWorkspaceConfig>;
+  updateWorkspaceConfig: (
+    input: UpdateWorkspaceConfigInput,
+  ) => Promise<AFSWorkspaceConfig>;
   getWorkspaceVersioningPolicy: (
     input: GetWorkspaceVersioningPolicyInput,
   ) => Promise<AFSWorkspaceVersioningPolicy>;
@@ -137,6 +154,13 @@ type AFSClient = {
   getWorkspaceDiff: (
     input: GetWorkspaceDiffInput,
   ) => Promise<AFSWorkspaceDiffResponse>;
+  getWorkspaceQueryIndexStatus: (
+    input: GetWorkspaceQueryIndexStatusInput,
+  ) => Promise<AFSWorkspaceQueryIndexStatus>;
+  rebuildWorkspaceQueryIndex: (
+    input: RebuildWorkspaceQueryIndexInput,
+  ) => Promise<AFSWorkspaceQueryIndexRebuildResponse>;
+  queryWorkspace: (input: QueryWorkspaceInput) => Promise<AFSFileQueryResponse>;
   quickstart: (input: QuickstartInput) => Promise<QuickstartResponse>;
   createOnboardingToken: (
     databaseId: string | undefined,
@@ -557,6 +581,96 @@ type HTTPWorkspaceVersioningPolicy = {
   max_age_days?: number;
   max_total_bytes?: number;
   large_file_cutoff_bytes?: number;
+};
+
+type HTTPWorkspaceConfig = {
+  versioning?: HTTPWorkspaceVersioningPolicy;
+  query?: {
+    embeddings?: {
+      enabled?: boolean;
+      model?: string;
+      chunk_strategy?: AFSWorkspaceConfig["query"]["embeddings"]["chunkStrategy"];
+    };
+  };
+};
+
+type HTTPWorkspaceQueryIndexKeywordStatus = {
+  index_name?: string;
+  state?: string;
+  search_available?: boolean;
+  files?: number;
+  ready?: number;
+  pending?: number;
+  stale?: number;
+  skipped?: number;
+  errors?: number;
+  unindexed?: number;
+  chunks?: number;
+};
+
+type HTTPWorkspaceQueryIndexStatus = {
+  workspace?: string;
+  path?: string;
+  state?: string;
+  message?: string;
+  keyword?: HTTPWorkspaceQueryIndexKeywordStatus;
+  embeddings_enabled?: boolean;
+  model?: string;
+  chunk_strategy?: AFSWorkspaceConfig["query"]["embeddings"]["chunkStrategy"];
+};
+
+type HTTPWorkspaceQueryIndexRebuildResponse = {
+  workspace?: string;
+  path?: string;
+  keyword?: {
+    enqueued?: number;
+    waited?: boolean;
+    process?: {
+      processed?: number;
+      indexed?: number;
+      skipped?: number;
+      deleted?: number;
+      errors?: number;
+      pending?: number;
+    };
+    status?: HTTPWorkspaceQueryIndexKeywordStatus;
+  };
+  status?: HTTPWorkspaceQueryIndexStatus;
+  message?: string;
+};
+
+type HTTPFileQuerySearch = {
+  type: "lex" | "vec" | "hyde";
+  query: string;
+};
+
+type HTTPFileQueryResult = {
+  path: string;
+  chunk_id?: string;
+  start_line?: number;
+  end_line?: number;
+  score?: number;
+  snippet?: string;
+  search_types?: string[];
+  metadata?: Record<string, unknown>;
+};
+
+type HTTPFileQueryExplain = {
+  stage?: string;
+  message?: string;
+  values?: Record<string, unknown>;
+};
+
+type HTTPFileQueryResponse = {
+  status?: string;
+  workspace?: string;
+  path?: string;
+  query?: string;
+  searches?: HTTPFileQuerySearch[];
+  intent?: string;
+  results?: HTTPFileQueryResult[];
+  warnings?: string[];
+  explain?: HTTPFileQueryExplain[];
 };
 
 type HTTPFileVersion = {
@@ -1165,6 +1279,21 @@ function normalizeFilePath(value: string) {
   return `/${trimmed.replace(/^\/+/, "")}`;
 }
 
+function snippetForQuery(content: string, terms: string[]) {
+  const compact = content.replace(/\s+/g, " ").trim();
+  if (compact === "") {
+    return "";
+  }
+  const lower = compact.toLowerCase();
+  const firstHit = terms
+    .map((term) => lower.indexOf(term))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0];
+  const start = Math.max(0, (firstHit ?? 0) - 80);
+  const end = Math.min(compact.length, start + 220);
+  return compact.slice(start, end);
+}
+
 function demoFilesForView(
   workspace: AFSWorkspace,
   view: AFSWorkspaceView,
@@ -1738,6 +1867,29 @@ This workspace was created from the AFS Web UI.
     return normalizeWorkspace(requireWorkspace(state, input.workspaceId));
   },
 
+  async getWorkspaceConfig(input: GetWorkspaceConfigInput) {
+    await wait();
+    const configs = loadDemoWorkspaceConfigs();
+    const config = configs[input.workspaceId] ?? defaultWorkspaceConfig();
+    const policies = loadDemoVersioningPolicies();
+    if (policies[input.workspaceId]) {
+      config.versioning = policies[input.workspaceId];
+    }
+    return normalizeWorkspaceConfig(config);
+  },
+
+  async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput) {
+    await wait();
+    const config = normalizeWorkspaceConfig(input.config);
+    const configs = loadDemoWorkspaceConfigs();
+    configs[input.workspaceId] = config;
+    saveDemoWorkspaceConfigs(configs);
+    const policies = loadDemoVersioningPolicies();
+    policies[input.workspaceId] = config.versioning;
+    saveDemoVersioningPolicies(policies);
+    return config;
+  },
+
   async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
     await wait();
     const policies = loadDemoVersioningPolicies();
@@ -1762,6 +1914,118 @@ This workspace was created from the AFS Web UI.
     policies[input.workspaceId] = input.policy;
     saveDemoVersioningPolicies(policies);
     return input.policy;
+  },
+
+  async getWorkspaceQueryIndexStatus(input: GetWorkspaceQueryIndexStatusInput) {
+    await wait();
+    const state = loadDemoState();
+    const workspace = requireWorkspace(state, input.workspaceId);
+    const normalizedPath = normalizeFilePath(input.path ?? "/");
+    const files = workspace.files.filter((file) =>
+      normalizedPath === "/"
+        ? true
+        : normalizeFilePath(file.path).startsWith(normalizedPath),
+    );
+    const chunks = files.reduce(
+      (sum, file) => sum + Math.max(1, Math.ceil(file.content.length / 8000)),
+      0,
+    );
+    const config = await demoAFSClient.getWorkspaceConfig(input);
+    return {
+      workspace: workspace.name,
+      path: normalizedPath,
+      state: "ready",
+      message: "RedisSearch BM25 query index is ready.",
+      keyword: {
+        indexName: `afs:qidx:{${workspace.id}}:v3`,
+        state: "ready",
+        searchAvailable: true,
+        files: files.length,
+        ready: files.length,
+        pending: 0,
+        stale: 0,
+        skipped: 0,
+        errors: 0,
+        unindexed: 0,
+        chunks,
+      },
+      embeddingsEnabled: config.query.embeddings.enabled,
+      model: config.query.embeddings.model,
+      chunkStrategy: config.query.embeddings.chunkStrategy,
+    };
+  },
+
+  async rebuildWorkspaceQueryIndex(input: RebuildWorkspaceQueryIndexInput) {
+    await wait();
+    const status = await demoAFSClient.getWorkspaceQueryIndexStatus(input);
+    return {
+      workspace: status.workspace,
+      path: status.path,
+      keyword: {
+        enqueued: status.keyword.files,
+        waited: input.wait ?? false,
+        process: {
+          processed: status.keyword.files,
+          indexed: status.keyword.ready,
+          skipped: status.keyword.skipped,
+          deleted: 0,
+          errors: status.keyword.errors,
+          pending: 0,
+        },
+        status: status.keyword,
+      },
+      status,
+      message: `Enqueued ${status.keyword.files} file(s) for keyword query indexing.`,
+    };
+  },
+
+  async queryWorkspace(input: QueryWorkspaceInput) {
+    await wait();
+    const state = loadDemoState();
+    const workspace = requireWorkspace(state, input.workspaceId);
+    const query = String(input.request.query ?? "").trim().toLowerCase();
+    const normalizedPath = normalizeFilePath(input.request.path ?? "/");
+    const terms = query.split(/\s+/).filter(Boolean);
+    const files = workspace.files.filter((file) =>
+      normalizedPath === "/"
+        ? true
+        : normalizeFilePath(file.path).startsWith(normalizedPath),
+    );
+    const results = files
+      .map((file) => {
+        const content = file.content.toLowerCase();
+        const pathScore = terms.filter((term) =>
+          file.path.toLowerCase().includes(term),
+        ).length;
+        const contentScore = terms.filter((term) => content.includes(term)).length;
+        return { file, score: pathScore * 2 + contentScore };
+      })
+      .filter((result) => query === "" || result.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, input.request.limit ?? 10)
+      .map(({ file, score }) => ({
+        path: normalizeFilePath(file.path),
+        score: score || 0.1,
+        snippet: snippetForQuery(file.content, terms),
+        searchTypes: [input.request.mode === "keyword" ? "keyword" : "lex"],
+      }));
+    return {
+      status: "ok",
+      workspace: workspace.name,
+      path: normalizedPath,
+      query: input.request.query,
+      results,
+      warnings: [],
+      explain: input.request.explain
+        ? [
+            {
+              stage: "keyword",
+              message: "Demo BM25-style ranked workspace query.",
+              values: { backend: "demo" },
+            },
+          ]
+        : [],
+    };
   },
 
   async getFileHistory(input: GetFileHistoryInput) {
@@ -2245,6 +2509,77 @@ function saveDemoVersioningPolicies(
   window.localStorage.setItem(
     VERSIONING_POLICY_STORAGE_KEY,
     JSON.stringify(policies),
+  );
+}
+
+function defaultWorkspaceConfig(): AFSWorkspaceConfig {
+  return {
+    versioning: {
+      mode: "off",
+      includeGlobs: [],
+      excludeGlobs: [],
+      maxVersionsPerFile: 0,
+      maxAgeDays: 0,
+      maxTotalBytes: 0,
+      largeFileCutoffBytes: 0,
+    },
+    query: {
+      embeddings: {
+        enabled: false,
+        model: "",
+        chunkStrategy: "auto",
+      },
+    },
+  };
+}
+
+function normalizeWorkspaceConfig(input?: Partial<AFSWorkspaceConfig>): AFSWorkspaceConfig {
+  const fallback = defaultWorkspaceConfig();
+  return {
+    versioning: {
+      ...fallback.versioning,
+      ...(input?.versioning ?? {}),
+      includeGlobs: input?.versioning?.includeGlobs ?? [],
+      excludeGlobs: input?.versioning?.excludeGlobs ?? [],
+    },
+    query: {
+      embeddings: {
+        ...fallback.query.embeddings,
+        ...(input?.query?.embeddings ?? {}),
+        chunkStrategy: input?.query?.embeddings?.chunkStrategy || "auto",
+      },
+    },
+  };
+}
+
+function loadDemoWorkspaceConfigs(): Record<string, AFSWorkspaceConfig> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_CONFIG_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as Record<string, Partial<AFSWorkspaceConfig>>;
+    return Object.fromEntries(
+      Object.entries(parsed).map(([workspaceId, config]) => [
+        workspaceId,
+        normalizeWorkspaceConfig(config),
+      ]),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveDemoWorkspaceConfigs(configs: Record<string, AFSWorkspaceConfig>) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(
+    WORKSPACE_CONFIG_STORAGE_KEY,
+    JSON.stringify(configs),
   );
 }
 
@@ -2766,6 +3101,146 @@ function mapWorkspaceVersioningPolicy(
   };
 }
 
+function mapWorkspaceConfig(input: HTTPWorkspaceConfig): AFSWorkspaceConfig {
+  return normalizeWorkspaceConfig({
+    versioning: mapWorkspaceVersioningPolicy(input.versioning ?? {}),
+    query: {
+      embeddings: {
+        enabled: input.query?.embeddings?.enabled ?? false,
+        model: input.query?.embeddings?.model ?? "",
+        chunkStrategy: input.query?.embeddings?.chunk_strategy || "auto",
+      },
+    },
+  });
+}
+
+function workspaceConfigToHTTP(input: AFSWorkspaceConfig): HTTPWorkspaceConfig {
+  return {
+    versioning: {
+      mode: input.versioning.mode,
+      include_globs: input.versioning.includeGlobs,
+      exclude_globs: input.versioning.excludeGlobs,
+      max_versions_per_file: input.versioning.maxVersionsPerFile,
+      max_age_days: input.versioning.maxAgeDays,
+      max_total_bytes: input.versioning.maxTotalBytes,
+      large_file_cutoff_bytes: input.versioning.largeFileCutoffBytes,
+    },
+    query: {
+      embeddings: {
+        enabled: input.query.embeddings.enabled,
+        model: input.query.embeddings.model,
+        chunk_strategy: input.query.embeddings.chunkStrategy || "auto",
+      },
+    },
+  };
+}
+
+function mapWorkspaceQueryIndexKeywordStatus(
+  input: HTTPWorkspaceQueryIndexKeywordStatus | undefined,
+): AFSWorkspaceQueryIndexStatus["keyword"] {
+  return {
+    indexName: input?.index_name ?? "",
+    state: input?.state ?? "missing",
+    searchAvailable: input?.search_available ?? false,
+    files: input?.files ?? 0,
+    ready: input?.ready ?? 0,
+    pending: input?.pending ?? 0,
+    stale: input?.stale ?? 0,
+    skipped: input?.skipped ?? 0,
+    errors: input?.errors ?? 0,
+    unindexed: input?.unindexed ?? 0,
+    chunks: input?.chunks ?? 0,
+  };
+}
+
+function mapWorkspaceQueryIndexStatus(
+  input: HTTPWorkspaceQueryIndexStatus,
+): AFSWorkspaceQueryIndexStatus {
+  return {
+    workspace: input.workspace ?? "",
+    path: input.path ?? "/",
+    state: input.state ?? "missing",
+    message: input.message ?? "",
+    keyword: mapWorkspaceQueryIndexKeywordStatus(input.keyword),
+    embeddingsEnabled: input.embeddings_enabled ?? false,
+    model: input.model ?? "",
+    chunkStrategy: input.chunk_strategy || "auto",
+  };
+}
+
+function mapWorkspaceQueryIndexRebuildResponse(
+  input: HTTPWorkspaceQueryIndexRebuildResponse,
+): AFSWorkspaceQueryIndexRebuildResponse {
+  return {
+    workspace: input.workspace ?? "",
+    path: input.path ?? "/",
+    keyword: {
+      enqueued: input.keyword?.enqueued ?? 0,
+      waited: input.keyword?.waited ?? false,
+      process:
+        input.keyword?.process == null
+          ? undefined
+          : {
+              processed: input.keyword.process.processed ?? 0,
+              indexed: input.keyword.process.indexed ?? 0,
+              skipped: input.keyword.process.skipped ?? 0,
+              deleted: input.keyword.process.deleted ?? 0,
+              errors: input.keyword.process.errors ?? 0,
+              pending: input.keyword.process.pending ?? 0,
+            },
+      status: mapWorkspaceQueryIndexKeywordStatus(input.keyword?.status),
+    },
+    status: mapWorkspaceQueryIndexStatus(input.status ?? {}),
+    message: input.message ?? "",
+  };
+}
+
+function fileQueryRequestToHTTP(input: AFSFileQueryRequest) {
+  return {
+    workspace: input.workspace,
+    path: input.path,
+    mode: input.mode,
+    query: input.query,
+    searches: input.searches,
+    intent: input.intent,
+    limit: input.limit,
+    all: input.all,
+    min_score: input.minScore,
+    full: input.full,
+    candidate_limit: input.candidateLimit,
+    rerank: input.rerank,
+    explain: input.explain,
+    chunk_strategy: input.chunkStrategy,
+  };
+}
+
+function mapFileQueryResponse(input: HTTPFileQueryResponse): AFSFileQueryResponse {
+  return {
+    status: input.status ?? "ok",
+    workspace: input.workspace,
+    path: input.path,
+    query: input.query,
+    searches: input.searches ?? [],
+    intent: input.intent,
+    results: (input.results ?? []).map((result) => ({
+      path: result.path,
+      chunkId: result.chunk_id,
+      startLine: result.start_line,
+      endLine: result.end_line,
+      score: result.score ?? 0,
+      snippet: result.snippet ?? "",
+      searchTypes: result.search_types ?? [],
+      metadata: result.metadata,
+    })),
+    warnings: input.warnings ?? [],
+    explain: (input.explain ?? []).map((entry) => ({
+      stage: entry.stage ?? "",
+      message: entry.message ?? "",
+      values: entry.values,
+    })),
+  };
+}
+
 function mapFileVersion(input: HTTPFileVersion) {
   return {
     versionId: input.version_id,
@@ -3061,6 +3536,26 @@ const httpAFSClient: AFSClient = {
     );
   },
 
+  async getWorkspaceConfig(input: GetWorkspaceConfigInput) {
+    return mapWorkspaceConfig(
+      await requestJSON<HTTPWorkspaceConfig>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/config`,
+      ),
+    );
+  },
+
+  async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput) {
+    return mapWorkspaceConfig(
+      await requestJSON<HTTPWorkspaceConfig>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/config`,
+        {
+          method: "PUT",
+          body: JSON.stringify(workspaceConfigToHTTP(input.config)),
+        },
+      ),
+    );
+  },
+
   async getWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput) {
     return mapWorkspaceVersioningPolicy(
       await requestJSON<HTTPWorkspaceVersioningPolicy>(
@@ -3086,6 +3581,47 @@ const httpAFSClient: AFSClient = {
             max_total_bytes: input.policy.maxTotalBytes,
             large_file_cutoff_bytes: input.policy.largeFileCutoffBytes,
           }),
+        },
+      ),
+    );
+  },
+
+  async getWorkspaceQueryIndexStatus(input: GetWorkspaceQueryIndexStatusInput) {
+    const params = new URLSearchParams();
+    if (input.path?.trim()) {
+      params.set("path", input.path.trim());
+    }
+    const query = params.toString();
+    return mapWorkspaceQueryIndexStatus(
+      await requestJSON<HTTPWorkspaceQueryIndexStatus>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/query/index/status${query ? `?${query}` : ""}`,
+      ),
+    );
+  },
+
+  async rebuildWorkspaceQueryIndex(input: RebuildWorkspaceQueryIndexInput) {
+    return mapWorkspaceQueryIndexRebuildResponse(
+      await requestJSON<HTTPWorkspaceQueryIndexRebuildResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/query/index/rebuild`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            path: input.path,
+            force: input.force,
+            wait: input.wait,
+          }),
+        },
+      ),
+    );
+  },
+
+  async queryWorkspace(input: QueryWorkspaceInput) {
+    return mapFileQueryResponse(
+      await requestJSON<HTTPFileQueryResponse>(
+        `${workspaceBasePath(input.databaseId, input.workspaceId)}/query`,
+        {
+          method: "POST",
+          body: JSON.stringify(fileQueryRequestToHTTP(input.request)),
         },
       ),
     );

@@ -57,6 +57,7 @@ type Props = {
   errorMessage?: string;
   toolbarAction?: ReactNode;
   connectedAgentsByWorkspace?: Record<string, number>;
+  databaseSearchSupportById?: Record<string, boolean | undefined>;
   onOpenWorkspace: (workspace: AFSWorkspaceSummary) => void;
   onPreviewWorkspace?: (workspace: AFSWorkspaceSummary) => void;
   onOpenWorkspaceTab?: (workspace: AFSWorkspaceSummary, tab: StudioTab) => void;
@@ -72,6 +73,12 @@ function workspaceRowKey(workspace: AFSWorkspaceSummary) {
   return `${workspace.databaseId}:${workspace.id}`;
 }
 
+function searchCapabilityLabel(supportsSearch: boolean | undefined) {
+  if (supportsSearch === true) return "BM25 On";
+  if (supportsSearch === false) return "Fallback";
+  return "Search Ready";
+}
+
 export function WorkspaceTable({
   rows,
   loading = false,
@@ -79,6 +86,7 @@ export function WorkspaceTable({
   errorMessage = "Unable to load workspaces. Please retry.",
   toolbarAction,
   connectedAgentsByWorkspace = {},
+  databaseSearchSupportById = {},
   onOpenWorkspace,
   onPreviewWorkspace,
   onOpenWorkspaceTab,
@@ -236,6 +244,16 @@ export function WorkspaceTable({
           ),
         },
         {
+          id: "search",
+          header: "Search",
+          size: 130,
+          enableSorting: false,
+          cell: ({ row }) => {
+            const support = databaseSearchSupportById[row.original.databaseId];
+            return <SearchStatusText>{searchCapabilityLabel(support)}</SearchStatusText>;
+          },
+        },
+        {
           accessorKey: "databaseName",
           header: "Database",
           size: 160,
@@ -287,7 +305,7 @@ export function WorkspaceTable({
             }]
           : []),
       ] as ColumnDef<AFSWorkspaceSummary>[],
-    [connectedAgentsByWorkspace, copiedId, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onPreviewWorkspace, showActionsColumn],
+    [connectedAgentsByWorkspace, copiedId, databaseSearchSupportById, deletingWorkspaceKey, onDeleteWorkspace, onOpenWorkspace, onOpenWorkspaceTab, onPreviewWorkspace, showActionsColumn],
   );
 
   return (
@@ -417,6 +435,9 @@ export function WorkspaceTable({
                       {agentCount} Agent{agentCount !== 1 ? "s" : ""}
                     </S.CardInfoBox>
                     <S.CardInfoBox>
+                      Search: {searchCapabilityLabel(databaseSearchSupportById[ws.databaseId])}
+                    </S.CardInfoBox>
+                    <S.CardInfoBox>
                       {new Date(ws.updatedAt).toLocaleDateString()}
                     </S.CardInfoBox>
                   </S.CardInfoRow>
@@ -440,6 +461,15 @@ export function WorkspaceTable({
                     }}
                   >
                     Checkpoints
+                  </S.CardSecondaryButton>
+                  <S.CardSecondaryButton
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenWorkspaceTab?.(ws, "search");
+                    }}
+                  >
+                    Search
                   </S.CardSecondaryButton>
                 </S.CardButtonRow>
               </S.WorkspaceCard>
@@ -608,6 +638,13 @@ const DatabaseName = styled.span`
   overflow-wrap: anywhere;
   white-space: normal;
   min-width: 0;
+`;
+
+const SearchStatusText = styled.span`
+  color: var(--afs-ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
 `;
 
 const CopyButton = styled.button`

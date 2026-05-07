@@ -200,6 +200,17 @@ func (selfHostedBackend) OpenSession(ctx context.Context, cfg config) (*afsBacke
 	if err != nil {
 		return nil, err
 	}
+	productMode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if productMode == productModeSelfHosted {
+		resolvedDatabaseID, err = resolveManagedDatabaseScope(ctx, cfg, client)
+		if err != nil {
+			return nil, err
+		}
+		client.databaseID = resolvedDatabaseID
+	}
 	cfg.DatabaseID = resolvedDatabaseID
 	return &afsBackendSession{
 		cfg:          cfg,

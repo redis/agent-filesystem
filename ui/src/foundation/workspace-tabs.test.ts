@@ -8,5 +8,6 @@ describe("workspace tabs", () => {
 
   test("schema preserves current tab names", () => {
     expect(studioTabSchema.parse("checkpoints")).toBe("checkpoints");
+    expect(studioTabSchema.parse("search")).toBe("search");
   });
 });

@@ -151,7 +151,7 @@ afs mcp --workspace my-project --profile workspace-rw-checkpoint
 | `afs status` | Show daemon status and local workspace mounts. |
 | `afs ws mount [workspace] [directory]` | Mount a workspace at a local folder. |
 | `afs ws unmount [workspace|directory]` | Unmount a workspace and preserve local files by default. |
-| `afs ws list` | List workspaces. |
+| `afs ws list [--json]` | List workspaces. |
 | `afs ws create <name>` | Create an empty workspace. |
 | `afs ws import [--mount-at-source] <name> <dir>` | Import a local directory into AFS. |
 | `afs ws fork <source> <target>` | Create a second line of work. |
@@ -159,7 +159,11 @@ afs mcp --workspace my-project --profile workspace-rw-checkpoint
 | `afs cp list [workspace]` | List checkpoints. |
 | `afs cp restore [workspace] <name>` | Restore a checkpoint. This overwrites live state. |
 | `afs fs grep <pattern>` | Search workspace files. |
+| `afs fs query <query>` | Ranked conceptual search over workspace files. |
+| `afs fs get <path>[:line] -l <n>` | Read a targeted line slice. |
+| `afs fs multi-get <pattern>` | Fetch multiple files by glob or comma list. |
 | `afs mcp` | Start the workspace-first MCP server over stdio. |
+| `afs skill install` | Install the packaged AFS skill into `./.agents/skills/afs`. |
 
 ## Config Commands
 
@@ -222,6 +226,10 @@ Keyword ranking uses Redis Search BM25 over query chunks when available, then
 falls back to direct content ranking. Use `query --keyword` for keyword-only
 ranking and `query --semantic` only when you specifically need vector-only
 semantic retrieval.
+
+`query --files`, `query --csv`, `query --md`, and `query --xml` provide
+QMD-style output formats for agents. `query --paths` keeps the simple path-only
+output for scripts.
 
 Regex and advanced matching can fall back to traversal. For regex-heavy scans on
 a synced or mounted workspace, local `rg` is often the right tool.

@@ -17,6 +17,7 @@ import { SurfaceCard } from "../../components/card-shell";
 import {
   useUpdateWorkspaceVersioningPolicyMutation,
   useWorkspaceVersioningPolicy,
+  useWorkspaceQueryIndexStatus,
 } from "../../foundation/hooks/use-afs";
 import type {
   AFSMCPToken,
@@ -57,6 +58,11 @@ export function SettingsTab({
   const versioningQuery = useWorkspaceVersioningPolicy({
     databaseId: workspace.databaseId,
     workspaceId: workspace.id,
+  });
+  const queryIndexStatus = useWorkspaceQueryIndexStatus({
+    databaseId: workspace.databaseId,
+    workspaceId: workspace.id,
+    path: "/",
   });
   const updateVersioning = useUpdateWorkspaceVersioningPolicyMutation();
   const [versioningMode, setVersioningMode] = useState<"off" | "all" | "paths">(
@@ -158,7 +164,7 @@ export function SettingsTab({
             ) : null}
             {workspace.searchIndex ? (
               <MetaRow>
-                <MetaLabel>Search index</MetaLabel>
+                <MetaLabel>Exact search index</MetaLabel>
                 <MetaValue>
                   <StorageSummary>
                     <StatusBadge
@@ -176,6 +182,26 @@ export function SettingsTab({
                 </MetaValue>
               </MetaRow>
             ) : null}
+            <MetaRow>
+              <MetaLabel>Search Index</MetaLabel>
+              <MetaValue>
+                <StorageSummary>
+                  <StatusBadge
+                    $tone={queryIndexTone(queryIndexStatus.data?.state)}
+                  >
+                    {queryIndexSummaryLabel(queryIndexStatus.data?.state)}
+                  </StatusBadge>
+                  <StorageText>
+                    {queryIndexStatus.data
+                      ? `RedisSearch BM25 query is ${queryIndexStatus.data.state}. ${queryIndexStatus.data.keyword.ready} file${queryIndexStatus.data.keyword.ready === 1 ? "" : "s"} ready across ${queryIndexStatus.data.keyword.chunks} chunk${queryIndexStatus.data.keyword.chunks === 1 ? "" : "s"}.`
+                      : "AFS is checking the BM25 query index for this workspace."}
+                  </StorageText>
+                  {queryIndexStatus.data?.keyword.indexName ? (
+                    <MonoValue>{queryIndexStatus.data.keyword.indexName}</MonoValue>
+                  ) : null}
+                </StorageSummary>
+              </MetaValue>
+            </MetaRow>
             {workspace.mountedPath ? (
               <MetaRow>
                 <MetaLabel>Mounted path</MetaLabel>
@@ -991,6 +1017,39 @@ function searchIndexTone(
       return "bad";
     default:
       return "neutral";
+  }
+}
+
+function queryIndexTone(
+  state?: string,
+): "good" | "warn" | "neutral" | "bad" {
+  switch (state) {
+    case "ready":
+      return "good";
+    case "indexing":
+    case "needs_rebuild":
+      return "warn";
+    case "error":
+      return "bad";
+    default:
+      return "neutral";
+  }
+}
+
+function queryIndexSummaryLabel(state?: string) {
+  switch (state) {
+    case "ready":
+      return "On";
+    case "indexing":
+      return "Indexing";
+    case "needs_rebuild":
+      return "Needs rebuild";
+    case "unavailable":
+      return "Fallback";
+    case "error":
+      return "Error";
+    default:
+      return "Checking";
   }
 }
 

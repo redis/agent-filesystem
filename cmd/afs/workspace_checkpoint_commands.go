@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -208,7 +210,14 @@ func cmdWorkspaceList(args []string) error {
 		fmt.Fprint(os.Stderr, workspaceListUsageText(filepath.Base(os.Args[0])))
 		return nil
 	}
-	if len(args) != 2 {
+	fs := flag.NewFlagSet("ws list", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var jsonOut bool
+	fs.BoolVar(&jsonOut, "json", false, "write JSON output")
+	if err := fs.Parse(args[2:]); err != nil {
+		return fmt.Errorf("%s", workspaceListUsageText(filepath.Base(os.Args[0])))
+	}
+	if fs.NArg() != 0 {
 		return fmt.Errorf("%s", workspaceListUsageText(filepath.Base(os.Args[0])))
 	}
 
@@ -223,6 +232,13 @@ func cmdWorkspaceList(args []string) error {
 	if err != nil {
 		return err
 	}
+	mounts := workspaceListMounts(workspaces.Items)
+
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(workspaceListJSONResponse(cfg, workspaces.Items, mounts))
+	}
 
 	fmt.Println()
 	fmt.Println(workspaceListTitle(cfg))
@@ -231,10 +247,56 @@ func cmdWorkspaceList(args []string) error {
 		fmt.Println("No workspaces found")
 	} else {
 		headers := []string{"", "Workspace", "Mounted", "Updated", "ID", "Database"}
-		printPlainTable(headers, workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts(workspaces.Items)))
+		printPlainTable(headers, workspaceSummaryTableRows(cfg, workspaces.Items, mounts))
 	}
 	fmt.Println()
 	return nil
+}
+
+type workspaceListJSONItem struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Selected        bool   `json:"selected"`
+	Mounted         string `json:"mounted,omitempty"`
+	UpdatedAt       string `json:"updated_at,omitempty"`
+	DatabaseID      string `json:"database_id,omitempty"`
+	DatabaseName    string `json:"database_name,omitempty"`
+	Status          string `json:"status,omitempty"`
+	FileCount       int    `json:"file_count"`
+	FolderCount     int    `json:"folder_count"`
+	TotalBytes      int64  `json:"total_bytes"`
+	CheckpointCount int    `json:"checkpoint_count"`
+	DraftState      string `json:"draft_state,omitempty"`
+}
+
+func workspaceListJSONResponse(cfg config, items []workspaceSummary, mounts map[string]string) struct {
+	Items []workspaceListJSONItem `json:"items"`
+} {
+	out := struct {
+		Items []workspaceListJSONItem `json:"items"`
+	}{Items: make([]workspaceListJSONItem, 0, len(items))}
+	for _, item := range items {
+		mounted := workspaceListMounted(item, mounts)
+		if mounted == "-" {
+			mounted = ""
+		}
+		out.Items = append(out.Items, workspaceListJSONItem{
+			ID:              item.ID,
+			Name:            item.Name,
+			Selected:        workspaceListSelected(cfg, item),
+			Mounted:         mounted,
+			UpdatedAt:       item.UpdatedAt,
+			DatabaseID:      item.DatabaseID,
+			DatabaseName:    item.DatabaseName,
+			Status:          item.Status,
+			FileCount:       item.FileCount,
+			FolderCount:     item.FolderCount,
+			TotalBytes:      item.TotalBytes,
+			CheckpointCount: item.CheckpointCount,
+			DraftState:      item.DraftState,
+		})
+	}
+	return out
 }
 
 func cmdWorkspaceDefault(args []string) error {
@@ -2010,7 +2072,7 @@ Create an empty workspace with an initial checkpoint named "initial".
 
 func workspaceListUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws list
+  %s ws list [--json]
 
 List workspaces stored in Redis, along with checkpoint counts and creation time.
 `, bin)

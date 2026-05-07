@@ -2,6 +2,7 @@ package queryindex
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -42,8 +43,10 @@ func writeQueryIndexFileWithDirty(t *testing.T, ctx context.Context, rdb *redis.
 	if !dirty {
 		return
 	}
-	if err := rdb.SAdd(ctx, DirtySetKey(fsKey), inodeID).Err(); err != nil {
-		t.Fatalf("SADD dirty: %v", err)
+	pipe := rdb.Pipeline()
+	QueueMarkDirty(ctx, pipe, fsKey, inodeID)
+	if _, err := pipe.Exec(ctx); err != nil {
+		t.Fatalf("QueueMarkDirty: %v", err)
 	}
 }
 
@@ -114,6 +117,41 @@ func TestBuildChunksKeepsJSONLRecordsSeparateAcrossPhysicalLines(t *testing.T) {
 	}
 }
 
+func TestExtractSnippetMatchesQMDWindow(t *testing.T) {
+	text := strings.Join([]string{
+		"intro",
+		"setup notes",
+		"checkpoint savepoint recovery",
+		"restore workspace",
+		"final note",
+		"extra line",
+	}, "\n")
+
+	got := extractSnippet(text, []string{"checkpoint"}, 10, SnippetMaxBytes)
+	if got.MatchLine != 12 || got.StartLine != 11 || got.EndLine != 14 {
+		t.Fatalf("snippet lines = match %d start %d end %d, want 12/11/14", got.MatchLine, got.StartLine, got.EndLine)
+	}
+	want := strings.Join([]string{
+		"setup notes",
+		"checkpoint savepoint recovery",
+		"restore workspace",
+		"final note",
+	}, "\n")
+	if got.Text != want {
+		t.Fatalf("snippet text = %q, want %q", got.Text, want)
+	}
+}
+
+func TestExtractSnippetCapsLongOutput(t *testing.T) {
+	got := extractSnippet("needle "+strings.Repeat("x", SnippetMaxBytes), []string{"needle"}, 1, 80)
+	if len(got.Text) > 80 {
+		t.Fatalf("snippet length = %d, want <= 80", len(got.Text))
+	}
+	if !strings.HasSuffix(got.Text, "...") {
+		t.Fatalf("snippet = %q, want ellipsis", got.Text)
+	}
+}
+
 func TestInspectTreatsOldProjectionVersionAsUnindexed(t *testing.T) {
 	ctx, rdb, fsKey := setupQueryIndexTest(t)
 	writeQueryIndexFileWithDirty(t, ctx, rdb, fsKey, "1", "/docs/guide.md", []byte("existing file content\n"), false)
@@ -148,6 +186,25 @@ func TestInspectAndRebuildBackfillExistingFiles(t *testing.T) {
 	}
 	if rebuild.Enqueued != 1 || rebuild.Process.Indexed != 1 || rebuild.Status.Ready != 1 || rebuild.Status.Unindexed != 0 {
 		t.Fatalf("Rebuild() = %+v, want indexed status", rebuild)
+	}
+}
+
+func TestInspectDoesNotDoubleCountPendingFilesAsStale(t *testing.T) {
+	ctx, rdb, fsKey := setupQueryIndexTest(t)
+	for i := 0; i < 13; i++ {
+		inodeID := strconv.Itoa(i + 1)
+		writeQueryIndexFile(t, ctx, rdb, fsKey, inodeID, "/docs/file-"+inodeID+".md", []byte("pending file content\n"))
+	}
+
+	status, err := Inspect(ctx, rdb, fsKey, "/")
+	if err != nil {
+		t.Fatalf("Inspect() returned error: %v", err)
+	}
+	if status.Pending != 13 {
+		t.Fatalf("Inspect().Pending = %d, want 13", status.Pending)
+	}
+	if status.Stale != 0 {
+		t.Fatalf("Inspect().Stale = %d, want 0 because pending files already describe queued work", status.Stale)
 	}
 }
 

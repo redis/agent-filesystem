@@ -162,6 +162,9 @@ func (s *Service) QueryIndexStatus(ctx context.Context, workspace string, reques
 	if err != nil {
 		return WorkspaceQueryIndexStatus{}, err
 	}
+	if _, err := queryindex.ProcessPending(ctx, s.store.rdb, fsKey, queryindexStatusCatchupLimit); err != nil {
+		return WorkspaceQueryIndexStatus{}, err
+	}
 	keyword, err := queryindex.Inspect(ctx, s.store.rdb, fsKey, queryPath)
 	if err != nil {
 		return WorkspaceQueryIndexStatus{}, err
@@ -189,6 +192,8 @@ func (s *Service) QueryIndexStatus(ctx context.Context, workspace string, reques
 	}
 	return status, nil
 }
+
+const queryindexStatusCatchupLimit = 128
 
 func (s *Service) RebuildQueryIndex(ctx context.Context, workspace string, request WorkspaceQueryIndexRebuildRequest) (WorkspaceQueryIndexRebuildResponse, error) {
 	displayWorkspace := strings.TrimSpace(request.Workspace)

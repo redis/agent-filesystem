@@ -5,8 +5,15 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/redis/agent-filesystem/internal/mcptools"
+)
+
+const (
+	snippetMaxBytes    = 500
+	snippetBeforeLines = 1
+	snippetAfterLines  = 2
 )
 
 // Target is a readable workspace file considered for ranked retrieval.
@@ -77,15 +84,36 @@ func RankKeywordTargets(targets []Target, spec KeywordSpec, opts KeywordOptions)
 		if containsAny(lowerContent, spec.Negative) {
 			continue
 		}
-		score, line, snippet := scoreKeywordContent(target.Path, content, spec.Positive)
+		score, line, logicalSnippet := scoreKeywordContent(target.Path, content, spec.Positive)
 		if score <= 0 || score < opts.MinScore {
 			continue
 		}
 		endLine := line
+		snippet := ""
+		metadata := map[string]any(nil)
 		if opts.Full {
 			snippet = content
 			line = 1
 			endLine = len(splitTextLines(content))
+		} else {
+			focused := extractKeywordSnippet(content, spec.Positive, line, snippetMaxBytes)
+			snippet = focused.Text
+			metadata = map[string]any{
+				"snippet_start_line": focused.StartLine,
+				"snippet_end_line":   focused.EndLine,
+			}
+			logicalSnippet = strings.TrimSpace(logicalSnippet)
+			physicalMatch := physicalLine(content, line)
+			if logicalSnippet != "" &&
+				physicalMatch != "" &&
+				logicalSnippet != physicalMatch &&
+				strings.Contains(physicalMatch, logicalSnippet) &&
+				len(logicalSnippet) < len(snippet) &&
+				snippetLineScore(logicalSnippet, spec.Positive) > 0 {
+				snippet = truncateUTF8(logicalSnippet, snippetMaxBytes)
+				metadata["snippet_start_line"] = line
+				metadata["snippet_end_line"] = line
+			}
 		}
 		candidates = append(candidates, mcptools.FileQueryResult{
 			Path:        target.Path,
@@ -94,6 +122,7 @@ func RankKeywordTargets(targets []Target, spec KeywordSpec, opts KeywordOptions)
 			Score:       score,
 			Snippet:     snippet,
 			SearchTypes: append([]string(nil), spec.SearchTypes...),
+			Metadata:    metadata,
 		})
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
@@ -251,6 +280,82 @@ func scoreKeywordContent(filePath, content string, terms []string) (float64, int
 	pathScore := scoreKeywordText(lowerPath, terms) * 0.75
 	score := bestScore*2 + math.Log1p(totalScore) + pathScore
 	return score, bestLine, bestSnippet
+}
+
+func physicalLine(content string, line int) string {
+	lines := splitTextLines(content)
+	if line <= 0 || line > len(lines) {
+		return ""
+	}
+	return strings.TrimSpace(lines[line-1])
+}
+
+type keywordSnippet struct {
+	Text      string
+	StartLine int
+	EndLine   int
+}
+
+func extractKeywordSnippet(content string, terms []string, matchLine, maxBytes int) keywordSnippet {
+	lines := splitTextLines(content)
+	if len(lines) == 0 {
+		return keywordSnippet{StartLine: matchLine, EndLine: matchLine}
+	}
+	matchIndex := matchLine - 1
+	if matchIndex < 0 || matchIndex >= len(lines) || snippetLineScore(lines[matchIndex], terms) == 0 {
+		matchIndex = bestKeywordSnippetLine(lines, terms)
+	}
+	start := max(0, matchIndex-snippetBeforeLines)
+	end := min(len(lines), matchIndex+snippetAfterLines+1)
+	text := strings.TrimRight(strings.Join(lines[start:end], "\n"), "\n")
+	if maxBytes > 0 && len(text) > maxBytes {
+		text = truncateUTF8(text, maxBytes)
+	}
+	return keywordSnippet{
+		Text:      text,
+		StartLine: start + 1,
+		EndLine:   end,
+	}
+}
+
+func bestKeywordSnippetLine(lines []string, terms []string) int {
+	bestIndex := 0
+	bestScore := -1
+	for i, line := range lines {
+		score := snippetLineScore(line, terms)
+		if score > bestScore {
+			bestScore = score
+			bestIndex = i
+		}
+	}
+	return bestIndex
+}
+
+func snippetLineScore(line string, terms []string) int {
+	lower := strings.ToLower(line)
+	score := 0
+	for _, term := range terms {
+		term = strings.ToLower(strings.TrimSpace(term))
+		if term == "" {
+			continue
+		}
+		score += strings.Count(lower, term)
+	}
+	return score
+}
+
+func truncateUTF8(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	if maxBytes <= 3 {
+		return strings.Repeat(".", maxBytes)
+	}
+	cut := maxBytes - 3
+	for cut > 0 && !utf8.ValidString(text[:cut]) {
+		cut--
+	}
+	return text[:cut] + "..."
 }
 
 func scoreKeywordText(text string, terms []string) float64 {

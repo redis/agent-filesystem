@@ -103,12 +103,23 @@ afs query "ralph loops"
 Example output:
 
 ```text
-#1 /docs/checkpoints.md:12-20  score 0.42
-  Checkpoints are explicit snapshots of workspace state. File edits update the
-  live workspace immediately, and checkpoint_create records a recoverable point.
+afs://getting-started/docs/checkpoints.md:12  #a1b2c3
+Score: 42%  Source: redissearch
 
-#2 /README.md:148-156  score 0.31
-  grep is for exact text evidence. query is for ranked conceptual search...
+@@ -11,4 @@
+Previous setup notes
+Checkpoints are explicit snapshots of workspace state.
+File edits update the live workspace immediately.
+checkpoint_create records a recoverable point.
+
+
+afs://getting-started/README.md:148  #d4e5f6
+Score: 31%  Source: redissearch
+
+@@ -147,4 @@
+grep is for exact text evidence.
+query is for ranked conceptual search.
+Agents can ask for concepts without knowing exact filenames.
 ```
 
 This is useful for agents because they often know what they are looking for
@@ -128,6 +139,10 @@ see which backend answered a query:
 
 ```bash
 afs query --explain --json "ralph loops"
+afs query --files "ralph loops"       # #id,score,afs://workspace/path
+afs query --paths "ralph loops"       # path-only compatibility output
+afs fs getting-started get README.md:120 -l 20
+afs fs getting-started multi-get 'docs/*.md' --md
 ```
 
 ## Requirements
@@ -289,6 +304,15 @@ edit files, grep exact text with `file_grep`, run ranked conceptual search
 with `file_query`, and create or restore checkpoints.
 File-edit tools update the live workspace state and leave the workspace dirty
 until `checkpoint_create` is called explicitly.
+
+## AI Agents
+
+- Run `afs mcp` to expose the MCP server (stdio) to agents.
+- `afs skill install` installs the AFS skill into `./.agents/skills/afs`.
+- Use `afs skill install --global` for `~/.agents/skills/afs`.
+- `afs --skill` is kept as an alias for `afs skill show`.
+- Advanced: `afs mcp --workspace <name> --profile <profile>` scopes agent
+  access.
 
 ## The Basic Model
 

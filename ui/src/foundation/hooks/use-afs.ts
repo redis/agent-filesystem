@@ -16,15 +16,20 @@ import type {
   DiffFileVersionsInput,
   GetFileHistoryInput,
   GetFileVersionContentInput,
+  GetWorkspaceConfigInput,
   GetWorkspaceFileContentInput,
   GetWorkspaceDiffInput,
+  GetWorkspaceQueryIndexStatusInput,
   GetWorkspaceTreeInput,
   GetWorkspaceVersioningPolicyInput,
+  QueryWorkspaceInput,
+  RebuildWorkspaceQueryIndexInput,
   RestoreSavepointInput,
   RestoreFileVersionInput,
   SaveDatabaseInput,
   UndeleteFileVersionInput,
   UpdateWorkspaceInput,
+  UpdateWorkspaceConfigInput,
   UpdateWorkspaceFileInput,
   UpdateWorkspaceVersioningPolicyInput,
   QuickstartInput,
@@ -149,6 +154,15 @@ export const afsKeys = {
       input.base,
       input.head,
     ] as const,
+  workspaceConfig: (input: GetWorkspaceConfigInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "config",
+    ] as const,
   workspaceVersioningPolicy: (input: GetWorkspaceVersioningPolicyInput) =>
     [
       ...afsKeys.all,
@@ -157,6 +171,16 @@ export const afsKeys = {
       "workspaces",
       input.workspaceId,
       "versioning",
+    ] as const,
+  workspaceQueryIndexStatus: (input: GetWorkspaceQueryIndexStatusInput) =>
+    [
+      ...afsKeys.all,
+      "databases",
+      input.databaseId ?? "all",
+      "workspaces",
+      input.workspaceId,
+      "query-index-status",
+      input.path ?? "/",
     ] as const,
   fileHistory: (input: GetFileHistoryInput) =>
     [
@@ -358,10 +382,28 @@ export function workspaceDiffQueryOptions(input: GetWorkspaceDiffInput) {
   });
 }
 
+export function workspaceConfigQueryOptions(input: GetWorkspaceConfigInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceConfig(input),
+    queryFn: () => afsApi.getWorkspaceConfig(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
 export function workspaceVersioningPolicyQueryOptions(input: GetWorkspaceVersioningPolicyInput) {
   return queryOptions({
     queryKey: afsKeys.workspaceVersioningPolicy(input),
     queryFn: () => afsApi.getWorkspaceVersioningPolicy(input),
+    staleTime: LIVE_QUERY_STALE_MS,
+    gcTime: LIVE_QUERY_GC_MS,
+  });
+}
+
+export function workspaceQueryIndexStatusQueryOptions(input: GetWorkspaceQueryIndexStatusInput) {
+  return queryOptions({
+    queryKey: afsKeys.workspaceQueryIndexStatus(input),
+    queryFn: () => afsApi.getWorkspaceQueryIndexStatus(input),
     staleTime: LIVE_QUERY_STALE_MS,
     gcTime: LIVE_QUERY_GC_MS,
   });
@@ -713,10 +755,38 @@ export function useWorkspaceDiff(input: GetWorkspaceDiffInput, enabled = true) {
   );
 }
 
+export function useWorkspaceConfig(input: GetWorkspaceConfigInput, enabled = true) {
+  return useQuery({
+    ...workspaceConfigQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "",
+  });
+}
+
 export function useWorkspaceVersioningPolicy(input: GetWorkspaceVersioningPolicyInput, enabled = true) {
   return useQuery({
     ...workspaceVersioningPolicyQueryOptions(input),
     enabled: enabled && input.workspaceId !== "",
+  });
+}
+
+export function useWorkspaceQueryIndexStatus(
+  input: GetWorkspaceQueryIndexStatusInput,
+  enabled = true,
+) {
+  return useQuery({
+    ...workspaceQueryIndexStatusQueryOptions(input),
+    enabled: enabled && input.workspaceId !== "",
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data?.state === "indexing" ||
+        (data?.keyword.pending ?? 0) > 0 ||
+        (data?.keyword.stale ?? 0) > 0
+      ) {
+        return 2_000;
+      }
+      return false;
+    },
   });
 }
 
@@ -893,6 +963,17 @@ export function useUpdateWorkspaceFileMutation() {
   });
 }
 
+export function useUpdateWorkspaceConfigMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: UpdateWorkspaceConfigInput) => afsApi.updateWorkspaceConfig(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
 export function useUpdateWorkspaceVersioningPolicyMutation() {
   const invalidate = useWorkspaceInvalidation();
 
@@ -901,6 +982,23 @@ export function useUpdateWorkspaceVersioningPolicyMutation() {
     onSuccess: async () => {
       await invalidate();
     },
+  });
+}
+
+export function useRebuildWorkspaceQueryIndexMutation() {
+  const invalidate = useWorkspaceInvalidation();
+
+  return useMutation({
+    mutationFn: (input: RebuildWorkspaceQueryIndexInput) => afsApi.rebuildWorkspaceQueryIndex(input),
+    onSuccess: async () => {
+      await invalidate();
+    },
+  });
+}
+
+export function useQueryWorkspaceMutation() {
+  return useMutation({
+    mutationFn: (input: QueryWorkspaceInput) => afsApi.queryWorkspace(input),
   });
 }
 

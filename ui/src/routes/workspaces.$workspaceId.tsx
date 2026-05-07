@@ -47,6 +47,7 @@ import { CheckpointsTab } from "./workspace-studio/-checkpoints-tab";
 import { ActivityTab } from "./workspace-studio/-activity-tab";
 import { ChangesTab } from "./workspace-studio/-changes-tab";
 import { SettingsTab } from "./workspace-studio/-settings-tab";
+import { SearchTab } from "./workspace-studio/-search-tab";
 
 const workspaceStudioSearchSchema = z.object({
   tab: studioTabSchema.optional(),
@@ -123,6 +124,18 @@ function WorkspaceStudioPage() {
       search: {
         ...(search.databaseId ? { databaseId: search.databaseId } : {}),
         ...(nextTab === "browse" ? {} : { tab: nextTab }),
+      },
+      replace: true,
+    });
+  }
+
+  function openSearchForPath(_path: string) {
+    void navigate({
+      to: "/workspaces/$workspaceId",
+      params: { workspaceId },
+      search: {
+        ...(search.databaseId ? { databaseId: search.databaseId } : {}),
+        tab: "search",
       },
       replace: true,
     });
@@ -374,6 +387,12 @@ function WorkspaceStudioPage() {
           Browse Files
         </TabButton>
         <TabButton
+          $active={tab === "search"}
+          onClick={() => setStudioTab("search")}
+        >
+          Search
+        </TabButton>
+        <TabButton
           $active={tab === "changes"}
           onClick={() => setStudioTab("changes")}
         >
@@ -404,7 +423,12 @@ function WorkspaceStudioPage() {
           workspace={workspace}
           browserView={browserView}
           onBrowserViewChange={setBrowserView}
+          onAskWorkspace={openSearchForPath}
         />
+      ) : null}
+
+      {tab === "search" ? (
+        <SearchTab workspace={workspace} />
       ) : null}
 
       {tab === "checkpoints" ? (
@@ -526,6 +550,11 @@ const StudioNavRow = styled.div`
   justify-content: space-between;
   gap: 16px;
   min-height: 24px;
+
+  @media (max-width: 1040px) {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
 `;
 
 const StudioActions = styled.div`
@@ -744,6 +773,12 @@ function workspaceCommandsFor(
       title: "Mount workspace",
       description: "Browse and edit this workspace from a local path.",
       command: `afs ws mount ${name} ~/${name}`,
+    },
+    {
+      tab: "search",
+      title: "Query workspace",
+      description: "Rank files by concept through RedisSearch BM25.",
+      command: `afs fs ${name} query "where is auth configured?"`,
     },
     {
       tab: "changes",

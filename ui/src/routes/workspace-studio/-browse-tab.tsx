@@ -5,21 +5,21 @@ type Props = {
   workspace: AFSWorkspaceDetail;
   browserView: AFSWorkspaceView;
   onBrowserViewChange: (view: AFSWorkspaceView) => void;
-  onViewAllCheckpoints: () => void;
+  onAskWorkspace?: (path: string) => void;
 };
 
 export function BrowseTab({
   workspace,
   browserView,
   onBrowserViewChange,
-  onViewAllCheckpoints,
+  onAskWorkspace,
 }: Props) {
   return (
     <FilesTab
       workspace={workspace}
       browserView={browserView}
       onBrowserViewChange={onBrowserViewChange}
-      onViewAllCheckpoints={onViewAllCheckpoints}
+      onAskWorkspace={onAskWorkspace}
     />
   );
 }

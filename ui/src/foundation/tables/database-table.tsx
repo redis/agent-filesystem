@@ -66,7 +66,7 @@ function arrayCapabilityLabel(supportsArrays: boolean | undefined) {
 }
 
 function searchCapabilityLabel(supportsSearch: boolean | undefined) {
-  if (supportsSearch === true) return "Search Enabled";
+  if (supportsSearch === true) return "RedisSearch Ready";
   if (supportsSearch === false) return "Search Unavailable";
   return "Search unknown";
 }
@@ -596,7 +596,7 @@ function CapabilityHelpDialog({
         <CapabilityHelpCopy>
           {isArrays
             ? "Redis Arrays are coming soon. They have not been accepted into the upstream Redis repository yet, so this capability will become available after Redis ships support and the database is upgraded."
-            : "Redis Search is included in current Redis distributions that provide the query engine. Upgrade this database to the latest Redis release with Search support enabled, then refresh the database catalog."}
+            : "Redis Search powers AFS exact grep and BM25 workspace query. Upgrade this database to a Redis release with the query engine enabled, then refresh the database catalog."}
         </CapabilityHelpCopy>
 
         <DialogActions style={{ justifyContent: "flex-end", marginTop: 20 }}>

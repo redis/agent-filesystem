@@ -185,6 +185,132 @@ export type AFSWorkspaceVersioningPolicy = {
   largeFileCutoffBytes: number;
 };
 
+export type AFSWorkspaceQueryChunkStrategy = "" | "auto" | "regex";
+
+export type AFSWorkspaceQueryEmbeddingsConfig = {
+  enabled: boolean;
+  model: string;
+  chunkStrategy: AFSWorkspaceQueryChunkStrategy;
+};
+
+export type AFSWorkspaceQueryConfig = {
+  embeddings: AFSWorkspaceQueryEmbeddingsConfig;
+};
+
+export type AFSWorkspaceConfig = {
+  versioning: AFSWorkspaceVersioningPolicy;
+  query: AFSWorkspaceQueryConfig;
+};
+
+export type AFSWorkspaceQueryIndexState =
+  | "ready"
+  | "indexing"
+  | "needs_rebuild"
+  | "unavailable"
+  | "missing"
+  | "stale"
+  | "skipped"
+  | "error";
+
+export type AFSWorkspaceQueryIndexKeywordStatus = {
+  indexName: string;
+  state: AFSWorkspaceQueryIndexState | string;
+  searchAvailable: boolean;
+  files: number;
+  ready: number;
+  pending: number;
+  stale: number;
+  skipped: number;
+  errors: number;
+  unindexed: number;
+  chunks: number;
+};
+
+export type AFSWorkspaceQueryIndexStatus = {
+  workspace: string;
+  path: string;
+  state: AFSWorkspaceQueryIndexState | string;
+  message: string;
+  keyword: AFSWorkspaceQueryIndexKeywordStatus;
+  embeddingsEnabled: boolean;
+  model: string;
+  chunkStrategy: AFSWorkspaceQueryChunkStrategy;
+};
+
+export type AFSWorkspaceQueryIndexRebuildResponse = {
+  workspace: string;
+  path: string;
+  keyword: {
+    enqueued: number;
+    waited: boolean;
+    process?: {
+      processed: number;
+      indexed: number;
+      skipped: number;
+      deleted: number;
+      errors: number;
+      pending: number;
+    };
+    status: AFSWorkspaceQueryIndexKeywordStatus;
+  };
+  status: AFSWorkspaceQueryIndexStatus;
+  message: string;
+};
+
+export type AFSFileQueryMode = "query" | "keyword" | "semantic";
+export type AFSFileQuerySearchType = "lex" | "vec" | "hyde";
+
+export type AFSFileQuerySearch = {
+  type: AFSFileQuerySearchType;
+  query: string;
+};
+
+export type AFSFileQueryRequest = {
+  workspace?: string;
+  path?: string;
+  mode?: AFSFileQueryMode;
+  query?: string;
+  searches?: AFSFileQuerySearch[];
+  intent?: string;
+  limit?: number;
+  all?: boolean;
+  minScore?: number;
+  full?: boolean;
+  candidateLimit?: number;
+  rerank?: "auto" | "none";
+  explain?: boolean;
+  chunkStrategy?: AFSWorkspaceQueryChunkStrategy;
+};
+
+export type AFSFileQueryResult = {
+  path: string;
+  chunkId?: string;
+  startLine?: number;
+  endLine?: number;
+  score: number;
+  snippet: string;
+  searchTypes: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type AFSFileQueryExplain = {
+  stage: string;
+  message: string;
+  values?: Record<string, unknown>;
+};
+
+export type AFSFileQueryResponse = {
+  status: "ok" | "unavailable" | string;
+  workspace?: string;
+  path?: string;
+  query?: string;
+  searches?: AFSFileQuerySearch[];
+  intent?: string;
+  results: AFSFileQueryResult[];
+  warnings: string[];
+  explain: AFSFileQueryExplain[];
+};
+
 export type AFSFileVersion = {
   versionId: string;
   fileId: string;
@@ -627,10 +753,35 @@ export type GetWorkspaceVersioningPolicyInput = {
   workspaceId: string;
 };
 
+export type GetWorkspaceConfigInput = {
+  databaseId?: string;
+  workspaceId: string;
+};
+
+export type UpdateWorkspaceConfigInput = GetWorkspaceConfigInput & {
+  config: AFSWorkspaceConfig;
+};
+
 export type UpdateWorkspaceVersioningPolicyInput =
   GetWorkspaceVersioningPolicyInput & {
     policy: AFSWorkspaceVersioningPolicy;
   };
+
+export type GetWorkspaceQueryIndexStatusInput = {
+  databaseId?: string;
+  workspaceId: string;
+  path?: string;
+};
+
+export type RebuildWorkspaceQueryIndexInput =
+  GetWorkspaceQueryIndexStatusInput & {
+    force?: boolean;
+    wait?: boolean;
+  };
+
+export type QueryWorkspaceInput = GetWorkspaceConfigInput & {
+  request: AFSFileQueryRequest;
+};
 
 export type GetFileHistoryInput = {
   databaseId?: string;
