@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/go-redis/v9"
 )
@@ -592,6 +593,9 @@ func (c *nativeClient) saveInode(ctx context.Context, p string, inode *inodeData
 		pipe := c.rdb.Pipeline()
 		rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), inode.ContentRef, []byte(inode.Content))
 		pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(inode.Content)))
+		if inode.Content != "" {
+			c.queueQueryDirty(ctx, pipe, inode.ID)
+		}
 		if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 			return err
 		}
@@ -680,8 +684,14 @@ func (c *nativeClient) createInodeUnderParent(ctx context.Context, childPath str
 		// Content goes to the external backend; metadata-only to the HASH.
 		rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(id), inode.ContentRef, []byte(inode.Content))
 		pipe.HSet(ctx, c.keys.inode(id), mergeFieldMaps(c.inodeFieldsAtPath(inode, childPath, false), fileSearchIndexFields(inode.Content)))
+		if inode.Content != "" {
+			c.queueQueryDirty(ctx, pipe, id)
+		}
 	} else {
 		pipe.HSet(ctx, c.keys.inode(id), c.inodeFieldsAtPath(inode, childPath, inode.Type == "file"))
+		if inode.Type == "file" && inode.Content != "" {
+			c.queueQueryDirty(ctx, pipe, id)
+		}
 	}
 	pipe.HSet(ctx, c.keys.dirents(parent.ID), name, id)
 	c.queueTouchTimes(pipe, parent.ID, now)
@@ -783,6 +793,9 @@ func (c *nativeClient) createFileIfMissing(ctx context.Context, p string, conten
 	// inode HASH.
 	rediscontent.QueueWriteFull(ctx, pipe, c.keys.content(inode.ID), inode.ContentRef, []byte(content))
 	pipe.HSet(ctx, c.keys.inode(inode.ID), mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), fileSearchIndexFields(content)))
+	if content != "" {
+		c.queueQueryDirty(ctx, pipe, inode.ID)
+	}
 	c.queueTouchTimes(pipe, parentInode.ID, now)
 	c.queueCreateInfo(pipe, inode)
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -944,6 +957,10 @@ func (c *nativeClient) renamePath(ctx context.Context, resolvedSrc string, srcIn
 				}
 				if replaced != nil {
 					pipe.Del(ctx, c.keys.inode(replaced.ID))
+					if replaced.Type == "file" {
+						pipe.Del(ctx, c.keys.content(replaced.ID))
+						c.queueQueryDeleted(ctx, pipe, replaced.ID)
+					}
 					if replaced.Type == "dir" {
 						pipe.Del(ctx, c.keys.dirents(replaced.ID))
 					}
@@ -1115,6 +1132,9 @@ func (c *nativeClient) queueRefreshIndexedSubtree(ctx context.Context, pipe redi
 		"path":           currentPath,
 		"path_ancestors": indexedPathAncestors(currentPath),
 	})
+	if inode.Type == "file" {
+		c.queueQueryDirty(ctx, pipe, inode.ID)
+	}
 	if inode.Type != "dir" {
 		return nil
 	}
@@ -1150,6 +1170,14 @@ func (c *nativeClient) queueCreateInfo(pipe redis.Pipeliner, inode *inodeData) {
 	case "symlink":
 		pipe.HIncrBy(context.Background(), c.keys.info(), "symlinks", 1)
 	}
+}
+
+func (c *nativeClient) queueQueryDirty(ctx context.Context, pipe redis.Pipeliner, inodeID string) {
+	queryindex.QueueMarkDirty(ctx, pipe, c.key, inodeID)
+}
+
+func (c *nativeClient) queueQueryDeleted(ctx context.Context, pipe redis.Pipeliner, inodeID string) {
+	queryindex.QueueMarkDeleted(ctx, pipe, c.key, inodeID)
 }
 
 func (c *nativeClient) queueDeleteInfo(pipe redis.Pipeliner, inode *inodeData) {

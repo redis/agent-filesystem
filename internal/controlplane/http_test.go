@@ -585,6 +585,60 @@ func TestHTTPWorkspaceConfigRoutes(t *testing.T) {
 	}
 }
 
+func TestHTTPResolvedWorkspaceQueryRoutes(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	listResp, err := http.Get(server.URL + "/v1/databases/" + url.PathEscape(databaseID) + "/workspaces")
+	if err != nil {
+		t.Fatalf("GET scoped workspaces returned error: %v", err)
+	}
+	defer listResp.Body.Close()
+	if listResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(listResp.Body)
+		t.Fatalf("GET scoped workspaces status = %d, want %d, body=%s", listResp.StatusCode, http.StatusOK, body)
+	}
+	var list workspaceListResponse
+	if err := json.NewDecoder(listResp.Body).Decode(&list); err != nil {
+		t.Fatalf("Decode(workspaces) returned error: %v", err)
+	}
+	if len(list.Items) == 0 || strings.TrimSpace(list.Items[0].ID) == "" {
+		t.Fatalf("workspace list missing ID: %+v", list.Items)
+	}
+	workspaceID := url.PathEscape(list.Items[0].ID)
+
+	statusResp, err := http.Get(server.URL + "/v1/workspaces/" + workspaceID + "/query/index/status")
+	if err != nil {
+		t.Fatalf("GET resolved query index status returned error: %v", err)
+	}
+	defer statusResp.Body.Close()
+	if statusResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(statusResp.Body)
+		t.Fatalf("GET resolved query index status = %d, want %d, body=%s", statusResp.StatusCode, http.StatusOK, body)
+	}
+	var status WorkspaceQueryIndexStatus
+	if err := json.NewDecoder(statusResp.Body).Decode(&status); err != nil {
+		t.Fatalf("Decode(query index status) returned error: %v", err)
+	}
+	if status.Keyword.State == "" {
+		t.Fatalf("query index status missing keyword state: %+v", status)
+	}
+
+	queryBody := `{"workspace":"repo","query":"demo","mode":"keyword","limit":5}`
+	queryResp, err := http.Post(server.URL+"/v1/workspaces/"+workspaceID+"/query", "application/json", strings.NewReader(queryBody))
+	if err != nil {
+		t.Fatalf("POST resolved query returned error: %v", err)
+	}
+	defer queryResp.Body.Close()
+	if queryResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(queryResp.Body)
+		t.Fatalf("POST resolved query status = %d, want %d, body=%s", queryResp.StatusCode, http.StatusOK, body)
+	}
+}
+
 func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {
 	t.Helper()
 
@@ -1154,6 +1208,9 @@ func TestHostedMCPTokenFlowCreatesVisibleAgentSession(t *testing.T) {
 	}
 	if _, ok := toolNames["file_grep"]; !ok {
 		t.Fatalf("tools/list missing file_grep: %#v", toolsPayload.Result.Tools)
+	}
+	if _, ok := toolNames["file_query"]; !ok {
+		t.Fatalf("tools/list missing file_query: %#v", toolsPayload.Result.Tools)
 	}
 	if _, ok := toolNames["workspace_current"]; ok {
 		t.Fatalf("workspace_current should not be exposed to workspace-rw tokens: %#v", toolsPayload.Result.Tools)

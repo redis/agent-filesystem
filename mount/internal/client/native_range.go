@@ -448,6 +448,7 @@ func resizeRangeContent(existing string, size int64) string {
 func (c *nativeClient) finishRangeWrite(ctx context.Context, data *inodeData, path string, fields map[string]interface{}, delta int64) error {
 	pipe := c.rdb.Pipeline()
 	pipe.HSet(ctx, c.keys.inode(data.ID), fields)
+	c.queueQueryDirty(ctx, pipe, data.ID)
 	if delta != 0 {
 		pipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
 	}

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -37,13 +38,15 @@ type syncDaemonConfig struct {
 	// are set, the uploader emits one changelog entry per successful op so
 	// live sync writes show up in the Changes tab without requiring an
 	// explicit checkpoint.
-	Rdb          *redis.Client
-	StorageID    string
-	SessionID    string
-	User         string
-	AgentID      string
-	Label        string
-	AgentVersion string
+	Rdb              *redis.Client
+	QueryIndexFSKey  string
+	StorageID        string
+	HeadCheckpointID string
+	SessionID        string
+	User             string
+	AgentID          string
+	Label            string
+	AgentVersion     string
 }
 
 // syncDaemon orchestrates the watcher, reconciler, uploader, downloader, and
@@ -126,7 +129,7 @@ func newSyncDaemon(cfg syncDaemonConfig) (*syncDaemon, error) {
 		ignore:      ignore,
 		done:        make(chan struct{}),
 	}
-	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.SessionID, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
+	d.reconciler = newReconciler(stateWriter, cfg.LocalRoot, cfg.Workspace, cfg.StorageID, cfg.HeadCheckpointID, cfg.SessionID, cfg.Store, cfg.FS, echo, conflict, ignore, cfg.MaxFileBytes, cfg.Readonly, log, cfg.ChunkSize, cfg.ChunkThreshold)
 	d.full = newFullReconciler(d.reconciler)
 	d.uploader = newUploader(cfg.FS, d.reconciler.uploadOut(), cfg.MaxFileBytes, cfg.Readonly, log)
 	if cfg.Rdb != nil && strings.TrimSpace(cfg.StorageID) != "" && strings.TrimSpace(cfg.SessionID) != "" {
@@ -175,6 +178,8 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 			return fmt.Errorf("initial reconcile: %w", err)
 		}
 	}
+
+	d.startQueryIndexWorker(dctx)
 
 	// Install the watcher AFTER the reconcile. The cold-start path calls
 	// materializeManifestToDirectory which does RemoveAll + MkdirAll on
@@ -279,6 +284,20 @@ func (d *syncDaemon) start(ctx context.Context, onProgress ProgressFunc, skipRec
 	}()
 
 	return nil
+}
+
+func (d *syncDaemon) startQueryIndexWorker(ctx context.Context) {
+	if d.cfg.Rdb == nil || strings.TrimSpace(d.cfg.QueryIndexFSKey) == "" {
+		return
+	}
+	worker := queryindex.NewWorker(d.cfg.Rdb, d.cfg.QueryIndexFSKey)
+	d.wg.Add(1)
+	go func() {
+		defer d.wg.Done()
+		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			fmt.Fprintf(os.Stderr, "afs sync: query index worker exited: %v\n", err)
+		}
+	}()
 }
 
 // Stop cancels the daemon context and waits for all goroutines to drain.

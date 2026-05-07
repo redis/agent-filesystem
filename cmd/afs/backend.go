@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -140,6 +141,9 @@ type afsControlPlane interface {
 	GetCheckpoint(ctx context.Context, workspace, checkpointID string) (controlplane.CheckpointDetail, error)
 	GetTree(ctx context.Context, workspace, view, path string, depth int) (controlplane.TreeResponse, error)
 	GetFileContent(ctx context.Context, workspace, view, path string) (controlplane.FileContentResponse, error)
+	QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error)
+	QueryIndexStatus(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexStatusRequest) (controlplane.WorkspaceQueryIndexStatus, error)
+	RebuildQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error)
 	DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)

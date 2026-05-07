@@ -348,18 +348,20 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 	store := newAFSStore(rdb)
 	fsClient := client.New(rdb, bootstrap.redisKey)
 	daemon, err := newSyncDaemon(syncDaemonConfig{
-		Workspace:    bootstrap.workspace,
-		LocalRoot:    localRoot,
-		FS:           fsClient,
-		Store:        store,
-		MaxFileBytes: syncSizeCapBytes(runtimeCfg),
-		Readonly:     runtimeCfg.ReadOnly,
-		Rdb:          rdb,
-		StorageID:    bootstrap.redisKey,
-		SessionID:    bootstrap.sessionID,
-		AgentID:      runtimeCfg.ID,
-		Label:        runtimeCfg.Name,
-		AgentVersion: version.String(),
+		Workspace:        bootstrap.workspace,
+		LocalRoot:        localRoot,
+		FS:               fsClient,
+		Store:            store,
+		MaxFileBytes:     syncSizeCapBytes(runtimeCfg),
+		Readonly:         runtimeCfg.ReadOnly,
+		Rdb:              rdb,
+		QueryIndexFSKey:  bootstrap.redisKey,
+		StorageID:        bootstrap.redisKey,
+		HeadCheckpointID: bootstrap.headCheckpoint,
+		SessionID:        bootstrap.sessionID,
+		AgentID:          runtimeCfg.ID,
+		Label:            runtimeCfg.Name,
+		AgentVersion:     version.String(),
 	})
 	if err != nil {
 		closeManagedWorkspaceSession(runtimeCfg, bootstrap.workspace, bootstrap.sessionID)
@@ -507,7 +509,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 	}
 	rows := []outputRow{
 		{Label: "workspace", Value: bootstrap.workspace},
-		{Label: "path", Value: compactDisplayPath(localRoot)},
+		{Label: "path", Value: homeRelativeDisplayPath(localRoot)},
 		{Label: "mode", Value: "sync"},
 		{Label: "files", Value: entryCount},
 	}
@@ -525,7 +527,7 @@ func startSyncMount(ctx context.Context, cfg config, selection workspaceSelectio
 func printEmptyLocalDeleteWarning(workspace, localRoot string, plan mountReconcilePlan) {
 	printSection("Empty local folder", []outputRow{
 		{Label: "workspace", Value: workspace},
-		{Label: "path", Value: compactDisplayPath(localRoot)},
+		{Label: "path", Value: homeRelativeDisplayPath(localRoot)},
 		{Label: "remote entries", Value: fmt.Sprintf("%d", plan.RemoteCount)},
 		{Label: "would delete", Value: fmt.Sprintf("%d remote entries", plan.DeleteRemoteCount)},
 		{Label: "note", Value: "This only makes sense if you deleted everything while unmounted."},
@@ -579,7 +581,8 @@ func promptMountSelection(opts mountOptions) error {
 	fmt.Println()
 	fmt.Println("Mount workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Workspace ID", "Database", "Status", "Path"}, mountPromptRows(choices))
+	headers := []string{"#", "Workspace", "Workspace ID", "Database", "Status", "Path"}
+	printPlainTable(headers, mountPromptRows(choices))
 	fmt.Println()
 	fmt.Print("Workspace to mount: ")
 
@@ -605,7 +608,7 @@ func promptMountSelection(opts mountOptions) error {
 	if selected.Mounted {
 		printSection("Workspace already mounted", []outputRow{
 			{Label: "workspace", Value: selected.Workspace},
-			{Label: "path", Value: compactDisplayPath(selected.Path)},
+			{Label: "path", Value: homeRelativeDisplayPath(selected.Path)},
 		})
 		return nil
 	}
@@ -732,7 +735,7 @@ func mountPromptRows(choices []mountPromptChoice) [][]string {
 		path := ""
 		if choice.Mounted {
 			status = "mounted"
-			path = compactDisplayPath(choice.Path)
+			path = homeRelativeDisplayPath(choice.Path)
 		}
 		rows = append(rows, []string{
 			strconv.Itoa(i + 1),
@@ -890,7 +893,8 @@ func promptUnmountSelection(deleteLocal bool) error {
 	fmt.Println()
 	fmt.Println("Unmount workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Path"}, unmountPromptRows(records))
+	headers := []string{"#", "Workspace", "Path"}
+	printPlainTable(headers, unmountPromptRows(records))
 	fmt.Println()
 	fmt.Print("Workspace to unmount: ")
 
@@ -929,7 +933,7 @@ func promptUnmountSelection(deleteLocal bool) error {
 func unmountPromptRows(records []mountRecord) [][]string {
 	rows := make([][]string, 0, len(records))
 	for i, rec := range records {
-		rows = append(rows, []string{strconv.Itoa(i + 1), rec.Workspace, compactDisplayPath(rec.LocalPath)})
+		rows = append(rows, []string{strconv.Itoa(i + 1), rec.Workspace, homeRelativeDisplayPath(rec.LocalPath)})
 	}
 	return rows
 }
@@ -1026,7 +1030,7 @@ func printUnmountResult(rec mountRecord, deleteLocal bool) {
 	}
 	printSection("Workspace unmounted", []outputRow{
 		{Label: "workspace", Value: rec.Workspace},
-		{Label: "path", Value: compactDisplayPath(rec.LocalPath)},
+		{Label: "path", Value: homeRelativeDisplayPath(rec.LocalPath)},
 		{Label: label, Value: local},
 	})
 }

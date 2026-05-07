@@ -588,9 +588,8 @@ const ScopeBadge = styled.span<{ $tone: "control" | "workspace" }>`
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   border: 1px solid
     ${({ $tone }) =>
       $tone === "control"

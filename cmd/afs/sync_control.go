@@ -87,6 +87,8 @@ func cmdFS(args []string) error {
 		return cmdFileUndelete(fsFileCommandArgs("undelete", parsed.workspace, parsed.args))
 	case "grep":
 		return cmdFSGrep(parsed.workspace, parsed.args)
+	case "query":
+		return cmdFSQuery(parsed.workspace, parsed.args)
 	default:
 		return fmt.Errorf("unknown filesystem subcommand %q\n\n%s", parsed.subcommand, fsUsageText(filepath.Base(os.Args[0])))
 	}
@@ -147,7 +149,7 @@ func parseFSDispatchArgs(args []string) (fsDispatchArgs, error) {
 
 func isFSSubcommand(command string) bool {
 	switch command {
-	case "ls", "cat", "find", "create-exclusive", "history", "diff", "restore", "undelete", "grep":
+	case "ls", "cat", "find", "create-exclusive", "history", "diff", "restore", "undelete", "grep", "query":
 		return true
 	default:
 		return false
@@ -244,7 +246,8 @@ Subcommands:
   ls                 List workspace files
   cat                Print a workspace file
   find               Find workspace paths by name
-  grep               Search workspace files
+  grep               Exact line-oriented content search
+  query              Ranked workspace query (hybrid by default)
   create-exclusive   Create a workspace file only if it does not already exist
   history            Show ordered file history for a path
   diff               Diff historical versions for one path
@@ -259,7 +262,9 @@ Examples:
   %s fs demo history README.md
   %s fs demo find . -name '*.md' -print
   %s fs demo grep Redis
-`, bin, bin, bin, bin, bin, bin, bin, bin, bin)
+  %s fs demo query "how do checkpoints work?"
+  %s fs demo query --semantic "where is workspace config handled?"
+`, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin, bin)
 }
 
 func fileCreateExclusiveUsageText(bin string) string {

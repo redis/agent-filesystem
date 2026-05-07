@@ -126,6 +126,93 @@ func TestCmdStatusPrintsAlignedMountTable(t *testing.T) {
 	}
 }
 
+func TestCmdStatusMountTableShowsSourceWhenMountsCrossConfigs(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	reg := mountRegistry{Mounts: []mountRecord{
+		{
+			ID:                   "mnt_first",
+			Workspace:            "first-workspace",
+			LocalPath:            "/tmp/first-workspace",
+			Mode:                 modeSync,
+			ProductMode:          productModeSelfHosted,
+			ControlPlaneURL:      "http://127.0.0.1:8091",
+			ControlPlaneDatabase: "localhost-6379",
+			PID:                  os.Getpid(),
+			StartedAt:            time.Now().UTC(),
+		},
+		{
+			ID:                   "mnt_new",
+			Workspace:            "new",
+			LocalPath:            "/tmp/new",
+			Mode:                 modeSync,
+			ProductMode:          productModeCloud,
+			ControlPlaneURL:      "https://afs.cloud",
+			ControlPlaneDatabase: "afs-cloud",
+			PID:                  os.Getpid(),
+			StartedAt:            time.Now().UTC(),
+		},
+	}}
+	if err := saveMountRegistry(reg); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdStatusWithOptions(statusOptions{})
+	})
+	if err != nil {
+		t.Fatalf("cmdStatusWithOptions() returned error: %v", err)
+	}
+	clean := stripAnsi(out)
+	for _, want := range []string{
+		"Source",
+		"Database",
+		"Self-managed",
+		"localhost-6379",
+		"Cloud-managed",
+		"afs-cloud",
+	} {
+		if !strings.Contains(clean, want) {
+			t.Fatalf("status output missing %q:\n%s", want, clean)
+		}
+	}
+}
+
+func TestCmdStatusMountTableDoesNotTruncatePathsAndUsesTilde(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	displayPath := "~/projects/customer-success/super-long-nested-workspace-path/that-keeps-going/final-folder"
+	reg := mountRegistry{Mounts: []mountRecord{{
+		ID:        "mnt_long",
+		Workspace: "long-path",
+		LocalPath: "/Users/example/projects/customer-success/super-long-nested-workspace-path/that-keeps-going/final-folder",
+		Mode:      modeSync,
+		PID:       os.Getpid(),
+		StartedAt: time.Now().UTC(),
+	}}}
+	if err := saveMountRegistry(reg); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdStatusWithOptions(statusOptions{})
+	})
+	if err != nil {
+		t.Fatalf("cmdStatusWithOptions() returned error: %v", err)
+	}
+	clean := stripAnsi(out)
+	if !strings.Contains(clean, displayPath) {
+		t.Fatalf("status output missing untruncated home-relative path %q:\n%s", displayPath, clean)
+	}
+	for _, line := range strings.Split(clean, "\n") {
+		if strings.Contains(line, "long-path") && strings.Contains(line, "…") {
+			t.Fatalf("status path row was ellipsized:\n%s", clean)
+		}
+	}
+}
+
 func TestCmdStatusDoesNotListStoppedRecordsAsMounted(t *testing.T) {
 	t.Helper()
 

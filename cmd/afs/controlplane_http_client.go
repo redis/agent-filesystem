@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 )
 
 type httpControlPlaneClient struct {
@@ -379,6 +380,32 @@ func (c *httpControlPlaneClient) GetFileContent(ctx context.Context, workspace, 
 	}
 	var out controlplane.FileContentResponse
 	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
+	var out mcptools.FileQueryResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query"), request, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) QueryIndexStatus(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexStatusRequest) (controlplane.WorkspaceQueryIndexStatus, error) {
+	params := url.Values{}
+	if strings.TrimSpace(request.Path) != "" {
+		params.Set("path", strings.TrimSpace(request.Path))
+	}
+	rel := c.workspacePath(workspace, "query", "index", "status")
+	if encoded := params.Encode(); encoded != "" {
+		rel += "?" + encoded
+	}
+	var out controlplane.WorkspaceQueryIndexStatus
+	err := c.doJSON(ctx, http.MethodGet, rel, nil, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) RebuildQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error) {
+	var out controlplane.WorkspaceQueryIndexRebuildResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query", "index", "rebuild"), request, &out, http.StatusOK)
 	return out, err
 }
 

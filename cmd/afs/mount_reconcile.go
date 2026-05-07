@@ -439,7 +439,7 @@ func approveMountReconcilePlan(d *syncDaemon, plan mountReconcilePlan) {
 func printMountReconcilePlan(title, workspace, localRoot string, plan mountReconcilePlan, showOperations bool) {
 	rows := []outputRow{
 		{Label: "workspace", Value: workspace},
-		{Label: "path", Value: compactDisplayPath(localRoot)},
+		{Label: "path", Value: homeRelativeDisplayPath(localRoot)},
 		{Label: "local entries", Value: fmt.Sprintf("%d", plan.LocalCount)},
 		{Label: "remote entries", Value: fmt.Sprintf("%d", plan.RemoteCount)},
 		{Label: "sync state", Value: mountSyncStateDisplay(plan)},

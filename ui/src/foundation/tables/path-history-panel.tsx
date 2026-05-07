@@ -107,7 +107,7 @@ function formatDelta(value?: number) {
 }
 
 function shortID(value: string) {
-  return value.length <= 12 ? value : value.slice(0, 12);
+  return value;
 }
 
 const Panel = styled.aside`
@@ -134,12 +134,11 @@ const PanelTitle = styled.h3`
 
 const PanelPath = styled.span`
   min-width: 0;
-  overflow: hidden;
   color: var(--afs-muted);
   font-family: var(--afs-mono);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const PanelMessage = styled.div`
@@ -185,20 +184,18 @@ const EventMain = styled.span`
 `;
 
 const EventTitle = styled.span`
-  overflow: hidden;
   color: var(--afs-ink);
   font-size: 13px;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const EventMeta = styled.span`
-  overflow: hidden;
   color: var(--afs-muted);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const EventTags = styled.span`

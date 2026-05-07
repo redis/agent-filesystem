@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/redis/agent-filesystem/internal/mcptools"
 )
 
 type databaseProfile struct {
@@ -1790,6 +1792,60 @@ func (m *DatabaseManager) GetResolvedFileContent(ctx context.Context, workspace,
 		return fileContentResponse{}, err
 	}
 	return service.GetFileContent(ctx, route.WorkspaceID, rawView, rawPath)
+}
+
+func (m *DatabaseManager) QueryWorkspace(ctx context.Context, databaseID, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return mcptools.FileQueryResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.QueryWorkspace(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) QueryIndexStatus(ctx context.Context, databaseID, workspace string, request WorkspaceQueryIndexStatusRequest) (WorkspaceQueryIndexStatus, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexStatus{}, err
+	}
+	request.Workspace = route.Name
+	return service.QueryIndexStatus(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) RebuildQueryIndex(ctx context.Context, databaseID, workspace string, request WorkspaceQueryIndexRebuildRequest) (WorkspaceQueryIndexRebuildResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexRebuildResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.RebuildQueryIndex(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) QueryResolvedWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return mcptools.FileQueryResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.QueryWorkspace(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) QueryResolvedIndexStatus(ctx context.Context, workspace string, request WorkspaceQueryIndexStatusRequest) (WorkspaceQueryIndexStatus, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexStatus{}, err
+	}
+	request.Workspace = route.Name
+	return service.QueryIndexStatus(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) RebuildResolvedQueryIndex(ctx context.Context, workspace string, request WorkspaceQueryIndexRebuildRequest) (WorkspaceQueryIndexRebuildResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexRebuildResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.RebuildQueryIndex(ctx, route.WorkspaceID, request)
 }
 
 func (m *DatabaseManager) GetResolvedFileVersionContent(ctx context.Context, workspace, versionID string) (FileVersionContentResponse, error) {

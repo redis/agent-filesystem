@@ -159,9 +159,8 @@ export const ProfileTextGroup = styled.div`
 
 export const ProfileName = styled.div`
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-size: 13px;
   font-weight: 600;
   color: var(--afs-ink);
@@ -169,9 +168,8 @@ export const ProfileName = styled.div`
 
 export const ProfileMeta = styled.div`
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-size: 11px;
   color: var(--afs-muted);
 `;

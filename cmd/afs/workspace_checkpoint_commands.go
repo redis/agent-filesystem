@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -229,12 +230,8 @@ func cmdWorkspaceList(args []string) error {
 	if len(workspaces.Items) == 0 {
 		fmt.Println("No workspaces found")
 	} else {
-		headers := []string{"", "Workspace", "Database", "ID", "Updated", "Mounted"}
-		printPlainTableWithOptions(
-			headers,
-			workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts(workspaces.Items)),
-			plainTableOptions{NoTruncateColumns: map[int]bool{len(headers) - 1: true}},
-		)
+		headers := []string{"", "Workspace", "Mounted", "Updated", "ID", "Database"}
+		printPlainTable(headers, workspaceSummaryTableRows(cfg, workspaces.Items, workspaceListMounts(workspaces.Items)))
 	}
 	fmt.Println()
 	return nil
@@ -296,7 +293,7 @@ func cmdWorkspaceSetDefault(args []string) error {
 	}
 	defer closeStore()
 
-	selection, err := resolveWorkspaceSelectionFromControlPlane(context.Background(), cfg, service, args[2])
+	selection, err := resolveWorkspaceSetDefaultSelection(context.Background(), cfg, service, args[2])
 	if err != nil {
 		return err
 	}
@@ -326,6 +323,141 @@ func cmdWorkspaceSetDefault(args []string) error {
 	rows = append(rows, outputRow{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))})
 	printSection(markerSuccess+" "+clr(ansiBold, "default workspace set"), rows)
 	return nil
+}
+
+func resolveWorkspaceSetDefaultSelection(ctx context.Context, cfg config, service afsControlPlane, ref string) (workspaceSelection, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return workspaceSelection{}, fmt.Errorf("workspace is required")
+	}
+
+	workspaces, listErr := service.ListWorkspaceSummaries(ctx)
+	if listErr == nil {
+		match, ok, err := matchWorkspaceSelection(ref, "", workspaces.Items)
+		if err != nil {
+			return workspaceSelection{}, fmt.Errorf("%w\nRun '%s ws list' and pass the workspace id explicitly", err, filepath.Base(os.Args[0]))
+		}
+		if ok {
+			match.Source = workspaceSelectionExplicit
+			return match, nil
+		}
+	}
+
+	if selection, ok, err := workspaceSelectionFromMountedDefaultRef(cfg, ref, workspaces.Items); err != nil {
+		return workspaceSelection{}, err
+	} else if ok {
+		return selection, nil
+	}
+
+	if recs, err := mountedWorkspaceRecordsForRef(ref); err != nil {
+		return workspaceSelection{}, err
+	} else if len(recs) > 0 {
+		return workspaceSelection{}, mountedWorkspaceConfigMismatchError(cfg, ref, recs)
+	}
+
+	if listErr != nil {
+		return workspaceSelection{}, listErr
+	}
+	return workspaceSelection{}, fmt.Errorf("workspace %q does not exist", ref)
+}
+
+func workspaceSelectionFromMountedDefaultRef(cfg config, ref string, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	recs, err := mountedWorkspaceRecordsForRef(ref)
+	if err != nil {
+		return workspaceSelection{}, false, err
+	}
+	matches := make([]mountRecord, 0, len(recs))
+	for _, rec := range recs {
+		if mountRecordMatchesDefaultConfig(cfg, rec) {
+			matches = append(matches, rec)
+		}
+	}
+	if len(matches) == 0 {
+		return workspaceSelection{}, false, nil
+	}
+	if len(matches) > 1 {
+		paths := make([]string, 0, len(matches))
+		for _, rec := range matches {
+			paths = append(paths, homeRelativeDisplayPath(rec.LocalPath))
+		}
+		sort.Strings(paths)
+		return workspaceSelection{}, false, fmt.Errorf("workspace %q matches multiple mounted workspaces: %s\nPass a workspace id explicitly", ref, strings.Join(paths, ", "))
+	}
+	return workspaceSelectionFromMountedDefaultRecord(matches[0], workspaces)
+}
+
+func workspaceSelectionFromMountedDefaultRecord(rec mountRecord, workspaces []workspaceSummary) (workspaceSelection, bool, error) {
+	selection := workspaceSelection{
+		ID:        strings.TrimSpace(rec.WorkspaceID),
+		Name:      strings.TrimSpace(rec.Workspace),
+		Source:    workspaceSelectionExplicit,
+		MountPath: strings.TrimSpace(rec.LocalPath),
+	}
+	if selection.ID == "" && selection.Name == "" {
+		return workspaceSelection{}, false, nil
+	}
+	if len(workspaces) == 0 {
+		return selection, true, nil
+	}
+	ref := selection.ID
+	if ref == "" {
+		ref = selection.Name
+	}
+	match, ok, err := matchWorkspaceSelection(ref, selection.Name, workspaces)
+	if err != nil {
+		return workspaceSelection{}, false, fmt.Errorf("mounted workspace %q is ambiguous: %w\nRun '%s ws list' and pass a workspace id explicitly", selection.Name, err, filepath.Base(os.Args[0]))
+	}
+	if ok {
+		match.Source = workspaceSelectionExplicit
+		match.MountPath = selection.MountPath
+		return match, true, nil
+	}
+	return selection, true, nil
+}
+
+func mountedWorkspaceRecordsForRef(ref string) ([]mountRecord, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, nil
+	}
+	reg, err := loadMountRegistry()
+	if err != nil {
+		return nil, err
+	}
+	matches := make([]mountRecord, 0)
+	for _, rec := range sortedMountRecords(reg.Mounts) {
+		if mountStatus(rec) != "running" {
+			continue
+		}
+		if strings.TrimSpace(rec.WorkspaceID) == ref || strings.TrimSpace(rec.Workspace) == ref {
+			matches = append(matches, rec)
+		}
+	}
+	return matches, nil
+}
+
+func mountRecordMatchesDefaultConfig(cfg config, rec mountRecord) bool {
+	if !mountRecordMatchesConfig(cfg, rec) {
+		return false
+	}
+	mode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return false
+	}
+	if mode == productModeLocal {
+		return true
+	}
+	cfgDatabase := strings.TrimSpace(cfg.DatabaseID)
+	recDatabase := strings.TrimSpace(rec.ControlPlaneDatabase)
+	return cfgDatabase == "" || recDatabase == "" || cfgDatabase == recDatabase
+}
+
+func mountedWorkspaceConfigMismatchError(cfg config, ref string, recs []mountRecord) error {
+	current := currentConfigScopeLabel(cfg)
+	if len(recs) == 1 {
+		return fmt.Errorf("workspace %q is mounted from %s, but the current config uses %s\nRun '%s status --verbose' to inspect mounts or '%s ws list' to choose a workspace in the current config", ref, mountRecordScopeLabel(recs[0]), current, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+	}
+	return fmt.Errorf("workspace %q is mounted under another config, but the current config uses %s\nRun '%s status --verbose' to inspect mounts or '%s ws list' to choose a workspace in the current config", ref, current, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 }
 
 func cmdWorkspaceUnsetDefault(args []string) error {
@@ -442,10 +574,10 @@ func workspaceSummaryTableRows(cfg config, items []workspaceSummary, mounts map[
 		rows = append(rows, []string{
 			workspaceListMarker(workspaceListSelected(cfg, item)),
 			workspaceListName(item.Name),
-			workspaceListDatabase(item),
-			workspaceListID(item),
-			workspaceListUpdated(item),
 			workspaceListMounted(item, mounts),
+			workspaceListUpdated(item),
+			workspaceListID(item),
+			workspaceListDatabase(item),
 		})
 	}
 	return rows
@@ -566,18 +698,7 @@ func workspaceListMountedPath(path string) string {
 	if path == "" {
 		return "-"
 	}
-	home, err := os.UserHomeDir()
-	if err == nil {
-		home = filepath.Clean(home)
-		clean := filepath.Clean(path)
-		if clean == home {
-			return "~"
-		}
-		if rel, err := filepath.Rel(home, clean); err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != ".." {
-			return filepath.Join("~", rel)
-		}
-	}
-	return path
+	return homeRelativeDisplayPath(path)
 }
 
 func cmdWorkspaceDelete(args []string) error {
@@ -1361,18 +1482,11 @@ func printCheckpointDiff(workspace string, diff controlplane.WorkspaceDiffRespon
 		return
 	}
 	rows = append(rows, outputRow{})
-	limit := len(diff.Entries)
-	if limit > 100 {
-		limit = 100
-	}
-	for _, entry := range diff.Entries[:limit] {
+	for _, entry := range diff.Entries {
 		rows = append(rows, outputRow{
 			Label: checkpointDiffOpLabel(entry.Op),
 			Value: checkpointDiffEntryValue(entry),
 		})
-	}
-	if extra := len(diff.Entries) - limit; extra > 0 {
-		rows = append(rows, outputRow{Value: fmt.Sprintf("%d more changes not shown", extra)})
 	}
 	printSection(clr(ansiBold, "checkpoint diff"), rows)
 	printCheckpointDiffText(diff)
@@ -1453,22 +1567,10 @@ func checkpointDiffEntryValue(entry controlplane.DiffEntry) string {
 }
 
 func printCheckpointDiffText(diff controlplane.WorkspaceDiffResponse) {
-	const (
-		maxTextFiles = 12
-		maxTextLines = 600
-	)
-	filesShown := 0
-	linesShown := 0
 	for _, entry := range diff.Entries {
 		if entry.TextDiff == nil {
 			continue
 		}
-		if filesShown >= maxTextFiles || linesShown >= maxTextLines {
-			fmt.Fprintln(os.Stdout)
-			fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diffs not shown. Use --json for complete structured diff data."))
-			return
-		}
-		filesShown++
 		fmt.Fprintln(os.Stdout)
 		fmt.Fprintln(os.Stdout, clr(ansiBold, entry.Path))
 		if !entry.TextDiff.Available {
@@ -1477,19 +1579,9 @@ func printCheckpointDiffText(diff controlplane.WorkspaceDiffResponse) {
 			continue
 		}
 		for _, hunk := range entry.TextDiff.Hunks {
-			if linesShown >= maxTextLines {
-				fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diff lines not shown. Use --json for complete structured diff data."))
-				return
-			}
 			fmt.Fprintln(os.Stdout, clr(ansiDim, checkpointTextDiffHunkHeader(hunk)))
-			linesShown++
 			for _, line := range hunk.Lines {
-				if linesShown >= maxTextLines {
-					fmt.Fprintln(os.Stdout, clr(ansiDim, "Additional text diff lines not shown. Use --json for complete structured diff data."))
-					return
-				}
 				fmt.Fprintln(os.Stdout, checkpointTextDiffLine(line))
-				linesShown++
 			}
 		}
 	}

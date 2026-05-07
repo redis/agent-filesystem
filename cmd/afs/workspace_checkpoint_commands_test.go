@@ -76,7 +76,7 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	}
 
 	stripped := stripAnsi(listOutput)
-	if !strings.Contains(stripped, "Workspace") || !strings.Contains(stripped, "Database") || !strings.Contains(stripped, "Updated") {
+	if !strings.Contains(stripped, "Workspace") || !strings.Contains(stripped, "Mounted") || !strings.Contains(stripped, "Database") || !strings.Contains(stripped, "Updated") {
 		t.Fatalf("cmdWorkspace(list) output = %q, want table headers", listOutput)
 	}
 	var repoLine, copyLine string
@@ -95,26 +95,30 @@ func TestWorkspaceCommandsImportCloneForkListAndDelete(t *testing.T) {
 	if headerLine == "" || repoLine == "" || copyLine == "" {
 		t.Fatalf("cmdWorkspace(list) output = %q, want header and both workspace rows", listOutput)
 	}
-	databaseIdx := strings.Index(headerLine, "Database")
-	idIdx := strings.Index(headerLine, "ID")
+	mountedIdx := strings.Index(headerLine, "Mounted")
 	updatedIdx := strings.Index(headerLine, "Updated")
-	if databaseIdx == -1 || idIdx == -1 || updatedIdx == -1 {
+	idIdx := strings.Index(headerLine, "ID")
+	databaseIdx := strings.Index(headerLine, "Database")
+	if mountedIdx == -1 || updatedIdx == -1 || idIdx == -1 || databaseIdx == -1 {
 		t.Fatalf("workspace list output = %q, want fixed header columns", listOutput)
 	}
-	if len(repoLine) < updatedIdx || len(copyLine) < updatedIdx {
+	if !(mountedIdx < updatedIdx && updatedIdx < idIdx && idIdx < databaseIdx) {
+		t.Fatalf("workspace list header order = %q, want Mounted, Updated, ID, Database", headerLine)
+	}
+	if len(repoLine) < databaseIdx || len(copyLine) < databaseIdx {
 		t.Fatalf("workspace list output = %q, want rows wide enough for all columns", listOutput)
 	}
-	if got := strings.TrimSpace(repoLine[databaseIdx:idIdx]); got == "" {
-		t.Fatalf("repo database column empty\nheader: %q\nrow: %q", headerLine, repoLine)
-	}
-	if got := strings.TrimSpace(copyLine[databaseIdx:idIdx]); got == "" {
-		t.Fatalf("copy database column empty\nheader: %q\nrow: %q", headerLine, copyLine)
-	}
-	if got := strings.TrimSpace(repoLine[idIdx:updatedIdx]); !strings.HasPrefix(got, "ws_") {
+	if got := strings.TrimSpace(repoLine[idIdx:databaseIdx]); !strings.HasPrefix(got, "ws_") {
 		t.Fatalf("repo id column = %q, want opaque workspace id\nheader: %q\nrow: %q", got, headerLine, repoLine)
 	}
-	if got := strings.TrimSpace(copyLine[idIdx:updatedIdx]); !strings.HasPrefix(got, "ws_") {
+	if got := strings.TrimSpace(copyLine[idIdx:databaseIdx]); !strings.HasPrefix(got, "ws_") {
 		t.Fatalf("copy id column = %q, want opaque workspace id\nheader: %q\nrow: %q", got, headerLine, copyLine)
+	}
+	if got := strings.TrimSpace(repoLine[databaseIdx:]); got == "" {
+		t.Fatalf("repo database column empty\nheader: %q\nrow: %q", headerLine, repoLine)
+	}
+	if got := strings.TrimSpace(copyLine[databaseIdx:]); got == "" {
+		t.Fatalf("copy database column empty\nheader: %q\nrow: %q", headerLine, copyLine)
 	}
 
 	if err := cmdWorkspace([]string{"workspace", "delete", "--no-confirmation", "repo-copy"}); err != nil {
@@ -343,10 +347,28 @@ func TestWorkspaceListShowsMountedFolder(t *testing.T) {
 			t.Fatalf("cmdWorkspace(list) output = %q, want %q", out, want)
 		}
 	}
+	var headerLine, repoLine string
 	for _, line := range strings.Split(stripped, "\n") {
-		if strings.Contains(line, "repo-with-a-long-mount-folder-name") && strings.Contains(line, "…") {
-			t.Fatalf("cmdWorkspace(list) mount path was ellipsized: %q", line)
+		switch {
+		case strings.Contains(line, "Workspace") && strings.Contains(line, "Mounted") && strings.Contains(line, "Updated"):
+			headerLine = line
+		case strings.Contains(line, displayPath):
+			repoLine = line
 		}
+	}
+	mountedIdx := strings.Index(headerLine, "Mounted")
+	updatedIdx := strings.Index(headerLine, "Updated")
+	databaseIdx := strings.Index(headerLine, "Database")
+	if headerLine == "" || repoLine == "" || mountedIdx == -1 || updatedIdx == -1 || databaseIdx == -1 || mountedIdx >= updatedIdx {
+		t.Fatalf("cmdWorkspace(list) output = %q, want mounted and updated columns", out)
+	}
+	mountedColumn := strings.TrimSpace(repoLine[mountedIdx:updatedIdx])
+	if strings.Contains(mountedColumn, "…") {
+		t.Fatalf("cmdWorkspace(list) mounted path was ellipsized: %q", mountedColumn)
+	}
+	databaseColumn := strings.TrimSpace(repoLine[databaseIdx:])
+	if databaseColumn == "" || strings.Contains(databaseColumn, "…") {
+		t.Fatalf("cmdWorkspace(list) database column = %q, want unellipsized database label", databaseColumn)
 	}
 }
 

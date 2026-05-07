@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"net"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/go-git/go-billy/v5"
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/agent-filesystem/mount/internal/nfsfs"
 	"github.com/redis/agent-filesystem/mount/internal/redisconn"
@@ -180,6 +182,11 @@ func main() {
 	// handles that internally.
 	subscriberCtx, cancelSubscriber := context.WithCancel(context.Background())
 	defer cancelSubscriber()
+	go func() {
+		if err := queryindex.NewWorker(rdb, redisKey).Run(subscriberCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("warning: query index worker exited: %v", err)
+		}
+	}()
 	if *disableInvalidation {
 		c.DisableInvalidationPublishing()
 		log.Printf("Cross-client cache invalidation: DISABLED (flag)")

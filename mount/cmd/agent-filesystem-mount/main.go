@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/mount/internal/afsfs"
 	"github.com/redis/agent-filesystem/mount/internal/client"
 	"github.com/redis/agent-filesystem/mount/internal/redisconn"
@@ -136,6 +138,11 @@ func main() {
 	// the pub/sub goroutine down.
 	mountCtx, cancelMount := context.WithCancel(context.Background())
 	defer cancelMount()
+	go func() {
+		if err := queryindex.NewWorker(rdb, redisKey).Run(mountCtx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("warning: query index worker exited: %v", err)
+		}
+	}()
 
 	server, err := afsfs.Mount(mountCtx, mountpoint, c, opts)
 	if err != nil {

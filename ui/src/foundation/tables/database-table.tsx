@@ -631,9 +631,8 @@ const NameButton = styled.button`
   text-align: left;
   line-height: 1.2;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 
   &:hover {
     color: var(--afs-accent, #dc2626);
@@ -732,9 +731,8 @@ const IdText = styled.span`
   letter-spacing: 0;
   line-height: 1.2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const CopyButton = styled.button`
@@ -800,9 +798,8 @@ const UsageSubline = styled.span`
   color: var(--afs-muted, #71717a);
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Load cell ---- */
@@ -845,7 +842,6 @@ const DimCell = styled.span`
 const VersionText = styled.code`
   display: inline-block;
   max-width: 120px;
-  overflow: hidden;
   color: var(--afs-ink, #18181b);
   font-family: var(
     --afs-mono,
@@ -857,8 +853,8 @@ const VersionText = styled.code`
   );
   font-size: 12px;
   line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Capabilities cell ---- */

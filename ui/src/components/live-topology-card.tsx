@@ -251,9 +251,8 @@ const AgentLabel = styled.span`
   font-size: 12px;
   font-weight: 800;
   color: var(--afs-ink, #18181b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   max-width: 100%;
 `;
 
@@ -268,12 +267,11 @@ const AgentText = styled.div`
 const AgentPath = styled.span`
   display: block;
   max-width: 100%;
-  overflow: hidden;
   color: var(--afs-muted, #71717a);
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Hub ---- */
@@ -328,9 +326,8 @@ const HubCaptionValue = styled.span`
   font-size: 11px;
   font-weight: 600;
   color: var(--afs-ink, #18181b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   max-width: 100%;
 `;
 
@@ -410,18 +407,16 @@ const WorkspaceName = styled.span`
   font-size: 12px;
   font-weight: 700;
   color: var(--afs-ink, #18181b);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   max-width: 100%;
 `;
 
 const WorkspaceFiles = styled.span`
   font-size: 10px;
   color: var(--afs-muted, #71717a);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   max-width: 100%;
 `;
 
@@ -460,9 +455,8 @@ const HostGroupName = styled.span`
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;
   font-weight: 700;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Database group ---- */
@@ -501,9 +495,8 @@ const DatabaseGroupName = styled.span`
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Live status footer pill ---- */
@@ -609,7 +602,7 @@ function displayLocalPath(path: string): string {
 // Topology-specific label: the parent host group already shows the host, and
 // `agentName` often duplicates it as a friendly prefix (e.g. "Macbook Air").
 // Prefer the session name, then the agent name; never return the hostname.
-// When neither is set, fall back to a short session id ("Session: a1b2c3d4").
+// When neither is set, fall back to the full session id.
 function displayAgentPrimaryName(agent: AFSAgentSession): string {
   const host = agent.hostname.trim();
   const notHost = (value?: string | null) => {
@@ -618,8 +611,8 @@ function displayAgentPrimaryName(agent: AFSAgentSession): string {
   };
   const named = notHost(agent.sessionName) || notHost(agent.agentName);
   if (named) return named;
-  const shortId = agent.sessionId.trim().slice(0, 8);
-  return shortId ? `Session: ${shortId}` : "Session: unknown";
+  const sessionId = agent.sessionId.trim();
+  return sessionId ? `Session: ${sessionId}` : "Session: unknown";
 }
 
 function getAgentTopologyId(agent: AFSAgentSession): string {

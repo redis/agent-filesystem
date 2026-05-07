@@ -98,9 +98,8 @@ export const Stack = styled.div`
 export const SingleLineText = styled.span`
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 export const StatusCaption = styled.span`
@@ -328,9 +327,8 @@ export const CardName = styled.span`
   font-weight: 800;
   color: var(--afs-ink, #18181b);
   line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 export const CardDescription = styled.span`
@@ -362,9 +360,8 @@ export const CardDetailLabel = styled.span`
 
 export const CardDetailValue = styled.span`
   color: var(--afs-muted, #71717a);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   min-width: 0;
 `;
 

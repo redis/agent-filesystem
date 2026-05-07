@@ -90,9 +90,7 @@ async function seedTemplateFiles(
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(
-        `Seeding ${file.path} failed: HTTP ${response.status} ${text.slice(0, 160)}`,
-      );
+      throw new Error(`Seeding ${file.path} failed: HTTP ${response.status} ${text}`);
     }
     const body = (await response.json()) as {
       error?: { message?: string };
@@ -699,9 +697,8 @@ const SelectedFolderName = styled.span`
   font-size: 13px;
   font-weight: 700;
   color: var(--afs-ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const SelectedFolderMeta = styled.span`

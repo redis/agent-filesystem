@@ -23,6 +23,7 @@ var (
 		"file_list":                       {},
 		"file_glob":                       {},
 		"file_grep":                       {},
+		"file_query":                      {},
 		"workspace_get_versioning_policy": {},
 	}
 	workspaceWriteTools = map[string]struct{}{

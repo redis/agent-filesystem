@@ -341,6 +341,7 @@ Subcommands:
 | `afs fs [workspace] cat <path>` | Print a workspace file. |
 | `afs fs [workspace] find [path] [-name <pattern>] [-type f|d|l] [-print]` | Find workspace paths by basename pattern. |
 | `afs fs [workspace] grep [flags] <pattern>` | Search workspace file contents. |
+| `afs fs [workspace] query [flags] <query>` | Rank workspace files for a concept or question. |
 | `afs fs create-exclusive <path>` | Create a file through a mounted sync workspace only if it does not exist. |
 
 Examples:
@@ -352,6 +353,7 @@ afs fs repo cat README.md
 afs fs repo find . -name '*.md' -print
 afs fs repo find /src -type f -name '*.go'
 afs fs repo grep "hello"
+afs fs repo query "how do checkpoints work?"
 ```
 
 ### `afs fs grep`
@@ -393,6 +395,67 @@ afs fs repo grep -w --path /logs token
 afs fs repo grep -l -i "disk full"
 afs fs repo grep --glob --path /src "*TODO*"
 ```
+
+### `afs fs query`
+
+```bash
+afs fs [workspace] query [flags] <query>
+afs fs [workspace] query --keyword <query>
+afs fs [workspace] query --semantic <query>
+afs fs [workspace] query index status
+afs fs [workspace] query index rebuild --wait
+```
+
+Ranks workspace files for a concept or natural-language question. Plain
+`query` is the recommended hybrid surface. While vector retrieval is still
+behind the embedding index, it falls back to keyword-ranked results. Keyword
+ranking uses Redis Search BM25 over a chunk-level HASH projection when
+available, with a direct content-ranking fallback. Use `grep` when you know the
+exact text.
+
+Existing workspaces are backfilled automatically on first query when Redis
+Search is available. Use `query index status --json` to inspect files, ready
+chunks, pending work, skipped files, and unindexed files. Use
+`query index rebuild --wait` to force an immediate backfill.
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--path <path>` | Scope search to a workspace path. |
+| `-n`, `--limit <num>` | Maximum results. |
+| `--all` | Return all results. |
+| `--min-score <num>` | Minimum score. |
+| `--json` | Write JSON output. |
+| `--files` | Show only files. |
+| `--md` | Write Markdown output. |
+| `--full` | Include full content. |
+| `--line-numbers` | Include line numbers. |
+| `--explain` | Include retrieval explanation when available. |
+| `--candidate-limit <num>` | Candidate result limit. |
+| `--no-rerank` | Disable reranking when available. |
+| `--keyword` | Keyword-ranked retrieval only. |
+| `--semantic` | Vector-only semantic retrieval. Requires embeddings. |
+| `--intent <text>` | Extra search intent. |
+| `--chunk-strategy <auto|regex>` | Chunk strategy. |
+
+Typed query documents are supported on the default `query` mode:
+
+```bash
+afs fs repo query $'lex: checkpoint\nvec: how do I save a snapshot?'
+afs fs repo query $'intent: mount setup\nlex: "mount backend"\nhyde: setup stores the selected backend in config'
+```
+
+Top-level shortcuts are also available:
+
+```bash
+afs grep "DirtyHint"
+afs query "how do checkpoints work?"
+```
+
+The shortcuts use the saved default workspace. Use
+`afs fs <workspace> grep` or `afs fs <workspace> query` to choose a workspace
+explicitly.
 
 ## Databases
 

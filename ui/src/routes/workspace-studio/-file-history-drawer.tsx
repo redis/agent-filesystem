@@ -343,7 +343,7 @@ export function FileHistoryDrawer({
               <LineageCard key={lineage.fileId}>
                 <LineageHeader>
                   <Tag>{lineage.state}</Tag>
-                  <LineageMeta>{lineage.fileId.slice(0, 12)}</LineageMeta>
+                  <LineageMeta>{lineage.fileId}</LineageMeta>
                 </LineageHeader>
                 <VersionList>
                   {lineage.versions.map((version) => {
@@ -365,7 +365,7 @@ export function FileHistoryDrawer({
                         </VersionTitleRow>
                         <VersionMeta>
                           <span>{shortDateTime(version.createdAt)}</span>
-                          <span>{version.versionId.slice(0, 12)}</span>
+                          <span>{version.versionId}</span>
                         </VersionMeta>
                       </VersionButton>
                     );

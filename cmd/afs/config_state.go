@@ -37,6 +37,9 @@ func compactDisplayPath(p string) string {
 	}
 
 	clean := filepath.Clean(p)
+	if display := homeRelativeDisplayPath(clean); display != clean {
+		return display
+	}
 	base := filepath.Base(clean)
 	dirBase := filepath.Base(filepath.Dir(clean))
 	if base == "." || base == string(filepath.Separator) {

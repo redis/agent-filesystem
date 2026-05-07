@@ -160,7 +160,7 @@ function ConnectCLIPage() {
         <Title>Connect your CLI</Title>
         <Description>
           {autoWorkspace == null
-            ? "Pick a workspace for this terminal. If you have not created one yet, finish onboarding in AFS Cloud first."
+            ? "No workspace is selected for this terminal yet. Run afs workspace create <name>, then retry login."
             : isGettingStartedName(autoWorkspace.name)
               ? "Connecting this CLI to your getting-started workspace so you can start with sample files right away."
               : `Preparing browser login for ${displayWorkspaceName(autoWorkspace.name)}.`}
@@ -180,7 +180,7 @@ function ConnectCLIPage() {
               {explicitWorkspaceHint
                 ? "AFS Cloud is trying to connect this CLI to your starter workspace. If this page stays here, refresh once and retry the login from the terminal."
                 : hasCreatableDatabase
-                ? "Create your first workspace in AFS Cloud, then come back here to connect this CLI."
+                ? "Create your first workspace with afs workspace create <name>, then retry this login."
                 : "Your account only has access to the shared getting-started database right now. Create your own cloud database or add an existing Redis database before creating a workspace."}
             </SectionCopy>
             {explicitWorkspaceHint ? (

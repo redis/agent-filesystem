@@ -14,8 +14,9 @@ workspaces.
 `file_grep` remains the deterministic text-search tool for exact strings,
 regex, glob matching, counts, and line-oriented matches. `file_query` becomes
 the ranked retrieval tool for lexical search, local vector similarity, typed
-query documents, and hybrid search. `vsearch` is the explicit vector-only CLI
-path.
+query documents, and hybrid search. The CLI keeps this as two commands:
+`grep` for exact text and `query` for ranked retrieval. Narrow query modes use
+flags instead of separate verbs.
 
 The design is inspired by Tobi Lutke's QMD command split:
 
@@ -24,12 +25,15 @@ The design is inspired by Tobi Lutke's QMD command split:
 - `qmd embed` -> generate or refresh local embeddings.
 - `qmd query` -> recommended hybrid search.
 - QMD typed query documents: `lex:`, `vec:`, `hyde:`, and `intent:`.
+- QMD plain `query` text is an implicit `expand:` query; explicit `expand:`
+  cannot be mixed with typed lines.
 
 AFS keeps the public model crisp:
 
 - `grep` -> exact deterministic evidence.
-- `vsearch` -> semantic vector results.
 - `query` -> recommended hybrid retrieval.
+- `query --keyword` -> BM25 keyword-only retrieval.
+- `query --semantic` -> vector-only semantic retrieval.
 
 ## Scope
 
@@ -38,14 +42,17 @@ In scope:
 - Add a new MCP `file_query` tool for local and hosted MCP.
 - Add CLI commands:
   - `afs grep`
-  - `afs vsearch`
   - `afs query`
-  - `afs fs <workspace> vsearch`
+  - `afs query --keyword`
+  - `afs query --semantic`
   - `afs fs <workspace> query`
+  - `afs fs <workspace> query --keyword`
+  - `afs fs <workspace> query --semantic`
 - Add a workspace config surface, modeled after top-level `afs config`, so
   workspace settings use one key-based API instead of one subcommand family per
   feature.
-- Add vector-index operations under `vsearch` for status, rebuild, and cleanup.
+- Add vector-index operations under `query index` for status, rebuild, and
+  cleanup.
 - Use Redis Search / `FT.SEARCH` as the canonical search backend, with
   `FT.HYBRID` as an optimization where available.
 - Store embeddings as chunk-level Redis HASH documents indexed by RediSearch
@@ -77,14 +84,16 @@ afs fs repo grep -E "error|warning" --path /internal
 afs fs repo grep -l -i "disk full"
 ```
 
-Add QMD-style semantic and hybrid commands:
+Add QMD-style query commands:
 
 ```bash
 afs grep "DirtyHint"
-afs vsearch "how does the UI know a workspace has unsaved changes?"
 afs query "how does auth attach tenant scope to a workspace?"
-afs fs repo vsearch "how does the UI know a workspace has unsaved changes?"
+afs query --keyword "auth subject workspace"
+afs query --semantic "how does the UI know a workspace has unsaved changes?"
+afs query "expand: how does auth attach tenant scope to a workspace?"
 afs fs repo query "how does auth attach tenant scope to a workspace?"
+afs fs repo query --semantic "how does the UI know a workspace has unsaved changes?"
 ```
 
 Support typed query documents for the recommended hybrid command:
@@ -110,6 +119,8 @@ Shared query options:
 --explain
 --candidate-limit <n>
 --no-rerank
+--keyword
+--semantic
 --intent <text>
 --chunk-strategy <regex|auto>
 ```
@@ -128,12 +139,12 @@ afs ws config repo unset query.embeddings.model
 Vector index operations:
 
 ```bash
-afs vsearch status
-afs vsearch rebuild --wait
-afs vsearch rebuild --force
-afs vsearch rebuild --path /cmd/afs
-afs vsearch clean
-afs fs repo vsearch status
+afs query index status
+afs query index rebuild --wait
+afs query index rebuild --force
+afs query index rebuild --path /cmd/afs
+afs query index clean
+afs fs repo query index status
 ```
 
 ### MCP
@@ -211,6 +222,22 @@ grep behavior to semantic query behavior.
 
 ### Redis Data Model
 
+AFS now has two derived search projections beside canonical file content:
+
+- `grep` projection on inode HASHes for exact literal candidate discovery.
+  Key pattern: `afs:{fsKey}:inode:<inodeID>`, indexed by
+  `afs:idx:{fsKey}:v1`, with `grep_grams_ci` and file metadata fields.
+- `query` keyword projection on chunk HASHes for BM25 ranked retrieval.
+  Key pattern:
+  `afs:{fsKey}:qchunk:<inodeID>:<contentHash>:<seq>`, indexed by
+  `afs:qidx:{fsKey}:v1`, with `text`, `preview`, path filters, line spans, and
+  content identity.
+
+Canonical file bytes remain in the filesystem content backend (`ARRAY` when
+available, `STRING` fallback). RediSearch indexes the HASH projection because
+the search module indexes HASH/JSON documents, not Redis Array payloads. The
+projection is derived and rebuildable.
+
 Do not store vectors on inode HASHes. Store one HASH per embedded chunk:
 
 ```text
@@ -277,8 +304,8 @@ type Engine interface {
 ```
 
 Testing uses a deterministic fake embedder. If the local model is unavailable,
-`query` falls back to lexical-only results with a clear warning, and `vsearch`
-returns a structured "embeddings unavailable" error.
+default `query` falls back to keyword-only results with a clear warning, and
+`query --semantic` returns a structured "embeddings unavailable" error.
 
 ### Chunking
 
@@ -297,9 +324,24 @@ mode.
 
 ### Write Path
 
-File writes and imports must not synchronously embed.
+File writes and imports must not synchronously chunk or embed.
 
-On control-plane materialization/import and mount/sync writes:
+Current keyword projection flow:
+
+1. Write canonical content and inode metadata.
+2. Update the grep projection fields in the inode HASH.
+3. Mark the file stale with `query_state=stale`.
+4. Add the inode id to `afs:{fsKey}:query_index:dirty`.
+5. Return to the caller.
+
+The async query worker claims dirty inode ids, re-reads current file content,
+skips unsupported/binary/oversized files, writes `qchunk` HASH projection
+documents, deletes stale chunk documents, and marks the inode `query_state`
+`ready`, `skipped`, or `error`. Empty file creation does not enqueue query
+work; later writes/truncates mark the file dirty.
+
+Future vector flow on control-plane materialization/import and mount/sync
+writes:
 
 1. Write file content and existing search metadata.
 2. Compute content hash.
@@ -338,15 +380,15 @@ Lexical retrieval inside `query`:
 2. Query RediSearch text fields.
 3. Return ranked chunk/file results with snippets.
 
-`vsearch`:
+`query --semantic`:
 
 1. Embed query locally.
 2. Run RediSearch vector KNN with path filters.
 3. Return ranked chunk results.
 
-`query`:
+Default `query`:
 
-1. Parse query document or single natural-language query.
+1. Parse query document, explicit `expand:`, or single natural-language query.
 2. If single query, use it as the original search with optional local expansion
    in a later phase.
 3. Run lexical and vector retrieval in parallel.
@@ -368,16 +410,25 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [x] Add query embedding config keys:
       `query.embeddings.enabled`, `query.embeddings.model`, and
       `query.embeddings.chunkStrategy`.
-- [ ] Define `file_query` MCP request/response structs in a shared package.
-- [ ] Define CLI option structs for `vsearch`, `query`, and vector-index
-      management.
-- [ ] Implement typed query parsing for `lex:`, `vec:`, `hyde:`, and `intent:`.
-- [ ] Add unit tests for query parsing, invalid mixed query documents, balanced
+- [x] Define `file_query` MCP request/response structs in a shared package.
+- [x] Define CLI option structs for `query` and its `--keyword` / `--semantic`
+      modes.
+- [x] Define CLI option structs for vector-index management.
+- [x] Implement QMD-style query parsing for `expand:`, `lex:`, `vec:`,
+      `hyde:`, and `intent:`.
+- [x] Add unit tests for query parsing, invalid mixed query documents, balanced
       quote checks, and line constraints.
-- [ ] Add result structs with stable JSON field names.
+- [x] Add result structs with stable JSON field names.
 
 ### Phase 2 - Redis vector index
 
+- [x] Add `internal/queryindex` key builders for keyword chunk projection.
+- [x] Add RediSearch BM25 chunk index creation and capability detection.
+- [x] Add chunk HASH upsert/delete operations for keyword projection.
+- [x] Add dirty-set processing for text files, binary skips, unsupported
+      document/container skips, and deleted inode cleanup.
+- [x] Route CLI, HTTP, local MCP, and hosted MCP through the shared query
+      service.
 - [ ] Add `internal/vectorindex` key builders.
 - [ ] Add RediSearch vector index creation and capability detection.
 - [ ] Add chunk HASH upsert/delete operations.
@@ -393,7 +444,7 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [ ] Add local GGUF model config and model identity/dimension handling.
 - [ ] Add model cache path and environment overrides.
 - [ ] Add clear errors for missing model/runtime.
-- [ ] Add model-change detection that requires `vsearch rebuild --force`.
+- [ ] Add model-change detection that requires `query index rebuild --force`.
 
 ### Phase 4 - Chunking
 
@@ -410,33 +461,40 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [ ] Add embedding pending queue and metadata keys.
 - [ ] Gate enqueue/rebuild behavior on workspace config
       `query.embeddings.enabled`.
+- [x] Hook control-plane workspace materialization/import to enqueue keyword
+      query projection work.
+- [x] Hook mount/sync write paths to enqueue keyword query projection work after
+      content changes.
+- [x] Add query projection delete and rename handling.
 - [ ] Hook control-plane workspace materialization/import to enqueue vector work.
 - [ ] Hook mount/sync write paths to enqueue vector work after content changes.
-- [ ] Add delete and rename handling.
-- [ ] Add `afs fs <workspace> vsearch rebuild` to process pending work.
-- [ ] Add `afs fs <workspace> vsearch status`, `rebuild`, and `clean`.
-- [ ] Ensure writes never block on model download or embedding inference.
+- [ ] Add vector projection delete and rename handling.
+- [x] Add `afs fs <workspace> query index rebuild` to process pending keyword
+      projection work.
+- [x] Add `afs fs <workspace> query index status`, `rebuild`, and `clean`.
+- [x] Ensure writes never block on chunking, model download, or embedding
+      inference.
 
 ### Phase 6 - CLI query commands
 
-- [ ] Add top-level `afs grep` as the active-workspace shorthand for existing
+- [x] Add top-level `afs grep` as the active-workspace shorthand for existing
       deterministic grep behavior.
-- [ ] Add `afs fs <workspace> vsearch`.
-- [ ] Add `afs fs <workspace> query`.
-- [ ] Add top-level `afs vsearch` and `afs query` active-workspace shorthands.
-- [ ] Support shared output options: `--json`, `--files`, `--md`, `--full`,
+- [x] Add `afs fs <workspace> query`.
+- [x] Add `afs query --keyword` and `afs query --semantic`.
+- [x] Add top-level `afs query` active-workspace shorthand.
+- [x] Accept shared output options: `--json`, `--files`, `--md`, `--full`,
       `--line-numbers`, `--explain`, `--limit`, `--all`, and `--min-score`.
 - [ ] Add profile timings similar to `AFS_GREP_PROFILE`.
-- [ ] Add user-friendly fallback messages for missing/stale embeddings.
+- [x] Add user-friendly fallback messages for missing/stale embeddings.
 
 ### Phase 7 - MCP tools
 
-- [ ] Add local MCP `file_query`.
-- [ ] Add hosted MCP `file_query`.
-- [ ] Keep `file_grep` documentation pointed at deterministic text search.
-- [ ] Update MCP tool descriptions so agents choose `file_query` for concepts
+- [x] Add local MCP `file_query`.
+- [x] Add hosted MCP `file_query`.
+- [x] Keep `file_grep` documentation pointed at deterministic text search.
+- [x] Update MCP tool descriptions so agents choose `file_query` for concepts
       and `file_grep` for exact occurrences.
-- [ ] Add MCP tests for lexical, vector-unavailable fallback, typed queries,
+- [x] Add MCP tests for lexical, vector-unavailable fallback, typed queries,
       path scoping, and JSON result shape.
 
 ### Phase 8 - Hybrid and explain quality
@@ -451,11 +509,11 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 
 ### Phase 9 - Documentation and cleanup
 
-- [ ] Update `README.md` with the new query command family.
+- [x] Update `README.md` with the new query command family.
 - [ ] Update `docs/reference/control-plane-api.md` if hosted MCP/API contracts
       change.
-- [ ] Update MCP setup docs with `file_query` examples.
-- [ ] Add a short ADR under `docs/internals/decisions/` for QMD-inspired
+- [x] Update MCP setup docs with `file_query` examples.
+- [x] Add a short ADR under `docs/internals/decisions/` for QMD-inspired
       hybrid search, local embeddings, and RediSearch over VectorSets.
 - [ ] Remove any stale entries from `plans/future-work.md` if this work lands.
 
@@ -466,22 +524,52 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
   keys.
 - Retired the old `afs ws versioning` CLI path so versioning now follows the
   workspace config API shape.
+- Second implementation slice landed: shared `file_query` contract structs,
+  typed QMD-style query parsing, and `afs query` CLI skeletons with `--keyword`
+  / `--semantic` modes, structured unavailable JSON, and clear
+  embedding-disabled messages.
+- Third implementation slice landed: plain `afs query` and
+  `afs query --keyword` now return keyword-ranked workspace results, with typed
+  `lex:`, `vec:`, and `hyde:` clauses falling back to keyword text when vector
+  retrieval is unavailable.
+- Fourth implementation slice landed: `afs query index status|rebuild|clean`
+  and `afs fs <workspace> query index ...` exist as the vector-index operations
+  surface. Status reflects workspace embedding config; rebuild reports the
+  vector worker as unavailable until the embedding backend lands.
+- Fifth implementation slice landed: local and hosted MCP expose `file_query`
+  beside deterministic `file_grep`, using the shared query request/response and
+  keyword-ranking fallback.
+- Sixth implementation slice landed: `internal/queryindex` maintains a
+  chunk-level HASH projection for BM25 keyword query. Control-plane
+  materialization and mount/sync writes mark changed files dirty; local sync,
+  FUSE, and NFS daemons run the async worker; CLI, HTTP, local MCP, and hosted
+  MCP all use `Service.QueryWorkspace`. If RediSearch is unavailable, query
+  falls back to direct keyword ranking without requiring embeddings.
+- Seventh implementation slice landed: `afs query index status --json` reports
+  keyword projection health (`files`, `ready`, `pending`, `stale`, `unindexed`,
+  `skipped`, `errors`, `chunks`, and RediSearch availability). `afs query index
+  rebuild --wait` enqueues existing files for backfill. First query also
+  opportunistically backfills unindexed existing files once per workspace.
 
 ## Decisions / Blockers
 
 - **Separate tool boundary.** `file_query` is a new ranked retrieval surface.
   `file_grep` remains deterministic and line-oriented.
-- **Separate CLI verbs.** Use `grep`, `vsearch`, and `query`: exact evidence,
-  vector-only semantic search, and the recommended hybrid query path.
+- **Two CLI verbs.** Use `grep` and `query`: exact evidence and powerful
+  ranked retrieval. `query` defaults to hybrid retrieval; `--keyword` and
+  `--semantic` select narrower modes.
 - **Vector management is split by responsibility.** Enable, disable, and
   model/chunk settings live under `afs ws config`; rebuild, status, and clean
-  commands live under `vsearch`.
+  commands live under `query index`.
 - **Workspace settings use one key-based API.** New query/embedding settings
   should go through `afs ws config <workspace> get|set|list|unset`, not a dedicated
   `afs ws query` command.
 - **Redis Search first.** Use chunk HASHes plus RediSearch vector fields.
   VectorSets are not the primary backend because AFS needs rich path filters,
   lexical search, hybrid ranking, and explainability.
+- **Derived projections.** Canonical file bytes stay in the filesystem content
+  backend. Grep and query maintain rebuildable HASH projections because
+  RediSearch cannot index Redis Array values directly.
 - **Local-first embeddings.** Default to a local GGUF embedding model,
   conceptually matching QMD's `embeddinggemma-300M-Q8_0` setup. Cloud/provider
   embeddings can be added later behind explicit configuration.
@@ -499,23 +587,43 @@ using separate `FT.SEARCH` lexical and vector queries plus Go-side RRF.
 - [x] `make test`
 - [x] Targeted CLI tests under `./cmd/afs/...`
 - [x] Targeted control-plane tests under `./internal/controlplane/...`
-- [ ] Targeted vector/query package unit tests.
-- [ ] `cd mount && go test ./...` after write-hook changes.
-- [ ] MCP local and hosted tool tests pass.
+- [x] Targeted vector/query package unit tests.
+- [x] `go test ./internal/queryindex`
+- [x] `go test ./internal/controlplane ./internal/mcptools ./internal/queryindex ./internal/querysearch ./internal/searchindex`
+- [x] `go test ./cmd/afs`
+- [x] `cd mount && go test ./internal/client ./cmd/agent-filesystem-mount ./cmd/agent-filesystem-nfs`
+- [x] `cd mount && go test ./...` after write-hook changes.
+- [x] MCP local and hosted tool tests pass.
 - [ ] Manual smoke:
 
 ```bash
 afs ws config getting-started set query.embeddings.enabled true
-afs fs getting-started vsearch rebuild --force --wait
-afs fs getting-started vsearch "how do I save a snapshot?"
+afs fs getting-started query index rebuild --force --wait
+afs fs getting-started query --semantic "how do I save a snapshot?"
 afs fs getting-started query "how do checkpoints work?"
 afs fs getting-started query $'lex: checkpoint\nvec: how do I save a snapshot?'
 ```
 
-- [ ] Confirm `afs fs grep` and MCP `file_grep` behavior is unchanged.
-- [ ] Confirm vector search degrades cleanly when embeddings or RediSearch
+Current smoke evidence from the implementation workspace:
+
+```bash
+./afs query daemon
+./afs query --keyword daemon
+./afs query --semantic daemon
+./afs query index status --json
+./afs fs testgrep query --json daemon
+./afs fs testgrep query index status --json
+```
+
+- [x] Confirm `afs fs grep` and MCP `file_grep` behavior is unchanged.
+- [x] Confirm vector search degrades cleanly when embeddings or RediSearch
       vector support are unavailable.
 
 ## Result
 
-Fill this in before archiving.
+The usable first version is implemented: CLI and MCP now have the final
+two-verb search model (`grep` for exact evidence, `query` for ranked
+retrieval), workspace config owns embedding settings, and vector-index
+operations have a stable command surface. Keyword-ranked query works today;
+semantic/vector retrieval remains explicitly gated on the future embedding
+worker and Redis vector index implementation.

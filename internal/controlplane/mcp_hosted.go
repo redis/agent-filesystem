@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/redis/agent-filesystem/internal/mcpproto"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 	afsclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
@@ -344,7 +345,6 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 					"path":    map[string]string{"type": "string", "description": "Absolute directory path", "default": "/"},
 					"pattern": map[string]string{"type": "string", "description": "Basename glob pattern"},
 					"kind":    map[string]string{"type": "string", "description": "Optional kind filter: file, dir, symlink, or any", "default": "file"},
-					"limit":   map[string]string{"type": "integer", "description": "Maximum number of results to return", "default": "100"},
 				},
 				"required": []string{"pattern"},
 			},
@@ -369,6 +369,27 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 					"max_count":          map[string]string{"type": "integer", "description": "Maximum selected lines per file"},
 				},
 				"required": []string{"pattern"},
+			},
+		},
+		{
+			Name:        "file_query",
+			Description: "Rank workspace files for a concept or natural-language question. Use this when exact text is unknown or when QMD-style lex/vec/hyde clauses are useful. Use file_grep instead for deterministic exact line matches.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":            map[string]string{"type": "string", "description": "Absolute workspace path to search within", "default": "/"},
+					"query":           map[string]string{"type": "string", "description": "Plain query text or a QMD-style typed query document using lex:, vec:, hyde:, and intent:"},
+					"mode":            map[string]string{"type": "string", "description": "query (default), keyword, or semantic", "default": "query"},
+					"searches":        hostedFileQuerySearchesSchema(),
+					"intent":          map[string]string{"type": "string", "description": "Extra retrieval intent"},
+					"limit":           map[string]string{"type": "integer", "description": "Maximum results", "default": "10"},
+					"all":             map[string]string{"type": "boolean", "description": "Return all results"},
+					"min_score":       map[string]string{"type": "number", "description": "Minimum score"},
+					"candidate_limit": map[string]string{"type": "integer", "description": "Candidate result limit"},
+					"rerank":          map[string]string{"type": "string", "description": "auto or none", "default": "auto"},
+					"explain":         map[string]string{"type": "boolean", "description": "Include retrieval explanation"},
+					"chunk_strategy":  map[string]string{"type": "string", "description": "auto or regex"},
+				},
 			},
 		},
 		{
@@ -476,6 +497,21 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 		}
 	}
 	return filtered
+}
+
+func hostedFileQuerySearchesSchema() map[string]any {
+	return map[string]any{
+		"type":        "array",
+		"description": "Optional typed searches for mode=query",
+		"items": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"type":  map[string]string{"type": "string", "description": "lex, vec, or hyde"},
+				"query": map[string]string{"type": "string", "description": "Query text for this clause"},
+			},
+			"required": []string{"type", "query"},
+		},
+	}
 }
 
 func (p *hostedMCPProvider) CallTool(ctx context.Context, name string, args map[string]any) mcpproto.ToolResult {
@@ -595,6 +631,8 @@ func (p *hostedMCPProvider) callWorkspaceTool(ctx context.Context, name string, 
 		value, err = p.toolFileGlob(ctx, args)
 	case "file_grep":
 		value, err = p.toolFileGrep(ctx, args)
+	case "file_query":
+		value, err = p.toolFileQuery(ctx, args)
 	case "file_write":
 		err = p.ensureWritable()
 		if err == nil {
@@ -957,13 +995,6 @@ func (p *hostedMCPProvider) toolFileGlob(ctx context.Context, args map[string]an
 	default:
 		return nil, fmt.Errorf("argument %q must be one of file, dir, symlink, or any", "kind")
 	}
-	limit, err := mcpInt(args, "limit", 100)
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
-		limit = 100
-	}
 	normalizedPath := normalizeAFSGrepPath(path)
 	fsClient, err := p.fsClient(ctx)
 	if err != nil {
@@ -972,11 +1003,6 @@ func (p *hostedMCPProvider) toolFileGlob(ctx context.Context, args map[string]an
 	matches, err := fsClient.Find(ctx, normalizedPath, pattern, kind)
 	if err != nil {
 		return nil, err
-	}
-	truncated := false
-	if len(matches) > limit {
-		truncated = true
-		matches = matches[:limit]
 	}
 	items := make([]mcpFileListItem, 0, len(matches))
 	for _, matchPath := range matches {
@@ -1009,7 +1035,6 @@ func (p *hostedMCPProvider) toolFileGlob(ctx context.Context, args map[string]an
 		"pattern":   pattern,
 		"kind":      ternaryString(kind == "", "any", kind),
 		"count":     len(items),
-		"truncated": truncated,
 		"items":     items,
 	}, nil
 }
@@ -1382,6 +1407,17 @@ func (p *hostedMCPProvider) toolFileGrep(ctx context.Context, args map[string]an
 		result["matches"] = matches
 	}
 	return result, nil
+}
+
+func (p *hostedMCPProvider) toolFileQuery(ctx context.Context, args map[string]any) (any, error) {
+	request, err := mcptools.FileQueryRequestFromArgs(args, p.workspace)
+	if err != nil {
+		return nil, err
+	}
+	request.Workspace = p.workspace
+	request.Path = normalizeAFSGrepPath(request.Path)
+
+	return p.manager.QueryWorkspace(ctx, p.databaseID, p.workspace, request)
 }
 
 type hostedWorkspaceContext struct {

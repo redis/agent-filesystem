@@ -123,8 +123,8 @@ export function PublicLandingPage() {
           <TerminalComment># repo start</TerminalComment>
           <TerminalLine><Prompt>$</Prompt> git clone https://github.com/redis/agent-filesystem.git</TerminalLine>
           <TerminalLine><Prompt>$</Prompt> cd agent-filesystem &amp;&amp; make</TerminalLine>
-          <TerminalLine><Prompt>$</Prompt> ./afs setup</TerminalLine>
-          <TerminalOutput><Info>mode</Info> sync recommended - real directories, real tools</TerminalOutput>
+          <TerminalLine><Prompt>$</Prompt> ./afs workspace create my-repo</TerminalLine>
+          <TerminalOutput><Info>ok</Info> workspace my-repo ready</TerminalOutput>
         </TerminalBody>
       </TerminalSection>
 
@@ -452,11 +452,10 @@ const TerminalDots = styled.span`
 
 const TerminalTitle = styled.span`
   min-width: 0;
-  overflow: hidden;
   color: var(--afs-ink);
   text-align: center;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const TerminalMeta = styled.span`

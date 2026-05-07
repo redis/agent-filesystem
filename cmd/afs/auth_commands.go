@@ -281,7 +281,7 @@ func runSelfHostedLogin(cfg *config, overrideURL string) error {
 		{Label: "control plane", Value: cfg.URL},
 		{Label: "config", Value: clr(ansiDim, compactDisplayPath(configPath()))},
 		{},
-		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" setup") + clr(ansiDim, "   (pick a workspace)")},
+		{Label: "next", Value: clr(ansiOrange, filepath.Base(os.Args[0])+" workspace create <name>")},
 	})
 	return nil
 }

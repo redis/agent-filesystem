@@ -129,53 +129,6 @@ func cellWidth(r rune) int {
 	return 1
 }
 
-func fitDisplayText(text string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return ""
-	}
-	if runeWidth(text) <= maxWidth {
-		return text
-	}
-	if maxWidth == 1 {
-		return "…"
-	}
-
-	var b strings.Builder
-	visible := 0
-	hasAnsi := false
-
-	for i := 0; i < len(text); {
-		if text[i] == '\033' && i+1 < len(text) && text[i+1] == '[' {
-			hasAnsi = true
-			j := i + 2
-			for j < len(text) && !((text[j] >= 'A' && text[j] <= 'Z') || (text[j] >= 'a' && text[j] <= 'z')) {
-				j++
-			}
-			if j < len(text) {
-				j++
-			}
-			b.WriteString(text[i:j])
-			i = j
-			continue
-		}
-
-		r, size := utf8.DecodeRuneInString(text[i:])
-		w := cellWidth(r)
-		if visible+w > maxWidth-1 {
-			break
-		}
-		b.WriteRune(r)
-		visible += w
-		i += size
-	}
-
-	b.WriteRune('…')
-	if hasAnsi {
-		b.WriteString(ansiReset)
-	}
-	return b.String()
-}
-
 func padVisibleText(text string, width int) string {
 	padding := width - runeWidth(text)
 	if padding <= 0 {
@@ -291,20 +244,8 @@ func (s *uiStep) fail(detail string) {
 // ---------------------------------------------------------------------------
 
 type outputRow struct {
-	Label      string
-	Value      string
-	NoTruncate bool
-}
-
-type plainTableOptions struct {
-	NoTruncateColumns map[int]bool
-}
-
-func (o plainTableOptions) noTruncateColumn(index int) bool {
-	if len(o.NoTruncateColumns) == 0 {
-		return false
-	}
-	return o.NoTruncateColumns[index]
+	Label string
+	Value string
 }
 
 func printSection(title string, rows []outputRow) {
@@ -332,17 +273,10 @@ func printSection(title string, rows []outputRow) {
 		label := stripAnsi(strings.TrimSpace(r.Label))
 		value := stripAnsi(strings.TrimSpace(r.Value))
 		if label == "" {
-			fmt.Println(fitDisplayText(value, maxCLIWidth))
+			fmt.Println(value)
 		} else if value == "" {
 			fmt.Println(label)
 		} else {
-			valueWidth := maxCLIWidth - maxLabel - 2
-			if valueWidth < 1 {
-				valueWidth = 1
-			}
-			if !r.NoTruncate {
-				value = fitDisplayText(value, valueWidth)
-			}
 			fmt.Printf("%s  %s\n", padVisibleText(label, maxLabel), value)
 		}
 	}
@@ -350,10 +284,6 @@ func printSection(title string, rows []outputRow) {
 }
 
 func printPlainTable(headers []string, rows [][]string) {
-	printPlainTableWithOptions(headers, rows, plainTableOptions{})
-}
-
-func printPlainTableWithOptions(headers []string, rows [][]string, opts plainTableOptions) {
 	widths := make([]int, len(headers))
 	for i, header := range headers {
 		widths[i] = runeWidth(header)
@@ -368,14 +298,13 @@ func printPlainTableWithOptions(headers []string, rows [][]string, opts plainTab
 			}
 		}
 	}
-	printPlainTableRow(headers, widths, opts)
+	printPlainTableRow(headers, widths)
 	for _, row := range rows {
-		printPlainTableRow(row, widths, opts)
+		printPlainTableRow(row, widths)
 	}
 }
 
-func printPlainTableRow(cols []string, widths []int, opts plainTableOptions) {
-	used := 0
+func printPlainTableRow(cols []string, widths []int) {
 	for i, width := range widths {
 		value := ""
 		if i < len(cols) {
@@ -383,23 +312,13 @@ func printPlainTableRow(cols []string, widths []int, opts plainTableOptions) {
 		}
 		if i > 0 {
 			fmt.Print("  ")
-			used += 2
 		}
 		if i == len(widths)-1 {
-			remaining := maxCLIWidth - used
-			if remaining < 1 {
-				remaining = 1
-			}
-			if !opts.noTruncateColumn(i) {
-				value = fitDisplayText(value, remaining)
-			}
 			fmt.Print(value)
-			used += runeWidth(value)
 			continue
 		}
 		value = padVisibleText(value, width)
 		fmt.Print(value)
-		used += runeWidth(value)
 	}
 	fmt.Println()
 }

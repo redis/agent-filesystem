@@ -74,6 +74,47 @@ func configRemoteLabel(cfg config) string {
 	return redisDatabaseLabel(cfg.RedisAddr, cfg.RedisDB, cfg.RedisTLS)
 }
 
+func currentConfigScopeLabel(cfg config) string {
+	mode, err := effectiveProductMode(cfg)
+	if err != nil {
+		return configRemoteLabel(cfg)
+	}
+	return strings.TrimSpace(productModeDisplayLabel(mode) + " " + configRemoteLabel(cfg))
+}
+
+func mountRecordScopeLabel(rec mountRecord) string {
+	mode := mountRecordProductMode(rec)
+	label := productModeDisplayLabel(mode)
+	switch mode {
+	case productModeSelfHosted, productModeCloud:
+		target := strings.TrimSpace(rec.ControlPlaneURL)
+		if target == "" {
+			target = "<control plane url not configured>"
+		}
+		if db := strings.TrimSpace(rec.ControlPlaneDatabase); db != "" {
+			target = fmt.Sprintf("%s (%s)", target, db)
+		}
+		return strings.TrimSpace(label + " " + target)
+	default:
+		addr := strings.TrimSpace(rec.RedisAddr)
+		if addr == "" {
+			addr = "<redis not configured>"
+		}
+		return strings.TrimSpace(label + " " + redisDatabaseLabel(addr, rec.RedisDB, false))
+	}
+}
+
+func mountRecordProductMode(rec mountRecord) string {
+	mode := strings.TrimSpace(rec.ProductMode)
+	if mode != "" {
+		return mode
+	}
+	if strings.TrimSpace(rec.ControlPlaneURL) != "" {
+		return productModeSelfHosted
+	}
+	return productModeLocal
+}
+
 func configPathLabel() string {
 	return clr(ansiGray, compactDisplayPath(configPath()))
 }
@@ -87,20 +128,41 @@ func statusConfigPathLabel() string {
 }
 
 func homeRelativeDisplayPath(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return path
+	}
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	home = filepath.Clean(home)
 	cleanPath := filepath.Clean(path)
-	if cleanPath == home {
-		return "~"
+	if err == nil {
+		home = filepath.Clean(home)
+		if cleanPath == home {
+			return "~"
+		}
+		rel, err := filepath.Rel(home, cleanPath)
+		if err == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) && rel != ".." {
+			return filepath.Join("~", rel)
+		}
 	}
-	rel, err := filepath.Rel(home, cleanPath)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." {
-		return path
+	if macHome, ok := macUserHomeRelativeDisplayPath(cleanPath); ok {
+		return macHome
 	}
-	return filepath.Join("~", rel)
+	return path
+}
+
+func macUserHomeRelativeDisplayPath(path string) (string, bool) {
+	slashPath := filepath.ToSlash(path)
+	if !strings.HasPrefix(slashPath, "/Users/") {
+		return "", false
+	}
+	rest := strings.TrimPrefix(slashPath, "/Users/")
+	user, rel, hasRel := strings.Cut(rest, "/")
+	if user == "" {
+		return "", false
+	}
+	if !hasRel || rel == "" {
+		return "~", true
+	}
+	return filepath.Join("~", filepath.FromSlash(rel)), true
 }
 
 // appendConfigRows adds user-facing config metadata rows without overloading
@@ -143,7 +205,7 @@ func statusDisplayRows(cfg config, rows []outputRow) []outputRow {
 		}
 		ordered = append(ordered, row)
 	}
-	ordered = append(ordered, outputRow{Label: "config file", Value: statusConfigPathLabel(), NoTruncate: true})
+	ordered = append(ordered, outputRow{Label: "config file", Value: statusConfigPathLabel()})
 	ordered = append(ordered, databaseRows...)
 	return ordered
 }
@@ -186,7 +248,7 @@ func statusRows(cfg config, workspace, localPath, mode, backendName, redisAddr s
 			rows = append(rows, outputRow{Label: "workspace", Value: ws})
 		}
 		if localPath != "" {
-			rows = append(rows, outputRow{Label: "local", Value: localPath})
+			rows = append(rows, outputRow{Label: "local", Value: homeRelativeDisplayPath(localPath)})
 		}
 	}
 	rows = append(rows, outputRow{Label: "database", Value: databaseStatusLabel(cfg, redisAddr, redisDB)})
@@ -424,12 +486,14 @@ func printMountStatus(reg mountRegistry, verbose bool) {
 		fmt.Println()
 		fmt.Println("Mounted workspaces")
 		fmt.Println()
-		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(running))
+		headers := mountSummaryHeaders(running)
+		printPlainTable(headers, mountSummaryRows(running))
 	} else if verbose && len(stopped) > 0 {
 		fmt.Println()
 		fmt.Println("Mounted workspaces")
 		fmt.Println()
-		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(stopped))
+		headers := mountSummaryHeaders(stopped)
+		printPlainTable(headers, mountSummaryRows(stopped))
 	} else {
 		fmt.Println()
 		fmt.Println("No mounted workspaces.")
@@ -438,7 +502,8 @@ func printMountStatus(reg mountRegistry, verbose bool) {
 		fmt.Println()
 		fmt.Println("Stopped workspace records")
 		fmt.Println()
-		printPlainTable([]string{"Workspace", "Status", "Mode", "Path"}, mountSummaryRows(stopped))
+		headers := mountSummaryHeaders(stopped)
+		printPlainTable(headers, mountSummaryRows(stopped))
 	}
 	if !verbose {
 		fmt.Println()
@@ -652,16 +717,53 @@ func daemonStatusSummary(pids []int) string {
 	}
 }
 
+func mountSummaryHeaders(mounts []mountRecord) []string {
+	headers := []string{"Workspace", "Status", "Mode"}
+	if mountSummaryShowsScope(mounts) {
+		headers = append(headers, "Source", "Database")
+	}
+	return append(headers, "Path")
+}
+
 func mountSummaryRows(mounts []mountRecord) [][]string {
 	rows := make([][]string, 0, len(mounts))
+	showScope := mountSummaryShowsScope(mounts)
 	for _, rec := range mounts {
 		mode := strings.TrimSpace(rec.Mode)
 		if mode == "" {
 			mode = "unknown"
 		}
-		rows = append(rows, []string{rec.Workspace, mountStatus(rec), mode, rec.LocalPath})
+		row := []string{rec.Workspace, mountStatus(rec), mode}
+		if showScope {
+			row = append(row, mountSummarySource(rec), mountSummaryDatabase(rec))
+		}
+		row = append(row, homeRelativeDisplayPath(rec.LocalPath))
+		rows = append(rows, row)
 	}
 	return rows
+}
+
+func mountSummaryShowsScope(mounts []mountRecord) bool {
+	for _, rec := range mounts {
+		if strings.TrimSpace(rec.ProductMode) != "" || strings.TrimSpace(rec.ControlPlaneURL) != "" || strings.TrimSpace(rec.ControlPlaneDatabase) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func mountSummarySource(rec mountRecord) string {
+	return productModeDisplayLabel(mountRecordProductMode(rec))
+}
+
+func mountSummaryDatabase(rec mountRecord) string {
+	if db := strings.TrimSpace(rec.ControlPlaneDatabase); db != "" {
+		return db
+	}
+	if addr := strings.TrimSpace(rec.RedisAddr); addr != "" {
+		return redisDatabaseLabel(addr, rec.RedisDB, false)
+	}
+	return "-"
 }
 
 func printMountVerbose(rec mountRecord) {
@@ -669,7 +771,7 @@ func printMountVerbose(rec mountRecord) {
 		{Label: "workspace", Value: rec.Workspace},
 		{Label: "status", Value: mountStatus(rec)},
 		{Label: "mode", Value: fallbackString(rec.Mode, "unknown")},
-		{Label: "path", Value: rec.LocalPath},
+		{Label: "path", Value: homeRelativeDisplayPath(rec.LocalPath)},
 	}
 	if rec.PID > 0 {
 		rows = append(rows, outputRow{Label: "pid", Value: fmt.Sprintf("%d", rec.PID)})
@@ -723,7 +825,7 @@ func printMountVerbose(rec mountRecord) {
 		if label == "mount" {
 			width = len("database")
 		}
-		fmt.Printf("%s  %s\n", padVisibleText(label, width), fitDisplayText(value, maxCLIWidth-width-2))
+		fmt.Printf("%s  %s\n", padVisibleText(label, width), value)
 	}
 	fmt.Printf("\n")
 }
@@ -825,7 +927,7 @@ func cmdStatusMount(st state, hasMountRecords bool) error {
 	rows = appendConnectedAgentRows(rows, cfg, st)
 	rows = appendUptimeRows(rows, st)
 	if st.ArchivePath != "" {
-		rows = append(rows, outputRow{Label: "archive", Value: st.ArchivePath})
+		rows = append(rows, outputRow{Label: "archive", Value: homeRelativeDisplayPath(st.ArchivePath)})
 	}
 	printSection(title, rows)
 	return nil

@@ -83,6 +83,53 @@ The important pattern is:
 
 So AFS is not trying to beat your local SSD, and it is not trying to out-POSIX mature shared filesystems. It is trying to give you a remote, checkpointable, forkable workspace with enough performance that normal tools still feel normal.
 
+## RedisSearch BM25 Query
+
+AFS workspaces are not just mounted folders. They are now queryable knowledge
+surfaces backed by RedisSearch BM25.
+
+When you mount a workspace, text files flow into the live Redis-backed
+workspace. AFS builds a RedisSearch chunk index over Markdown, JSON, JSONL,
+source files, config files, notes, logs, and other text content. Then
+`afs query` ranks the most relevant chunks with BM25:
+
+```bash
+afs query "how do checkpoints work?"
+afs query "redis connection refused during setup"
+afs query "where is auth token configuration handled?"
+afs query "ralph loops"
+```
+
+Example output:
+
+```text
+#1 /docs/checkpoints.md:12-20  score 0.42
+  Checkpoints are explicit snapshots of workspace state. File edits update the
+  live workspace immediately, and checkpoint_create records a recoverable point.
+
+#2 /README.md:148-156  score 0.31
+  grep is for exact text evidence. query is for ranked conceptual search...
+```
+
+This is useful for agents because they often know what they are looking for
+conceptually, but not the exact phrase or filename. `grep` is still the right
+tool for exact evidence. `query` is the right tool when an agent needs ranked
+context from docs, history, config, and source files.
+
+The path is:
+
+```text
+mounted folder -> AFS live workspace -> RedisSearch chunk index -> BM25 ranked results
+```
+
+If RedisSearch is unavailable or the projection is temporarily stale, AFS falls
+back to direct keyword ranking over the workspace content. Use `--explain` to
+see which backend answered a query:
+
+```bash
+afs query --explain --json "ralph loops"
+```
+
 ## Requirements
 
 AFS requires a Redis instance you provide.
@@ -141,6 +188,19 @@ If you want to save a known-good point:
 ```bash
 ./afs cp create my-repo before-refactor
 ```
+
+If you want to search workspace contents:
+
+```bash
+./afs fs my-repo grep "DirtyHint"
+./afs fs my-repo query "how do checkpoints work?"
+./afs fs my-repo query --keyword "checkpoint savepoint"
+```
+
+`grep` is for exact text evidence. `query` is for ranked conceptual search and
+falls back to keyword-ranked results when embeddings are disabled or
+unavailable. Keyword ranking uses RedisSearch BM25 query chunks when available,
+then falls back to direct content ranking.
 
 If you want commands with an optional workspace argument to use `my-repo` by
 default:
@@ -224,8 +284,9 @@ client on demand. A minimal config looks like:
 }
 ```
 
-The MCP surface is workspace-oriented: list/create/fork workspaces,
-read and edit files, grep a workspace, and create or restore checkpoints.
+The MCP surface is workspace-oriented: list/create/fork workspaces, read and
+edit files, grep exact text with `file_grep`, run ranked conceptual search
+with `file_query`, and create or restore checkpoints.
 File-edit tools update the live workspace state and leave the workspace dirty
 until `checkpoint_create` is called explicitly.
 

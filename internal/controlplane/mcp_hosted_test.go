@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/redis/agent-filesystem/internal/mcptools"
 )
 
 func TestHostedMCPFileCreateExclusiveCreatesFile(t *testing.T) {
@@ -76,6 +78,51 @@ func TestHostedMCPFileCreateExclusiveFailsWhenFileExists(t *testing.T) {
 	})
 	if !second.IsError {
 		t.Fatal("second file_create_exclusive should fail, got success")
+	}
+}
+
+func TestHostedMCPFileQueryRanksWorkspaceContent(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+	}
+
+	for _, file := range []struct {
+		path    string
+		content string
+	}{
+		{path: "/docs/checkpoints.md", content: "Checkpoints save workspace snapshots.\nRestore from savepoints when needed.\n"},
+		{path: "/docs/auth.md", content: "Auth attaches tenant scope to a workspace.\n"},
+	} {
+		result := provider.CallTool(context.Background(), "file_write", map[string]any{
+			"path":    file.path,
+			"content": file.content,
+		})
+		if result.IsError {
+			t.Fatalf("file_write(%s) returned error result: %+v", file.path, result)
+		}
+	}
+
+	result := provider.CallTool(context.Background(), "file_query", map[string]any{
+		"query": "how do checkpoints work?",
+	})
+	if result.IsError {
+		t.Fatalf("file_query returned error result: %+v", result)
+	}
+
+	var response mcptools.FileQueryResponse
+	if err := decodeHostedStructuredContent(result.StructuredContent, &response); err != nil {
+		t.Fatalf("decodeHostedStructuredContent(query) returned error: %v", err)
+	}
+	if response.Status != mcptools.FileQueryStatusOK {
+		t.Fatalf("status = %q, want ok", response.Status)
+	}
+	if len(response.Results) == 0 || response.Results[0].Path != "/docs/checkpoints.md" {
+		t.Fatalf("results = %#v, want checkpoints first", response.Results)
 	}
 }
 

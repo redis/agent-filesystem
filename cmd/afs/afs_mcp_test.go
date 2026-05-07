@@ -16,6 +16,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 )
 
 func TestAFSMCPServerInitializeAndToolsList(t *testing.T) {
@@ -340,6 +341,97 @@ func TestAFSMCPFileGrepUsesCurrentWorkspace(t *testing.T) {
 	}
 	if len(matches) != 2 {
 		t.Fatalf("grep matches len = %d, want 2", len(matches))
+	}
+}
+
+func TestAFSMCPFileQueryRanksWorkspaceContent(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/checkpoints.md",
+		"content": "Checkpoints save workspace snapshots.\nRestore from savepoints when needed.\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(checkpoints) returned error: %v", err)
+	}
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/auth.md",
+		"content": "Auth attaches tenant scope to a workspace.\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(auth) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_query", map[string]any{
+		"query": "how do checkpoints work?",
+	})
+	if result.IsError {
+		t.Fatalf("file_query returned error result: %+v", result)
+	}
+
+	var response mcptools.FileQueryResponse
+	if err := decodeStructuredContent(result.StructuredContent, &response); err != nil {
+		t.Fatalf("decodeStructuredContent(query) returned error: %v", err)
+	}
+	if response.Status != mcptools.FileQueryStatusOK {
+		t.Fatalf("status = %q, want ok", response.Status)
+	}
+	if len(response.Results) == 0 || response.Results[0].Path != "/docs/checkpoints.md" {
+		t.Fatalf("results = %#v, want checkpoints first", response.Results)
+	}
+}
+
+func TestAFSMCPFileQueryTypedClausesAndSemanticUnavailable(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/checkpoints.md",
+		"content": "checkpoint save snapshot\nrestore checkpoint savepoint\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(checkpoints) returned error: %v", err)
+	}
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/src/checkpoints.go",
+		"content": "checkpoint outside docs\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(src) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_query", map[string]any{
+		"path":  "/docs",
+		"query": "lex: checkpoint\nvec: how do I save a snapshot?",
+	})
+	if result.IsError {
+		t.Fatalf("file_query typed returned error result: %+v", result)
+	}
+	var response mcptools.FileQueryResponse
+	if err := decodeStructuredContent(result.StructuredContent, &response); err != nil {
+		t.Fatalf("decodeStructuredContent(query typed) returned error: %v", err)
+	}
+	if len(response.Results) != 1 || response.Results[0].Path != "/docs/checkpoints.md" {
+		t.Fatalf("results = %#v, want scoped docs result", response.Results)
+	}
+	if len(response.Warnings) != 1 || !strings.Contains(response.Warnings[0], "Embeddings are disabled") {
+		t.Fatalf("warnings = %#v, want embeddings disabled fallback", response.Warnings)
+	}
+
+	semantic := server.callTool(context.Background(), "file_query", map[string]any{
+		"mode":  "semantic",
+		"query": "how do I save a snapshot?",
+	})
+	if semantic.IsError {
+		t.Fatalf("file_query semantic returned transport error: %+v", semantic)
+	}
+	var semanticResponse mcptools.FileQueryResponse
+	if err := decodeStructuredContent(semantic.StructuredContent, &semanticResponse); err != nil {
+		t.Fatalf("decodeStructuredContent(query semantic) returned error: %v", err)
+	}
+	if semanticResponse.Status != mcptools.FileQueryStatusUnavailable {
+		t.Fatalf("semantic status = %q, want unavailable", semanticResponse.Status)
 	}
 }
 

@@ -206,7 +206,7 @@ function agentDisplayLabel(agent: AFSAgentSession) {
     agent.label?.trim() ||
     agent.agentId ||
     agent.hostname ||
-    agent.sessionId.slice(0, 12)
+    agent.sessionId
   );
 }
 
@@ -258,9 +258,6 @@ function MissionHudPanel({
 }) {
   if (agents.length === 0) return null;
   const ordered = [...agents].sort(compareMonitorAgents);
-  const showCount = Math.min(6, ordered.length);
-  const overflow = ordered.length - showCount;
-  const visible = ordered.slice(0, showCount);
 
   return (
     <HudCard>
@@ -281,7 +278,7 @@ function MissionHudPanel({
           <HudCol>UP</HudCol>
           <HudCol $right>LAST SEEN</HudCol>
         </HudColRow>
-        {visible.map((agent) => {
+        {ordered.map((agent) => {
           const idle = isAgentIdle(agent);
           const lastSeen = relativeAgentSeen(agent.lastSeenAt);
           return (
@@ -301,13 +298,7 @@ function MissionHudPanel({
         })}
       </HudTable>
       <HudHintBar>
-        {overflow > 0 ? (
-          <HudHintLink type="button" onClick={onOpenAgents}>
-            ↵ {overflow} more
-          </HudHintLink>
-        ) : (
-          <HudHintLink type="button" onClick={onOpenAgents}>↵ open all</HudHintLink>
-        )}
+        <HudHintLink type="button" onClick={onOpenAgents}>↵ open all</HudHintLink>
         <HudHintSep>·</HudHintSep>
         <HudHintText>/ filter</HudHintText>
         <HudHintSep>·</HudHintSep>
@@ -780,9 +771,8 @@ const HudCol = styled.span<{ $accent?: boolean; $muted?: boolean; $right?: boole
   align-items: center;
   gap: 6px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   justify-content: ${(p) => (p.$right ? "flex-end" : "flex-start")};
   text-align: ${(p) => (p.$right ? "right" : "left")};
   color: ${(p) =>
@@ -823,9 +813,8 @@ const HudActiveMark = styled.span<{ $idle: boolean }>`
 const HudAgentName = styled.span`
   color: var(--afs-ink);
   font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const HudHintBar = styled.div`

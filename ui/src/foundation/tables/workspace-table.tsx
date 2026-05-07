@@ -392,9 +392,7 @@ export function WorkspaceTable({
                     </S.CardDetailLine>
                     <S.CardDetailLine>
                       <S.CardDetailLabel>ID</S.CardDetailLabel>
-                      <S.CardDetailValue>
-                        {ws.id.length > 22 ? `${ws.id.slice(0, 22)}…` : ws.id}
-                      </S.CardDetailValue>
+                      <S.CardDetailValue>{ws.id}</S.CardDetailValue>
                     </S.CardDetailLine>
                   </S.CardDetailLines>
 
@@ -582,9 +580,8 @@ const IdText = styled.span`
   color: var(--afs-muted, #71717a);
   line-height: 1.2;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const TemplateChip = styled.button`
@@ -608,9 +605,8 @@ const TemplateChip = styled.button`
 const DatabaseName = styled.span`
   font-size: 13px;
   color: var(--afs-ink, #18181b);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   min-width: 0;
 `;
 
@@ -663,9 +659,8 @@ const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
     font-weight: 700;
     min-width: 0;
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   }
 `;
 

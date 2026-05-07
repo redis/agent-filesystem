@@ -16,8 +16,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
+	"github.com/redis/go-redis/v9"
 )
 
 func itoa(i int) string { return strconv.Itoa(i) }
@@ -682,6 +684,67 @@ func TestSyncOversizedFileRefused(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if env.remoteExists(t, "big.bin") {
 		t.Fatalf("oversize file unexpectedly uploaded")
+	}
+}
+
+func TestSyncColdStartUsesStorageIDWhenWorkspaceMetaIsUnavailable(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+
+	ctx := context.Background()
+	cp := controlplane.NewStore(rdb)
+	workspaceName := "getting-started"
+	storageID := "ws_ebf0b1dd5f6a0fb1"
+	if err := cp.PutWorkspaceMeta(ctx, controlplane.WorkspaceMeta{
+		ID:            storageID,
+		Name:          workspaceName,
+		HeadSavepoint: "initial",
+	}); err != nil {
+		t.Fatalf("PutWorkspaceMeta: %v", err)
+	}
+	readme := []byte("# Getting started\n")
+	if err := controlplane.SyncWorkspaceRoot(ctx, cp, workspaceName, controlplane.Manifest{
+		Workspace: workspaceName,
+		Savepoint: "initial",
+		Entries: map[string]controlplane.ManifestEntry{
+			"/":          {Type: "dir", Mode: 0o755},
+			"/README.md": {Type: "file", Mode: 0o644, Size: int64(len(readme)), Inline: base64.StdEncoding.EncodeToString(readme)},
+		},
+	}); err != nil {
+		t.Fatalf("SyncWorkspaceRoot: %v", err)
+	}
+	if err := rdb.Del(ctx, "afs:{"+storageID+"}:workspace:meta", "afs:workspace:index:names").Err(); err != nil {
+		t.Fatalf("delete workspace metadata: %v", err)
+	}
+
+	localRoot := t.TempDir()
+	d, err := newSyncDaemon(syncDaemonConfig{
+		Workspace:        workspaceName,
+		LocalRoot:        localRoot,
+		FS:               client.New(rdb, controlplane.WorkspaceFSKey(storageID)),
+		Store:            newAFSStore(rdb),
+		MaxFileBytes:     16 * 1024 * 1024,
+		StorageID:        storageID,
+		HeadCheckpointID: "initial",
+	})
+	if err != nil {
+		t.Fatalf("newSyncDaemon: %v", err)
+	}
+	if err := d.Start(ctx); err != nil {
+		t.Fatalf("daemon.Start: %v", err)
+	}
+	defer d.Stop()
+
+	got, err := os.ReadFile(filepath.Join(localRoot, "README.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(README.md): %v", err)
+	}
+	if string(got) != string(readme) {
+		t.Fatalf("README.md = %q, want %q", got, readme)
 	}
 }
 

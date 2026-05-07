@@ -17,6 +17,7 @@ import (
 
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/mount/client"
+	"github.com/redis/go-redis/v9"
 )
 
 // fullReconciler walks the local tree and the live workspace root, diffs
@@ -87,13 +88,12 @@ func (f *fullReconciler) replaceFromRemote(ctx context.Context, onProgress Progr
 		return err
 	}
 
-	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
+	fsKey, headSavepoint, err := f.workspaceRootRef(ctx)
 	if err != nil {
-		return fmt.Errorf("get workspace meta: %w", err)
+		return err
 	}
-	fsKey := controlplane.WorkspaceFSKey(controlplane.WorkspaceStorageID(meta))
 
-	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint, onProgress)
+	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, headSavepoint, onProgress)
 	if err != nil {
 		return fmt.Errorf("build manifest: %w", err)
 	}
@@ -177,6 +177,48 @@ func (f *fullReconciler) replaceStateFromManifest(m manifest, blobs map[string][
 	return nil
 }
 
+func (f *fullReconciler) workspaceRootRef(ctx context.Context) (string, string, error) {
+	storageID := strings.TrimSpace(f.r.storageID)
+	if storageID != "" {
+		head, err := f.workspaceRootHead(ctx, storageID, f.r.headCheckpoint)
+		if err != nil {
+			return "", "", fmt.Errorf("get workspace root head: %w", err)
+		}
+		return storageID, head, nil
+	}
+
+	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
+	if err != nil {
+		return "", "", fmt.Errorf("get workspace meta: %w", err)
+	}
+	return controlplane.WorkspaceStorageID(meta), strings.TrimSpace(meta.HeadSavepoint), nil
+}
+
+func (f *fullReconciler) workspaceRootHead(ctx context.Context, storageID, fallback string) (string, error) {
+	fallback = strings.TrimSpace(fallback)
+	if f.r.store == nil || f.r.store.rdb == nil {
+		return fallback, nil
+	}
+	head, err := f.r.store.rdb.Get(ctx, workspaceRootHeadSavepointKey(storageID)).Result()
+	if err == nil {
+		if head = strings.TrimSpace(head); head != "" {
+			return head, nil
+		}
+		return fallback, nil
+	}
+	if fallback != "" {
+		return fallback, nil
+	}
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	return "", err
+}
+
+func workspaceRootHeadSavepointKey(storageID string) string {
+	return "afs:{" + controlplane.WorkspaceFSKey(strings.TrimSpace(storageID)) + "}:root_head_savepoint"
+}
+
 // isColdStart returns true when the local folder is empty (or missing) and
 // there is no persisted SyncState. This means we can skip the diff entirely
 // and just pull everything from Redis in bulk.
@@ -209,18 +251,17 @@ func (f *fullReconciler) coldStart(ctx context.Context, onProgress ProgressFunc)
 		return fmt.Errorf("cold start requires a store with Redis connection")
 	}
 
-	meta, err := f.r.store.getWorkspaceMeta(ctx, f.r.workspace)
+	fsKey, headSavepoint, err := f.workspaceRootRef(ctx)
 	if err != nil {
-		return fmt.Errorf("get workspace meta: %w", err)
+		return err
 	}
 	// Every Redis key for this workspace is hash-tagged by the workspace's
 	// storage ID, which may differ from the user-facing name in cloud /
 	// multi-tenant deployments (e.g. name "getting-started" → storage ID
 	// "ws_f6214eecf58fe5e6"). Using the resolved ID here ensures we read the
 	// actual tree instead of an empty phantom key derived from the name.
-	fsKey := controlplane.WorkspaceStorageID(meta)
 
-	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, meta.HeadSavepoint, onProgress)
+	m, blobs, stats, err := buildManifestFromWorkspaceRootWithProgress(ctx, f.r.store.rdb, fsKey, f.r.workspace, headSavepoint, onProgress)
 	if err != nil {
 		return fmt.Errorf("build manifest: %w", err)
 	}

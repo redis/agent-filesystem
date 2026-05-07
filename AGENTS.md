@@ -235,3 +235,24 @@ The most important implementation seams are:
 - Control-plane import/checkpoint JSON fields typed as `map[string][]byte`
   expect base64-encoded string values. Small synthetic manifests can avoid that
   by using `ManifestEntry.inline`, which is already base64 text.
+- `afs status` can show running mounts from multiple product modes/databases.
+  When a command scopes to the current config, explain when a status-visible
+  mount belongs to another config instead of returning a bare "does not exist".
+- Top-level filesystem shortcuts like `afs grep` and `afs query` must route
+  through the `afs fs` command path. Do not send them to older local-only
+  helpers, or Cloud/Self-managed users will see local Redis errors instead of
+  control-plane behavior.
+- Top-level filesystem shortcut help must say shortcuts use the "default"
+  workspace and that explicit targeting requires `afs fs <workspace> <command>`.
+- Sync mount cold-start in Cloud-managed mode must hydrate from the workspace
+  session's storage key/head checkpoint. Do not require direct Redis workspace
+  metadata lookup by display name; cloud session Redis may expose the live root
+  while metadata lives behind the control plane.
+- Preserve the two-command search UX: `grep` is exact text evidence and `query`
+  is the powerful ranked retrieval command. `query` defaults to hybrid + rerank,
+  supports `lex:`, `vec:`, `hyde:`, and `intent:` documents, and uses
+  `--keyword` / `--semantic` for narrower modes. Do not reintroduce public
+  `search` or `vsearch` commands unless the product direction changes again.
+- Workspace file/query CLI calls use resolved workspace routes under
+  `/v1/workspaces/<id>/...`; when adding a scoped database route, add the
+  matching resolved route and a regression test for workspace IDs.

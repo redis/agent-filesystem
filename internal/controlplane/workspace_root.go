@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/queryindex"
 	"github.com/redis/agent-filesystem/internal/rediscontent"
 	"github.com/redis/agent-filesystem/internal/searchindex"
 	"github.com/redis/go-redis/v9"
@@ -145,6 +146,8 @@ func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace s
 			"afs:{"+fsKey+"}:info",
 			"afs:{"+fsKey+"}:next_inode",
 			searchindex.ReadyKey(fsKey),
+			queryindex.DirtySetKey(fsKey),
+			queryindex.ReadyKey(fsKey),
 			workspaceRootHeadKey(fsKey),
 			workspaceRootDirtyKey(fsKey),
 		).Err(); err != nil {
@@ -154,6 +157,8 @@ func SyncWorkspaceRootWithOptions(ctx context.Context, store *Store, workspace s
 	if err := materializeManifestToWorkspaceFS(ctx, store, storageID, fsKey, m, opts); err != nil {
 		return err
 	}
+	_, _ = searchindex.EnsureIndex(ctx, store.rdb, fsKey)
+	_, _ = queryindex.EnsureIndex(ctx, store.rdb, fsKey)
 	return MarkWorkspaceRootClean(ctx, store, storageID, m.Savepoint)
 }
 
@@ -186,6 +191,8 @@ func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey str
 		"afs:{" + fsKey + "}:content:*",
 		"afs:{" + fsKey + "}:dirents:*",
 		"afs:{" + fsKey + "}:locks:*",
+		queryindex.ChunkPrefix(fsKey) + "*",
+		"afs:{" + fsKey + "}:qchunks:*",
 	}
 	for _, pattern := range patterns {
 		var cursor uint64
@@ -209,6 +216,8 @@ func resetWorkspaceFSNamespace(ctx context.Context, rdb *redis.Client, fsKey str
 		"afs:{"+fsKey+"}:info",
 		"afs:{"+fsKey+"}:next_inode",
 		searchindex.ReadyKey(fsKey),
+		queryindex.DirtySetKey(fsKey),
+		queryindex.ReadyKey(fsKey),
 		workspaceRootHeadKey(fsKey),
 		workspaceRootDirtyKey(fsKey),
 	).Err(); err != nil {
@@ -340,6 +349,7 @@ func writeWorkspaceFSNodes(ctx context.Context, store *Store, workspace, fsKey s
 		}
 		if node.Entry.Type == "file" {
 			rediscontent.QueueWriteFull(ctx, pipe, workspaceFSContentKey(fsKey, node.ID), contentRef, content)
+			queryindex.QueueMarkDirty(ctx, pipe, fsKey, node.ID)
 		}
 		pipe.HSet(ctx, workspaceFSInodeKey(fsKey, node.ID), fields)
 		if node.ParentID != "" {

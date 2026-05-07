@@ -50,6 +50,7 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	}
 
 	out := captureStderrText(t, printUsage)
+	plain := stripAnsi(out)
 	for _, documented := range []string{
 		"Workspace Shortcuts", "mount", "unmount", "create", "list", "clone",
 		"default", "set-default", "unset-default", "info", "import", "fork",
@@ -62,13 +63,31 @@ func TestWorkspaceRootShortcutsAreDocumentedAliases(t *testing.T) {
 	if strings.Contains(out, "  reset") {
 		t.Fatalf("top-level help should not document non-workspace shortcut %q:\n%s", "reset", out)
 	}
+	if !strings.Contains(plain, "Filesystem Shortcuts") {
+		t.Fatalf("top-level help should document filesystem shortcuts:\n%s", plain)
+	}
+	if !strings.Contains(plain, `Omit "fs" for: grep, query`) {
+		t.Fatalf("top-level help should document filesystem shortcut commands:\n%s", plain)
+	}
+	if !strings.Contains(plain, `shortcuts use the "default" workspace`) || !strings.Contains(plain, `fs <workspace> <command> to choose one.`) {
+		t.Fatalf("top-level help should explain filesystem shortcut workspace resolution:\n%s", plain)
+	}
+	for _, row := range []string{
+		"grep               exact workspace content search",
+		"query              hybrid ranked workspace query",
+		"vsearch            vector-only workspace search",
+	} {
+		if strings.Contains(plain, row) {
+			t.Fatalf("top-level help should group %q under filesystem shortcuts:\n%s", row, plain)
+		}
+	}
 }
 
 func TestCompactDisplayPathUsesParentAndFilename(t *testing.T) {
 	t.Helper()
 
 	got := compactDisplayPath("/Users/example/.afs/afs.config.json")
-	want := filepath.Join(".afs", "afs.config.json")
+	want := filepath.Join("~", ".afs", "afs.config.json")
 	if got != want {
 		t.Fatalf("compactDisplayPath() = %q, want %q", got, want)
 	}
@@ -82,6 +101,17 @@ func TestHomeRelativeDisplayPathUsesTildeForHomePath(t *testing.T) {
 	t.Helper()
 
 	t.Setenv("HOME", "/Users/example")
+	path := "/Users/example/git/agent-filesystem/afs.config.json"
+	want := filepath.Join("~", "git", "agent-filesystem", "afs.config.json")
+	if got := homeRelativeDisplayPath(path); got != want {
+		t.Fatalf("homeRelativeDisplayPath() = %q, want %q", got, want)
+	}
+}
+
+func TestHomeRelativeDisplayPathUsesTildeForMacUserPath(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("HOME", "/Users/current")
 	path := "/Users/example/git/agent-filesystem/afs.config.json"
 	want := filepath.Join("~", "git", "agent-filesystem", "afs.config.json")
 	if got := homeRelativeDisplayPath(path); got != want {
@@ -385,7 +415,7 @@ func TestCmdStatusWithStaleSyncStateOmitsMode(t *testing.T) {
 	}
 }
 
-func TestPrintReadyBoxKeepsVisibleLinesWithinEightyColumns(t *testing.T) {
+func TestPrintReadyBoxDoesNotTruncateLongPaths(t *testing.T) {
 	t.Helper()
 
 	origColorTerm := colorTerm
@@ -408,13 +438,12 @@ func TestPrintReadyBoxKeepsVisibleLinesWithinEightyColumns(t *testing.T) {
 		t.Fatalf("printReadyBox() returned error: %v", err)
 	}
 
-	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		if strings.TrimSpace(stripAnsi(line)) == "" {
-			continue
-		}
-		if width := runeWidth(line); width > maxCLIWidth {
-			t.Fatalf("line width = %d, want <= %d: %q", width, maxCLIWidth, stripAnsi(line))
-		}
+	clean := stripAnsi(out)
+	if strings.Contains(clean, "…") {
+		t.Fatalf("printReadyBox() output was truncated:\n%s", clean)
+	}
+	if !strings.Contains(clean, "super-long-nested-workspace-path") {
+		t.Fatalf("printReadyBox() output missing full path suffix:\n%s", clean)
 	}
 }
 

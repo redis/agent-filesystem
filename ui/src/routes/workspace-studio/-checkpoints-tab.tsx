@@ -743,9 +743,6 @@ function CheckpointDiffDialog({
 }
 
 function DiffReview({ diff }: { diff: AFSWorkspaceDiffResponse }) {
-  const entries = diff.entries.slice(0, 160);
-  const hiddenCount = diff.entries.length - entries.length;
-
   return (
     <DiffStack>
       <DiffSummaryGrid>
@@ -781,7 +778,7 @@ function DiffReview({ diff }: { diff: AFSWorkspaceDiffResponse }) {
         <DiffMessage>No file changes between these states.</DiffMessage>
       ) : (
         <DiffList>
-          {entries.map((entry) => (
+          {diff.entries.map((entry) => (
             <DiffRowShell key={`${entry.op}:${entry.previousPath ?? ""}:${entry.path}`}>
               <DiffRow>
                 <DiffOpBadge $op={entry.op}>{formatDiffOp(entry.op)}</DiffOpBadge>
@@ -794,9 +791,6 @@ function DiffReview({ diff }: { diff: AFSWorkspaceDiffResponse }) {
               <InlineTextDiff entry={entry} />
             </DiffRowShell>
           ))}
-          {hiddenCount > 0 ? (
-            <DiffMessage>{hiddenCount.toLocaleString()} more changes not shown.</DiffMessage>
-          ) : null}
         </DiffList>
       )}
     </DiffStack>
@@ -823,12 +817,12 @@ function InlineTextDiff({ entry }: { entry: AFSDiffEntry }) {
 
   return (
     <DiffInlineBlock>
-      {hunks.slice(0, 8).map((hunk, hunkIndex) => (
+      {hunks.map((hunk, hunkIndex) => (
         <DiffHunk key={`${entry.path}:${hunk.oldStart}:${hunk.newStart}:${hunkIndex}`}>
           <DiffHunkHeader>
             @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
           </DiffHunkHeader>
-          {hunk.lines.slice(0, 80).map((line, lineIndex) => (
+          {hunk.lines.map((line, lineIndex) => (
             <DiffCodeLine
               key={`${line.oldLine ?? ""}:${line.newLine ?? ""}:${lineIndex}`}
               $kind={line.kind}
@@ -839,14 +833,8 @@ function InlineTextDiff({ entry }: { entry: AFSDiffEntry }) {
               <DiffLineText>{line.text === "" ? " " : line.text}</DiffLineText>
             </DiffCodeLine>
           ))}
-          {hunk.lines.length > 80 ? (
-            <DiffInlineNotice>{hunk.lines.length - 80} more lines not shown.</DiffInlineNotice>
-          ) : null}
         </DiffHunk>
       ))}
-      {hunks.length > 8 ? (
-        <DiffInlineNotice>{hunks.length - 8} more hunks not shown.</DiffInlineNotice>
-      ) : null}
     </DiffInlineBlock>
   );
 }
@@ -1066,11 +1054,10 @@ const CheckpointTitleRow = styled.div`
 
 const CheckpointTitle = styled.span`
   min-width: 0;
-  overflow: hidden;
   color: var(--afs-ink);
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const CheckpointActions = styled.div`
@@ -1122,11 +1109,10 @@ const ExpandedPanelHeader = styled.div`
 
 const ExpandedPanelTitle = styled.span`
   min-width: 0;
-  overflow: hidden;
   color: var(--afs-ink);
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const ExpandedDescription = styled.div`
@@ -1178,13 +1164,12 @@ const DiffStat = styled.div`
 
 const DiffStatValue = styled.span`
   display: block;
-  overflow: hidden;
   color: var(--afs-ink);
   font-size: 16px;
   font-weight: 800;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const DiffList = styled.div`
@@ -1246,21 +1231,19 @@ const DiffPathStack = styled.div`
 `;
 
 const DiffPath = styled.span`
-  overflow: hidden;
   color: var(--afs-ink);
   font-family: var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-size: 12px;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const DiffMeta = styled.span`
-  overflow: hidden;
   color: var(--afs-muted);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const DiffDelta = styled.span`
@@ -1381,12 +1364,11 @@ const DetailLabel = styled.span`
 const DetailValue = styled.span<{ $mono?: boolean }>`
   display: block;
   min-width: 0;
-  overflow: hidden;
   color: var(--afs-ink);
   font-family: ${({ $mono }) => ($mono ? "var(--afs-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)" : "inherit")};
   font-size: ${({ $mono }) => ($mono ? "12px" : "14px")};
   font-weight: 600;
   line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;

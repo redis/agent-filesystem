@@ -60,6 +60,14 @@ func main() {
 		if err := cmdFS(args); err != nil {
 			fatal(err)
 		}
+	case "grep":
+		if err := cmdFSGrep("", args[1:]); err != nil {
+			fatal(err)
+		}
+	case "query":
+		if err := cmdQuery(args); err != nil {
+			fatal(err)
+		}
 	case "mcp":
 		if err := cmdMCP(args); err != nil {
 			fatal(err)
@@ -157,6 +165,11 @@ func printUsage() {
 	fmt.Fprintf(w, "  %sOmit \"ws\" for:%s mount, unmount, create, list, clone, default, set-default,\n", dim, reset)
 	fmt.Fprintf(w, "                 unset-default, info, import, fork, delete\n")
 	fmt.Fprintf(w, "  %sExample:%s %s%s mount demo ~/demo%s  %s(same as %s ws mount demo ~/demo)%s\n\n", dim, reset, orange, bin, reset, dim, bin, reset)
+
+	fmt.Fprintf(w, "%sFilesystem Shortcuts:%s\n", bold, reset)
+	fmt.Fprintf(w, "  %sOmit \"fs\" for:%s grep, query\n", dim, reset)
+	fmt.Fprintf(w, "  %sNote:%s shortcuts use the \"default\" workspace; use %s fs <workspace> <command> to choose one.\n", dim, reset, bin)
+	fmt.Fprintf(w, "  %sExample:%s %s%s grep DirtyHint%s  %s(same as %s fs grep DirtyHint)%s\n\n", dim, reset, orange, bin, reset, dim, bin, reset)
 
 	fmt.Fprintf(w, "%sExamples:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %s%s auth login%s\n    Sign in to AFS Cloud via browser.\n", orange, bin, reset)

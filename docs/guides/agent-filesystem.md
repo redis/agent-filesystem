@@ -88,7 +88,8 @@ Common workspace-scoped MCP tools:
 | `workspace_current` | Confirm which workspace the MCP server is bound to. |
 | `file_list` | List directory contents. |
 | `file_glob` | Find files or directories by basename glob. Use this for filename discovery. |
-| `file_grep` | Search file contents. Use this for content search, not directory discovery. |
+| `file_grep` | Search exact file contents. Use this when the text or regex is known. |
+| `file_query` | Rank files for a concept or natural-language question. |
 | `file_read` | Read a whole file. |
 | `file_lines` | Read a specific line range. |
 | `file_write` | Create or fully overwrite a file. Use carefully. |
@@ -188,7 +189,8 @@ Useful keys:
 
 - Read the file before changing it.
 - Prefer precise patches over full rewrites.
-- Use `file_glob` for filename discovery and `file_grep` for content search.
+- Use `file_glob` for filename discovery, `file_grep` for exact content
+  search, and `file_query` for conceptual search.
 - Preserve user changes you did not make.
 - Create a checkpoint before destructive or broad edits.
 - Do not restore a checkpoint unless the user asked or you are certain the live
@@ -209,9 +211,17 @@ build/
 
 ## Search Guidance
 
-Use `afs fs grep` or `file_grep` for workspace content search. Literal searches use
-the Redis Search indexed path when it is available, then verify candidate file
-contents through AFS.
+Use `afs fs grep` or `file_grep` when you know the exact text, regex, or glob.
+Literal searches use the Redis Search indexed path when it is available, then
+verify candidate file contents through AFS.
+
+Use `afs fs query` or `file_query` when you have a concept or natural-language
+question. Plain query is the recommended hybrid surface and currently falls
+back to keyword-ranked results when embeddings are disabled or unavailable.
+Keyword ranking uses Redis Search BM25 over query chunks when available, then
+falls back to direct content ranking. Use `query --keyword` for keyword-only
+ranking and `query --semantic` only when you specifically need vector-only
+semantic retrieval.
 
 Regex and advanced matching can fall back to traversal. For regex-heavy scans on
 a synced or mounted workspace, local `rg` is often the right tool.

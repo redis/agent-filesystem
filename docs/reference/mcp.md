@@ -70,7 +70,7 @@ use a workspace-scoped hosted token.
 | --- | --- |
 | Status/admin | `afs_status`, `workspace_list`, `workspace_create`, `workspace_fork` |
 | Checkpoints | `checkpoint_list`, `checkpoint_create`, `checkpoint_restore` |
-| File reads | `file_read`, `file_lines`, `file_list`, `file_glob`, `file_grep` |
+| File reads | `file_read`, `file_lines`, `file_list`, `file_glob`, `file_grep`, `file_query` |
 | File writes | `file_write`, `file_create_exclusive`, `file_replace`, `file_insert`, `file_delete_lines`, `file_patch` |
 | Hosted token administration | `mcp_token_issue`, `mcp_token_revoke` |
 
@@ -210,7 +210,8 @@ Arguments:
 | `path` | Yes | Absolute file or symlink path. |
 
 Use this for whole-file reads. Use `file_lines` for partial text reads,
-`file_list` or `file_glob` for discovery, and `file_grep` for content search.
+`file_list` or `file_glob` for discovery, `file_grep` for exact content
+search, and `file_query` for conceptual search.
 
 ### `file_lines`
 
@@ -249,7 +250,6 @@ Arguments:
 | `path` | No | `/` | Absolute directory path to search within. |
 | `pattern` | Yes | - | Basename glob pattern such as `*.go`. |
 | `kind` | No | `file` | `file`, `dir`, `symlink`, or `any`. |
-| `limit` | No | `100` | Maximum results. |
 
 Use this for filename discovery. Do not use it for content search.
 
@@ -276,6 +276,37 @@ Arguments:
 | `max_count` | No | unset | Maximum selected lines per file. |
 
 Choose only one search mode among `glob`, `fixed_strings`, and `regexp`.
+
+Use `file_grep` when you know the exact text, regex, or glob you need.
+
+### `file_query`
+
+Ranks workspace files for a concept or natural-language question.
+
+Arguments:
+
+| Field | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `workspace` | No | Current/token workspace | Local MCP workspace override. |
+| `path` | No | `/` | Absolute file or directory to search within. |
+| `query` | Yes unless `searches` is set | - | Plain query text or a QMD-style typed query document. |
+| `mode` | No | `query` | `query`, `keyword`, or `semantic`. |
+| `searches` | No | unset | Array of `{ "type": "lex|vec|hyde", "query": "..." }` clauses for `mode=query`. |
+| `intent` | No | unset | Extra retrieval intent. |
+| `limit` | No | `10` | Maximum results. |
+| `all` | No | `false` | Return all results. |
+| `min_score` | No | `0` | Minimum score. |
+| `candidate_limit` | No | unset | Candidate result limit. |
+| `rerank` | No | `auto` | `auto` or `none`. |
+| `explain` | No | `false` | Include retrieval explanation when available. |
+| `chunk_strategy` | No | unset | `auto` or `regex`. |
+
+Use `file_query` when exact text is unknown or typed `lex:`, `vec:`, and
+`hyde:` clauses help describe the task. Plain `mode=query` falls back to
+keyword-ranked results when embeddings are disabled or unavailable. Keyword
+ranking uses Redis Search BM25 over query chunks when available, then falls
+back to direct content ranking. Use `mode=semantic` only when vector-only
+retrieval is required.
 
 ## File Write Tools
 
@@ -413,7 +444,8 @@ Arguments:
 ## Agent Usage Rules
 
 - Use `file_glob` for filename discovery.
-- Use `file_grep` for content search.
+- Use `file_grep` for exact content search.
+- Use `file_query` for conceptual or ranked workspace search.
 - Read before editing.
 - Prefer precise edit tools over full-file rewrites.
 - Create checkpoints before risky changes and after useful results.

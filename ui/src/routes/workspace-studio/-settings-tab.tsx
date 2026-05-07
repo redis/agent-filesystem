@@ -485,7 +485,7 @@ export function SettingsTab({
               </tr>
             </thead>
             <tbody>
-              {activeTokens.slice(0, 5).map((token) => (
+              {activeTokens.map((token) => (
                 <TokenRow key={token.id}>
                   <TokenCell>
                     <TokenName>{token.name?.trim() || token.id}</TokenName>

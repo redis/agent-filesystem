@@ -163,12 +163,12 @@ func unmountLegacyState(deleteLocal bool) error {
 				_ = os.Remove(st.LocalPath)
 				if err := os.Rename(st.ArchivePath, st.LocalPath); err != nil {
 					s.fail(err.Error())
-					fmt.Printf("  %s archive preserved at %s\n", clr(ansiYellow, "!"), st.ArchivePath)
+					fmt.Printf("  %s archive preserved at %s\n", clr(ansiYellow, "!"), homeRelativeDisplayPath(st.ArchivePath))
 				} else {
-					s.succeed(st.LocalPath)
+					s.succeed(homeRelativeDisplayPath(st.LocalPath))
 				}
 			} else {
-				fmt.Printf("  %s mount still active, archive preserved at %s\n", clr(ansiYellow, "!"), st.ArchivePath)
+				fmt.Printf("  %s mount still active, archive preserved at %s\n", clr(ansiYellow, "!"), homeRelativeDisplayPath(st.ArchivePath))
 			}
 		}
 	}
@@ -176,7 +176,7 @@ func unmountLegacyState(deleteLocal bool) error {
 	if deleteLocal && st.CreatedLocalPath && st.ArchivePath == "" && !backend.IsMounted(st.LocalPath) {
 		removeErr := removeEmptyMountpoint(st.LocalPath)
 		if removeErr != nil {
-			fmt.Printf("  %s empty mountpoint at %s could not be removed automatically (%v)\n", clr(ansiYellow, "!"), st.LocalPath, removeErr)
+			fmt.Printf("  %s empty mountpoint at %s could not be removed automatically (%v)\n", clr(ansiYellow, "!"), homeRelativeDisplayPath(st.LocalPath), removeErr)
 		}
 	}
 
@@ -189,7 +189,7 @@ func unmountLegacyState(deleteLocal bool) error {
 		local = "deleted"
 	}
 	fmt.Printf("Unmounted workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
-	fmt.Printf("path   %s\n", st.LocalPath)
+	fmt.Printf("path   %s\n", homeRelativeDisplayPath(st.LocalPath))
 	fmt.Printf("local  %s\n", local)
 	return nil
 }

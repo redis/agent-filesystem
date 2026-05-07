@@ -583,6 +583,7 @@ func (c *nativeClient) Rm(ctx context.Context, p string) error {
 	pipe.Del(ctx, c.keys.inode(inode.ID))
 	if inode.Type == "file" {
 		pipe.Del(ctx, c.keys.content(inode.ID))
+		c.queueQueryDeleted(ctx, pipe, inode.ID)
 	}
 	if inode.Type == "dir" {
 		pipe.Del(ctx, c.keys.dirents(inode.ID))
@@ -1213,6 +1214,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 			"chunk_hashes", hashJSON,
 		)
 		metaPipe.HSet(ctx, c.keys.inode(inode.ID), searchFields)
+		c.queueQueryDirty(ctx, metaPipe, inode.ID)
 		if delta != 0 {
 			metaPipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
 		}
@@ -1297,6 +1299,7 @@ func (c *nativeClient) WriteChunks(ctx context.Context, p string, chunks map[int
 		"chunk_hashes", hashJSON,
 	)
 	metaPipe.HSet(ctx, c.keys.inode(inode.ID), searchFields)
+	c.queueQueryDirty(ctx, metaPipe, inode.ID)
 	if delta != 0 {
 		metaPipe.HIncrBy(ctx, c.keys.info(), "total_data_bytes", delta)
 	}

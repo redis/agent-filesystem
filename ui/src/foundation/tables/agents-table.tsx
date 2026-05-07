@@ -127,9 +127,8 @@ const TablePrimaryText = styled.span`
   font-size: 14px;
   font-weight: 700;
   line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 const TableSecondaryText = styled.span`
@@ -139,9 +138,8 @@ const TableSecondaryText = styled.span`
   font-size: 11.5px;
   font-weight: 600;
   line-height: 1.2;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;
 
 /* ---- Detail dialog ---- */
@@ -231,9 +229,8 @@ const CardHostname = styled.span`
   font-size: 15px;
   font-weight: 700;
   color: var(--afs-ink, #18181b);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   min-width: 0;
   flex: 1;
 `;

@@ -12,15 +12,23 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
+	"github.com/redis/agent-filesystem/internal/mcptools"
 	mountclient "github.com/redis/agent-filesystem/mount/client"
 	"github.com/redis/go-redis/v9"
 )
 
 type stubAFSControlPlane struct {
-	workspaces controlplane.WorkspaceListResponse
+	workspaces         controlplane.WorkspaceListResponse
+	workspacesErr      error
+	workspaceConfig    controlplane.WorkspaceConfig
+	workspaceConfigOK  bool
+	workspaceConfigErr error
 }
 
 func (s stubAFSControlPlane) ListWorkspaceSummaries(context.Context) (controlplane.WorkspaceListResponse, error) {
+	if s.workspacesErr != nil {
+		return controlplane.WorkspaceListResponse{}, s.workspacesErr
+	}
 	return s.workspaces, nil
 }
 
@@ -29,6 +37,12 @@ func (s stubAFSControlPlane) GetWorkspace(context.Context, string) (controlplane
 }
 
 func (s stubAFSControlPlane) GetWorkspaceConfig(context.Context, string) (controlplane.WorkspaceConfig, error) {
+	if s.workspaceConfigErr != nil {
+		return controlplane.WorkspaceConfig{}, s.workspaceConfigErr
+	}
+	if s.workspaceConfigOK {
+		return s.workspaceConfig, nil
+	}
 	return controlplane.WorkspaceConfig{}, fmt.Errorf("unexpected GetWorkspaceConfig call")
 }
 
@@ -110,6 +124,18 @@ func (s stubAFSControlPlane) GetTree(context.Context, string, string, string, in
 
 func (s stubAFSControlPlane) GetFileContent(context.Context, string, string, string) (controlplane.FileContentResponse, error) {
 	return controlplane.FileContentResponse{}, fmt.Errorf("unexpected GetFileContent call")
+}
+
+func (s stubAFSControlPlane) QueryWorkspace(context.Context, string, mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
+	return mcptools.FileQueryResponse{}, fmt.Errorf("unexpected QueryWorkspace call")
+}
+
+func (s stubAFSControlPlane) QueryIndexStatus(context.Context, string, controlplane.WorkspaceQueryIndexStatusRequest) (controlplane.WorkspaceQueryIndexStatus, error) {
+	return controlplane.WorkspaceQueryIndexStatus{}, fmt.Errorf("unexpected QueryIndexStatus call")
+}
+
+func (s stubAFSControlPlane) RebuildQueryIndex(context.Context, string, controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error) {
+	return controlplane.WorkspaceQueryIndexRebuildResponse{}, fmt.Errorf("unexpected RebuildQueryIndex call")
 }
 
 func (s stubAFSControlPlane) DiffWorkspace(context.Context, string, string, string) (controlplane.WorkspaceDiffResponse, error) {
@@ -492,6 +518,90 @@ func TestResolveWorkspaceSelectionPrefersCWDMountedWorkspace(t *testing.T) {
 	}
 	if selection.ID != "ws_beta" || selection.Name != "beta" || selection.Source != workspaceSelectionCWD {
 		t.Fatalf("selection = %+v, want CWD-mounted beta", selection)
+	}
+}
+
+func TestResolveWorkspaceSetDefaultSelectionUsesCurrentConfigMountWhenCatalogMissesWorkspace(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeCloud
+	cfg.URL = "https://afs.cloud"
+	cfg.DatabaseID = "afs-cloud"
+
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{{
+		ID:                   "mnt_first",
+		Workspace:            "first-workspace",
+		WorkspaceID:          "ws_first",
+		LocalPath:            filepath.Join(homeDir, "first-workspace"),
+		ProductMode:          productModeCloud,
+		ControlPlaneURL:      cfg.URL,
+		ControlPlaneDatabase: cfg.DatabaseID,
+		PID:                  os.Getpid(),
+		Mode:                 modeSync,
+		StartedAt:            time.Now().UTC(),
+	}}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	selection, err := resolveWorkspaceSetDefaultSelection(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_new", Name: "new", DatabaseID: cfg.DatabaseID},
+			},
+		},
+	}, "first-workspace")
+	if err != nil {
+		t.Fatalf("resolveWorkspaceSetDefaultSelection() returned error: %v", err)
+	}
+	if selection.ID != "ws_first" || selection.Name != "first-workspace" || selection.Source != workspaceSelectionExplicit {
+		t.Fatalf("selection = %+v, want mounted first-workspace", selection)
+	}
+}
+
+func TestResolveWorkspaceSetDefaultSelectionExplainsMountedWorkspaceFromOtherConfig(t *testing.T) {
+	t.Helper()
+
+	homeDir := withTempHome(t)
+	cfg := defaultConfig()
+	cfg.ProductMode = productModeCloud
+	cfg.URL = "https://afs.cloud"
+	cfg.DatabaseID = "afs-cloud"
+
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{{
+		ID:                   "mnt_first",
+		Workspace:            "first-workspace",
+		WorkspaceID:          "ws_first",
+		LocalPath:            filepath.Join(homeDir, "first-workspace"),
+		ProductMode:          productModeSelfHosted,
+		ControlPlaneURL:      "http://127.0.0.1:8091",
+		ControlPlaneDatabase: "localhost-6379",
+		PID:                  os.Getpid(),
+		Mode:                 modeSync,
+		StartedAt:            time.Now().UTC(),
+	}}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	_, err := resolveWorkspaceSetDefaultSelection(context.Background(), cfg, stubAFSControlPlane{
+		workspaces: controlplane.WorkspaceListResponse{
+			Items: []controlplane.WorkspaceSummary{
+				{ID: "ws_new", Name: "new", DatabaseID: cfg.DatabaseID},
+			},
+		},
+	}, "first-workspace")
+	if err == nil {
+		t.Fatal("resolveWorkspaceSetDefaultSelection() returned nil error, want config mismatch")
+	}
+	for _, want := range []string{
+		`workspace "first-workspace" is mounted from Self-managed http://127.0.0.1:8091 (localhost-6379)`,
+		"current config uses Cloud-managed https://afs.cloud (afs-cloud)",
+		"status --verbose",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error = %q, want %q", err, want)
+		}
 	}
 }
 

@@ -32,14 +32,16 @@ type remoteEvent struct {
 // subscription events, upload results, and download results all funnel
 // through one goroutine so we never have to lock individual entries.
 type reconciler struct {
-	state     *stateWriter
-	root      string
-	workspace string
-	sessionID string
-	store     *afsStore
-	echo      *echoSuppressor
-	conflict  *conflictNamer
-	ignore    *syncIgnore
+	state          *stateWriter
+	root           string
+	workspace      string
+	storageID      string
+	headCheckpoint string
+	sessionID      string
+	store          *afsStore
+	echo           *echoSuppressor
+	conflict       *conflictNamer
+	ignore         *syncIgnore
 
 	uploadCh      chan uploadOp
 	downloadCh    chan downloadOp
@@ -74,6 +76,8 @@ type renameCandidate struct {
 func newReconciler(
 	state *stateWriter,
 	root, workspace string,
+	storageID string,
+	headCheckpoint string,
 	sessionID string,
 	store *afsStore,
 	fs client.Client,
@@ -96,6 +100,8 @@ func newReconciler(
 		state:              state,
 		root:               root,
 		workspace:          workspace,
+		storageID:          strings.TrimSpace(storageID),
+		headCheckpoint:     strings.TrimSpace(headCheckpoint),
 		sessionID:          strings.TrimSpace(sessionID),
 		store:              store,
 		fs:                 fs,

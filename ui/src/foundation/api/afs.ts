@@ -2195,9 +2195,9 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
     return JSON.parse(rawBody) as T;
   } catch (error) {
     const contentType = response.headers.get("content-type") ?? "unknown";
-    const preview = rawBody.slice(0, 160).replace(/\s+/g, " ").trim();
+    const body = rawBody.replace(/\s+/g, " ").trim();
     throw new Error(
-      `Expected JSON from ${url}, but received ${contentType} (status ${response.status}). Body preview: ${preview || "<empty>"}`,
+      `Expected JSON from ${url}, but received ${contentType} (status ${response.status}). Body: ${body || "<empty>"}`,
       { cause: error },
     );
   }

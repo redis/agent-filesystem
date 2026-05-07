@@ -6,7 +6,7 @@ import styled from "styled-components";
 import { compareValues } from "../sort-compare";
 import { shortDateTime } from "../time-format";
 import type { AFSChangelogEntry } from "../types/afs";
-import { truncateMiddlePath } from "./changes-table-utils";
+import { displayPath } from "./changes-table-utils";
 import * as S from "./workspace-table.styles";
 
 type ChangesSortField = "occurredAt" | "op" | "path" | "sessionId" | "deltaBytes";
@@ -217,11 +217,11 @@ export function ChangesTable({
             row.original.versionId ? (
               <S.Stack>
                 <S.SingleLineText title={row.original.versionId}>
-                  {row.original.versionId.slice(0, 12)}
+                  {row.original.versionId}
                 </S.SingleLineText>
                 {row.original.fileId ? (
                   <Typography.Body color="secondary" component="span">
-                    {row.original.fileId.slice(0, 12)}
+                    {row.original.fileId}
                   </Typography.Body>
                 ) : null}
               </S.Stack>
@@ -275,7 +275,7 @@ export function ChangesTable({
             const agentId = row.original.agentId?.trim();
             const sessionId = row.original.sessionId ?? "";
             const actor = row.original.actor?.trim();
-            const display = label || actor || agentId || sessionId.slice(0, 8) || "—";
+            const display = label || actor || agentId || sessionId || "—";
             const tooltip = [label, actor, agentId, sessionId].filter(Boolean).join(" · ");
             return (
               <S.SingleLineText title={tooltip || display}>
@@ -393,13 +393,13 @@ function HistoryDetailCell({ row }: { row: HistoryTableRow }) {
   }
 
   const path = row.path ?? "";
-  const displayPath = path ? truncateMiddlePath(path) : "—";
+  const visiblePath = path ? displayPath(path) : "—";
   const previousPath = row.prevPath ?? "";
-  const displayPreviousPath = previousPath ? truncateMiddlePath(previousPath) : "";
+  const displayPreviousPath = previousPath ? displayPath(previousPath) : "";
 
   return (
     <HistoryDetailStack>
-      <HistoryDetailText title={path}>{displayPath}</HistoryDetailText>
+      <HistoryDetailText title={path}>{visiblePath}</HistoryDetailText>
       {previousPath ? (
         <HistoryDetailSecondary title={previousPath}>
           from {displayPreviousPath}
@@ -442,7 +442,7 @@ function sessionLabel(value?: string): string {
 }
 
 function shortID(value: string): string {
-  return value.length <= 12 ? value : value.slice(0, 12);
+  return value;
 }
 
 function formatToken(value?: string) {
@@ -467,10 +467,9 @@ const HistoryDetailSecondary = styled.span`
   display: block;
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
   color: var(--afs-muted);
   font-size: 13px;
   line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 `;

@@ -199,6 +199,35 @@ func TestCmdLoginPersistsCloudConfig(t *testing.T) {
 	}
 }
 
+func TestCmdLoginSelfManagedShowsWorkspaceCreateNextStep(t *testing.T) {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	saveTempConfig(t, defaultConfig())
+
+	out, err := captureStdout(t, func() error {
+		return cmdLogin([]string{"--self-hosted", "--control-plane-url", server.URL})
+	})
+	if err != nil {
+		t.Fatalf("cmdLogin(self-managed) returned error: %v", err)
+	}
+	out = stripAnsi(out)
+	if !strings.Contains(out, "workspace create <name>") {
+		t.Fatalf("cmdLogin(self-managed) output = %q, want workspace create next step", out)
+	}
+	if strings.Contains(out, "afs setup") || strings.Contains(out, "pick a workspace") {
+		t.Fatalf("cmdLogin(self-managed) output = %q, should not mention setup or pick a workspace", out)
+	}
+}
+
 func TestCmdAuthLogoutClearsCloudConfig(t *testing.T) {
 	t.Helper()
 

@@ -1111,7 +1111,8 @@ func promptWorkspaceSelectionFromSummariesWithReader(workspaces []workspaceSumma
 	fmt.Println()
 	fmt.Println("Select workspace")
 	fmt.Println()
-	printPlainTable([]string{"#", "Workspace", "Workspace ID", "Database", "Updated", "Mounted"}, checkpointWorkspacePromptRows(workspaces, workspaceListMounts(workspaces)))
+	headers := []string{"#", "Workspace", "Workspace ID", "Database", "Updated", "Mounted"}
+	printPlainTable(headers, checkpointWorkspacePromptRows(workspaces, workspaceListMounts(workspaces)))
 	fmt.Println()
 	fmt.Print("Workspace: ")
 

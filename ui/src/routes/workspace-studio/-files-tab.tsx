@@ -555,9 +555,8 @@ const FileCell = styled.td<{ $name?: boolean; $message?: boolean; $time?: boolea
   padding: 8px 16px;
   font-size: 13px;
   color: var(--afs-ink-soft);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
+  white-space: normal;
   vertical-align: middle;
 
   ${({ $name }) =>
@@ -607,9 +606,8 @@ const IconWrap = styled.span`
 const FileName = styled.span<{ $isDir?: boolean }>`
   color: var(--afs-ink);
   font-weight: ${({ $isDir }) => ($isDir ? 600 : 400)};
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 
   &:hover {
     text-decoration: underline;

@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/redis/agent-filesystem/internal/mcptools"
 	"github.com/redis/agent-filesystem/internal/uistatic"
 	"github.com/redis/agent-filesystem/internal/version"
 )
@@ -1244,6 +1245,54 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/status"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/status")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.QueryIndexStatus(r.Context(), databaseID, workspace, WorkspaceQueryIndexStatusRequest{
+			Path: r.URL.Query().Get("path"),
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/rebuild"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/rebuild")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input WorkspaceQueryIndexRebuildRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("decode query index rebuild request: %w", err))
+			return
+		}
+		response, err := manager.RebuildQueryIndex(r.Context(), databaseID, workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query"):
+		workspace := strings.TrimSuffix(workspacePath, "/query")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input mcptools.FileQueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("decode query request: %w", err))
+			return
+		}
+		response, err := manager.QueryWorkspace(r.Context(), databaseID, workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	case strings.HasSuffix(workspacePath, "/diff") && !strings.HasSuffix(workspacePath, "/files/diff"):
 		workspace := strings.TrimSuffix(workspacePath, "/diff")
 		if r.Method != http.MethodGet {
@@ -1765,6 +1814,54 @@ func handleResolvedWorkspaceRoute(
 			r.URL.Query().Get("path"),
 			depth,
 		)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/status"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/status")
+		if r.Method != http.MethodGet {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		response, err := manager.QueryResolvedIndexStatus(r.Context(), workspace, WorkspaceQueryIndexStatusRequest{
+			Path: r.URL.Query().Get("path"),
+		})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/rebuild"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/rebuild")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input WorkspaceQueryIndexRebuildRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("decode query index rebuild request: %w", err))
+			return
+		}
+		response, err := manager.RebuildResolvedQueryIndex(r.Context(), workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query"):
+		workspace := strings.TrimSuffix(workspacePath, "/query")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input mcptools.FileQueryRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			writeError(w, fmt.Errorf("decode query request: %w", err))
+			return
+		}
+		response, err := manager.QueryResolvedWorkspace(r.Context(), workspace, input)
 		if err != nil {
 			writeError(w, err)
 			return
