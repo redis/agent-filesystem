@@ -2171,8 +2171,8 @@ This workspace was created from the AFS Web UI.
     const configs = loadDemoWorkspaceConfigs();
     const config = configs[input.workspaceId] ?? defaultWorkspaceConfig();
     const policies = loadDemoVersioningPolicies();
-    if (policies[input.workspaceId]) {
-      config.versioning = policies[input.workspaceId];
+    if (Object.hasOwn(policies, input.workspaceId)) {
+      config.versioning = policies[input.workspaceId]!;
     }
     return normalizeWorkspaceConfig(config);
   },
