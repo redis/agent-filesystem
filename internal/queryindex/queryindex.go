@@ -1276,6 +1276,7 @@ func isSearchUnavailable(err error) bool {
 	return strings.Contains(msg, "unknown command") ||
 		strings.Contains(msg, "module") ||
 		strings.Contains(msg, "not supported") ||
+		strings.Contains(msg, "db != 0") ||
 		strings.Contains(msg, "resp3 responses for this command are disabled")
 }
 

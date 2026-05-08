@@ -351,6 +351,8 @@ class MountedFS:
             remote_path = _normalize_remote_path(posixpath.join(remote_directory, child.name))
             if child.is_dir():
                 self._copy_local_directory(workspace, child, remote_path)
+            elif child.is_symlink():
+                continue
             elif child.is_file():
                 workspace.client.call_tool(
                     "file_write",

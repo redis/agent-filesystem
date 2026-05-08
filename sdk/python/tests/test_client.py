@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from redis_afs.client import AFSError, CheckpointClient, FSClient, MCPHttpClient, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
@@ -7,13 +8,22 @@ from redis_afs.client import AFSError, CheckpointClient, FSClient, MCPHttpClient
 class FakeMCP:
     def __init__(self):
         self.files = {}
+        self.symlinks = {}
+        self.calls = []
 
     def call_tool(self, name, arguments=None):
         arguments = arguments or {}
+        self.calls.append((name, dict(arguments)))
         if name == "file_write":
             self.files[arguments["path"]] = arguments["content"]
             return {"path": arguments["path"], "operation": "write"}
         if name == "file_read":
+            if arguments["path"] in self.symlinks:
+                return {
+                    "path": arguments["path"],
+                    "kind": "symlink",
+                    "target": self.symlinks[arguments["path"]],
+                }
             return {
                 "path": arguments["path"],
                 "kind": "file",
@@ -29,6 +39,13 @@ class FakeMCP:
                     remainder = file_path[len(path.rstrip("/")) + 1 :]
                     if "/" not in remainder:
                         entries.append({"path": file_path, "name": remainder, "kind": "file"})
+            for link_path, target in sorted(self.symlinks.items()):
+                if path == "/" and "/" not in link_path.strip("/"):
+                    entries.append({"path": link_path, "name": link_path.strip("/"), "kind": "symlink", "target": target})
+                elif link_path.startswith(path.rstrip("/") + "/"):
+                    remainder = link_path[len(path.rstrip("/")) + 1 :]
+                    if "/" not in remainder:
+                        entries.append({"path": link_path, "name": remainder, "kind": "symlink", "target": target})
             return {"entries": entries}
         if name == "checkpoint_create":
             return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "save-20260508-000000.000", "created": True}
@@ -145,6 +162,21 @@ class MountedFSTest(unittest.TestCase):
             self.assertEqual(control_plane.issued[0]["arguments"]["workspace"], "repo")
             self.assertEqual(control_plane.issued[0]["arguments"]["profile"], "workspace-rw")
             self.assertEqual(control_plane.issued[0]["arguments"]["name"], "Mounted FS")
+
+    def test_sync_to_remote_skips_symlink_entries(self):
+        fake = FakeMCP()
+        fake.files["/README.md"] = "hello"
+        fake.symlinks["/readme-link.md"] = "README.md"
+        fs = MountedFS([_MountedWorkspace(name="repo", token="token", client=fake)])
+        self.addCleanup(fs.close)
+
+        root = fs.sync_from_remote()
+        self.assertTrue(Path(root, "repo", "readme-link.md").is_symlink())
+
+        fs.sync_to_remote()
+
+        write_paths = [args["path"] for name, args in fake.calls if name == "file_write"]
+        self.assertNotIn("/readme-link.md", write_paths)
 
 
 class EndpointTest(unittest.TestCase):
