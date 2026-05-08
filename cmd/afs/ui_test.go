@@ -57,17 +57,9 @@ func TestMarkerSuccessConstant(t *testing.T) {
 func TestFormatCLIErrorUsesPlainSectionFormat(t *testing.T) {
 	t.Helper()
 
-	got := formatCLIError(errors.New(`mount blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty
-Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first`))
+	got := formatCLIError(errors.New("mount blocked for workspace \"smoke\": local path \"/Users/rowantrollope/afs\" is already populated and the remote workspace is not empty\nUse an empty directory, import the local directory into a new workspace, or rerun `afs ws mount --dry-run` to inspect the reconciliation plan and move overlapping files aside if needed."))
 
-	want := `
-Error
-
-Mount blocked for workspace "smoke": local path "/Users/rowantrollope/afs" is already populated and the remote workspace is not empty.
-
-Use an empty directory, import the local directory into a new workspace, or move conflicting files aside first.
-
-`
+	want := "\nError\n\nMount blocked for workspace \"smoke\": local path \"/Users/rowantrollope/afs\" is already populated and the remote workspace is not empty.\n\nUse an empty directory, import the local directory into a new workspace, or rerun `afs ws mount --dry-run` to inspect the reconciliation plan and move overlapping files aside if needed.\n\n"
 	if got != want {
 		t.Fatalf("formatCLIError() = %q, want %q", got, want)
 	}

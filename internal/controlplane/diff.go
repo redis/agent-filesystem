@@ -3,6 +3,8 @@ package controlplane
 import (
 	"bytes"
 	"context"
+	"mime"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -411,6 +413,9 @@ func (s *Service) textDiffForEntries(ctx context.Context, storageID, p string, o
 	if hasNew && newEntry.Type != "file" && newEntry.Type != "symlink" {
 		return nil
 	}
+	if looksBinaryPath(p) && ((hadOld && oldEntry.Type == "file") || (hasNew && newEntry.Type == "file")) {
+		return skippedTextDiff("binary")
+	}
 	if hadOld && oldEntry.Type == "file" && oldEntry.Size > diffTextMaxBytes {
 		return skippedTextDiff("too_large")
 	}
@@ -477,6 +482,28 @@ func skippedTextDiff(reason string) *TextDiff {
 		SkippedReason: reason,
 		MaxBytes:      diffTextMaxBytes,
 	}
+}
+
+func looksBinaryPath(p string) bool {
+	ext := strings.ToLower(path.Ext(strings.TrimSpace(p)))
+	if ext == "" {
+		return false
+	}
+	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(mime.TypeByExtension(ext), ";")[0]))
+	if mediaType == "" {
+		return false
+	}
+	if strings.HasPrefix(mediaType, "text/") {
+		return false
+	}
+	switch mediaType {
+	case "application/json", "application/xml", "application/yaml", "application/x-yaml", "application/javascript", "application/x-javascript", "image/svg+xml":
+		return false
+	}
+	if strings.HasSuffix(mediaType, "+json") || strings.HasSuffix(mediaType, "+xml") {
+		return false
+	}
+	return true
 }
 
 func splitDiffLines(text string) []string {

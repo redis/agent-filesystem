@@ -21,7 +21,8 @@ import (
 )
 
 type saveCheckpointHTTPResponse struct {
-	Saved bool `json:"saved"`
+	Saved        bool   `json:"saved"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
 }
 
 type forkWorkspaceRequest struct {
@@ -1474,7 +1475,11 @@ func handleWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		saved, err := manager.SaveCheckpointFromLiveWithOptions(r.Context(), databaseID, workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
+		checkpointID := strings.TrimSpace(input.CheckpointID)
+		if checkpointID == "" {
+			checkpointID = generatedSavepointName()
+		}
+		saved, err := manager.SaveCheckpointFromLiveWithOptions(r.Context(), databaseID, workspace, checkpointID, SaveCheckpointFromLiveOptions{
 			Description:    input.Description,
 			Kind:           input.Kind,
 			Source:         input.Source,
@@ -1485,7 +1490,7 @@ func handleWorkspaceRoute(
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
+		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved, CheckpointID: checkpointID})
 	case strings.HasSuffix(workspacePath, ":fork"):
 		workspace := strings.TrimSuffix(workspacePath, ":fork")
 		if r.Method != http.MethodPost {
@@ -2085,7 +2090,11 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, fmt.Errorf("invalid request body: %w", err))
 			return
 		}
-		saved, err := manager.SaveResolvedCheckpointFromLiveWithOptions(r.Context(), workspace, input.CheckpointID, SaveCheckpointFromLiveOptions{
+		checkpointID := strings.TrimSpace(input.CheckpointID)
+		if checkpointID == "" {
+			checkpointID = generatedSavepointName()
+		}
+		saved, err := manager.SaveResolvedCheckpointFromLiveWithOptions(r.Context(), workspace, checkpointID, SaveCheckpointFromLiveOptions{
 			Description:    input.Description,
 			Kind:           input.Kind,
 			Source:         input.Source,
@@ -2096,7 +2105,7 @@ func handleResolvedWorkspaceRoute(
 			writeError(w, err)
 			return
 		}
-		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved})
+		writeJSON(w, http.StatusCreated, saveCheckpointHTTPResponse{Saved: saved, CheckpointID: checkpointID})
 	case strings.HasSuffix(workspacePath, ":fork"):
 		workspace := strings.TrimSuffix(workspacePath, ":fork")
 		if r.Method != http.MethodPost {

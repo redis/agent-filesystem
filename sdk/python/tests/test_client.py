@@ -31,7 +31,7 @@ class FakeMCP:
                         entries.append({"path": file_path, "name": remainder, "kind": "file"})
             return {"entries": entries}
         if name == "checkpoint_create":
-            return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+            return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "save-20260508-000000.000", "created": True}
         if name == "checkpoint_restore":
             return {"workspace": "workspace", "checkpoint": arguments["checkpoint"], "restored": True}
         raise AssertionError(f"unexpected tool {name}")
@@ -158,6 +158,14 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(created["checkpoint"], "unchanged-head")
         self.assertTrue(restored["restored"])
         self.assertEqual(restored["checkpoint"], "unchanged-head")
+
+    def test_checkpoint_create_allows_omitted_name(self):
+        checkpoint = CheckpointClient(FakeMCP())
+
+        created = checkpoint.create(workspace="repo")
+
+        self.assertTrue(created["created"])
+        self.assertEqual(created["checkpoint"], "save-20260508-000000.000")
 
     def test_normalizes_mcp_endpoint(self):
         self.assertEqual(_normalize_mcp_endpoint("https://afs.cloud"), "https://afs.cloud/mcp")

@@ -658,43 +658,5 @@ func printSyncReadyBox(cfg config, workspace, localRoot string) {
 // stopSyncServicesIfActive performs unmount cleanup when the running daemon was
 // started in sync mode.
 func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
-	if strings.TrimSpace(st.Mode) != modeSync {
-		return false, nil
-	}
-
-	fmt.Println()
-
-	if st.SyncPID > 0 && processAlive(st.SyncPID) {
-		s := startStep("Stopping sync daemon")
-		if err := terminatePID(st.SyncPID, 5*time.Second); err != nil {
-			s.fail(err.Error())
-		} else {
-			s.succeed(fmt.Sprintf("pid %d", st.SyncPID))
-		}
-	}
-	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" && deleteLocal {
-		if err := os.RemoveAll(localPath); err != nil {
-			fmt.Printf("  %s local sync folder preserved at %s (%v)\n", clr(ansiYellow, "!"), localPath, err)
-		}
-	}
-
-	if deleteLocal {
-		// Clean up sync state only when the user explicitly deletes the local
-		// copy; otherwise it remains as the baseline for a later re-mount.
-		workspace := strings.TrimSpace(st.CurrentWorkspace)
-		_ = removeSyncState(workspace)
-	}
-	closeManagedWorkspaceSession(configFromState(st), strings.TrimSpace(st.CurrentWorkspace), strings.TrimSpace(st.SessionID))
-
-	if err := os.Remove(statePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return true, err
-	}
-	local := "preserved"
-	if deleteLocal {
-		local = "deleted"
-	}
-	fmt.Printf("Unmounted workspace %s\n", currentWorkspaceLabel(st.CurrentWorkspace))
-	fmt.Printf("path   %s\n", homeRelativeDisplayPath(st.LocalPath))
-	fmt.Printf("local  %s\n", local)
-	return true, nil
+	return stopSyncServicesIfActiveAtPath(st, statePath(), deleteLocal)
 }

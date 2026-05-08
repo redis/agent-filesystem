@@ -171,6 +171,51 @@ func TestMountReconcileAllowsApprovedSafeUnion(t *testing.T) {
 	}
 }
 
+func TestMountReconcileReportsEmptyRemoteImport(t *testing.T) {
+	t.Helper()
+	env := newSyncTestEnv(t)
+	env.writeLocalFile(t, "local-only.txt", "hello")
+
+	daemonClient := client.New(env.rdb, env.mountKey)
+	cfg := syncDaemonConfig{
+		Workspace:       env.workspace,
+		LocalRoot:       env.localRoot,
+		FS:              daemonClient,
+		Store:           env.store,
+		MaxFileBytes:    16 * 1024 * 1024,
+		WatcherDebounce: 20 * time.Millisecond,
+	}
+	d, err := newSyncDaemon(cfg)
+	if err != nil {
+		t.Fatalf("newSyncDaemon: %v", err)
+	}
+	plan, err := buildMountReconcilePlan(context.Background(), d)
+	if err != nil {
+		t.Fatalf("buildMountReconcilePlan: %v", err)
+	}
+	if plan.ImportCount != 1 || plan.DownloadCount != 0 || plan.ConflictCount != 0 {
+		t.Fatalf("plan counts = import:%d download:%d conflict:%d, want 1/0/0", plan.ImportCount, plan.DownloadCount, plan.ConflictCount)
+	}
+	if !plan.requiresConfirmation() {
+		t.Fatal("requiresConfirmation() = false, want true for empty-remote local import")
+	}
+	requireMountOp(t, plan, "I", "local-only.txt")
+
+	approveMountReconcilePlan(d, plan)
+	if err := d.Start(context.Background()); err != nil {
+		t.Fatalf("Start() after approved empty-remote import: %v", err)
+	}
+	env.daemon = d
+	defer env.stopDaemon()
+
+	assertEventually(t, 3*time.Second, "local-only.txt to upload", func() bool {
+		return env.remoteExists(t, "local-only.txt")
+	})
+	if got := env.readRemoteFile(t, "local-only.txt"); got != "hello" {
+		t.Fatalf("remote local-only.txt = %q, want hello", got)
+	}
+}
+
 func TestMountReconcileReportsOfflineLocalCreate(t *testing.T) {
 	t.Helper()
 	env := newSyncTestEnv(t)

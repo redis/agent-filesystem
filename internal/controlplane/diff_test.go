@@ -1,6 +1,7 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/base64"
 	"testing"
 )
@@ -59,5 +60,28 @@ func TestSummarizeDiffEntriesCountsBytes(t *testing.T) {
 	}
 	if summary.BytesAdded != 10 || summary.BytesRemoved != 10 {
 		t.Fatalf("summary bytes = +%d/-%d, want +10/-10", summary.BytesAdded, summary.BytesRemoved)
+	}
+}
+
+func TestTextDiffForEntriesSkipsLikelyBinaryPaths(t *testing.T) {
+	t.Helper()
+
+	service := &Service{}
+	entry := ManifestEntry{
+		Type:   "file",
+		Mode:   0o644,
+		Size:   int64(len("not-a-real-png")),
+		Inline: base64.StdEncoding.EncodeToString([]byte("not-a-real-png")),
+	}
+
+	diff := service.textDiffForEntries(context.Background(), "repo", "/assets/logo.png", entry, true, nil, entry, true, nil)
+	if diff == nil {
+		t.Fatal("textDiffForEntries() = nil, want skipped binary diff")
+	}
+	if diff.Available {
+		t.Fatalf("textDiffForEntries().Available = true, want false: %#v", diff)
+	}
+	if diff.SkippedReason != "binary" {
+		t.Fatalf("textDiffForEntries().SkippedReason = %q, want %q", diff.SkippedReason, "binary")
 	}
 }

@@ -567,6 +567,10 @@ func (s *Service) saveCheckpointFromLive(ctx context.Context, workspace, checkpo
 	if err := ValidateName("workspace", workspace); err != nil {
 		return false, fmt.Errorf("save-from-live validate: %w", err)
 	}
+	checkpointID = strings.TrimSpace(checkpointID)
+	if checkpointID == "" {
+		checkpointID = generatedSavepointName()
+	}
 	if err := ValidateName("checkpoint", checkpointID); err != nil {
 		return false, fmt.Errorf("save-from-live validate checkpoint: %w", err)
 	}

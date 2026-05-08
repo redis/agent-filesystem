@@ -106,7 +106,8 @@ type httpCLIAccessTokenResponse struct {
 }
 
 type httpSaveCheckpointResponse struct {
-	Saved bool `json:"saved"`
+	Saved        bool   `json:"saved"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
 }
 
 func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPlaneClient, string, error) {

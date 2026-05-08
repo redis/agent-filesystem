@@ -104,3 +104,37 @@ test("checkpoint.create and checkpoint.restore round-trip through MCP", async ()
     ["checkpoint_create", "checkpoint_restore"],
   );
 });
+
+test("checkpoint.create allows omitted checkpoint names", async () => {
+  const calls = [];
+  const afs = new AFS({
+    apiKey: "test",
+    baseUrl: "https://afs.cloud",
+    fetch: async (_url, init) => {
+      const body = JSON.parse(String(init.body));
+      calls.push(body);
+      return new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            structuredContent: {
+              workspace: body.params.arguments.workspace,
+              checkpoint: "save-20260508-000000.000",
+              created: true,
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const created = await afs.checkpoint.create({ workspace: "repo" });
+
+  assert.equal(created.created, true);
+  assert.equal(created.checkpoint, "save-20260508-000000.000");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].params.name, "checkpoint_create");
+  assert.equal(calls[0].params.arguments.workspace, "repo");
+});

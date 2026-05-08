@@ -273,6 +273,11 @@ afs ws unmount my-project
 If you run `afs ws mount` without a workspace, AFS lists available workspaces
 and prompts you to choose one.
 
+When mounting into a populated local folder, AFS shows a reconciliation plan
+before it changes anything. Local-only files can be imported into an empty or
+otherwise disjoint workspace after confirmation, while same-path mismatches are
+treated as real conflicts and block the mount until you move one side aside.
+
 ## Deployment Modes
 
 | Mode | Use it when |

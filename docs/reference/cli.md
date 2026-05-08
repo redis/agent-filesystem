@@ -170,7 +170,7 @@ where the workspace argument is optional.
 ### `afs ws mount`
 
 ```bash
-afs ws mount [--dry-run] [--verbose] [--readonly] [--session <name>] [<workspace> <directory>]
+afs ws mount [--dry-run] [--yes] [--verbose] [--readonly] [--session <name>] [<workspace> <directory>]
 ```
 
 Mounts a durable workspace to a local directory using sync mode. The
@@ -183,9 +183,12 @@ unambiguous.
 Mount safety rules:
 
 - Empty local directory + populated workspace: downloads workspace files.
-- Populated local directory + empty workspace: uploads local files.
+- Populated local directory + empty workspace: shows a safe import plan and,
+  after confirmation or `--yes`, uploads local files.
 - Populated local directory + populated workspace with no prior sync baseline:
-  mount is blocked so files are not overwritten silently.
+  disjoint local-only and remote-only files are shown as a reconciliation plan
+  that you can confirm; overlapping paths with mismatched content are treated
+  as conflicts and block the mount.
 - Existing sync baseline: AFS reconciles from that baseline.
 
 Examples:
