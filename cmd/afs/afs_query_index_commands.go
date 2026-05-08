@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -142,20 +143,42 @@ func runWorkspaceQueryIndexClean(workspace string, args []string) error {
 	fs := flag.NewFlagSet("query index clean", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var jsonOut bool
+	var yes bool
 	fs.BoolVar(&jsonOut, "json", false, "write JSON output")
+	fs.BoolVar(&yes, "yes", false, "confirm removal of generated query index data")
+	fs.BoolVar(&yes, "y", false, "confirm removal of generated query index data")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%s", workspaceQueryIndexUsageText(filepath.Base(os.Args[0])))
 	}
 	if fs.NArg() != 0 {
 		return fmt.Errorf("%s", workspaceQueryIndexUsageText(filepath.Base(os.Args[0])))
 	}
-	status, err := workspaceQueryIndexStatusForWorkspace(workspace, "/")
+	ctx := context.Background()
+	remote, err := openFSRemoteWorkspace(ctx, workspace)
 	if err != nil {
 		return err
 	}
-	status.State = "clean"
-	status.Message = "No query index data was removed."
-	return writeWorkspaceQueryIndexStatus(status, jsonOut)
+	defer remote.close()
+	if !yes {
+		ok, err := confirmWorkspaceQueryIndexClean(remote.selection.Name)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Println()
+			fmt.Println("Query index clean cancelled.")
+			fmt.Println()
+			return nil
+		}
+	}
+	response, err := remote.controlPlane.CleanQueryIndex(ctx, remote.selection.ID, controlplane.WorkspaceQueryIndexCleanRequest{
+		Workspace: remote.selection.Name,
+		Confirm:   true,
+	})
+	if err != nil {
+		return err
+	}
+	return writeWorkspaceQueryIndexClean(response, jsonOut)
 }
 
 func workspaceQueryIndexStatusForWorkspace(workspace, path string) (controlplane.WorkspaceQueryIndexStatus, error) {
@@ -271,6 +294,47 @@ func embeddingBackfillLabel(result controlplane.QueryEmbeddingBackfillResult) st
 	return "off"
 }
 
+func writeWorkspaceQueryIndexClean(response controlplane.WorkspaceQueryIndexCleanResponse, jsonOut bool) error {
+	if jsonOut {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(response)
+	}
+	fmt.Fprintln(os.Stdout, "Query index clean")
+	fmt.Fprintln(os.Stdout)
+	fmt.Fprintf(os.Stdout, "workspace  %s\n", response.Workspace)
+	fmt.Fprintf(os.Stdout, "cleared    %t\n", response.Cleared)
+	fmt.Fprintf(os.Stdout, "files      %d\n", response.RemovedFiles)
+	fmt.Fprintf(os.Stdout, "chunks     %d\n", response.RemovedChunks)
+	fmt.Fprintf(os.Stdout, "state      %s\n", response.Status.State)
+	if response.Message != "" {
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout, response.Message)
+	}
+	return nil
+}
+
+func confirmWorkspaceQueryIndexClean(workspace string) (bool, error) {
+	return confirmWorkspaceQueryIndexCleanWithReader(workspace, bufio.NewReader(os.Stdin))
+}
+
+func confirmWorkspaceQueryIndexCleanWithReader(workspace string, reader *bufio.Reader) (bool, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return false, nil
+	}
+	fmt.Println()
+	fmt.Printf("Are you sure you want to clear generated query index data for %s? Workspace files will not change. [y/N] ", workspace)
+	raw, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(raw) == "" {
+		fmt.Println()
+		return false, nil
+	}
+	fmt.Println()
+	answer := strings.ToLower(strings.TrimSpace(raw))
+	return answer == "y" || answer == "yes", nil
+}
+
 func workspaceQueryIndexUsageText(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %[1]s query index <status|create|rebuild|clean> [flags]
@@ -282,7 +346,7 @@ Subcommands:
   status             Show keyword query projection and embedding state
   create             Build keyword chunks and semantic embeddings
   rebuild            Enqueue existing files for keyword query indexing
-  clean              Remove stale query index data
+  clean              Clear generated query index data for the workspace
 
 Flags:
   --json             Write JSON output
@@ -290,10 +354,12 @@ Flags:
   --wait             Wait for rebuild completion
   --force            Rebuild existing chunks
   --embeddings       Build semantic embeddings
+  --yes, -y          Confirm full-workspace query index cleanup
 
 Examples:
   %[1]s query index status
   %[1]s fs repo query index create --embeddings --wait
   %[1]s fs repo query index rebuild --path /cmd/afs --wait
+  %[1]s query index clean --yes
 `, bin)
 }

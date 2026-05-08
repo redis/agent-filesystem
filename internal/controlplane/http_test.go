@@ -710,6 +710,24 @@ func TestHTTPResolvedWorkspaceQueryRoutes(t *testing.T) {
 		body, _ := io.ReadAll(queryResp.Body)
 		t.Fatalf("POST resolved query status = %d, want %d, body=%s", queryResp.StatusCode, http.StatusOK, body)
 	}
+
+	cleanBody := `{"confirm":true}`
+	cleanResp, err := http.Post(server.URL+"/v1/workspaces/"+workspaceID+"/query/index/clean", "application/json", strings.NewReader(cleanBody))
+	if err != nil {
+		t.Fatalf("POST resolved query index clean returned error: %v", err)
+	}
+	defer cleanResp.Body.Close()
+	if cleanResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(cleanResp.Body)
+		t.Fatalf("POST resolved query index clean status = %d, want %d, body=%s", cleanResp.StatusCode, http.StatusOK, body)
+	}
+	var cleaned WorkspaceQueryIndexCleanResponse
+	if err := json.NewDecoder(cleanResp.Body).Decode(&cleaned); err != nil {
+		t.Fatalf("Decode(query index clean) returned error: %v", err)
+	}
+	if !cleaned.Cleared {
+		t.Fatalf("query index clean response = %+v, want cleared=true", cleaned)
+	}
 }
 
 func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {

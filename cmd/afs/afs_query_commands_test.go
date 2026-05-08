@@ -738,6 +738,92 @@ func findLineWithPrefix(output, prefix string) string {
 	return ""
 }
 
+func TestCmdQueryIndexCleanClearsGeneratedData(t *testing.T) {
+	_, store, closeStore := setupAFSGrepTest(t)
+	defer closeStore()
+
+	writeLiveAFSFile(t, store, "repo", "/docs/checkpoints.md", "checkpoint recovery guide\n")
+	if _, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "index", "status", "--json"})
+	}); err != nil {
+		t.Fatalf("cmdQuery(index status) returned error: %v", err)
+	}
+
+	output, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "index", "clean", "--yes", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdQuery(index clean) returned error: %v", err)
+	}
+
+	var response controlplane.WorkspaceQueryIndexCleanResponse
+	if err := json.Unmarshal([]byte(output), &response); err != nil {
+		t.Fatalf("Unmarshal(clean response) returned error: %v\n%s", err, output)
+	}
+	if !response.Cleared || response.RemovedFiles != 1 || response.RemovedChunks == 0 {
+		t.Fatalf("clean response = %+v, want cleared response with removed files/chunks", response)
+	}
+	if response.Status.Keyword.Chunks != 0 {
+		t.Fatalf("post-clean chunks = %d, want 0", response.Status.Keyword.Chunks)
+	}
+}
+
+func TestCmdQueryIndexCleanPromptsBeforeClearing(t *testing.T) {
+	_, store, closeStore := setupAFSGrepTest(t)
+	defer closeStore()
+
+	writeLiveAFSFile(t, store, "repo", "/docs/checkpoints.md", "checkpoint recovery guide\n")
+	if _, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "index", "status", "--json"})
+	}); err != nil {
+		t.Fatalf("cmdQuery(index status) returned error: %v", err)
+	}
+
+	input, err := os.CreateTemp(t.TempDir(), "query-index-clean-stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() returned error: %v", err)
+	}
+	if _, err := input.WriteString("n\n"); err != nil {
+		t.Fatalf("WriteString() returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek() returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	output, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "index", "clean"})
+	})
+	if err != nil {
+		t.Fatalf("cmdQuery(index clean) returned error: %v", err)
+	}
+	if !strings.Contains(output, "Are you sure you want to clear generated query index data for repo?") {
+		t.Fatalf("cmdQuery(index clean) output = %q, want confirmation prompt", output)
+	}
+	if !strings.Contains(output, "Query index clean cancelled.") {
+		t.Fatalf("cmdQuery(index clean) output = %q, want cancellation message", output)
+	}
+
+	statusOutput, err := captureStdout(t, func() error {
+		return cmdQuery([]string{"query", "index", "status", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdQuery(index status after cancel) returned error: %v", err)
+	}
+	var status controlplane.WorkspaceQueryIndexStatus
+	if err := json.Unmarshal([]byte(statusOutput), &status); err != nil {
+		t.Fatalf("Unmarshal(status) returned error: %v\n%s", err, statusOutput)
+	}
+	if status.Keyword.Chunks == 0 {
+		t.Fatalf("status after cancelled clean = %+v, want indexed chunks to remain", status)
+	}
+}
+
 func TestWorkspaceQueryConfigFallsBackWhenConfigRouteIsMissing(t *testing.T) {
 	cfg, err := workspaceQueryConfig(context.Background(), stubAFSControlPlane{
 		workspaceConfigErr: os.ErrNotExist,

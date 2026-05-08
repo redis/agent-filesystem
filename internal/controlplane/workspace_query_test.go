@@ -189,3 +189,73 @@ func TestRebuildQueryIndexCanCreateSemanticEmbeddings(t *testing.T) {
 		t.Fatalf("embedding_model = %q, %v; want stored model", model, err)
 	}
 }
+
+func TestCleanQueryIndexResetsGeneratedData(t *testing.T) {
+	ctx := context.Background()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() {
+		_ = rdb.Close()
+	})
+
+	store := NewStore(rdb)
+	service := NewService(Config{}, store)
+	now := time.Now().UTC()
+	meta := WorkspaceMeta{
+		Version:          formatVersion,
+		Name:             "repo",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		HeadSavepoint:    initialCheckpointName,
+		DefaultSavepoint: initialCheckpointName,
+	}
+	if err := store.PutWorkspaceMeta(ctx, meta); err != nil {
+		t.Fatalf("PutWorkspaceMeta() returned error: %v", err)
+	}
+
+	content := []byte("checkpoint recovery\n")
+	manifestValue := Manifest{
+		Version:   formatVersion,
+		Workspace: "repo",
+		Savepoint: initialCheckpointName,
+		Entries: map[string]ManifestEntry{
+			"/":                    {Type: "dir", Mode: 0o755, MtimeMs: now.UnixMilli()},
+			"/docs/checkpoints.md": {Type: "file", Mode: 0o644, MtimeMs: now.UnixMilli(), Size: int64(len(content)), Inline: base64.StdEncoding.EncodeToString(content)},
+		},
+	}
+	savepoint := SavepointMeta{
+		Version:    formatVersion,
+		ID:         initialCheckpointName,
+		Name:       initialCheckpointName,
+		Workspace:  "repo",
+		CreatedAt:  now,
+		FileCount:  1,
+		DirCount:   1,
+		TotalBytes: int64(len(content)),
+	}
+	if err := store.PutSavepoint(ctx, savepoint, manifestValue); err != nil {
+		t.Fatalf("PutSavepoint() returned error: %v", err)
+	}
+
+	if _, _, _, err := EnsureWorkspaceRoot(ctx, store, "repo"); err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	before, err := service.QueryIndexStatus(ctx, "repo", WorkspaceQueryIndexStatusRequest{Path: "/"})
+	if err != nil {
+		t.Fatalf("QueryIndexStatus(before) returned error: %v", err)
+	}
+	if before.Keyword.Chunks == 0 {
+		t.Fatalf("QueryIndexStatus(before) = %+v, want indexed chunks", before.Keyword)
+	}
+
+	cleaned, err := service.CleanQueryIndex(ctx, "repo", WorkspaceQueryIndexCleanRequest{Confirm: true})
+	if err != nil {
+		t.Fatalf("CleanQueryIndex() returned error: %v", err)
+	}
+	if !cleaned.Cleared || cleaned.RemovedFiles != 1 || cleaned.RemovedChunks == 0 {
+		t.Fatalf("CleanQueryIndex() = %+v, want cleared response with removed files/chunks", cleaned)
+	}
+	if cleaned.Status.Keyword.Chunks != 0 {
+		t.Fatalf("CleanQueryIndex() status keyword = %+v, want zero chunks after clean", cleaned.Status.Keyword)
+	}
+}

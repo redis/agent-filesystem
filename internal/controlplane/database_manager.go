@@ -1846,6 +1846,15 @@ func (m *DatabaseManager) RebuildQueryIndex(ctx context.Context, databaseID, wor
 	return service.RebuildQueryIndex(ctx, route.WorkspaceID, request)
 }
 
+func (m *DatabaseManager) CleanQueryIndex(ctx context.Context, databaseID, workspace string, request WorkspaceQueryIndexCleanRequest) (WorkspaceQueryIndexCleanResponse, error) {
+	service, _, route, err := m.resolveScopedWorkspace(ctx, databaseID, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.CleanQueryIndex(ctx, route.WorkspaceID, request)
+}
+
 func (m *DatabaseManager) QueryResolvedWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
 	service, _, route, err := m.resolveWorkspace(ctx, workspace)
 	if err != nil {
@@ -1871,6 +1880,15 @@ func (m *DatabaseManager) RebuildResolvedQueryIndex(ctx context.Context, workspa
 	}
 	request.Workspace = route.Name
 	return service.RebuildQueryIndex(ctx, route.WorkspaceID, request)
+}
+
+func (m *DatabaseManager) CleanResolvedQueryIndex(ctx context.Context, workspace string, request WorkspaceQueryIndexCleanRequest) (WorkspaceQueryIndexCleanResponse, error) {
+	service, _, route, err := m.resolveWorkspace(ctx, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	request.Workspace = route.Name
+	return service.CleanQueryIndex(ctx, route.WorkspaceID, request)
 }
 
 func (m *DatabaseManager) GetResolvedFileVersionContent(ctx context.Context, workspace, versionID string) (FileVersionContentResponse, error) {

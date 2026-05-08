@@ -250,6 +250,25 @@ func ResetWorkspace(ctx context.Context, rdb *redis.Client, fsKey string) error 
 			}
 		}
 	}
+	pipe := rdb.Pipeline()
+	err := scanFiles(ctx, rdb, fsKey, "/", func(fields map[string]string) error {
+		pipe.HDel(ctx, InodeKey(fsKey, strings.TrimSpace(fields["id"])),
+			"query_state",
+			"query_index_version",
+			"query_skip_reason",
+			"query_error",
+			"query_content_hash",
+			"query_chunk_count",
+			"query_indexed_at_ms",
+		)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
 	return rdb.Del(ctx, DirtySetKey(fsKey), ReadyKey(fsKey)).Err()
 }
 

@@ -146,6 +146,7 @@ type afsControlPlane interface {
 	RebuildQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexRebuildRequest) (controlplane.WorkspaceQueryIndexRebuildResponse, error)
 	QueryModelStatus(ctx context.Context, request controlplane.QueryModelStatusRequest) (controlplane.QueryModelStatus, error)
 	DownloadQueryModel(ctx context.Context, request controlplane.QueryModelDownloadRequest) (controlplane.QueryModelDownloadResult, error)
+	CleanQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexCleanRequest) (controlplane.WorkspaceQueryIndexCleanResponse, error)
 	DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error)
 	RestoreCheckpoint(ctx context.Context, workspace, checkpointID string) error
 	SaveCheckpoint(ctx context.Context, input controlplane.SaveCheckpointRequest) (bool, error)

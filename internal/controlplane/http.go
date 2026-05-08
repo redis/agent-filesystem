@@ -1635,6 +1635,23 @@ func handleWorkspaceRoute(
 			return
 		}
 		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/clean"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/clean")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input WorkspaceQueryIndexCleanRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, fmt.Errorf("decode query index clean request: %w", err))
+			return
+		}
+		response, err := manager.CleanQueryIndex(r.Context(), databaseID, workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
 	case strings.HasSuffix(workspacePath, "/query"):
 		workspace := strings.TrimSuffix(workspacePath, "/query")
 		if r.Method != http.MethodPost {
@@ -2223,6 +2240,23 @@ func handleResolvedWorkspaceRoute(
 			return
 		}
 		response, err := manager.RebuildResolvedQueryIndex(r.Context(), workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	case strings.HasSuffix(workspacePath, "/query/index/clean"):
+		workspace := strings.TrimSuffix(workspacePath, "/query/index/clean")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input WorkspaceQueryIndexCleanRequest
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, fmt.Errorf("decode query index clean request: %w", err))
+			return
+		}
+		response, err := manager.CleanResolvedQueryIndex(r.Context(), workspace, input)
 		if err != nil {
 			writeError(w, err)
 			return

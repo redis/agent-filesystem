@@ -505,6 +505,12 @@ func (c *httpControlPlaneClient) DownloadQueryModel(ctx context.Context, request
 	return out, err
 }
 
+func (c *httpControlPlaneClient) CleanQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexCleanRequest) (controlplane.WorkspaceQueryIndexCleanResponse, error) {
+	var out controlplane.WorkspaceQueryIndexCleanResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query", "index", "clean"), request, &out, http.StatusOK)
+	return out, err
+}
+
 func (c *httpControlPlaneClient) DiffWorkspace(ctx context.Context, workspace, baseView, headView string) (controlplane.WorkspaceDiffResponse, error) {
 	params := url.Values{}
 	if strings.TrimSpace(baseView) != "" {
