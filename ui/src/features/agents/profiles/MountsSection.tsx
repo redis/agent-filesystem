@@ -1,4 +1,5 @@
 import { Button, Select } from "@redis-ui/components";
+import { useNavigate } from "@tanstack/react-router";
 import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import styled from "styled-components";
@@ -66,6 +67,7 @@ export function MountsSection({
   onUpdateRow,
   onRemoveRow,
 }: Props) {
+  const navigate = useNavigate();
   const [editing, setEditing] = useState<{
     kind: MountPersistence;
     idx: number;
@@ -195,18 +197,56 @@ export function MountsSection({
             editing != null &&
             editing.kind === row.kind &&
             editing.idx === row.idx;
+          const openVolume = () => {
+            if (!ws || isEditing) return;
+            void navigate({
+              to: "/volumes/$volumeId",
+              params: { volumeId: ws.id },
+            });
+          };
           return (
             <MountRow
               key={`${row.kind}-${row.idx}`}
               $editing={isEditing}
               $isLast={index === rows.length - 1}
+              $clickable={ws != null && !isEditing}
+              role={ws != null && !isEditing ? "button" : undefined}
+              tabIndex={ws != null && !isEditing ? 0 : undefined}
+              aria-label={
+                ws != null && !isEditing
+                  ? `Open volume ${ws.name}`
+                  : undefined
+              }
+              onClick={openVolume}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  openVolume();
+                }
+              }}
             >
               <RowMain>
                 <Folder size={18} strokeWidth={1.75} aria-hidden="true" />
                 <RowTitle>
                   <RowPath>{row.mount}</RowPath>
                   <RowSub>
-                    <strong>{ws?.name}</strong>
+                    {ws ? (
+                      <VolumeLinkButton
+                        type="button"
+                        title={`Open volume ${ws.name}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void navigate({
+                            to: "/volumes/$volumeId",
+                            params: { volumeId: ws.id },
+                          });
+                        }}
+                      >
+                        {ws.name}
+                      </VolumeLinkButton>
+                    ) : (
+                      <strong>{ws?.name}</strong>
+                    )}
                     {" · "}
                     <span>{ws?.id}</span>
                   </RowSub>
@@ -226,22 +266,24 @@ export function MountsSection({
                 <Tag>{row.mode === "rw" ? "read / write" : "Read-Only"}</Tag>
               </RowBadges>
 
-              <RowActions>
+              <RowActions onClick={(event) => event.stopPropagation()}>
                 <IconButton
                   type="button"
                   aria-label="Edit mount"
-                  onClick={() =>
+                  onClick={(event) => {
+                    event.stopPropagation();
                     setEditing(
                       isEditing ? null : { kind: row.kind, idx: row.idx },
-                    )
-                  }
+                    );
+                  }}
                 >
                   <Pencil size={16} strokeWidth={1.75} aria-hidden="true" />
                 </IconButton>
                 <IconButton
                   type="button"
                   aria-label="Remove mount"
-                  onClick={() => {
+                  onClick={(event) => {
+                    event.stopPropagation();
                     onRemoveRow(row.kind, row.idx);
                     if (isEditing) setEditing(null);
                   }}
@@ -465,7 +507,11 @@ const EmptyHint = styled.div`
   font-size: 13px;
 `;
 
-const MountRow = styled.div<{ $editing: boolean; $isLast: boolean }>`
+const MountRow = styled.div<{
+  $editing: boolean;
+  $isLast: boolean;
+  $clickable?: boolean;
+}>`
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto auto auto;
@@ -475,6 +521,17 @@ const MountRow = styled.div<{ $editing: boolean; $isLast: boolean }>`
   border-bottom: 1px solid var(--afs-line);
   background: ${({ $editing }) =>
     $editing ? "var(--afs-bg-soft)" : "transparent"};
+  cursor: ${({ $clickable }) => ($clickable ? "pointer" : "default")};
+  transition: background 120ms ease;
+
+  ${({ $clickable, $editing }) =>
+    $clickable && !$editing
+      ? `&:hover { background: var(--afs-bg-soft); }
+         &:focus-visible {
+           outline: 2px solid var(--afs-selection-border);
+           outline-offset: -2px;
+         }`
+      : ""}
 
   &::before,
   &::after {
@@ -547,6 +604,24 @@ const RowSub = styled.span`
   strong {
     color: var(--afs-ink-soft);
     font-weight: 600;
+  }
+`;
+
+const VolumeLinkButton = styled.button`
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--afs-accent, #2563eb);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+    outline: none;
   }
 `;
 

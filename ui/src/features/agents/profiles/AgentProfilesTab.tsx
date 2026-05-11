@@ -24,6 +24,7 @@ import {
 } from "../../../foundation/database-scope";
 import {
   useCreateWorkspaceCompositionMutation,
+  useCreateWorkspaceMutation,
   useWorkspaceCompositions,
 } from "../../../foundation/hooks/use-afs";
 import { WorkspaceCompositionTable } from "../../../foundation/tables/workspace-composition-table";
@@ -77,6 +78,7 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
   const { databases } = useDatabaseScope();
   const volumesQuery = useScopedWorkspaceSummaries();
   const createWorkspace = useCreateWorkspaceCompositionMutation();
+  const createVolume = useCreateWorkspaceMutation();
 
   const volumeOptions = useMemo<WorkspaceOption[]>(
     () =>
@@ -105,16 +107,22 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
   const [description, setDescription] = useState("");
   const [databaseId, setDatabaseId] = useState("");
   const [selectedVolumeIds, setSelectedVolumeIds] = useState<string[]>([]);
-  const [mountMode, setMountMode] = useState<MountMode>("r");
+  // Per-volume mount mode; absent keys default to read-only.
+  const [mountModes, setMountModes] = useState<Record<string, MountMode>>({});
   const [formError, setFormError] = useState<string | null>(null);
+  // Inline new-volume form state.
+  const [newVolumeName, setNewVolumeName] = useState("");
+  const [newVolumeError, setNewVolumeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setName("");
     setDescription("");
     setSelectedVolumeIds([]);
-    setMountMode("r");
+    setMountModes({});
     setFormError(null);
+    setNewVolumeName("");
+    setNewVolumeError(null);
     setDatabaseId(defaultDatabaseId);
   }, [defaultDatabaseId, open]);
 
@@ -133,6 +141,40 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
         ? current.filter((id) => id !== volumeId)
         : [...current, volumeId],
     );
+  }
+
+  function setVolumeMode(volumeId: string, mode: MountMode) {
+    setMountModes((current) => ({ ...current, [volumeId]: mode }));
+  }
+
+  async function addNewVolume() {
+    const trimmed = newVolumeName.trim();
+    if (trimmed === "" || createVolume.isPending) return;
+    setNewVolumeError(null);
+    try {
+      const volumeDb = databaseId || defaultDatabaseId || undefined;
+      const databaseName =
+        eligibleDatabases.find((database) => database.id === volumeDb)
+          ?.databaseName ?? "";
+      const result = await createVolume.mutateAsync({
+        databaseId: volumeDb,
+        name: trimmed,
+        description: "",
+        cloudAccount: "Direct Redis",
+        databaseName,
+        region: "",
+        source: "blank",
+      });
+      setSelectedVolumeIds((current) =>
+        current.includes(result.id) ? current : [...current, result.id],
+      );
+      setMountModes((current) => ({ ...current, [result.id]: "r" }));
+      setNewVolumeName("");
+    } catch (error) {
+      setNewVolumeError(
+        error instanceof Error ? error.message : "Unable to create the volume.",
+      );
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -159,7 +201,7 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
               volumeId: volume.id,
               volumeName: volume.name,
               mountPath: mountPathForVolume(volume.name),
-              readonly: mountMode === "r",
+              readonly: (mountModes[volume.id] ?? "r") === "r",
             },
           ];
         }),
@@ -246,15 +288,44 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
 
           <Field>
             Initial volumes
+            <NewVolumeRow>
+              <NewVolumeInput
+                value={newVolumeName}
+                placeholder="new-volume-name"
+                onChange={(event) => setNewVolumeName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addNewVolume();
+                  }
+                }}
+                disabled={createVolume.isPending}
+              />
+              <Button
+                size="medium"
+                type="button"
+                variant="secondary-fill"
+                onClick={() => void addNewVolume()}
+                disabled={
+                  createVolume.isPending || newVolumeName.trim() === ""
+                }
+              >
+                {createVolume.isPending ? "Creating..." : "+ Create volume"}
+              </Button>
+            </NewVolumeRow>
+            {newVolumeError ? (
+              <DialogError role="alert">{newVolumeError}</DialogError>
+            ) : null}
             {volumeOptions.length === 0 ? (
               <EmptyVolumes>
-                No volumes are available yet. Create this Agent Workspace now and
-                add volumes later.
+                No volumes are available yet. Create one with the field above
+                or save this Agent Workspace and add volumes later.
               </EmptyVolumes>
             ) : (
               <VolumeList>
                 {volumeOptions.map((volume) => {
                   const selected = selectedVolumeIds.includes(volume.id);
+                  const mode = mountModes[volume.id] ?? "r";
                   return (
                     <VolumeOption key={volume.id} $selected={selected}>
                       <input
@@ -272,23 +343,26 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
                       <VolumeStats>
                         {volume.files.toLocaleString()} files &middot; {volume.size}
                       </VolumeStats>
+                      <VolumeModeSelect
+                        onClick={(event) => event.preventDefault()}
+                      >
+                        <Select
+                          aria-label={`Permission for ${volume.name}`}
+                          options={[
+                            { value: "r", label: "Read only" },
+                            { value: "rw", label: "Read / write" },
+                          ]}
+                          value={mode}
+                          onChange={(value) =>
+                            setVolumeMode(volume.id, value as MountMode)
+                          }
+                        />
+                      </VolumeModeSelect>
                     </VolumeOption>
                   );
                 })}
               </VolumeList>
             )}
-          </Field>
-
-          <Field>
-            Permissions
-            <Select
-              options={[
-                { value: "r", label: "Read only" },
-                { value: "rw", label: "Read / write" },
-              ]}
-              value={mountMode}
-              onChange={(value) => setMountMode(value as MountMode)}
-            />
           </Field>
 
           {formError ? <DialogError role="alert">{formError}</DialogError> : null}
@@ -313,18 +387,52 @@ function CreateAgentWorkspaceDialog({ open, onClose }: CreateDialogProps) {
   );
 }
 
+const NewVolumeRow = styled.div`
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+`;
+
+const NewVolumeInput = styled.input`
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--afs-line);
+  border-radius: 8px;
+  background: var(--afs-panel);
+  color: var(--afs-ink);
+  font: inherit;
+  font-size: 13px;
+
+  &:focus-visible {
+    outline: 2px solid var(--afs-selection-border);
+    outline-offset: 1px;
+  }
+
+  &::placeholder {
+    color: var(--afs-muted);
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+`;
+
 const VolumeList = styled.div`
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 300px;
-  overflow: auto;
+  /* Cap to ~3–4 rows so very long volume lists scroll instead of expanding
+     the dialog past the viewport. */
+  max-height: 280px;
+  overflow-y: auto;
   padding-right: 4px;
 `;
 
 const VolumeOption = styled.label<{ $selected: boolean }>`
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -344,12 +452,25 @@ const VolumeOption = styled.label<{ $selected: boolean }>`
     color: ${({ $selected }) => ($selected ? "var(--afs-selection-text)" : "var(--afs-selection-hover-ink)")};
   }
 
-  input {
+  input[type="checkbox"] {
     accent-color: var(--afs-accent);
   }
 
   @media (max-width: 560px) {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+`;
+
+const VolumeModeSelect = styled.div`
+  min-width: 168px;
+
+  > * {
+    width: 100%;
+  }
+
+  @media (max-width: 560px) {
+    grid-column: 2;
+    min-width: 0;
   }
 `;
 
