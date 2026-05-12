@@ -710,6 +710,24 @@ func TestHTTPResolvedWorkspaceQueryRoutes(t *testing.T) {
 		body, _ := io.ReadAll(queryResp.Body)
 		t.Fatalf("POST resolved query status = %d, want %d, body=%s", queryResp.StatusCode, http.StatusOK, body)
 	}
+
+	cleanBody := `{"confirm":true}`
+	cleanResp, err := http.Post(server.URL+"/v1/workspaces/"+workspaceID+"/query/index/clean", "application/json", strings.NewReader(cleanBody))
+	if err != nil {
+		t.Fatalf("POST resolved query index clean returned error: %v", err)
+	}
+	defer cleanResp.Body.Close()
+	if cleanResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(cleanResp.Body)
+		t.Fatalf("POST resolved query index clean status = %d, want %d, body=%s", cleanResp.StatusCode, http.StatusOK, body)
+	}
+	var cleaned WorkspaceQueryIndexCleanResponse
+	if err := json.NewDecoder(cleanResp.Body).Decode(&cleaned); err != nil {
+		t.Fatalf("Decode(query index clean) returned error: %v", err)
+	}
+	if !cleaned.Cleared {
+		t.Fatalf("query index clean response = %+v, want cleared=true", cleaned)
+	}
 }
 
 func TestHTTPFileHistoryAndVersionContentRoutes(t *testing.T) {
@@ -1933,6 +1951,79 @@ func TestHTTPCheckpointListSaveAndFork(t *testing.T) {
 	}
 	if forkedFile.Content != "phase-2\n" {
 		t.Fatalf("forked file content = %q, want %q", forkedFile.Content, "phase-2\n")
+	}
+}
+
+func TestHTTPSaveFromLiveGeneratesCheckpointIDWhenOmitted(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	ctx := context.Background()
+	service, _, err := manager.serviceFor(ctx, databaseID)
+	if err != nil {
+		t.Fatalf("manager.serviceFor() returned error: %v", err)
+	}
+	redisKey, _, _, err := EnsureWorkspaceRoot(ctx, service.store, "repo")
+	if err != nil {
+		t.Fatalf("EnsureWorkspaceRoot() returned error: %v", err)
+	}
+	if err := mountclient.New(service.store.rdb, redisKey).Echo(ctx, "/drafts/notes.txt", []byte("working copy\n")); err != nil {
+		t.Fatalf("Echo() returned error: %v", err)
+	}
+	if err := MarkWorkspaceRootDirty(ctx, service.store, "repo"); err != nil {
+		t.Fatalf("MarkWorkspaceRootDirty() returned error: %v", err)
+	}
+	detail, err := manager.GetWorkspace(ctx, databaseID, "repo")
+	if err != nil {
+		t.Fatalf("manager.GetWorkspace() returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandler(manager, "*"))
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/v1/workspaces/"+detail.ID+":save-from-live", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("POST save-from-live returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST save-from-live status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+
+	var saveResponse saveCheckpointHTTPResponse
+	if err := json.NewDecoder(resp.Body).Decode(&saveResponse); err != nil {
+		t.Fatalf("Decode(save-from-live response) returned error: %v", err)
+	}
+	if !saveResponse.Saved {
+		t.Fatal("expected save-from-live response to report saved=true")
+	}
+	if !strings.HasPrefix(saveResponse.CheckpointID, "save-") {
+		t.Fatalf("generated checkpoint_id = %q, want save-*", saveResponse.CheckpointID)
+	}
+
+	resp, err = http.Get(server.URL + "/v1/workspaces/" + detail.ID + "/checkpoints?limit=10")
+	if err != nil {
+		t.Fatalf("GET checkpoints after save-from-live returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET checkpoints after save-from-live status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var checkpoints []checkpointSummary
+	if err := json.NewDecoder(resp.Body).Decode(&checkpoints); err != nil {
+		t.Fatalf("Decode(checkpoints after save-from-live) returned error: %v", err)
+	}
+	found := false
+	for _, checkpoint := range checkpoints {
+		if checkpoint.ID == saveResponse.CheckpointID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("generated checkpoint %q not found in %#v", saveResponse.CheckpointID, checkpoints)
 	}
 }
 

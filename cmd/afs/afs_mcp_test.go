@@ -257,6 +257,34 @@ func TestAFSMCPCheckpointCreateAllowsUnchangedWorkspace(t *testing.T) {
 	}
 }
 
+func TestAFSMCPCheckpointCreateGeneratesCheckpointNameWhenOmitted(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+	server.profile = controlplane.MCPProfileWorkspaceRWCheckpoint
+
+	checkpointResult := server.callTool(context.Background(), "checkpoint_create", map[string]any{})
+	if checkpointResult.IsError {
+		t.Fatalf("checkpoint_create without name returned error result: %+v", checkpointResult)
+	}
+
+	var checkpointPayload map[string]any
+	if err := decodeStructuredContent(checkpointResult.StructuredContent, &checkpointPayload); err != nil {
+		t.Fatalf("decodeStructuredContent(checkpoint generated) returned error: %v", err)
+	}
+	if created, _ := checkpointPayload["created"].(bool); !created {
+		t.Fatalf("checkpoint_create created = %#v, want true", checkpointPayload["created"])
+	}
+	checkpoint, _ := checkpointPayload["checkpoint"].(string)
+	if !strings.HasPrefix(checkpoint, "save-") {
+		t.Fatalf("checkpoint_create checkpoint = %#v, want save-*", checkpointPayload["checkpoint"])
+	}
+	if _, err := server.store.getSavepointMeta(context.Background(), "repo", checkpoint); err != nil {
+		t.Fatalf("getSavepointMeta(%s) returned error: %v", checkpoint, err)
+	}
+}
+
 func TestAFSMCPFileWriteDoesNotRematerializeLocalWorkspaceCache(t *testing.T) {
 	t.Helper()
 

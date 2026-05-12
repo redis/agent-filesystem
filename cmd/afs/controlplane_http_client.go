@@ -106,7 +106,8 @@ type httpCLIAccessTokenResponse struct {
 }
 
 type httpSaveCheckpointResponse struct {
-	Saved bool `json:"saved"`
+	Saved        bool   `json:"saved"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
 }
 
 func newHTTPControlPlaneClient(ctx context.Context, cfg config) (*httpControlPlaneClient, string, error) {
@@ -502,6 +503,12 @@ func (c *httpControlPlaneClient) QueryModelStatus(ctx context.Context, request c
 func (c *httpControlPlaneClient) DownloadQueryModel(ctx context.Context, request controlplane.QueryModelDownloadRequest) (controlplane.QueryModelDownloadResult, error) {
 	var out controlplane.QueryModelDownloadResult
 	err := c.doJSONWithClient(ctx, c.queryer, http.MethodPost, "/v1/query/model/download", request, &out, http.StatusOK)
+	return out, err
+}
+
+func (c *httpControlPlaneClient) CleanQueryIndex(ctx context.Context, workspace string, request controlplane.WorkspaceQueryIndexCleanRequest) (controlplane.WorkspaceQueryIndexCleanResponse, error) {
+	var out controlplane.WorkspaceQueryIndexCleanResponse
+	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "query", "index", "clean"), request, &out, http.StatusOK)
 	return out, err
 }
 

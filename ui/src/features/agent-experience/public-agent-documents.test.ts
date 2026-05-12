@@ -56,16 +56,18 @@ describe("getSiteAgentDocument", () => {
     expect(doc.markdown).toContain("[MCP](https://ui.example.com/mcp)");
   });
 
-  test("uses workspace tab state for workspace studio routes", () => {
-    const doc = getSiteAgentDocument("/workspaces/payments-portal", {
+  test("uses volume tab state for volume studio routes", () => {
+    const doc = getSiteAgentDocument("/volumes/payments-portal", {
       controlPlaneUrl: "https://afs.example.com",
       siteOrigin: "https://ui.example.com",
       search: "?tab=checkpoints&databaseId=db-1",
     });
 
-    expect(doc.title).toBe("Workspace Studio: Checkpoints");
+    expect(doc.title).toBe("Volume Details: Checkpoints");
     expect(doc.markdown).toContain("Active tab: Checkpoints");
-    expect(doc.markdown).toContain("afs cp create payments-portal before-risky-change");
+    expect(doc.markdown).toContain(
+      "afs cp create --volume payments-portal before-risky-change",
+    );
   });
 
   test("describes installed template pages directly", () => {

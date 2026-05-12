@@ -187,6 +187,46 @@ The browser-facing read paths accept view/path/depth query parameters where
 applicable. File mutation still happens through checkpoint/save/import flows
 rather than a standalone `PUT /files/content` route.
 
+### Query
+
+- `POST /workspaces/{workspace_id}/query`
+- `GET /workspaces/{workspace_id}/query/index/status`
+- `POST /workspaces/{workspace_id}/query/index/rebuild`
+- `POST /workspaces/{workspace_id}/query/index/clean`
+
+`POST /workspaces/{workspace_id}/query` accepts the ranked retrieval request
+shape used by `file_query`, including:
+
+- `query`
+- `mode`
+- `searches`
+- `intent`
+- `path`
+- `limit`
+- `all`
+- `min_score`
+- `candidate_limit`
+- `rerank`
+- `full`
+
+`GET /workspaces/{workspace_id}/query/index/status` accepts:
+
+- `path`
+
+`POST /workspaces/{workspace_id}/query/index/rebuild` accepts:
+
+- `path`
+- `force`
+- `wait`
+
+`POST /workspaces/{workspace_id}/query/index/clean` accepts:
+
+- `confirm`
+
+Clean removes only generated query index state. It does not change workspace
+files. Database-scoped equivalents are available under
+`/databases/{database_id}/workspaces/{workspace_id}/...`.
+
 ### Activity, Changes, And Agents
 
 - `GET /activity`

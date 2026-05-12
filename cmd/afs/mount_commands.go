@@ -1135,9 +1135,10 @@ With no volume, lists volumes and prompts for a selection.
 With no directory, prompts for a local folder.
 Use --readonly to make this mount refuse local writes.
 Use --session to name this mount session separately from agent.name.
-When mounting to a populated local folder, AFS shows the safe reconciliation
-plan and asks before uploading or downloading files. Use --yes to accept a
-safe plan non-interactively; conflicts still block mount.
+When mounting to a populated local folder, AFS shows a reconciliation plan.
+Disjoint local-only and remote-only files are presented as a safe import plan
+that you can confirm or accept with --yes. Same-path conflicts still block
+mount until you move one side aside.
 Live Mount mode requires an empty local folder unless --yes is passed, because
 the NFS/FUSE mount hides any local files that already exist there.
 The directory is preserved on unmount unless --delete is used.

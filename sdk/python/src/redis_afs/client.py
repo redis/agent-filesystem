@@ -349,7 +349,9 @@ class MountedFS:
     def _copy_local_directory(self, workspace: _MountedWorkspace, local_directory: Path, remote_directory: str) -> None:
         for child in local_directory.iterdir():
             remote_path = _normalize_remote_path(posixpath.join(remote_directory, child.name))
-            if child.is_dir():
+            if child.is_symlink():
+                continue
+            elif child.is_dir():
                 self._copy_local_directory(workspace, child, remote_path)
             elif child.is_file():
                 workspace.client.call_tool(

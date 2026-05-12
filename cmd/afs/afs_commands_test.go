@@ -146,6 +146,10 @@ func (s stubAFSControlPlane) DownloadQueryModel(context.Context, controlplane.Qu
 	return controlplane.QueryModelDownloadResult{}, fmt.Errorf("unexpected DownloadQueryModel call")
 }
 
+func (s stubAFSControlPlane) CleanQueryIndex(context.Context, string, controlplane.WorkspaceQueryIndexCleanRequest) (controlplane.WorkspaceQueryIndexCleanResponse, error) {
+	return controlplane.WorkspaceQueryIndexCleanResponse{}, fmt.Errorf("unexpected CleanQueryIndex call")
+}
+
 func (s stubAFSControlPlane) DiffWorkspace(context.Context, string, string, string) (controlplane.WorkspaceDiffResponse, error) {
 	return controlplane.WorkspaceDiffResponse{}, fmt.Errorf("unexpected DiffWorkspace call")
 }

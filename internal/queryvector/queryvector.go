@@ -617,6 +617,7 @@ func isVectorUnavailable(err error) bool {
 		strings.Contains(msg, "module") ||
 		strings.Contains(msg, "not supported") ||
 		strings.Contains(msg, "unsupported") ||
+		strings.Contains(msg, "db != 0") ||
 		strings.Contains(msg, "vector") ||
 		strings.Contains(msg, "resp3 responses for this command are disabled")
 }

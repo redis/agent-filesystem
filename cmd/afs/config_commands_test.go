@@ -304,6 +304,110 @@ func TestCmdConfigResetRemovesConfigAndState(t *testing.T) {
 	}
 }
 
+func TestCmdConfigResetWithAlternateConfigPreservesDefaultState(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	if err := os.WriteFile(configFile, []byte(`{"mode":"sync"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	rawDefaultState, err := json.MarshalIndent(state{
+		Mode:             modeSync,
+		CurrentWorkspace: "default-workspace",
+		LocalPath:        t.TempDir(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(default state) returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(defaultStatePath()), 0o700); err != nil {
+		t.Fatalf("MkdirAll(default state dir) returned error: %v", err)
+	}
+	if err := os.WriteFile(defaultStatePath(), rawDefaultState, 0o600); err != nil {
+		t.Fatalf("WriteFile(defaultStatePath) returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdConfig([]string{"config", "reset"})
+	})
+	if err != nil {
+		t.Fatalf("cmdConfig(reset) returned error: %v", err)
+	}
+	if strings.Contains(out, "Unmounted workspace default-workspace") {
+		t.Fatalf("cmdConfig(reset) output = %q, should not unmount default runtime for an alternate config", out)
+	}
+	if _, err := os.Stat(defaultStatePath()); err != nil {
+		t.Fatalf("defaultStatePath removed by alternate-config reset: %v", err)
+	}
+}
+
+func TestCmdConfigResetWithAlternateConfigRemovesOnlyScopedState(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	configFile := filepath.Join(t.TempDir(), "afs.config.json")
+	origConfigPath := cfgPathOverride
+	cfgPathOverride = configFile
+	t.Cleanup(func() {
+		cfgPathOverride = origConfigPath
+	})
+
+	if err := os.WriteFile(configFile, []byte(`{"mode":"sync"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) returned error: %v", err)
+	}
+
+	scopedStatePath := statePath()
+	rawScopedState, err := json.MarshalIndent(state{
+		Mode:             modeSync,
+		CurrentWorkspace: "scoped-workspace",
+		LocalPath:        t.TempDir(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(scoped state) returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(scopedStatePath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(scoped state dir) returned error: %v", err)
+	}
+	if err := os.WriteFile(scopedStatePath, rawScopedState, 0o600); err != nil {
+		t.Fatalf("WriteFile(scopedStatePath) returned error: %v", err)
+	}
+
+	rawDefaultState, err := json.MarshalIndent(state{
+		Mode:             modeSync,
+		CurrentWorkspace: "default-workspace",
+		LocalPath:        t.TempDir(),
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("json.MarshalIndent(default state) returned error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(defaultStatePath()), 0o700); err != nil {
+		t.Fatalf("MkdirAll(default state dir) returned error: %v", err)
+	}
+	if err := os.WriteFile(defaultStatePath(), rawDefaultState, 0o600); err != nil {
+		t.Fatalf("WriteFile(defaultStatePath) returned error: %v", err)
+	}
+
+	if _, err := captureStdout(t, func() error {
+		return cmdConfig([]string{"config", "reset"})
+	}); err != nil {
+		t.Fatalf("cmdConfig(reset) returned error: %v", err)
+	}
+
+	if _, err := os.Stat(scopedStatePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("scoped state still exists after reset: %v", err)
+	}
+	if _, err := os.Stat(defaultStatePath()); err != nil {
+		t.Fatalf("default state removed by scoped reset: %v", err)
+	}
+}
+
 func TestCmdConfigSetAgentNamePersistsFriendlyAgentName(t *testing.T) {
 	t.Helper()
 

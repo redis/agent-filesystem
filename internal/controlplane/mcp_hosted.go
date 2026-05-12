@@ -1989,7 +1989,7 @@ func ternaryString(condition bool, whenTrue, whenFalse string) string {
 }
 
 func generatedSavepointName() string {
-	return "cp-" + time.Now().UTC().Format("20060102-150405")
+	return "save-" + time.Now().UTC().Format("20060102-150405.000")
 }
 
 func validateHostedMCPName(kind, value string) error {

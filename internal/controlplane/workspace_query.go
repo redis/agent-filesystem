@@ -30,6 +30,11 @@ type WorkspaceQueryIndexRebuildRequest struct {
 	Embeddings bool   `json:"embeddings,omitempty"`
 }
 
+type WorkspaceQueryIndexCleanRequest struct {
+	Workspace string `json:"workspace,omitempty"`
+	Confirm   bool   `json:"confirm,omitempty"`
+}
+
 type WorkspaceQueryIndexStatus struct {
 	Workspace  string               `json:"workspace"`
 	Path       string               `json:"path,omitempty"`
@@ -66,6 +71,31 @@ type QueryEmbeddingBackfillResult struct {
 	Scanned   int    `json:"scanned"`
 	Embedded  int    `json:"embedded"`
 	Message   string `json:"message,omitempty"`
+}
+
+type WorkspaceQueryIndexCleanResponse struct {
+	Workspace     string                    `json:"workspace"`
+	Cleared       bool                      `json:"cleared"`
+	RemovedFiles  int                       `json:"removed_files"`
+	RemovedChunks int                       `json:"removed_chunks"`
+	Status        WorkspaceQueryIndexStatus `json:"status"`
+	Message       string                    `json:"message,omitempty"`
+}
+
+func SemanticQueryDisabledMessage(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "Semantic query is disabled for this workspace."
+	}
+	return fmt.Sprintf("Semantic query is disabled for workspace %q.", workspace)
+}
+
+func SemanticQueryUnavailableMessage(workspace string) string {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		return "Semantic query is not available in this build yet."
+	}
+	return fmt.Sprintf("Semantic query is not available in this build yet for workspace %q.", workspace)
 }
 
 func (s *Service) QueryWorkspace(ctx context.Context, workspace string, request mcptools.FileQueryRequest) (mcptools.FileQueryResponse, error) {
@@ -448,6 +478,45 @@ func queryIndexRebuildMessage(enqueued int, embeddings *QueryEmbeddingBackfillRe
 		return fmt.Sprintf("Enqueued %d file(s) for keyword query indexing and indexed %d semantic embedding chunk(s).", enqueued, embeddings.Embedded)
 	}
 	return fmt.Sprintf("Enqueued %d file(s) for keyword query indexing.", enqueued)
+}
+
+func (s *Service) CleanQueryIndex(ctx context.Context, workspace string, request WorkspaceQueryIndexCleanRequest) (WorkspaceQueryIndexCleanResponse, error) {
+	displayWorkspace := strings.TrimSpace(request.Workspace)
+	if displayWorkspace == "" {
+		displayWorkspace = workspace
+	}
+	if !request.Confirm {
+		return WorkspaceQueryIndexCleanResponse{}, fmt.Errorf("query index clean requires confirm=true")
+	}
+	before, err := s.QueryIndexStatus(ctx, workspace, WorkspaceQueryIndexStatusRequest{
+		Workspace: displayWorkspace,
+		Path:      "/",
+	})
+	if err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	fsKey, err := s.workspaceQueryFSKey(ctx, workspace)
+	if err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	if err := queryindex.ResetWorkspace(ctx, s.store.rdb, fsKey); err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	status, err := s.QueryIndexStatus(ctx, workspace, WorkspaceQueryIndexStatusRequest{
+		Workspace: displayWorkspace,
+		Path:      "/",
+	})
+	if err != nil {
+		return WorkspaceQueryIndexCleanResponse{}, err
+	}
+	return WorkspaceQueryIndexCleanResponse{
+		Workspace:     displayWorkspace,
+		Cleared:       true,
+		RemovedFiles:  before.Keyword.Files,
+		RemovedChunks: before.Keyword.Chunks,
+		Status:        status,
+		Message:       fmt.Sprintf("Cleared generated query index data for %d file(s) and %d chunk(s). Workspace files were not changed.", before.Keyword.Files, before.Keyword.Chunks),
+	}, nil
 }
 
 func (s *Service) workspaceQueryFSKey(ctx context.Context, workspace string) (string, error) {

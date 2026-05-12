@@ -170,7 +170,7 @@ where the workspace argument is optional.
 ### `afs ws mount`
 
 ```bash
-afs ws mount [--dry-run] [--verbose] [--readonly] [--session <name>] [<workspace> <directory>]
+afs ws mount [--dry-run] [--yes] [--verbose] [--readonly] [--session <name>] [<workspace> <directory>]
 ```
 
 Mounts a durable workspace to a local directory using sync mode. The
@@ -183,9 +183,12 @@ unambiguous.
 Mount safety rules:
 
 - Empty local directory + populated workspace: downloads workspace files.
-- Populated local directory + empty workspace: uploads local files.
+- Populated local directory + empty workspace: shows a safe import plan and,
+  after confirmation or `--yes`, uploads local files.
 - Populated local directory + populated workspace with no prior sync baseline:
-  mount is blocked so files are not overwritten silently.
+  disjoint local-only and remote-only files are shown as a reconciliation plan
+  that you can confirm; overlapping paths with mismatched content are treated
+  as conflicts and block the mount.
 - Existing sync baseline: AFS reconciles from that baseline.
 
 Examples:
@@ -465,6 +468,7 @@ afs fs [workspace] query index status
 afs fs [workspace] query index rebuild --wait
 afs query model status
 afs query model download
+afs fs [workspace] query index clean --yes
 ```
 
 Ranks workspace files for a concept or natural-language question. Plain
@@ -480,12 +484,12 @@ model cache for the local provider path. Redis vector KNN is used when
 available, with a direct vector-ranking fallback. Use `grep` when you know the
 exact text.
 
-Semantic queries do not backfill embeddings. Imports start embedding creation
-in the background when the global provider is available. Use
-`query index status --json` to inspect files, ready chunks, pending work,
-skipped files, and unindexed files. Use `query index create --embeddings --wait`
-to explicitly build keyword chunks and semantic embeddings for an existing
-workspace.
+Existing workspaces are backfilled automatically on first query when Redis
+Search is available. `query index status --json` can also catch up pending work
+while it inspects files, ready chunks, pending work, skipped files, and
+unindexed files. Use `query index rebuild --wait` to force an immediate
+backfill. Use `query index clean --yes` to clear generated query chunks and
+restart indexing from scratch without changing workspace files.
 
 Flags:
 
@@ -507,7 +511,7 @@ Flags:
 | `--candidate-limit <num>` | Candidate result limit. |
 | `--no-rerank` | Disable reranking when available. |
 | `--keyword` | Keyword-ranked retrieval only. |
-| `--semantic` | Vector-only semantic retrieval through the global embedding provider. |
+| `--semantic` | Vector-only semantic retrieval through the global embedding provider. Requires a build with semantic retrieval enabled. |
 | `--intent <text>` | Extra search intent. |
 | `--chunk-strategy <auto|regex>` | Chunk strategy. |
 
