@@ -23,6 +23,47 @@ import (
 
 var errImportCancelled = errors.New("import cancelled")
 
+type volumeImportOptions struct {
+	ReplaceExisting  bool
+	MountAtSource    bool
+	ExplicitDatabase string
+	PrintReport      bool
+	NextHint         bool
+}
+
+type volumeImportResult struct {
+	Volume          string
+	Checkpoint      string
+	FileCount       int
+	DirCount        int
+	SymlinkCount    int
+	IgnoredCount    int
+	TotalBytes      int64
+	WorkerCount     int
+	Duration        time.Duration
+	SourceDir       string
+	Cancelled       bool
+	MountedAtSource bool
+}
+
+func (r volumeImportResult) rows(includeNextHint bool) []outputRow {
+	rows := []outputRow{
+		{Label: "volume", Value: r.Volume},
+		{Label: "checkpoint", Value: r.Checkpoint},
+		{Label: "files", Value: strconv.Itoa(r.FileCount)},
+		{Label: "dirs", Value: strconv.Itoa(r.DirCount)},
+		{Label: "symlinks", Value: strconv.Itoa(r.SymlinkCount)},
+		{Label: "ignored", Value: strconv.Itoa(r.IgnoredCount)},
+		{Label: "bytes", Value: formatBytes(r.TotalBytes)},
+		{Label: "workers", Value: strconv.Itoa(r.WorkerCount)},
+		{Label: "import time", Value: formatStepDuration(r.Duration)},
+	}
+	if includeNextHint && !r.MountedAtSource {
+		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " vol mount " + r.Volume + " " + shellQuote(r.SourceDir)})
+	}
+	return rows
+}
+
 // importBlobSink is a worktree.BlobSink that pipelines blobs to Redis via a
 // BlobWriter and retains each blob body in an in-memory map so the immediately
 // following SyncWorkspaceRoot can fetch them without re-reading Redis. Entries
@@ -101,44 +142,55 @@ func cmdImport(args []string) error {
 	if err != nil {
 		return err
 	}
+
+	_, err = importVolume(ctx, cfg, workspace, sourceDir, volumeImportOptions{
+		ReplaceExisting:  parsed.force,
+		MountAtSource:    parsed.mountAtSource,
+		ExplicitDatabase: parsed.database,
+		PrintReport:      true,
+		NextHint:         true,
+	})
+	return err
+}
+
+func importVolume(ctx context.Context, cfg config, workspace, sourceDir string, opts volumeImportOptions) (volumeImportResult, error) {
 	productMode, err := effectiveProductMode(cfg)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
-
 	switch productMode {
 	case productModeLocal:
-		if strings.TrimSpace(parsed.database) != "" {
-			return fmt.Errorf("--database is only supported in control plane mode")
-		}
-		return cmdImportDirect(ctx, cfg, workspace, sourceDir, parsed.force, parsed.mountAtSource)
+		return cmdImportDirect(ctx, cfg, workspace, sourceDir, opts)
 	case productModeSelfHosted:
-		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, parsed.force, parsed.database, parsed.mountAtSource)
+		return cmdImportSelfHosted(ctx, cfg, workspace, sourceDir, opts)
 	default:
 		_, _, _, err := openAFSControlPlaneForConfig(ctx, cfg)
-		return err
+		return volumeImportResult{}, err
 	}
 }
 
-func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting, mountAtSource bool) error {
+func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir string, opts volumeImportOptions) (volumeImportResult, error) {
+	if strings.TrimSpace(opts.ExplicitDatabase) != "" {
+		return volumeImportResult{}, fmt.Errorf("--database is only supported in control plane mode")
+	}
 	cfg, store, closeStore, err := openAFSStore(ctx)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 	defer closeStore()
 
 	exists, err := store.workspaceExists(ctx, workspace)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
-	if exists && !replaceExisting {
-		return fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
+	if exists && !opts.ReplaceExisting {
+		return volumeImportResult{}, fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
 	}
 	var preservedVersioningPolicy *controlplane.WorkspaceVersioningPolicy
-	if replaceExisting && exists {
+	if opts.ReplaceExisting && exists {
 		policy, err := store.cp.GetWorkspaceVersioningPolicy(ctx, workspace)
 		if err != nil {
-			return err
+			return volumeImportResult{}, err
 		}
 		preservedVersioningPolicy = &policy
 	}
@@ -146,9 +198,9 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	lock, err := store.acquireImportLock(ctx, workspace)
 	if err != nil {
 		if errors.Is(err, controlplane.ErrImportInProgress) {
-			return fmt.Errorf("another import is already running for volume %q; wait for it to finish or clear the stale lock", workspace)
+			return volumeImportResult{}, fmt.Errorf("another import is already running for volume %q; wait for it to finish or clear the stale lock", workspace)
 		}
-		return fmt.Errorf("acquire import lock: %w", err)
+		return volumeImportResult{}, fmt.Errorf("acquire import lock: %w", err)
 	}
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -157,26 +209,26 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	}()
 
 	const initialSavepoint = "initial"
-	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, replaceExisting)
+	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, opts.ReplaceExisting)
 	if err != nil {
 		if errors.Is(err, errImportCancelled) {
 			fmt.Println()
 			fmt.Println("  Import cancelled.")
 			fmt.Println()
-			return nil
+			return volumeImportResult{Volume: workspace, SourceDir: sourceDir, Cancelled: true}, nil
 		}
-		return err
+		return volumeImportResult{}, err
 	}
 
-	if replaceExisting {
+	if opts.ReplaceExisting {
 		step := startStep("Replacing existing volume")
 		if err := store.deleteWorkspace(ctx, workspace); err != nil {
 			step.fail(err.Error())
-			return err
+			return volumeImportResult{}, err
 		}
 		if err := removeLocalWorkspace(cfg, workspace); err != nil {
 			step.fail(err.Error())
-			return err
+			return volumeImportResult{}, err
 		}
 		step.succeed(workspace)
 	}
@@ -185,7 +237,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	defaultMeta := controlplane.ApplyWorkspaceMetaDefaults(controlPlaneConfigFromCLI(cfg), workspaceMeta{Name: workspace})
 	workspaceID, err := newCLIWorkspaceID()
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 
 	writer := store.newBlobWriter(workspaceID, now)
@@ -197,15 +249,15 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	})
 	if err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	if flushErr := writer.Flush(ctx); flushErr != nil {
 		step.fail(flushErr.Error())
-		return flushErr
+		return volumeImportResult{}, flushErr
 	}
 	if lockErr := lock.Lost(); lockErr != nil {
 		step.fail(lockErr.Error())
-		return lockErr
+		return volumeImportResult{}, lockErr
 	}
 	buildDuration := step.elapsed()
 	blobCount, blobBytes := writer.Totals()
@@ -217,7 +269,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 
 	manifestHash, err := hashManifest(manifest)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 
 	workspaceMeta := workspaceMeta{
@@ -255,17 +307,17 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	step = startStep("Writing workspace metadata")
 	if err := store.putWorkspaceMeta(ctx, workspaceMeta); err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	if preservedVersioningPolicy != nil {
 		if err := store.cp.PutWorkspaceVersioningPolicy(ctx, workspaceID, *preservedVersioningPolicy); err != nil {
 			step.fail(err.Error())
-			return err
+			return volumeImportResult{}, err
 		}
 	}
 	if err := store.putSavepoint(ctx, savepointMeta, manifest); err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	metadataDuration := step.elapsed()
 	step.succeed(initialSavepoint)
@@ -277,7 +329,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 	}
 	if err := store.syncWorkspaceRootWithOptions(ctx, workspaceID, manifest, syncOpts); err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	rootDuration := step.elapsed()
 	step.succeed("ready to mount")
@@ -296,7 +348,7 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 				CheckpointID: initialSavepoint,
 			},
 		); err != nil {
-			return err
+			return volumeImportResult{}, err
 		}
 	}
 
@@ -307,28 +359,32 @@ func cmdImportDirect(ctx context.Context, cfg config, workspace, sourceDir strin
 		"total_bytes": stats.TotalBytes,
 		"source":      sourceDir,
 	}); err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 
-	rows := []outputRow{
-		{Label: "volume", Value: workspace},
-		{Label: "checkpoint", Value: initialSavepoint},
-		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
-		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
-		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
-		{Label: "ignored", Value: strconv.Itoa(total.Ignored)},
-		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
-		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
-		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + metadataDuration + rootDuration)},
+	result := volumeImportResult{
+		Volume:          workspace,
+		Checkpoint:      initialSavepoint,
+		FileCount:       stats.FileCount,
+		DirCount:        stats.DirCount,
+		SymlinkCount:    total.Symlinks,
+		IgnoredCount:    total.Ignored,
+		TotalBytes:      stats.TotalBytes,
+		WorkerCount:     resolveImportWorkers(),
+		Duration:        scanDuration + buildDuration + metadataDuration + rootDuration,
+		SourceDir:       sourceDir,
+		MountedAtSource: opts.MountAtSource,
 	}
-	if !mountAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " vol mount " + workspace + " " + shellQuote(sourceDir)})
+	if opts.PrintReport {
+		printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), result.rows(opts.NextHint))
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), rows)
-	if mountAtSource {
-		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
+	if opts.MountAtSource {
+		result.MountedAtSource = true
+		if err := mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir}); err != nil {
+			return result, err
+		}
 	}
-	return nil
+	return result, nil
 }
 
 func newCLIWorkspaceID() (string, error) {
@@ -339,20 +395,20 @@ func newCLIWorkspaceID() (string, error) {
 	return "ws_" + hex.EncodeToString(raw[:]), nil
 }
 
-func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, replaceExisting bool, explicitDatabase string, mountAtSource bool) error {
+func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir string, opts volumeImportOptions) (volumeImportResult, error) {
 	client, _, err := newHTTPControlPlaneClient(ctx, cfg)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
-	database, err := resolveManagedDatabaseForWrite(ctx, cfg, client, explicitDatabase, "volume import")
+	database, err := resolveManagedDatabaseForWrite(ctx, cfg, client, opts.ExplicitDatabase, "volume import")
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 	cfg.DatabaseID = database.ID
 
 	cfg, service, closeControlPlane, err := openAFSControlPlaneForConfig(ctx, cfg)
 	if err != nil {
-		return err
+		return volumeImportResult{}, err
 	}
 	defer closeControlPlane()
 
@@ -362,41 +418,41 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	switch {
 	case err == nil:
 		exists = true
-		if !replaceExisting {
-			return fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
+		if !opts.ReplaceExisting {
+			return volumeImportResult{}, fmt.Errorf("volume %q already exists; rerun with --force to replace it", workspace)
 		}
 		policy, err := service.GetWorkspaceVersioningPolicy(ctx, workspace)
 		if err != nil {
-			return err
+			return volumeImportResult{}, err
 		}
 		preservedVersioningPolicy = &policy
 	case errors.Is(err, os.ErrNotExist):
 		// Importing a new workspace is fine.
 	default:
-		return err
+		return volumeImportResult{}, err
 	}
 
 	const initialSavepoint = "initial"
-	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, replaceExisting)
+	total, ignorer, scanDuration, err := prepareAFSImport(sourceDir, workspace, cfg, opts.ReplaceExisting)
 	if err != nil {
 		if errors.Is(err, errImportCancelled) {
 			fmt.Println()
 			fmt.Println("  Import cancelled.")
 			fmt.Println()
-			return nil
+			return volumeImportResult{Volume: workspace, SourceDir: sourceDir, Cancelled: true}, nil
 		}
-		return err
+		return volumeImportResult{}, err
 	}
 
-	if replaceExisting && exists {
+	if opts.ReplaceExisting && exists {
 		step := startStep("Replacing existing volume")
 		if err := service.DeleteWorkspace(ctx, workspace); err != nil && !errors.Is(err, os.ErrNotExist) {
 			step.fail(err.Error())
-			return err
+			return volumeImportResult{}, err
 		}
 		if err := removeLocalWorkspace(cfg, workspace); err != nil {
 			step.fail(err.Error())
-			return err
+			return volumeImportResult{}, err
 		}
 		step.succeed(workspace)
 	}
@@ -407,7 +463,7 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	})
 	if err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	buildDuration := step.elapsed()
 	if blobCount := len(blobs); blobCount == 0 {
@@ -429,30 +485,33 @@ func cmdImportSelfHosted(ctx context.Context, cfg config, workspace, sourceDir s
 	})
 	if err != nil {
 		step.fail(err.Error())
-		return err
+		return volumeImportResult{}, err
 	}
 	uploadDuration := step.elapsed()
 	step.succeed(response.Workspace.HeadCheckpointID)
 
-	rows := []outputRow{
-		{Label: "volume", Value: workspace},
-		{Label: "checkpoint", Value: response.Workspace.HeadCheckpointID},
-		{Label: "files", Value: strconv.Itoa(stats.FileCount)},
-		{Label: "dirs", Value: strconv.Itoa(stats.DirCount)},
-		{Label: "symlinks", Value: strconv.Itoa(total.Symlinks)},
-		{Label: "ignored", Value: strconv.Itoa(total.Ignored)},
-		{Label: "bytes", Value: formatBytes(stats.TotalBytes)},
-		{Label: "workers", Value: strconv.Itoa(resolveImportWorkers())},
-		{Label: "import time", Value: formatStepDuration(scanDuration + buildDuration + uploadDuration)},
+	result := volumeImportResult{
+		Volume:          workspace,
+		Checkpoint:      response.Workspace.HeadCheckpointID,
+		FileCount:       stats.FileCount,
+		DirCount:        stats.DirCount,
+		SymlinkCount:    total.Symlinks,
+		IgnoredCount:    total.Ignored,
+		TotalBytes:      stats.TotalBytes,
+		WorkerCount:     resolveImportWorkers(),
+		Duration:        scanDuration + buildDuration + uploadDuration,
+		SourceDir:       sourceDir,
+		MountedAtSource: opts.MountAtSource,
 	}
-	if !mountAtSource {
-		rows = append(rows, outputRow{Label: "next", Value: filepath.Base(os.Args[0]) + " vol mount " + workspace + " " + shellQuote(sourceDir)})
+	if opts.PrintReport {
+		printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), result.rows(opts.NextHint))
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "volume imported"), rows)
-	if mountAtSource {
-		return mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir})
+	if opts.MountAtSource {
+		if err := mountWorkspace(mountOptions{workspace: workspace, directory: sourceDir}); err != nil {
+			return result, err
+		}
 	}
-	return nil
+	return result, nil
 }
 
 // resolveImportWorkers mirrors the logic used inside worktree.BuildManifest so

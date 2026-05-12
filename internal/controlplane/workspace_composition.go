@@ -478,7 +478,7 @@ func (s *Service) RemoveWorkspaceCompositionMount(ctx context.Context, workspace
 	next := make([]workspaceCompositionMount, 0, len(item.Mounts))
 	removed := false
 	for _, mount := range item.Mounts {
-		if strings.TrimSpace(mount.VolumeID) == target {
+		if strings.TrimSpace(mount.VolumeID) == target || strings.TrimSpace(mount.VolumeName) == target {
 			removed = true
 			continue
 		}

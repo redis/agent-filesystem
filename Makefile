@@ -33,7 +33,7 @@ help: ## Show repo-specific make targets and common variables.
 	@printf '  %-20s %s\n' 'help' 'Show this help.'
 	@printf '  %-20s %s\n' 'all' 'Build mount helpers and Go commands.'
 	@printf '  %-20s %s\n' 'mount' 'Build the FUSE and NFS mount helpers.'
-	@printf '  %-20s %s\n' 'commands' 'Build the afs and afs-control-plane binaries.'
+	@printf '  %-20s %s\n' 'commands' 'Build the Go commands without rebuilding UI assets.'
 	@printf '  %-20s %s\n' 'afs' 'Build the afs CLI binary.'
 	@printf '  %-20s %s\n' 'afs-control-plane' 'Build the HTTP control-plane binary.'
 	@printf '  %-20s %s\n' 'test' 'Run Go unit tests for the active product surfaces.'
@@ -63,8 +63,8 @@ all: mount commands
 mount: ## Build the FUSE and NFS mount helpers.
 	$(MAKE) -C mount
 
-commands: ## Build the afs and afs-control-plane binaries.
-commands: afs afs-control-plane
+commands: ## Build the afs and afs-control-plane binaries without rebuilding UI assets.
+commands: afs afs-control-plane-noui
 
 afs: ## Build the afs CLI binary.
 	go build -ldflags "$(VERSION_LDFLAGS)" -o afs ./cmd/afs

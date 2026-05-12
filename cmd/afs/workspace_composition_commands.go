@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 
 type workspaceCompositionControlPlane interface {
 	CreateWorkspaceComposition(context.Context, controlplane.CreateWorkspaceCompositionRequest) (controlplane.WorkspaceCompositionDetail, error)
+	ListWorkspaceSummaries(context.Context) (controlplane.WorkspaceListResponse, error)
 	ListWorkspaceCompositions(context.Context) (controlplane.WorkspaceCompositionListResponse, error)
 	GetWorkspaceComposition(context.Context, string) (controlplane.WorkspaceCompositionDetail, error)
 	AddWorkspaceCompositionMount(context.Context, string, controlplane.WorkspaceCompositionMount) (controlplane.WorkspaceCompositionDetail, error)
@@ -97,7 +99,7 @@ func cmdWorkspaceManifestCreate(args []string) error {
 	printSection(markerSuccess+" "+clr(ansiBold, "workspace manifest created"), []outputRow{
 		{Label: "workspace", Value: detail.Name},
 		{Label: "id", Value: detail.ID},
-		{Label: "mounts", Value: fmt.Sprintf("%d", len(detail.Mounts))},
+		{Label: "volumes", Value: fmt.Sprintf("%d", len(detail.Mounts))},
 	})
 	return nil
 }
@@ -128,9 +130,9 @@ func cmdWorkspaceManifestList(args []string) error {
 		fmt.Fprintln(os.Stdout, "No workspace manifests found.")
 		return nil
 	}
-	fmt.Fprintf(os.Stdout, "%-28s  %-6s  %s\n", "Workspace", "Mounts", "Updated")
+	fmt.Fprintf(os.Stdout, "%-28s  %-7s  %s\n", "Workspace", "Volumes", "Updated")
 	for _, item := range response.Items {
-		fmt.Fprintf(os.Stdout, "%-28s  %-6d  %s\n", item.Name, item.MountCount, item.UpdatedAt)
+		fmt.Fprintf(os.Stdout, "%-28s  %-7d  %s\n", item.Name, item.MountCount, item.UpdatedAt)
 	}
 	return nil
 }
@@ -164,20 +166,117 @@ func cmdWorkspaceManifestShow(args []string) error {
 	return nil
 }
 
-func cmdWorkspaceMountVolume(args []string) error {
+func cmdWorkspaceAddVolume(args []string) error {
 	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceMountVolumeUsage(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, workspaceAddVolumeUsage(filepath.Base(os.Args[0])))
 		return nil
 	}
-	opts, err := parseWorkspaceMountVolumeArgs(args[2:])
+	opts, err := parseWorkspaceAddVolumeArgs(args[2:])
 	if err != nil {
 		return err
 	}
-	if opts.workspace == "" || opts.volume == "" {
-		return fmt.Errorf("%s", workspaceMountVolumeUsage(filepath.Base(os.Args[0])))
+	if opts.workspace == "" || opts.sourceDir == "" {
+		return fmt.Errorf("%s", workspaceAddVolumeUsage(filepath.Base(os.Args[0])))
 	}
-	if opts.mountPath == "" {
-		opts.mountPath = "/"
+	sourceDir, err := expandPath(opts.sourceDir)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(sourceDir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", sourceDir)
+	}
+	volumeName := strings.TrimSpace(opts.volumeName)
+	if volumeName == "" {
+		volumeName = filepath.Base(filepath.Clean(sourceDir))
+	}
+	if err := validateAFSName("volume", volumeName); err != nil {
+		return fmt.Errorf("%w\nPass --name <volume> to choose an AFS-safe volume name.", err)
+	}
+	mountPath := strings.TrimSpace(opts.mountPath)
+	if mountPath == "" {
+		mountPath = defaultWorkspaceVolumeMountPath(volumeName)
+	}
+	mountPath, err = normalizeWorkspaceVolumeMountPathForCLI(mountPath)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	cfg, err := loadAFSConfig()
+	if err != nil {
+		return err
+	}
+	service, closeStore, err := openWorkspaceCompositionControlPlane(ctx)
+	if err != nil {
+		return err
+	}
+	defer closeStore()
+
+	detail, err := service.GetWorkspaceComposition(ctx, opts.workspace)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return workspaceCompositionNotFoundError(opts.workspace)
+		}
+		return err
+	}
+	if existing, ok, err := resolveWorkspaceVolumeSelection(ctx, service, volumeName); err != nil {
+		return err
+	} else if ok {
+		label := existing.Name
+		if label == "" {
+			label = existing.ID
+		}
+		return fmt.Errorf("volume %q already exists\nUse '%s ws attach %s %s' to reuse it, or pass --name <new-volume>.", label, filepath.Base(os.Args[0]), shellQuote(detail.Name), shellQuote(label))
+	}
+	if err := validateWorkspaceAddPathAvailable(detail.Mounts, mountPath); err != nil {
+		return err
+	}
+
+	explicitDatabase := ""
+	if mode, err := effectiveProductMode(cfg); err == nil && mode != productModeLocal {
+		explicitDatabase = detail.DatabaseID
+	}
+	importResult, err := importVolume(ctx, cfg, volumeName, sourceDir, volumeImportOptions{
+		ExplicitDatabase: explicitDatabase,
+		PrintReport:      false,
+	})
+	if err != nil {
+		return err
+	}
+	if importResult.Cancelled {
+		return nil
+	}
+
+	detail, err = service.AddWorkspaceCompositionMount(ctx, detail.ID, controlplane.WorkspaceCompositionMount{
+		VolumeID:  volumeName,
+		MountPath: mountPath,
+		Readonly:  opts.readonly,
+	})
+	if err != nil {
+		return err
+	}
+	printSection(markerSuccess+" "+clr(ansiBold, "folder added to workspace"), []outputRow{
+		{Label: "workspace", Value: detail.Name},
+		{Label: "source", Value: homeRelativeDisplayPath(sourceDir)},
+		{Label: "volume", Value: volumeName},
+		{Label: "path", Value: mountPath},
+		{Label: "mode", Value: workspaceCompositionSummaryPermission(opts.readonly)},
+		{Label: "files", Value: workspaceCompositionFileCountLabel(importResult.FileCount)},
+	})
+	return nil
+}
+
+func cmdWorkspaceAttachVolume(args []string) error {
+	if len(args) > 2 && isHelpArg(args[2]) {
+		fmt.Fprint(os.Stderr, workspaceAttachVolumeUsage(filepath.Base(os.Args[0])))
+		return nil
+	}
+	opts, err := parseWorkspaceAttachVolumeArgs(args[2:])
+	if err != nil {
+		return err
 	}
 	ctx := context.Background()
 	service, closeStore, err := openWorkspaceCompositionControlPlane(ctx)
@@ -185,9 +284,25 @@ func cmdWorkspaceMountVolume(args []string) error {
 		return err
 	}
 	defer closeStore()
-	detail, err := service.AddWorkspaceCompositionMount(ctx, opts.workspace, controlplane.WorkspaceCompositionMount{
-		VolumeID:      opts.volume,
-		MountPath:     opts.mountPath,
+	workspaceDetail, err := resolveWorkspaceCompositionForCommand(ctx, service, opts.workspace)
+	if err != nil {
+		return err
+	}
+	volume, err := resolveWorkspaceAttachVolume(ctx, service, opts.volume)
+	if err != nil {
+		return err
+	}
+	mountPath := strings.TrimSpace(opts.mountPath)
+	if mountPath == "" {
+		mountPath = defaultWorkspaceVolumeMountPath(firstNonEmptyString(volume.Name, opts.volume, volume.ID))
+	}
+	mountPath, err = normalizeWorkspaceVolumeMountPathForCLI(mountPath)
+	if err != nil {
+		return err
+	}
+	detail, err := service.AddWorkspaceCompositionMount(ctx, workspaceDetail.ID, controlplane.WorkspaceCompositionMount{
+		VolumeID:      firstNonEmptyString(volume.ID, opts.volume),
+		MountPath:     mountPath,
 		Readonly:      opts.readonly,
 		VolumeTokenID: opts.volumeTokenID,
 	})
@@ -197,17 +312,19 @@ func cmdWorkspaceMountVolume(args []string) error {
 	if opts.jsonOut {
 		return writeJSON(detail)
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "volume mounted"), []outputRow{
+	volumeLabel := firstNonEmptyString(volume.Name, opts.volume, volume.ID)
+	printSection(markerSuccess+" "+clr(ansiBold, "volume attached"), []outputRow{
 		{Label: "workspace", Value: detail.Name},
-		{Label: "volume", Value: opts.volume},
-		{Label: "path", Value: opts.mountPath},
+		{Label: "volume", Value: volumeLabel},
+		{Label: "path", Value: mountPath},
+		{Label: "mode", Value: workspaceCompositionSummaryPermission(opts.readonly)},
 	})
 	return nil
 }
 
-func cmdWorkspaceUnmountVolume(args []string) error {
+func cmdWorkspaceDetachVolume(args []string) error {
 	if len(args) > 2 && isHelpArg(args[2]) {
-		fmt.Fprint(os.Stderr, workspaceUnmountVolumeUsage(filepath.Base(os.Args[0])))
+		fmt.Fprint(os.Stderr, workspaceDetachVolumeUsage(filepath.Base(os.Args[0])))
 		return nil
 	}
 	rest, jsonOut, err := parseJSONFlagWithPositionals(args[2:])
@@ -215,7 +332,7 @@ func cmdWorkspaceUnmountVolume(args []string) error {
 		return err
 	}
 	if len(rest) != 2 {
-		return fmt.Errorf("%s", workspaceUnmountVolumeUsage(filepath.Base(os.Args[0])))
+		return fmt.Errorf("%s", workspaceDetachVolumeUsage(filepath.Base(os.Args[0])))
 	}
 	ctx := context.Background()
 	service, closeStore, err := openWorkspaceCompositionControlPlane(ctx)
@@ -230,7 +347,7 @@ func cmdWorkspaceUnmountVolume(args []string) error {
 	if jsonOut {
 		return writeJSON(detail)
 	}
-	printSection(markerSuccess+" "+clr(ansiBold, "volume unmounted"), []outputRow{
+	printSection(markerSuccess+" "+clr(ansiBold, "volume detached"), []outputRow{
 		{Label: "workspace", Value: detail.Name},
 		{Label: "volume", Value: rest[1]},
 	})
@@ -391,7 +508,7 @@ func mountWorkspaceComposition(opts mountOptions) error {
 		return err
 	}
 	if len(detail.Mounts) == 0 {
-		return fmt.Errorf("workspace %s has no mounted volumes", detail.Name)
+		return fmt.Errorf("workspace %s has no attached volumes", detail.Name)
 	}
 	if strings.TrimSpace(opts.directory) == "" {
 		directory, ok, err := promptMountPathForWorkspace(detail.Name)
@@ -989,6 +1106,201 @@ func mountRecordUnderRoot(rec mountRecord, root string) bool {
 	return err == nil && rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
 
+func resolveWorkspaceCompositionForCommand(ctx context.Context, service workspaceCompositionControlPlane, workspace string) (controlplane.WorkspaceCompositionDetail, error) {
+	ref := strings.TrimSpace(workspace)
+	if ref != "" {
+		detail, err := service.GetWorkspaceComposition(ctx, ref)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return controlplane.WorkspaceCompositionDetail{}, workspaceCompositionNotFoundError(ref)
+			}
+			return controlplane.WorkspaceCompositionDetail{}, err
+		}
+		return detail, nil
+	}
+	return promptWorkspaceCompositionSelection(ctx, service)
+}
+
+func promptWorkspaceCompositionSelection(ctx context.Context, service workspaceCompositionControlPlane) (controlplane.WorkspaceCompositionDetail, error) {
+	response, err := service.ListWorkspaceCompositions(ctx)
+	if err != nil {
+		return controlplane.WorkspaceCompositionDetail{}, err
+	}
+	if len(response.Items) == 0 {
+		return controlplane.WorkspaceCompositionDetail{}, fmt.Errorf("no Agent Workspaces found\nCreate one with: %s ws create <workspace>", filepath.Base(os.Args[0]))
+	}
+
+	fmt.Println()
+	fmt.Println("Select Agent Workspace")
+	fmt.Println()
+	headers := []string{"#", "Workspace", "Volumes", "Updated"}
+	rows := make([][]string, 0, len(response.Items))
+	for i, item := range response.Items {
+		rows = append(rows, []string{
+			strconv.Itoa(i + 1),
+			item.Name,
+			strconv.Itoa(item.MountCount),
+			item.UpdatedAt,
+		})
+	}
+	printPlainTable(headers, rows)
+	fmt.Println()
+	fmt.Print("Workspace: ")
+
+	reader := bufio.NewReader(os.Stdin)
+	raw, err := reader.ReadString('\n')
+	if err != nil && strings.TrimSpace(raw) == "" {
+		fmt.Println()
+		return controlplane.WorkspaceCompositionDetail{}, errors.New("workspace selection cancelled")
+	}
+	choiceText := strings.TrimSpace(raw)
+	if choiceText == "" {
+		fmt.Println()
+		return controlplane.WorkspaceCompositionDetail{}, errors.New("workspace selection cancelled")
+	}
+	idx, err := strconv.Atoi(choiceText)
+	if err != nil || idx < 1 || idx > len(response.Items) {
+		return controlplane.WorkspaceCompositionDetail{}, fmt.Errorf("invalid selection %q", choiceText)
+	}
+	fmt.Println()
+	selected := response.Items[idx-1]
+	ref := firstNonEmptyString(selected.ID, selected.Name)
+	return service.GetWorkspaceComposition(ctx, ref)
+}
+
+func resolveWorkspaceAttachVolume(ctx context.Context, service workspaceCompositionControlPlane, volume string) (workspaceSelection, error) {
+	ref := strings.TrimSpace(volume)
+	if ref == "" {
+		response, err := service.ListWorkspaceSummaries(ctx)
+		if err != nil {
+			return workspaceSelection{}, err
+		}
+		return promptWorkspaceSelectionFromSummaries(response.Items)
+	}
+	selection, ok, err := resolveWorkspaceVolumeSelection(ctx, service, ref)
+	if err != nil {
+		return workspaceSelection{}, err
+	}
+	if !ok {
+		return workspaceSelection{}, fmt.Errorf("volume %q does not exist\nRun '%s vol list' to see volumes, or create one with '%s vol import <volume> <directory>'.", ref, filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+	}
+	return selection, nil
+}
+
+func resolveWorkspaceVolumeSelection(ctx context.Context, service workspaceCompositionControlPlane, volume string) (workspaceSelection, bool, error) {
+	response, err := service.ListWorkspaceSummaries(ctx)
+	if err != nil {
+		return workspaceSelection{}, false, err
+	}
+	return matchVolumeSelection(volume, response.Items)
+}
+
+func matchVolumeSelection(ref string, volumes []workspaceSummary) (workspaceSelection, bool, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return workspaceSelection{}, false, nil
+	}
+
+	idMatches := make([]workspaceSummary, 0, 1)
+	nameMatches := make([]workspaceSummary, 0)
+	for _, volume := range volumes {
+		if volume.ID == ref {
+			idMatches = append(idMatches, volume)
+		}
+		if volume.Name == ref {
+			nameMatches = append(nameMatches, volume)
+		}
+	}
+
+	switch {
+	case len(nameMatches) > 1:
+		return workspaceSelection{}, false, fmt.Errorf("volume %q exists multiple times; use a volume id instead: %s", ref, strings.Join(workspaceSelectionLabels(nameMatches), ", "))
+	case len(idMatches) == 1:
+		return workspaceSelection{ID: idMatches[0].ID, Name: idMatches[0].Name}, true, nil
+	case len(idMatches) > 1:
+		return workspaceSelection{}, false, fmt.Errorf("volume id %q is ambiguous; choose one of: %s", ref, strings.Join(workspaceSelectionLabels(idMatches), ", "))
+	}
+
+	switch len(nameMatches) {
+	case 0:
+		return workspaceSelection{}, false, nil
+	case 1:
+		return workspaceSelection{ID: nameMatches[0].ID, Name: nameMatches[0].Name}, true, nil
+	default:
+		return workspaceSelection{}, false, nil
+	}
+}
+
+func defaultWorkspaceVolumeMountPath(volumeName string) string {
+	value := strings.Trim(strings.TrimSpace(volumeName), "/")
+	if value == "" {
+		return "/"
+	}
+	return "/" + strings.ReplaceAll(value, "\\", "/")
+}
+
+func normalizeWorkspaceVolumeMountPathForCLI(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		value = "/"
+	}
+	if strings.Contains(value, "\x00") {
+		return "", fmt.Errorf("mount path contains an invalid character")
+	}
+	value = strings.ReplaceAll(value, "\\", "/")
+	if !strings.HasPrefix(value, "/") {
+		value = "/" + value
+	}
+	clean := path.Clean(value)
+	if clean == "." {
+		clean = "/"
+	}
+	for _, part := range strings.Split(strings.Trim(clean, "/"), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("mount path %q escapes the workspace root", raw)
+		}
+	}
+	return clean, nil
+}
+
+func validateWorkspaceAddPathAvailable(mounts []controlplane.WorkspaceCompositionMount, mountPath string) error {
+	for _, mount := range mounts {
+		existing, err := normalizeWorkspaceVolumeMountPathForCLI(mount.MountPath)
+		if err != nil {
+			return err
+		}
+		if existing == mountPath {
+			return fmt.Errorf("workspace path %q is already used by volume %q\nUse --at <path> to choose a different path.", mountPath, workspaceCompositionMountVolumeLabel(mount))
+		}
+		if workspaceVolumeMountPathAncestor(existing, mountPath) || workspaceVolumeMountPathAncestor(mountPath, existing) {
+			return fmt.Errorf("workspace path %q overlaps existing path %q\nUse --at <path> to choose a non-overlapping path.", mountPath, existing)
+		}
+	}
+	return nil
+}
+
+func workspaceVolumeMountPathAncestor(parent, child string) bool {
+	parent = strings.TrimSuffix(parent, "/")
+	child = strings.TrimSuffix(child, "/")
+	if parent == "" {
+		parent = "/"
+	}
+	if parent == child {
+		return true
+	}
+	if parent == "/" {
+		return child != "/"
+	}
+	return strings.HasPrefix(child, parent+"/")
+}
+
+func workspaceCompositionMountVolumeLabel(mount controlplane.WorkspaceCompositionMount) string {
+	if name := strings.TrimSpace(mount.VolumeName); name != "" {
+		return name
+	}
+	return strings.TrimSpace(mount.VolumeID)
+}
+
 type workspaceManifestCreateArgs struct {
 	name        string
 	description string
@@ -1022,7 +1334,57 @@ func parseWorkspaceManifestCreateArgs(args []string) (workspaceManifestCreateArg
 	return opts, nil
 }
 
-type workspaceMountVolumeArgs struct {
+type workspaceAddVolumeArgs struct {
+	workspace  string
+	sourceDir  string
+	volumeName string
+	mountPath  string
+	readonly   bool
+}
+
+func parseWorkspaceAddVolumeArgs(args []string) (workspaceAddVolumeArgs, error) {
+	var opts workspaceAddVolumeArgs
+	positionals := make([]string, 0, 2)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--readonly" || arg == "--read-only":
+			opts.readonly = true
+		case arg == "--name":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for --name")
+			}
+			i++
+			opts.volumeName = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--name="):
+			opts.volumeName = strings.TrimSpace(strings.TrimPrefix(arg, "--name="))
+		case arg == "--at":
+			if i+1 >= len(args) {
+				return opts, fmt.Errorf("missing value for --at")
+			}
+			i++
+			opts.mountPath = strings.TrimSpace(args[i])
+		case strings.HasPrefix(arg, "--at="):
+			opts.mountPath = strings.TrimSpace(strings.TrimPrefix(arg, "--at="))
+		case strings.HasPrefix(arg, "-"):
+			return opts, fmt.Errorf("unknown flag %q", arg)
+		default:
+			positionals = append(positionals, arg)
+		}
+	}
+	if len(positionals) > 2 {
+		return opts, fmt.Errorf("too many arguments")
+	}
+	if len(positionals) > 0 {
+		opts.workspace = positionals[0]
+	}
+	if len(positionals) > 1 {
+		opts.sourceDir = positionals[1]
+	}
+	return opts, nil
+}
+
+type workspaceAttachVolumeArgs struct {
 	workspace     string
 	volume        string
 	mountPath     string
@@ -1031,9 +1393,9 @@ type workspaceMountVolumeArgs struct {
 	jsonOut       bool
 }
 
-func parseWorkspaceMountVolumeArgs(args []string) (workspaceMountVolumeArgs, error) {
-	var opts workspaceMountVolumeArgs
-	positionals := make([]string, 0, 3)
+func parseWorkspaceAttachVolumeArgs(args []string) (workspaceAttachVolumeArgs, error) {
+	var opts workspaceAttachVolumeArgs
+	positionals := make([]string, 0, 2)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -1063,7 +1425,7 @@ func parseWorkspaceMountVolumeArgs(args []string) (workspaceMountVolumeArgs, err
 			positionals = append(positionals, arg)
 		}
 	}
-	if len(positionals) > 3 {
+	if len(positionals) > 2 {
 		return opts, fmt.Errorf("too many arguments")
 	}
 	if len(positionals) > 0 {
@@ -1071,9 +1433,6 @@ func parseWorkspaceMountVolumeArgs(args []string) (workspaceMountVolumeArgs, err
 	}
 	if len(positionals) > 1 {
 		opts.volume = positionals[1]
-	}
-	if len(positionals) > 2 {
-		opts.mountPath = positionals[2]
 	}
 	return opts, nil
 }
@@ -1157,7 +1516,7 @@ func printWorkspaceCompositionDetail(detail controlplane.WorkspaceCompositionDet
 	printSection(clr(ansiBold, "workspace manifest"), []outputRow{
 		{Label: "workspace", Value: detail.Name},
 		{Label: "id", Value: detail.ID},
-		{Label: "mounts", Value: fmt.Sprintf("%d", len(detail.Mounts))},
+		{Label: "volumes", Value: fmt.Sprintf("%d", len(detail.Mounts))},
 		{Label: "bookmarks", Value: fmt.Sprintf("%d", len(detail.Bookmarks))},
 	})
 	if len(detail.Mounts) > 0 {
@@ -1197,23 +1556,33 @@ func workspaceManifestShowUsage(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s ws show [--json] <workspace>
 
-Show mounted volumes and bookmarks for an Agent Workspace.
+Show attached volumes and bookmarks for an Agent Workspace.
 `, bin)
 }
 
-func workspaceMountVolumeUsage(bin string) string {
+func workspaceAddVolumeUsage(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws add [--at <mount-path>] [--readonly] [--token <volume-token>] [--json] <workspace> <volume>
+  %s ws add [--name <volume>] [--at <mount-path>] [--readonly] <workspace> <directory>
 
-Add a volume to an Agent Workspace manifest. The default mount path is /.
+Import a folder into a new volume, and attach it to the workspace.
+By default, the volume name comes from the folder name and the workspace path is /<volume>.
 `, bin)
 }
 
-func workspaceUnmountVolumeUsage(bin string) string {
+func workspaceAttachVolumeUsage(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
-  %s ws remove [--json] <workspace> <volume>
+  %s ws attach [--at <mount-path>] [--readonly] [--token <volume-token>] [--json] [<workspace> [volume]]
 
-Remove a volume from an Agent Workspace manifest.
+Attach an existing volume to an Agent Workspace. If volume is omitted, AFS prompts for one.
+By default, the workspace path is /<volume>.
+`, bin)
+}
+
+func workspaceDetachVolumeUsage(bin string) string {
+	return brandHeaderString() + fmt.Sprintf(`Usage:
+  %s ws detach [--json] <workspace> <volume>
+
+Detach a volume from an Agent Workspace manifest.
 `, bin)
 }
 
@@ -1223,7 +1592,7 @@ func workspaceBookmarkUsage(bin string) string {
   %s ws bookmark list [--json] <workspace>
   %s ws bookmark restore [--json] <workspace> <name>
 
-Capture each mounted volume's current checkpoint.
+Capture each attached volume's current checkpoint.
 `, bin, bin, bin)
 }
 
@@ -1239,7 +1608,7 @@ func workspaceRestoreBookmarkUsage(bin string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s ws bookmark restore [--json] <workspace> <name>
 
-Restore mounted volumes to the checkpoints captured by a bookmark.
+Restore attached volumes to the checkpoints captured by a bookmark.
 `, bin)
 }
 
@@ -1251,7 +1620,7 @@ func workspaceCompositionMountUsageFor(command string) string {
 	return brandHeaderString() + fmt.Sprintf(`Usage:
   %s [--dry-run] [--yes] [--readonly] [--verbose] [--session <name>] [<workspace> [directory]]
 
-Mount every volume from an Agent Workspace manifest under the local directory.
+Mount the workspace under a local root.
 Each manifest mount path becomes a mounted volume directory under that root.
 With no workspace, lists Agent Workspaces and prompts for a selection.
 With no directory, prompts for a local folder.

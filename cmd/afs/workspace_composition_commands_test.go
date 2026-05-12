@@ -29,8 +29,8 @@ func TestWorkspaceCommandsManageAgentWorkspaceManifests(t *testing.T) {
 	if err := cmdWorkspace([]string{"ws", "create", "coding-agent", "--description", "Reads repo files"}); err != nil {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"ws", "add", "coding-agent", "repo", "--at", "/repo", "--readonly"}); err != nil {
-		t.Fatalf("cmdWorkspace(add) returned error: %v", err)
+	if err := cmdWorkspace([]string{"ws", "attach", "coding-agent", "repo", "--at", "/repo", "--readonly"}); err != nil {
+		t.Fatalf("cmdWorkspace(attach) returned error: %v", err)
 	}
 
 	workspaceList, err := captureStdout(t, func() error {
@@ -78,6 +78,179 @@ func TestWorkspaceCommandsManageAgentWorkspaceManifests(t *testing.T) {
 	}
 }
 
+func TestWorkspaceAddImportsFolderAndAttachesDefaultPath(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNone
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	sourceDir := filepath.Join(t.TempDir(), "coding-skills")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(sourceDir) returned error: %v", err)
+	}
+	writeTestFile(t, filepath.Join(sourceDir, "README.md"), "skills\n")
+
+	if err := cmdWorkspace([]string{"ws", "create", "coding-agent"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "add", "coding-agent", sourceDir, "--readonly"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(add) returned error: %v", err)
+	}
+	for _, want := range []string{
+		"folder added to workspace",
+		"workspace  coding-agent",
+		"volume     coding-skills",
+		"path       /coding-skills",
+		"mode       read-only",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cmdWorkspace(add) output = %q, want %q", out, want)
+		}
+	}
+
+	showJSON, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "show", "coding-agent", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(show --json) returned error: %v", err)
+	}
+	var detail controlplane.WorkspaceCompositionDetail
+	if err := json.Unmarshal([]byte(showJSON), &detail); err != nil {
+		t.Fatalf("Unmarshal(workspace detail) returned error: %v\n%s", err, showJSON)
+	}
+	if len(detail.Mounts) != 1 {
+		t.Fatalf("mount count = %d, want 1", len(detail.Mounts))
+	}
+	mount := detail.Mounts[0]
+	if mount.VolumeName != "coding-skills" || mount.MountPath != "/coding-skills" || !mount.Readonly {
+		t.Fatalf("mount = %+v, want coding-skills at /coding-skills readonly", mount)
+	}
+}
+
+func TestWorkspaceAttachPromptsForVolumeWhenOmitted(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNone
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	if err := cmdVolume([]string{"vol", "create", "common-skills"}); err != nil {
+		t.Fatalf("cmdVolume(create) returned error: %v", err)
+	}
+	if err := cmdWorkspace([]string{"ws", "create", "coding-agent"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+
+	input, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp(stdin) returned error: %v", err)
+	}
+	if _, err := input.WriteString("1\n"); err != nil {
+		t.Fatalf("WriteString(stdin) returned error: %v", err)
+	}
+	if _, err := input.Seek(0, 0); err != nil {
+		t.Fatalf("Seek(stdin) returned error: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = input
+	t.Cleanup(func() {
+		os.Stdin = origStdin
+		_ = input.Close()
+	})
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "attach", "coding-agent"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(attach prompt) returned error: %v", err)
+	}
+	for _, want := range []string{
+		"Select volume",
+		"Volume:",
+		"volume attached",
+		"volume     common-skills",
+		"path       /common-skills",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("cmdWorkspace(attach prompt) output = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestWorkspaceDetachAcceptsVolumeName(t *testing.T) {
+	t.Helper()
+
+	mr := miniredis.RunT(t)
+
+	cfg := defaultConfig()
+	cfg.RedisAddr = mr.Addr()
+	cfg.MountBackend = mountBackendNone
+	cfg.WorkRoot = t.TempDir()
+	saveTempConfig(t, cfg)
+
+	if err := cmdVolume([]string{"vol", "create", "knowledge-base"}); err != nil {
+		t.Fatalf("cmdVolume(create) returned error: %v", err)
+	}
+	if err := cmdWorkspace([]string{"ws", "create", "coding-agent"}); err != nil {
+		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
+	}
+	if err := cmdWorkspace([]string{"ws", "attach", "coding-agent", "knowledge-base"}); err != nil {
+		t.Fatalf("cmdWorkspace(attach) returned error: %v", err)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "detach", "coding-agent", "knowledge-base"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(detach) returned error: %v", err)
+	}
+	if !strings.Contains(out, "volume detached") {
+		t.Fatalf("cmdWorkspace(detach) output = %q, want detach summary", out)
+	}
+
+	showJSON, err := captureStdout(t, func() error {
+		return cmdWorkspace([]string{"ws", "show", "coding-agent", "--json"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspace(show --json) returned error: %v", err)
+	}
+	var detail controlplane.WorkspaceCompositionDetail
+	if err := json.Unmarshal([]byte(showJSON), &detail); err != nil {
+		t.Fatalf("Unmarshal(workspace detail) returned error: %v\n%s", err, showJSON)
+	}
+	if len(detail.Mounts) != 0 {
+		t.Fatalf("mount count = %d, want 0", len(detail.Mounts))
+	}
+}
+
+func TestWorkspaceLegacyAttachAliasesAreNotSupported(t *testing.T) {
+	t.Helper()
+
+	for _, subcommand := range []string{"remove", "mount-volume", "unmount-volume"} {
+		err := cmdWorkspace([]string{"ws", subcommand, "coding-agent", "repo"})
+		if err == nil {
+			t.Fatalf("cmdWorkspace(%s) returned nil error, want unknown subcommand", subcommand)
+		}
+		want := `unknown workspace subcommand "` + subcommand + `"`
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("cmdWorkspace(%s) error = %q, want %q", subcommand, err, want)
+		}
+	}
+}
+
 func TestWorkspaceMountUsesDefaultLocalFolderAfterManifestLookup(t *testing.T) {
 	t.Helper()
 
@@ -96,8 +269,8 @@ func TestWorkspaceMountUsesDefaultLocalFolderAfterManifestLookup(t *testing.T) {
 	if err := cmdWorkspace([]string{"ws", "create", "coding-agent"}); err != nil {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"ws", "add", "coding-agent", "repo", "--at", "/repo"}); err != nil {
-		t.Fatalf("cmdWorkspace(add) returned error: %v", err)
+	if err := cmdWorkspace([]string{"ws", "attach", "coding-agent", "repo", "--at", "/repo"}); err != nil {
+		t.Fatalf("cmdWorkspace(attach) returned error: %v", err)
 	}
 
 	input, err := os.CreateTemp(t.TempDir(), "stdin")
@@ -268,8 +441,8 @@ func TestRootMountPromptsForAgentWorkspacesNotVolumes(t *testing.T) {
 	if err := cmdWorkspace([]string{"ws", "create", "coding-agent"}); err != nil {
 		t.Fatalf("cmdWorkspace(create) returned error: %v", err)
 	}
-	if err := cmdWorkspace([]string{"ws", "add", "coding-agent", "repo", "--at", "/repo"}); err != nil {
-		t.Fatalf("cmdWorkspace(add) returned error: %v", err)
+	if err := cmdWorkspace([]string{"ws", "attach", "coding-agent", "repo", "--at", "/repo"}); err != nil {
+		t.Fatalf("cmdWorkspace(attach) returned error: %v", err)
 	}
 
 	input, err := os.CreateTemp(t.TempDir(), "stdin")

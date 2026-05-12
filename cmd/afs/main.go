@@ -178,10 +178,10 @@ func printUsage() {
 	fmt.Fprintf(w, "%sCommands:%s\n", bold, reset)
 	fmt.Fprintf(w, "  %sstatus%s             %sshow AFS status and local mounts%s\n\n", bold, reset, dim, reset)
 
-	fmt.Fprintf(w, "  %svol%s (volume)       %smount, create, list, import, fork, show file trees%s\n", bold, reset, dim, reset)
-	fmt.Fprintf(w, "  %sws%s (workspace)     %scompose mounted volumes and manage workspace manifests%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %sws%s (workspace)     %smount, create and manage workspaces%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %sfs%s (filesystem)    %sread, search, and safely write workspace files%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %scp%s (checkpoint)    %screate, list, show, diff, restore%s\n", bold, reset, dim, reset)
+	fmt.Fprintf(w, "  %svol%s (volume) - %sdirect support for underlying volumes - create, import, list, etc.%s\n", bold, reset, dim, reset)
 	fmt.Fprintf(w, "  %slog%s                %sWorkspace file-change log%s\n\n", bold, reset, dim, reset)
 
 	fmt.Fprintf(w, "  %sauth%s               %slogin, logout, and inspect authentication%s\n", bold, reset, dim, reset)

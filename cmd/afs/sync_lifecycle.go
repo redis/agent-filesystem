@@ -672,9 +672,16 @@ func stopSyncServicesIfActive(st state, deleteLocal bool) (bool, error) {
 			s.succeed(fmt.Sprintf("pid %d", st.SyncPID))
 		}
 	}
-	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" && deleteLocal {
-		if err := os.RemoveAll(localPath); err != nil {
-			fmt.Printf("  %s local sync folder preserved at %s (%v)\n", clr(ansiYellow, "!"), localPath, err)
+	if localPath := strings.TrimSpace(st.LocalPath); localPath != "" {
+		if st.ReadOnly {
+			if err := releaseReadonlyLocalTree(localPath); err != nil {
+				fmt.Printf("  %s local sync folder remains read-only at %s (%v)\n", clr(ansiYellow, "!"), localPath, err)
+			}
+		}
+		if deleteLocal {
+			if err := os.RemoveAll(localPath); err != nil {
+				fmt.Printf("  %s local sync folder preserved at %s (%v)\n", clr(ansiYellow, "!"), localPath, err)
+			}
 		}
 	}
 

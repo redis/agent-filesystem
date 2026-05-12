@@ -70,6 +70,11 @@ func TestVolumeRootShortcutsAreDocumentedAliases(t *testing.T) {
 	if !strings.Contains(plain, "map to Agent Workspace manifests") {
 		t.Fatalf("top-level help should explain root mount/unmount workspace mapping:\n%s", plain)
 	}
+	cpIndex := strings.Index(plain, "cp (checkpoint)")
+	volIndex := strings.Index(plain, "vol (volume) - direct support for underlying volumes - create, import, list, etc.")
+	if cpIndex < 0 || volIndex < 0 || volIndex < cpIndex {
+		t.Fatalf("top-level help should list vol under cp with direct-volume copy:\n%s", plain)
+	}
 	if !strings.Contains(plain, "Filesystem Shortcuts") {
 		t.Fatalf("top-level help should document filesystem shortcuts:\n%s", plain)
 	}

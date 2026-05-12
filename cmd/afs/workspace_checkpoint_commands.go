@@ -49,10 +49,12 @@ func cmdWorkspace(args []string) error {
 		return cmdWorkspaceManifestList(args)
 	case "show", "info", "show-manifest":
 		return cmdWorkspaceManifestShow(args)
-	case "add", "mount-volume":
-		return cmdWorkspaceMountVolume(args)
-	case "remove", "unmount-volume":
-		return cmdWorkspaceUnmountVolume(args)
+	case "add":
+		return cmdWorkspaceAddVolume(args)
+	case "attach":
+		return cmdWorkspaceAttachVolume(args)
+	case "detach":
+		return cmdWorkspaceDetachVolume(args)
 	case "bookmark":
 		return cmdWorkspaceBookmarkCommand(args)
 	case "restore-bookmark":
@@ -84,7 +86,7 @@ func cmdWorkspace(args []string) error {
 
 func workspaceLegacyVolumeCommandError(command string) error {
 	return fmt.Errorf(
-		"%q now manages Agent Workspaces, which are manifests of mounted volumes\nUse %q for the volume file-tree command instead",
+		"%q now manages Agent Workspaces, which are manifests of attached volumes\nUse %q for the volume file-tree command instead",
 		"afs ws "+command,
 		"afs vol "+command,
 	)
@@ -2115,10 +2117,11 @@ func workspaceUsageTextFor(bin, group string) string {
 Subcommands:
   create <workspace>                          Create an Agent Workspace manifest
   list                                        List Agent Workspaces
-  show <workspace>                            Show mounted volumes and bookmarks
-  add <workspace> <volume> [--at <path>]      Add a volume to a workspace manifest
-  remove <workspace> <volume>                 Remove a volume from a workspace manifest
-  mount <workspace> <directory>               Mount all workspace volumes under a local root
+  show <workspace>                            Show attached volumes and bookmarks
+  add <workspace> <directory>                 Import a folder into a new volume, and attach it to the workspace
+  attach <workspace> [volume] [--at <path>]   Attach an existing volume
+  detach <workspace> <volume>                 Detach a volume from a workspace
+  mount <workspace> <directory>               Mount the workspace under a local root
   unmount [--delete] <directory>              Unmount a local workspace root
   bookmark create <workspace> <name>          Capture all mounted volume checkpoints
   bookmark list <workspace>                   List workspace bookmarks
@@ -2126,13 +2129,14 @@ Subcommands:
 
 Examples:
   %s %s create coding-agent
-  %s %s add coding-agent getting-started --at /repo
+  %s %s add coding-agent ./coding-skills --readonly
+  %s %s attach coding-agent common-skills --at /common-skills
   %s %s list
   %s %s show coding-agent
   %s %s mount coding-agent ~/coding-agent
 
 Run '%s %s <subcommand> --help' for details.
-`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
+`, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group, bin, group)
 }
 
 func workspaceCreateUsageText(bin string) string {

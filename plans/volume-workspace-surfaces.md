@@ -119,8 +119,9 @@ afs vol fork <source> <target>
 afs vol show <volume>
 
 afs ws create <name>
-afs ws add <workspace> <volume> --at <path> [--readonly] [--token <volume-token>]
-afs ws remove <workspace> <volume>
+afs ws add <workspace> <directory> [--name <volume>] [--at <path>] [--readonly]
+afs ws attach <workspace> [volume] [--at <path>] [--readonly] [--token <volume-token>]
+afs ws detach <workspace> <volume>
 afs ws mount <workspace> <root>
 afs ws unmount <workspace-or-root>
 afs ws list
@@ -317,9 +318,9 @@ Landed a compatibility-first user-surface pass:
 - Added `afs vol` as the explicit content-tree command family and added
   `--volume` to `afs fs`, `afs cp`, and `afs mcp`.
 - Added `afs daemon status` and `afs daemon stop`.
-- Added workspace-manifest CLI subcommands:
-  `create-manifest`, `list-manifests`, `show-manifest`, `mount-volume`,
-  `unmount-volume`, `bookmark`, and `restore-bookmark`.
+- Added workspace-manifest CLI subcommands. The current user-facing verbs are
+  `create`, `list`, `show`, `add`, `attach`, `detach`, `mount`, `unmount`,
+  `bookmark`, and `restore-bookmark`.
 - Split the UI into `/workspaces` for composition manifests and `/volumes`
   for the existing file studio, with generated route tree updates.
 - Moved Live Topology onto Monitor and turned `/agents` into a redirect.
@@ -335,8 +336,8 @@ Still remaining:
 
 Finished the CLI cutover:
 
-- `afs ws create/list/show/add/remove/mount/unmount/bookmark` now targets Agent
-  Workspace composition manifests.
+- `afs ws create/list/show/add/attach/detach/mount/unmount/bookmark` now
+  targets Agent Workspace composition manifests.
 - Legacy file-tree operations moved behind `afs vol`, and root shortcuts such
   as `afs mount`, `afs list`, and `afs import` now dispatch through `afs vol`.
 - `afs vol list` lists volumes; `afs ws list` lists Agent Workspaces only.
@@ -364,4 +365,25 @@ Verification:
 - `go test ./cmd/afs -run 'TestWorkspace(Mount|CommandsManage)'`
 - `go test ./cmd/afs -run 'Test(Root|VolumeRootShortcuts|WorkspaceMount|WorkspaceCommandsManage)'`
 - `go test ./internal/controlplane -run TestHTTPV2VolumesAndWorkspaceCompositions`
+- `make commands`
+
+## Implementation Review — 2026-05-11
+
+Applied the CLI ergonomics pass from developer feedback:
+
+- `afs ws add` now imports a local folder into a new volume and attaches it to
+  the Agent Workspace, with default volume and mount-path names derived from
+  the folder basename.
+- `afs ws attach` is the existing-volume path, defaults the in-workspace path
+  from the volume name, and prompts for a volume when one is not supplied.
+- Removed the legacy `afs ws remove` alias; detach is the workspace manifest
+  verb.
+- Updated root, `ws`, and `vol` help copy so `vol` is clearly the direct
+  underlying volume management surface.
+- Read-only sync unmount now releases local filesystem write protections before
+  preserving or deleting the local tree.
+
+Verification:
+
+- `go test ./cmd/afs`
 - `make commands`
