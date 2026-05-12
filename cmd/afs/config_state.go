@@ -272,7 +272,7 @@ func prepareConfigForSave(cfg *config) error {
 		cfg.DatabaseID = strings.TrimSpace(cfg.DatabaseID)
 		cfg.AuthToken = strings.TrimSpace(cfg.AuthToken)
 	}
-	if productMode != productModeCloud {
+	if productMode == productModeLocal {
 		cfg.AuthToken = ""
 	}
 	cfg.ID = strings.TrimSpace(cfg.ID)

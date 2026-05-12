@@ -139,6 +139,24 @@ func (m *DatabaseManager) CreateWorkspaceCLIAccessToken(ctx context.Context, dat
 	return m.createWorkspaceCLIAccessTokenRecord(ctx, subject, label, profile.ID, route.WorkspaceID, route.Name, input)
 }
 
+func (m *DatabaseManager) CreateResolvedWorkspaceCompositionCLIAccessToken(ctx context.Context, workspace string, input createCLIAccessTokenRequest) (cliAccessTokenResponse, error) {
+	if m == nil || m.catalog == nil {
+		return cliAccessTokenResponse{}, fmt.Errorf("cli token storage is unavailable")
+	}
+	subject, label, err := m.requireOwnedSubject(ctx)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	_, profile, route, err := m.resolveWorkspaceComposition(ctx, workspace)
+	if err != nil {
+		return cliAccessTokenResponse{}, err
+	}
+	if !databaseProfileVisibleToSubject(profile, subject) {
+		return cliAccessTokenResponse{}, os.ErrNotExist
+	}
+	return m.createWorkspaceCLIAccessTokenRecord(ctx, subject, label, profile.ID, route.ID, route.Name, input)
+}
+
 func (m *DatabaseManager) createWorkspaceCLIAccessTokenRecord(ctx context.Context, subject, label, databaseID, workspaceID, workspaceName string, input createCLIAccessTokenRequest) (cliAccessTokenResponse, error) {
 	capabilityInput := strings.TrimSpace(input.Capability)
 	if capabilityInput == "" && input.Readonly {
@@ -417,6 +435,9 @@ func cliTokenAllowsHTTPPath(identity AuthIdentity, method, path string) bool {
 	if method == http.MethodGet && path == "/v1/workspaces" {
 		return true
 	}
+	if method == http.MethodGet && (path == "/v2/workspaces" || strings.HasPrefix(path, "/v2/workspaces/")) {
+		return true
+	}
 	return strings.HasPrefix(path, "/v1/client/") ||
 		strings.HasPrefix(path, "/workspaces/") ||
 		strings.HasPrefix(path, "/databases/")
@@ -440,7 +461,13 @@ func cliTokenAllowsWorkspace(identity AuthIdentity, databaseID, workspaceID, wor
 	if target == "" {
 		return false
 	}
-	return target == strings.TrimSpace(workspaceID) || target == strings.TrimSpace(workspaceName)
+	if target == strings.TrimSpace(workspaceID) || target == strings.TrimSpace(workspaceName) {
+		return true
+	}
+	if _, ok := identity.WorkspaceMountCapabilities[strings.TrimSpace(workspaceID)]; ok {
+		return true
+	}
+	return false
 }
 
 func requireCLITokenWorkspaceAccess(ctx context.Context, databaseID, workspaceID, workspaceName string) error {
@@ -465,6 +492,68 @@ func filterWorkspaceSummariesForCLIToken(ctx context.Context, items []workspaceS
 	return filtered
 }
 
+func cliTokenAllowsWorkspaceComposition(identity AuthIdentity, databaseID, workspaceID, workspaceName string, mounts []workspaceCompositionMount) bool {
+	if strings.TrimSpace(identity.Provider) != "cli-token" {
+		return true
+	}
+	scope := normalizeCLITokenScope(identity.Scope)
+	if isAccountCLIScope(scope) {
+		return true
+	}
+	if !isWorkspaceCLIScope(scope) {
+		return false
+	}
+	if scopedDatabase := strings.TrimSpace(identity.ScopedDatabaseID); scopedDatabase != "" && scopedDatabase != strings.TrimSpace(databaseID) {
+		return false
+	}
+	target := strings.TrimSpace(strings.TrimPrefix(scope, cliScopeWorkspacePrefix))
+	if target == "" {
+		return false
+	}
+	if target == strings.TrimSpace(workspaceID) || target == strings.TrimSpace(workspaceName) {
+		return true
+	}
+	for _, mount := range mounts {
+		if target == strings.TrimSpace(mount.VolumeID) || target == strings.TrimSpace(mount.VolumeName) {
+			return true
+		}
+	}
+	return false
+}
+
+func cliTokenAllowsWorkspaceCompositionSummary(identity AuthIdentity, item workspaceCompositionSummary) bool {
+	mounts := make([]workspaceCompositionMount, 0, len(item.MountedVolumes))
+	for _, mounted := range item.MountedVolumes {
+		mounts = append(mounts, workspaceCompositionMount{
+			VolumeID:   mounted.ID,
+			VolumeName: mounted.Name,
+		})
+	}
+	return cliTokenAllowsWorkspaceComposition(identity, item.DatabaseID, item.ID, item.Name, mounts)
+}
+
+func filterWorkspaceCompositionSummariesForCLIToken(ctx context.Context, items []workspaceCompositionSummary) []workspaceCompositionSummary {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || strings.TrimSpace(identity.Provider) != "cli-token" || !isWorkspaceCLIScope(identity.Scope) {
+		return items
+	}
+	filtered := make([]workspaceCompositionSummary, 0, len(items))
+	for _, item := range items {
+		if cliTokenAllowsWorkspaceCompositionSummary(identity, item) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+func requireCLITokenWorkspaceCompositionAccess(ctx context.Context, databaseID, workspaceID, workspaceName string, mounts []workspaceCompositionMount) error {
+	identity, ok := AuthIdentityFromContext(ctx)
+	if !ok || cliTokenAllowsWorkspaceComposition(identity, databaseID, workspaceID, workspaceName, mounts) {
+		return nil
+	}
+	return os.ErrNotExist
+}
+
 func applyCLITokenSessionPolicy(ctx context.Context, route workspaceCatalogRoute, input createWorkspaceSessionRequest) (createWorkspaceSessionRequest, error) {
 	identity, ok := AuthIdentityFromContext(ctx)
 	if !ok || strings.TrimSpace(identity.Provider) != "cli-token" {
@@ -472,6 +561,9 @@ func applyCLITokenSessionPolicy(ctx context.Context, route workspaceCatalogRoute
 	}
 	if !cliTokenAllowsWorkspace(identity, route.DatabaseID, route.WorkspaceID, route.Name) {
 		return input, os.ErrNotExist
+	}
+	if capability, ok := identity.WorkspaceMountCapabilities[strings.TrimSpace(route.WorkspaceID)]; ok && cliCapabilityReadonly(capability) {
+		input.Readonly = true
 	}
 	if cliCapabilityReadonly(identity.Capability) {
 		input.Readonly = true

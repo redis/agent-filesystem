@@ -478,7 +478,7 @@ func (s *Service) RemoveWorkspaceCompositionMount(ctx context.Context, workspace
 	next := make([]workspaceCompositionMount, 0, len(item.Mounts))
 	removed := false
 	for _, mount := range item.Mounts {
-		if strings.TrimSpace(mount.VolumeID) == target {
+		if strings.TrimSpace(mount.VolumeID) == target || strings.TrimSpace(mount.VolumeName) == target {
 			removed = true
 			continue
 		}
@@ -805,6 +805,7 @@ func (m *DatabaseManager) ListWorkspaceCompositions(ctx context.Context, databas
 	for index := range response.Items {
 		stampWorkspaceCompositionSummary(&response.Items[index], profile)
 	}
+	response.Items = filterWorkspaceCompositionSummariesForCLIToken(ctx, response.Items)
 	return response, nil
 }
 
@@ -946,6 +947,9 @@ func (m *DatabaseManager) resolveWorkspaceComposition(ctx context.Context, works
 				continue
 			}
 			return nil, databaseProfile{}, workspaceCompositionRoute{}, err
+		}
+		if requireCLITokenWorkspaceCompositionAccess(ctx, databaseID, detail.ID, detail.Name, detail.Mounts) != nil {
+			continue
 		}
 		matches++
 		matchService = service

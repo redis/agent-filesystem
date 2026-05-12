@@ -963,6 +963,11 @@ func stopMount(rec mountRecord, deleteLocal bool) error {
 		}
 	}
 	closeManagedWorkspaceSession(configFromMount(rec), strings.TrimSpace(rec.Workspace), strings.TrimSpace(rec.SessionID))
+	if mountRecordNeedsReadonlyRelease(rec) {
+		if err := releaseReadonlyLocalTree(strings.TrimSpace(rec.LocalPath)); err != nil {
+			return err
+		}
+	}
 	if deleteLocal {
 		if localPath := strings.TrimSpace(rec.LocalPath); localPath != "" {
 			if err := os.RemoveAll(localPath); err != nil {
@@ -980,6 +985,54 @@ func stopMount(rec mountRecord, deleteLocal bool) error {
 		}
 	}
 	return removeLegacyStateForMount(rec)
+}
+
+func mountRecordNeedsReadonlyRelease(rec mountRecord) bool {
+	return rec.ReadOnly && strings.TrimSpace(rec.Mode) == modeSync
+}
+
+func releaseReadonlyLocalTree(localPath string) error {
+	if strings.TrimSpace(localPath) == "" {
+		return nil
+	}
+	err := filepath.WalkDir(localPath, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if errors.Is(walkErr, os.ErrNotExist) {
+				return nil
+			}
+			return walkErr
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		mode := info.Mode()
+		if mode&os.ModeSymlink != 0 {
+			return nil
+		}
+		perm := mode.Perm()
+		next := perm | 0o600
+		if entry.IsDir() {
+			next = perm | 0o700
+		}
+		if next == perm {
+			return nil
+		}
+		if err := os.Chmod(path, next); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("restore write permissions for %s: %w", localPath, err)
+	}
+	return nil
 }
 
 func removeLegacyStateForMount(rec mountRecord) error {

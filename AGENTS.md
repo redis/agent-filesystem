@@ -339,3 +339,11 @@ The most important implementation seams are:
   separate Mounted volumes section.
 - Do not restart the user's running control plane automatically. Rebuild
   binaries when needed, but let the user restart `afs-control-plane`.
+- Self-managed `afs auth login --access-token` must preserve the CLI bearer
+  token. Do not normalize self-managed access-token logins into unauthenticated
+  local-control-plane access, or workspace-scoped mount tokens can list and
+  mount workspaces outside their scope.
+- `afs tokens create --workspace <name>` is for Agent Workspace mounts. It must
+  mint against the Agent Workspace manifest route and authorize sessions only
+  for volumes attached to that manifest; do not route this command through the
+  lower-level volume workspace token path.

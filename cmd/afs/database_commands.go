@@ -194,6 +194,9 @@ func resolveManagedDatabaseScope(ctx context.Context, cfg config, client *httpCo
 	if configuredID == "" {
 		return "", nil
 	}
+	if strings.TrimSpace(cfg.AuthToken) != "" {
+		return configuredID, nil
+	}
 	response, err := client.listDatabases(ctx)
 	if err != nil {
 		return "", err

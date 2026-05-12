@@ -152,6 +152,31 @@ func NewHandler(manager *DatabaseManager, allowOrigin string) http.Handler {
 	})
 }
 
+func cliAccessTokenMountCapabilities(ctx context.Context, manager *DatabaseManager, record cliAccessTokenRecord) map[string]string {
+	if manager == nil || strings.TrimSpace(record.DatabaseID) == "" || strings.TrimSpace(record.WorkspaceID) == "" {
+		return nil
+	}
+	service, _, err := manager.serviceFor(ctx, record.DatabaseID)
+	if err != nil {
+		return nil
+	}
+	composition, err := service.GetWorkspaceComposition(ctx, record.WorkspaceID)
+	if err != nil || len(composition.Mounts) == 0 {
+		return nil
+	}
+	caps := make(map[string]string, len(composition.Mounts))
+	for _, mount := range composition.Mounts {
+		if id := strings.TrimSpace(mount.VolumeID); id != "" {
+			capability := normalizeCLITokenCapability(record.Scope, record.Capability)
+			if mount.Readonly || cliCapabilityReadonly(capability) {
+				capability = cliCapabilityMountRO
+			}
+			caps[id] = capability
+		}
+	}
+	return caps
+}
+
 func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.Handler {
 	root := http.NewServeMux()
 
@@ -161,17 +186,19 @@ func NewHandlerWithOptions(manager *DatabaseManager, opts HandlerOptions) http.H
 			if err != nil {
 				return nil, err
 			}
+			mountCaps := cliAccessTokenMountCapabilities(ctx, manager, record)
 			return &AuthIdentity{
-				Subject:           strings.TrimSpace(record.OwnerSubject),
-				Name:              strings.TrimSpace(record.OwnerLabel),
-				Provider:          "cli-token",
-				TokenID:           strings.TrimSpace(record.ID),
-				Scope:             normalizeCLITokenScope(record.Scope),
-				Capability:        normalizeCLITokenCapability(record.Scope, record.Capability),
-				ScopedDatabaseID:  strings.TrimSpace(record.DatabaseID),
-				ScopedWorkspaceID: strings.TrimSpace(record.WorkspaceID),
-				ScopedWorkspace:   strings.TrimSpace(record.WorkspaceName),
-				Readonly:          cliCapabilityReadonly(record.Capability),
+				Subject:                    strings.TrimSpace(record.OwnerSubject),
+				Name:                       strings.TrimSpace(record.OwnerLabel),
+				Provider:                   "cli-token",
+				TokenID:                    strings.TrimSpace(record.ID),
+				Scope:                      normalizeCLITokenScope(record.Scope),
+				Capability:                 normalizeCLITokenCapability(record.Scope, record.Capability),
+				ScopedDatabaseID:           strings.TrimSpace(record.DatabaseID),
+				ScopedWorkspaceID:          strings.TrimSpace(record.WorkspaceID),
+				ScopedWorkspace:            strings.TrimSpace(record.WorkspaceName),
+				Readonly:                   cliCapabilityReadonly(record.Capability),
+				WorkspaceMountCapabilities: mountCaps,
 			}, nil
 		})
 		opts.Auth.AttachMCPTokenAuthenticator(func(ctx context.Context, rawToken string) (*AuthIdentity, error) {
@@ -1416,6 +1443,25 @@ func handleResolvedWorkspaceCompositionRoute(
 			}
 		}
 		response, err := manager.CreateResolvedWorkspaceCompositionAPIKey(r.Context(), workspace, input)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, response)
+	case strings.HasSuffix(workspacePath, "/cli-tokens"):
+		workspace := strings.TrimSuffix(workspacePath, "/cli-tokens")
+		if r.Method != http.MethodPost {
+			writeError(w, fmt.Errorf("%s not allowed", r.Method))
+			return
+		}
+		var input createCLIAccessTokenRequest
+		if r.Body != nil {
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+				writeError(w, fmt.Errorf("invalid request body: %w", err))
+				return
+			}
+		}
+		response, err := manager.CreateResolvedWorkspaceCompositionCLIAccessToken(r.Context(), workspace, input)
 		if err != nil {
 			writeError(w, err)
 			return

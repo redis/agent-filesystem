@@ -402,6 +402,87 @@ func TestCloudModeUsesPersistedAuthTokenForWorkspaceList(t *testing.T) {
 	}
 }
 
+func TestSelfHostedAccessTokenLoginPreservesBearerForWorkspaceList(t *testing.T) {
+	t.Helper()
+
+	const token = "afs_cli_workspace_secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/workspaces" && r.Method == http.MethodGet:
+			if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "Bearer "+token {
+				http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(controlplane.WorkspaceListResponse{
+				Items: []controlplane.WorkspaceSummary{
+					{
+						ID:         "ws_volume_one",
+						Name:       "volume-one",
+						DatabaseID: "localhost-6379",
+					},
+					{
+						ID:         "ws_volume_two",
+						Name:       "volume-two",
+						DatabaseID: "localhost-6379",
+					},
+				},
+			})
+		case r.URL.Path == "/v2/workspaces" && r.Method == http.MethodGet:
+			if got := strings.TrimSpace(r.Header.Get("Authorization")); got != "Bearer "+token {
+				http.Error(w, `{"error":"authentication required"}`, http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(controlplane.WorkspaceCompositionListResponse{
+				Items: []controlplane.WorkspaceCompositionSummary{
+					{
+						ID:         "ws_snake",
+						Name:       "snake",
+						DatabaseID: "localhost-6379",
+						UpdatedAt:  "2026-05-12T07:05:48Z",
+					},
+				},
+			})
+		case r.URL.Path == "/v1/databases":
+			t.Fatalf("workspace-scoped access token login should not require database inventory")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	saveTempConfig(t, defaultConfig())
+
+	if err := cmdLogin([]string{"--url", server.URL, "--access-token", token}); err != nil {
+		t.Fatalf("cmdLogin() returned error: %v", err)
+	}
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() returned error: %v", err)
+	}
+	if cfg.ProductMode != productModeSelfHosted {
+		t.Fatalf("ProductMode = %q, want %q", cfg.ProductMode, productModeSelfHosted)
+	}
+	if cfg.AuthToken != token {
+		t.Fatalf("AuthToken = %q, want %q", cfg.AuthToken, token)
+	}
+	if cfg.CurrentWorkspace != "snake" || cfg.CurrentWorkspaceID != "ws_snake" {
+		t.Fatalf("CurrentWorkspace = %q/%q, want snake/ws_snake from Agent Workspace list", cfg.CurrentWorkspace, cfg.CurrentWorkspaceID)
+	}
+
+	out, err := captureStdout(t, func() error {
+		return cmdWorkspaceManifestList([]string{"ws", "list"})
+	})
+	if err != nil {
+		t.Fatalf("cmdWorkspaceManifestList() returned error: %v", err)
+	}
+	if !strings.Contains(out, "snake") {
+		t.Fatalf("cmdWorkspaceManifestList() output = %q, want snake", out)
+	}
+}
+
 func TestCmdLoginUsesBrowserFlowWhenTokenMissing(t *testing.T) {
 	t.Helper()
 

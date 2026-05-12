@@ -1033,8 +1033,9 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 		"Create an Agent Workspace manifest",
 		"list",
 		"show <workspace>",
-		"add <workspace> <volume> [--at <path>]",
-		"remove <workspace> <volume>",
+		"add <workspace> <directory>",
+		"attach <workspace> [volume] [--at <path>]",
+		"detach <workspace> <volume>",
 		"mount <workspace> <directory>",
 		"bookmark create <workspace> <name>",
 		"workspace create coding-agent",
@@ -1053,6 +1054,9 @@ func TestCmdWorkspaceHelpListsSubcommands(t *testing.T) {
 		"config <workspace> <get|set|unset|list>",
 		"clone [workspace] <directory>",
 		"import [--force] [--mount-at-source]",
+		"remove <workspace> <volume>",
+		"mount-volume",
+		"unmount-volume",
 	} {
 		if strings.Contains(out, removed) {
 			t.Fatalf("workspace help output = %q, did not expect removed subcommand %q", out, removed)

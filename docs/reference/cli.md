@@ -124,16 +124,16 @@ afs tokens create --workspace <workspace> [--permission ro|rw] [--expires 30d]
 afs tokens create <workspace> [--permission ro|rw]
 ```
 
-Creates a CLI token scoped to one workspace for mount use. The default
+Creates a CLI token scoped to one Agent Workspace for mount use. The default
 permission is read-write. `--permission ro` creates a read-only mount token;
-when that token is used with `afs auth login --access-token`, the mount session
-is forced read-only.
+when that token is used with `afs auth login --access-token`, every mounted
+volume session opened for that Agent Workspace is forced read-only.
 
 Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--workspace <name|id>` | Workspace the token may mount. |
+| `--workspace <name|id>` | Agent Workspace the token may mount. |
 | `--use mount` | Token use. `mount` is currently the only supported value. |
 | `--permission ro\|rw` | Mount permission. Defaults to `rw`. |
 | `--expires <duration>` | Expiry such as `12h`, `30d`, `4w`, RFC3339, or `never`. |
@@ -142,16 +142,16 @@ Flags:
 Examples:
 
 ```bash
-afs tokens create --workspace repo --permission rw
-afs tokens create repo --permission ro --expires 7d --name "ci read-only mount"
+afs tokens create --workspace coding-a --permission rw
+afs tokens create coding-a --permission ro --expires 7d --name "ci read-only mount"
 afs auth login --url https://afs.example.com --access-token afs_cli_...
-afs ws mount repo ~/repo
+afs ws mount coding-a ~/coding-a
 ```
 
-Workspace-scoped mount tokens can list only the workspace they are scoped to
-and can open client mount sessions for that workspace. Use a normal
-account-scoped login token for account, workspace-management, checkpoint, or
-MCP-token administration.
+Workspace-scoped mount tokens can list only the Agent Workspace they are scoped
+to and can open client mount sessions only for volumes attached to that Agent
+Workspace. Use a normal account-scoped login token for account,
+workspace-management, checkpoint, or MCP-token administration.
 
 ## First Run And Lifecycle
 

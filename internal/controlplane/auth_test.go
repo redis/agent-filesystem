@@ -366,6 +366,178 @@ func TestWorkspaceMountCLITokenIsScopedAndForcesReadonly(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMountCLITokenScopesAgentWorkspaceCompositionAndMountedVolumes(t *testing.T) {
+	manager, _ := newTestManager(t)
+	auth, err := NewAuthHandler(AuthConfig{
+		Mode:              AuthModeTrustedHeader,
+		TrustedUserHeader: "X-Forwarded-User",
+		TrustedNameHeader: "X-Forwarded-Name",
+	})
+	if err != nil {
+		t.Fatalf("NewAuthHandler() returned error: %v", err)
+	}
+
+	ownerCtx := context.WithValue(context.Background(), authIdentityContextKey, AuthIdentity{
+		Subject: "rowan@example.com",
+		Name:    "Rowan",
+		Email:   "rowan@example.com",
+	})
+	for _, name := range []string{"other", "outside"} {
+		if _, err := manager.CreateResolvedWorkspace(ownerCtx, createWorkspaceRequest{
+			Name:   name,
+			Source: sourceRef{Kind: SourceBlank},
+		}); err != nil {
+			t.Fatalf("CreateResolvedWorkspace(%s) returned error: %v", name, err)
+		}
+	}
+	if _, err := manager.CreateResolvedWorkspaceComposition(ownerCtx, createWorkspaceCompositionRequest{
+		Name: "coding-a",
+		Mounts: []workspaceCompositionMount{
+			{VolumeID: "repo", MountPath: "/repo", Readonly: true},
+			{VolumeID: "other", MountPath: "/other", Readonly: false},
+		},
+	}); err != nil {
+		t.Fatalf("CreateResolvedWorkspaceComposition(coding-a) returned error: %v", err)
+	}
+	if _, err := manager.CreateResolvedWorkspaceComposition(ownerCtx, createWorkspaceCompositionRequest{
+		Name: "outside-app",
+		Mounts: []workspaceCompositionMount{
+			{VolumeID: "outside", MountPath: "/", Readonly: true},
+		},
+	}); err != nil {
+		t.Fatalf("CreateResolvedWorkspaceComposition(outside-app) returned error: %v", err)
+	}
+
+	server := httptest.NewServer(NewHandlerWithOptions(manager, HandlerOptions{
+		AllowOrigin: "*",
+		Auth:        auth,
+	}))
+	defer server.Close()
+
+	body := strings.NewReader(fmtJSON(t, createCLIAccessTokenRequest{
+		Name:       "coding-a mount",
+		Capability: cliCapabilityMountRW,
+	}))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v2/workspaces/coding-a/cli-tokens", body)
+	if err != nil {
+		t.Fatalf("NewRequest(cli token) returned error: %v", err)
+	}
+	req.Header.Set("X-Forwarded-User", "rowan@example.com")
+	req.Header.Set("X-Forwarded-Name", "Rowan")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST cli token returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST cli token status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var token cliAccessTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&token); err != nil {
+		t.Fatalf("Decode(cli token) returned error: %v", err)
+	}
+	if token.WorkspaceName != "coding-a" || token.Scope != cliWorkspaceScope(token.WorkspaceID) {
+		t.Fatalf("token workspace/scope = %q/%q, want coding-a composition scope", token.WorkspaceName, token.Scope)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v2/workspaces", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(workspace compositions) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET scoped workspace compositions returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET scoped workspace compositions status = %d, want %d, body=%s", resp.StatusCode, http.StatusOK, body)
+	}
+	var compositions workspaceCompositionListResponse
+	if err := json.NewDecoder(resp.Body).Decode(&compositions); err != nil {
+		t.Fatalf("Decode(scoped workspace compositions) returned error: %v", err)
+	}
+	if len(compositions.Items) != 1 || compositions.Items[0].Name != "coding-a" {
+		t.Fatalf("scoped workspace compositions = %#v, want only coding-a", compositions.Items)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/repo/sessions", strings.NewReader(`{"readonly":false}`))
+	if err != nil {
+		t.Fatalf("NewRequest(repo client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST repo client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST repo client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	var session workspaceSession
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(repo client session) returned error: %v", err)
+	}
+	if !session.Readonly {
+		t.Fatal("session.Readonly = false, want true for read-only Agent Workspace mount")
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/other/sessions", strings.NewReader(`{"readonly":false}`))
+	if err != nil {
+		t.Fatalf("NewRequest(other client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST other client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST other client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusCreated, body)
+	}
+	session = workspaceSession{}
+	if err := json.NewDecoder(resp.Body).Decode(&session); err != nil {
+		t.Fatalf("Decode(other client session) returned error: %v", err)
+	}
+	if session.Readonly {
+		t.Fatal("session.Readonly = true, want writable session for writable Agent Workspace mount")
+	}
+
+	req, err = http.NewRequest(http.MethodGet, server.URL+"/v2/workspaces/outside-app", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(outside workspace composition) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET outside workspace composition returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET outside workspace composition status = %d, want %d, body=%s", resp.StatusCode, http.StatusNotFound, body)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/v1/client/workspaces/outside/sessions", nil)
+	if err != nil {
+		t.Fatalf("NewRequest(outside client session) returned error: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token.Token)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST outside client session returned error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("POST outside client session status = %d, want %d, body=%s", resp.StatusCode, http.StatusNotFound, body)
+	}
+}
+
 func TestClientWorkspaceSessionRoutesUseBearerTenantForDuplicateNames(t *testing.T) {
 	manager, databaseID := newTestManager(t)
 	auth, err := NewAuthHandler(AuthConfig{

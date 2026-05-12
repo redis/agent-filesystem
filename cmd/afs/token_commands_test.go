@@ -20,7 +20,7 @@ func TestCmdTokenCreatePostsWorkspaceScopedMountToken(t *testing.T) {
 
 	var sawRequest bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/workspaces/repo/cli-tokens" || r.Method != http.MethodPost {
+		if r.URL.Path != "/v2/workspaces/repo/cli-tokens" || r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
 		}

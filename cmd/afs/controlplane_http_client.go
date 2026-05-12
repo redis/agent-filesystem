@@ -346,7 +346,7 @@ func (c *httpControlPlaneClient) DeleteWorkspace(ctx context.Context, workspace 
 
 func (c *httpControlPlaneClient) CreateWorkspaceCLIAccessToken(ctx context.Context, workspace string, input httpCreateCLIAccessTokenRequest) (httpCLIAccessTokenResponse, error) {
 	var out httpCLIAccessTokenResponse
-	err := c.doJSON(ctx, http.MethodPost, c.workspacePath(workspace, "cli-tokens"), input, &out, http.StatusCreated)
+	err := c.doJSON(ctx, http.MethodPost, c.workspaceCompositionPath(workspace, "cli-tokens"), input, &out, http.StatusCreated)
 	return out, err
 }
 

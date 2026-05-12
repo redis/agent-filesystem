@@ -247,8 +247,12 @@ Database-scoped equivalents are available under
 
 ### CLI Tokens
 
+- `POST /v2/workspaces/{workspace_id}/cli-tokens`
 - `POST /workspaces/{workspace_id}/cli-tokens`
 - `POST /databases/{database_id}/workspaces/{workspace_id}/cli-tokens`
+
+Use the `/v2/workspaces/{workspace_id}/cli-tokens` route for Agent Workspace
+mount tokens. The `/workspaces/...` routes are lower-level volume routes.
 
 Workspace CLI token create requests accept:
 

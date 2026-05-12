@@ -73,10 +73,11 @@ type AuthIdentity struct {
 	ScopedWorkspace   string
 	MCPProfile        string
 	Readonly          bool
-	// WorkspaceMountCapabilities is set for workspace-scoped MCP tokens. It
-	// maps volume_id → capability (ro/rw/rw-checkpoint) for the volumes
-	// mounted in the bound Agent Workspace composition. The MCP server and CLI
-	// HTTP middleware use this map to enforce per-mount access.
+	// WorkspaceMountCapabilities is set for workspace-scoped MCP tokens and
+	// Agent Workspace-scoped CLI tokens. It maps volume_id → capability
+	// (ro/rw/rw-checkpoint or mount-ro/mount-rw) for the volumes mounted in the
+	// bound Agent Workspace composition. The MCP server and CLI HTTP middleware
+	// use this map to enforce per-mount access.
 	WorkspaceMountCapabilities map[string]string
 }
 

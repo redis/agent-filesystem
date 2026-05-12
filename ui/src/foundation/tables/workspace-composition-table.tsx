@@ -1,6 +1,7 @@
 import { Typography } from "@redis-ui/components";
 import { Table } from "@redis-ui/table";
 import type { ColumnDef, SortingState } from "@redis-ui/table";
+import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import styled from "styled-components";
@@ -54,6 +55,7 @@ export function WorkspaceCompositionTable({
   toolbarAction,
   onOpenWorkspace,
 }: Props) {
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] =
     useState<WorkspaceCompositionSortField>("updatedAt");
@@ -125,16 +127,40 @@ export function WorkspaceCompositionTable({
         {
           accessorKey: "mountCount",
           header: "Volumes",
-          size: 110,
+          size: 260,
           enableSorting: true,
           cell: ({ row }) => {
-            const count = row.original.mountCount;
-            return (
-              <S.CountCell>
-                <Typography.Body component="span">
-                  {count} {count === 1 ? "volume" : "volumes"}
+            const volumes = row.original.mountedVolumes;
+            if (volumes.length === 0) {
+              return (
+                <Typography.Body component="span" color="secondary">
+                  No volumes
                 </Typography.Body>
-              </S.CountCell>
+              );
+            }
+            return (
+              <VolumeNameList>
+                {volumes.map((volume) => {
+                  const label = volume.name?.trim() || volume.id;
+                  return (
+                    <VolumeNameButton
+                      key={volume.id}
+                      type="button"
+                      title={`Open volume ${label}${volume.readonly ? " (read-only)" : ""}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void navigate({
+                          to: "/volumes/$volumeId",
+                          params: { volumeId: volume.id },
+                        });
+                      }}
+                    >
+                      {label}
+                      {volume.readonly ? <ReadOnlyTag>ro</ReadOnlyTag> : null}
+                    </VolumeNameButton>
+                  );
+                })}
+              </VolumeNameList>
             );
           },
         },
@@ -170,7 +196,7 @@ export function WorkspaceCompositionTable({
           ),
         },
       ] as ColumnDef<AFSWorkspaceCompositionSummary>[],
-    [onOpenWorkspace],
+    [onOpenWorkspace, navigate],
   );
 
   return (
@@ -230,4 +256,50 @@ const WorkspaceNameButton = styled(S.WorkspaceNameButton)`
     font-size: 15px;
     font-weight: 700;
   }
+`;
+
+const VolumeNameList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+  min-width: 0;
+`;
+
+const VolumeNameButton = styled.button`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--afs-accent, #2563eb);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  &:hover,
+  &:focus-visible {
+    text-decoration: underline;
+    outline: none;
+  }
+`;
+
+const ReadOnlyTag = styled.span`
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--afs-line);
+  background: var(--afs-panel);
+  color: var(--afs-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 `;

@@ -178,6 +178,22 @@ class MountedFSTest(unittest.TestCase):
         write_paths = [args["path"] for name, args in fake.calls if name == "file_write"]
         self.assertNotIn("/readme-link.md", write_paths)
 
+    def test_sync_to_remote_skips_symlinked_directories(self):
+        fake = FakeMCP()
+        fs = MountedFS([_MountedWorkspace(name="repo", token="token", client=fake)])
+        self.addCleanup(fs.close)
+
+        root = Path(fs.sync_from_remote())
+        external = root / "external"
+        external.mkdir()
+        Path(external, "secret.txt").write_text("do not upload", encoding="utf-8")
+        Path(root, "repo", "external-link").symlink_to(external, target_is_directory=True)
+
+        fs.sync_to_remote()
+
+        write_paths = [args["path"] for name, args in fake.calls if name == "file_write"]
+        self.assertFalse(any(path.startswith("/external-link/") for path in write_paths))
+
 
 class EndpointTest(unittest.TestCase):
     def test_checkpoint_create_and_restore_round_trip(self):

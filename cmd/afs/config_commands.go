@@ -834,6 +834,7 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		}
 	}
 	if overrides.connection.set {
+		previousMode := cfg.ProductMode
 		mode, err := parseUserFacingConfigSource(overrides.connection.value)
 		if err != nil {
 			return err
@@ -841,11 +842,18 @@ func applyConfigOverrides(cfg *config, overrides configOverrides) error {
 		cfg.ProductMode = mode
 		if cfg.ProductMode == productModeLocal {
 			cfg.DatabaseID = ""
+			cfg.AuthToken = ""
+			cfg.Account = ""
 			cfg.CurrentWorkspaceID = ""
+		} else if previousMode != "" && previousMode != cfg.ProductMode {
+			cfg.AuthToken = ""
+			cfg.Account = ""
 		}
 	}
 	if overrides.controlPlaneURL.set {
 		cfg.URL = strings.TrimSpace(overrides.controlPlaneURL.value)
+		cfg.AuthToken = ""
+		cfg.Account = ""
 		// Providing a control plane URL implies self-hosted mode.
 		if !overrides.connection.set {
 			cfg.ProductMode = productModeSelfHosted
@@ -1067,11 +1075,16 @@ func setConfigKey(cfg *config, key, value string) error {
 			cfg.AuthToken = ""
 			cfg.Account = ""
 			cfg.CurrentWorkspaceID = ""
+		} else {
+			cfg.AuthToken = ""
+			cfg.Account = ""
 		}
 	case "controlPlane.url":
 		cfg.ProductMode = productModeSelfHosted
 		cfg.URL = strings.TrimSpace(value)
 		cfg.DatabaseID = ""
+		cfg.AuthToken = ""
+		cfg.Account = ""
 		cfg.CurrentWorkspaceID = ""
 	case "agent.name":
 		cfg.Name = strings.TrimSpace(value)

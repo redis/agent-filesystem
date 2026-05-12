@@ -537,6 +537,59 @@ func TestUnmountWorkspaceTargetByWorkspaceName(t *testing.T) {
 	}
 }
 
+func TestUnmountReadonlySyncMountReleasesLocalTree(t *testing.T) {
+	t.Helper()
+
+	withTempHome(t)
+	localPath := filepath.Join(t.TempDir(), "notes")
+	nestedPath := filepath.Join(localPath, "docs")
+	if err := os.MkdirAll(nestedPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(nestedPath) returned error: %v", err)
+	}
+	filePath := filepath.Join(nestedPath, "README.md")
+	writeTestFile(t, filePath, "read-only copy\n")
+	if err := os.Chmod(filePath, 0o444); err != nil {
+		t.Fatalf("Chmod(filePath) returned error: %v", err)
+	}
+	if err := os.Chmod(nestedPath, 0o555); err != nil {
+		t.Fatalf("Chmod(nestedPath) returned error: %v", err)
+	}
+	if err := os.Chmod(localPath, 0o555); err != nil {
+		t.Fatalf("Chmod(localPath) returned error: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = releaseReadonlyLocalTree(localPath)
+	})
+
+	rec := mountRecord{
+		ID:        "mnt_notes",
+		Workspace: "notes",
+		LocalPath: localPath,
+		Mode:      modeSync,
+		ReadOnly:  true,
+		StartedAt: time.Now().UTC(),
+	}
+	if err := saveMountRegistry(mountRegistry{Mounts: []mountRecord{rec}}); err != nil {
+		t.Fatalf("saveMountRegistry() returned error: %v", err)
+	}
+
+	if err := unmountWorkspaceTarget("notes", false); err != nil {
+		t.Fatalf("unmountWorkspaceTarget() returned error: %v", err)
+	}
+	for _, path := range []string{localPath, nestedPath, filePath} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat(%s) returned error: %v", path, err)
+		}
+		if info.Mode().Perm()&0o200 == 0 {
+			t.Fatalf("mode for %s = %#o, want owner-writable", path, info.Mode().Perm())
+		}
+	}
+	if err := os.RemoveAll(localPath); err != nil {
+		t.Fatalf("RemoveAll(localPath) after unmount returned error: %v", err)
+	}
+}
+
 func TestPrintUnmountResultLabelsLiveMountpoint(t *testing.T) {
 	t.Helper()
 
