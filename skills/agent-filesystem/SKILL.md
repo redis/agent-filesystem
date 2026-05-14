@@ -1,6 +1,6 @@
 ---
 name: agent-filesystem
-description: Persistent Redis-backed workspaces for agents. Use via `afs mcp`, the `afs` CLI, sync mode, live mounts, and explicit checkpoints.
+description: "Use when agents need persistent shared storage, when saving or restoring workspace state, or when coordinating file access across multiple agents and machines. Creates Redis-backed workspaces, checkpoints and restores agent state, mounts shared filesystems locally, searches workspace contents, and forks workspaces for parallel work."
 ---
 
 # Agent Filesystem
@@ -12,10 +12,11 @@ explicit checkpoints and easy movement between MCP, sync mode, and live mounts.
 ## When to Use This Skill
 
 **Use for:**
-- Persistent agent workspaces
-- Code or docs that should live in a normal directory
-- Shared notes/config/state that benefit from checkpoints and forks
-- Searchable workspaces where `afs fs grep` or MCP file tools are useful
+- Persistent agent workspaces that survive across sessions and machines
+- Code, docs, or shared state that should live in a normal directory backed by Redis
+- Saving and restoring workspace snapshots with explicit checkpoints
+- Searching workspace contents with `afs fs grep` or MCP file tools
+- Forking a workspace to run parallel experiments without losing the original
 
 **Avoid for:**
 - Large build output, media, or disposable artifacts
@@ -46,11 +47,13 @@ workspace exposed directly as a mount rather than through the sync daemon.
 ```bash
 ./afs ws create my-project
 ./afs ws import my-project ./existing-dir
+./afs ws list                          # verify the workspace exists
 ```
 
 ### Start working locally
 ```bash
 ./afs ws mount my-project ~/my-project
+./afs status                           # verify the mount is active
 cd ~/my-project
 ```
 
@@ -63,13 +66,15 @@ cd ~/my-project
 ### Save and restore stable points
 ```bash
 ./afs cp create my-project before-refactor
-./afs cp list my-project
+./afs cp list my-project               # verify the checkpoint was saved
 ./afs cp restore my-project before-refactor
+./afs cp list my-project               # confirm the restore completed
 ```
 
 ### Fork work for a second line of effort
 ```bash
 ./afs ws fork my-project my-project-experiment
+./afs ws list                          # verify the fork appears
 ```
 
 ## Key Points
@@ -81,3 +86,9 @@ cd ~/my-project
 - File edits change the live workspace immediately.
 - Create checkpoints explicitly when you want a restore point.
 - `.afsignore` controls what gets imported from an existing local directory.
+
+## Further Reading
+
+- `docs/guides/agent-filesystem.md` — agent-facing usage guide
+- `docs/reference/cli.md` — full CLI command reference
+- `docs/reference/mcp.md` — MCP tool reference for agent integrations
