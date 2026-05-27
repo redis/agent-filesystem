@@ -46,7 +46,7 @@ func parseArgs(argv []string) ParsedArgs {
 			parsed.addFlag(name, value)
 			continue
 		}
-		if index+1 >= len(argv) || len(argv[index+1]) >= 2 && argv[index+1][:2] == "--" {
+		if !longFlagNeedsValue(body) || index+1 >= len(argv) || len(argv[index+1]) >= 2 && argv[index+1][:2] == "--" {
 			parsed.Booleans[body] = true
 			continue
 		}
@@ -117,6 +117,15 @@ func shortFlagName(flag string) string {
 func shortFlagNeedsValue(name string) bool {
 	switch name {
 	case "agent", "skill":
+		return true
+	default:
+		return false
+	}
+}
+
+func longFlagNeedsValue(name string) bool {
+	switch name {
+	case "agent", "endpoint", "mount", "name", "output", "owner", "query", "skill", "token", "version", "visibility", "workspace":
 		return true
 	default:
 		return false

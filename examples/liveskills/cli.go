@@ -165,6 +165,9 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 				printSourceSkillList(stdout, result)
 			})
 		}
+		if err := validateAddSourceBeforePrompt(app.CWD, parsed.Pos(1)); err != nil {
+			return writeError(err, stderr)
+		}
 		if !parsed.Bool("json") {
 			printSecurityAssessment(stdout, parsed.Pos(1))
 		}
@@ -217,6 +220,24 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 	}
 
 	return writeError(fail("Unknown command: %s", command), stderr)
+}
+
+func validateAddSourceBeforePrompt(cwd string, source string) error {
+	if source == "" {
+		return fail("Usage: liveskills add <source-or-ref>")
+	}
+	sourcePath, _ := splitInlineSkillRef(source)
+	if !looksLikeLocalPathLiteral(sourcePath) || looksLikeRemoteSource(sourcePath) {
+		return nil
+	}
+	if _, err := os.Stat(resolvePath(cwd, sourcePath)); err != nil {
+		return fail("Skill source not found: %s", sourcePath)
+	}
+	return nil
+}
+
+func looksLikeLocalPathLiteral(input string) bool {
+	return strings.HasPrefix(input, ".") || strings.HasPrefix(input, "/") || strings.HasPrefix(input, "~")
 }
 
 func installOptions(parsed ParsedArgs) map[string]string {

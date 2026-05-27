@@ -131,6 +131,11 @@ func scanLocations(cwd string, home string, env map[string]string, includeProjec
 		}
 		if includeGlobal && agent.GlobalDir != "" {
 			addLocation(scopeGlobal, agent.GlobalDir, false, agent.DisplayName, agent.Name)
+			if agent.Name == "codex" {
+				for _, path := range codexPackagedGlobalSkillLocations(filepath.Dir(agent.GlobalDir)) {
+					addLocation(scopeGlobal, path, false, agent.DisplayName, agent.Name)
+				}
+			}
 		}
 	}
 
@@ -144,13 +149,26 @@ func scanLocations(cwd string, home string, env map[string]string, includeProjec
 }
 
 func standardProjectSkillLocations(cwd string) []scanLocation {
-	return []scanLocation{
+	locations := []scanLocation{
 		{Path: cwd, Direct: true},
 		{Path: filepath.Join(cwd, "skills")},
-		{Path: filepath.Join(cwd, "skills", ".curated")},
-		{Path: filepath.Join(cwd, "skills", ".experimental")},
-		{Path: filepath.Join(cwd, "skills", ".system")},
 	}
+	for _, dir := range packagedSkillCollectionDirs() {
+		locations = append(locations, scanLocation{Path: filepath.Join(cwd, "skills", dir)})
+	}
+	return locations
+}
+
+func codexPackagedGlobalSkillLocations(codexHome string) []string {
+	var paths []string
+	for _, dir := range packagedSkillCollectionDirs() {
+		paths = append(paths, filepath.Join(codexHome, "skills", dir))
+	}
+	return paths
+}
+
+func packagedSkillCollectionDirs() []string {
+	return []string{".curated", ".experimental", ".system"}
 }
 
 func scanSkillDirs(location scanLocation) ([]string, error) {

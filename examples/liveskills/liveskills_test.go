@@ -434,6 +434,78 @@ func TestGlobalListDiscoversExistingAgentSkills(t *testing.T) {
 	}
 }
 
+func TestGlobalListDiscoversCodexPackagedSkillsWithoutCache(t *testing.T) {
+	fixture := newFixture(t)
+	home := filepath.Join(fixture.root, "user-home")
+	must(t, os.MkdirAll(home, 0o755))
+	t.Setenv("HOME", home)
+	fixture.env["HOME"] = home
+
+	writeLocalSkill(t, filepath.Join(home, ".codex", "skills", ".system", "imagegen"), "imagegen")
+	writeLocalSkill(t, filepath.Join(home, ".codex", "plugins", "cache", "openai-curated", "github", "abc123", "skills", "github"), "github")
+
+	listed := fixture.run("list", "-g")
+	requireStatus(t, listed, 0)
+	for _, expected := range []string{
+		"imagegen ~/.codex/skills/.system/imagegen",
+		"Agents: Codex",
+	} {
+		if !strings.Contains(listed.stdout, expected) {
+			t.Fatalf("expected global list to contain %q\noutput:\n%s", expected, listed.stdout)
+		}
+	}
+	if strings.Contains(listed.stdout, ".codex/plugins/cache") || strings.Contains(listed.stdout, "github") {
+		t.Fatalf("global list should not include volatile plugin cache skills:\n%s", listed.stdout)
+	}
+
+	jsonResult := fixture.run("list", "-g", "--json")
+	requireStatus(t, jsonResult, 0)
+	var rows []InstalledSkillItem
+	decodeJSON(t, jsonResult.stdout, &rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected packaged global rows, got %#v", rows)
+	}
+	row := findInstalledSkill(rows, "imagegen")
+	if row == nil || row.Scope != scopeGlobal || row.Live || row.Managed || len(row.Agents) != 1 || row.Agents[0] != "Codex" {
+		t.Fatalf("unexpected packaged row: %#v", row)
+	}
+
+	scanned := fixture.run("scan", "-g", "--json")
+	requireStatus(t, scanned, 0)
+	var scannedRows []ScannedSkillItem
+	decodeJSON(t, scanned.stdout, &scannedRows)
+	if len(scannedRows) != 1 || findScannedSkill(scannedRows, "imagegen") == nil || findScannedSkill(scannedRows, "github") != nil {
+		t.Fatalf("expected scan to include packaged skills, got %#v", scannedRows)
+	}
+}
+
+func TestAddValidatesMissingLocalSourceBeforeSecurityPrompt(t *testing.T) {
+	fixture := newFixture(t)
+	missing := filepath.Join(fixture.root, "missing-skill")
+
+	added := fixture.run("add", missing)
+	requireNotStatus(t, added, 0)
+	if !strings.Contains(added.stderr, "Skill source not found: "+missing) {
+		t.Fatalf("unexpected stderr: %s", added.stderr)
+	}
+	if strings.Contains(added.stdout, "Security Risk Assessments") {
+		t.Fatalf("should not print security prompt for missing local path:\n%s", added.stdout)
+	}
+}
+
+func TestBooleanLongFlagsMayPrecedePositionals(t *testing.T) {
+	fixture := newFixture(t)
+	source := fixture.skill("Leading Flag Skill")
+
+	added := fixture.run("add", "--yes", source, "--json")
+	requireStatus(t, added, 0)
+	var payload InstallResult
+	decodeJSON(t, added.stdout, &payload)
+	if payload.Name != "local/leading-flag-skill" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
 func TestProjectInstallPreservesNeighboringSkills(t *testing.T) {
 	fixture := newFixture(t)
 	source := fixture.skill("Neighbor Skill")
@@ -1040,6 +1112,15 @@ func requireScannedSkill(t *testing.T, rows []ScannedSkillItem, name string) Sca
 }
 
 func findScannedSkill(rows []ScannedSkillItem, name string) *ScannedSkillItem {
+	for index := range rows {
+		if rows[index].Name == name {
+			return &rows[index]
+		}
+	}
+	return nil
+}
+
+func findInstalledSkill(rows []InstalledSkillItem, name string) *InstalledSkillItem {
 	for index := range rows {
 		if rows[index].Name == name {
 			return &rows[index]

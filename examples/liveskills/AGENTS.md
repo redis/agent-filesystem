@@ -113,5 +113,11 @@ HOME="$home" LIVESKILLS_HOME="$tmp/store" liveskills list -g
 - Do not break `-g` / `--global`; it should mirror the `skills` CLI scope model.
 - Preserve deterministic hashes and IDs when touching source discovery or versioning.
 - Reject symlinks in skill sources.
+- Codex global inventory must scan durable packaged skill roots under
+  `$CODEX_HOME/skills` too:
+  `$CODEX_HOME/skills/.system`, `$CODEX_HOME/skills/.curated`,
+  and `$CODEX_HOME/skills/.experimental`, not just direct
+  `$CODEX_HOME/skills/<skill>` folders. Do not list volatile
+  `$CODEX_HOME/plugins/cache/.../skills` entries as installed global skills.
 - Keep JSON files indented with two spaces and a trailing newline.
 - Keep the project dependency-light. This module currently uses only the Go standard library.
