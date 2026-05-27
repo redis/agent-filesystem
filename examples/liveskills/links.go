@@ -29,6 +29,54 @@ func EnsureRelativeSkillSymlink(agentSkillPath, canonicalSkillPath string) error
 	return ensureRelativeSymlink(link, canonical)
 }
 
+func ensureCanonicalMountAlias(aliasPath, mountedPath string) error {
+	mounted, err := cleanAbs(mountedPath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(mounted)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fail("Mounted skill path is not a directory: %s", mountedPath)
+	}
+	alias, err := cleanAbs(aliasPath)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(alias) == filepath.Clean(mounted) {
+		return nil
+	}
+	info, err = os.Lstat(alias)
+	if errors.Is(err, os.ErrNotExist) {
+		return ensureRelativeSymlink(alias, mounted)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if err := validateOrRepairSymlink(alias, mounted); err != nil {
+			return err
+		}
+		return ensureRelativeSymlink(alias, mounted)
+	}
+	if !info.IsDir() {
+		return fail("Refusing to overwrite unmanaged skill path: %s", alias)
+	}
+	entries, err := os.ReadDir(alias)
+	if err != nil {
+		return err
+	}
+	if len(entries) > 0 {
+		return fail("Refusing to overwrite non-empty skill path: %s", alias)
+	}
+	if err := os.Remove(alias); err != nil {
+		return err
+	}
+	return ensureRelativeSymlink(alias, mounted)
+}
+
 func ValidateSkillSymlink(agentSkillPath, canonicalSkillPath string) error {
 	link, err := cleanAbs(agentSkillPath)
 	if err != nil {

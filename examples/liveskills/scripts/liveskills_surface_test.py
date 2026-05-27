@@ -546,7 +546,6 @@ class LiveSkillsHarness:
             ("update", "stress/nope"),
             ("list", "--all"),
             ("find", "--interactive"),
-            ("add", "--global", refs[0]),
         ]
         for command in bad_commands:
             self.cli(*command, expect=1)

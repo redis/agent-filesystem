@@ -354,10 +354,10 @@ func joinOrNone(values []string) string {
 }
 
 func visibleSkillRows(rows []SkillListItem) []SkillListItem {
-	if len(rows) <= 8 {
+	if len(rows) <= 10 {
 		return rows
 	}
-	return rows[:8]
+	return rows[:10]
 }
 
 func skillSearchName(row SkillListItem) string {

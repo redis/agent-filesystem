@@ -77,7 +77,9 @@ func (a *LocalAFSAdapter) MountSkillsWorkspace(workspace SkillsWorkspace, mountP
 		return SkillsWorkspace{}, err
 	}
 	if a.usesCLI() {
-		if err := a.Runner.Run("ws", "mount", workspace.ID, mountPoint); err != nil && !isExistingWorkspaceMount(err, workspace.ID, mountPoint) {
+		if err := a.Runner.Run("ws", "mount", workspace.ID, mountPoint); err != nil &&
+			!isExistingWorkspaceMount(err, workspace.ID, mountPoint) &&
+			!isEmptySkillsWorkspaceMount(err, workspace.ID) {
 			return SkillsWorkspace{}, err
 		}
 	}
@@ -113,7 +115,15 @@ func (a *LocalAFSAdapter) AttachSkillVolume(workspace SkillsWorkspace, volumeID,
 		}
 		session := "liveskills-ws-" + hashText(workspace.ID + ":" + slug)[:12]
 		if err := a.Runner.Run("vol", "mount", "--yes", "--session", session, volumeID, canonicalPath); err != nil {
-			if !isExistingAFSMount(err, volumeID, canonicalPath) {
+			switch {
+			case isExistingAFSMount(err, volumeID, canonicalPath):
+				// Already mounted at the requested canonical path.
+			case isMountedVolumeAtDifferentPath(err, volumeID):
+				existingPath, _ := existingMountedVolumePath(err, volumeID)
+				if linkErr := ensureCanonicalMountAlias(canonicalPath, existingPath); linkErr != nil {
+					return "", linkErr
+				}
+			default:
 				return "", err
 			}
 		}
@@ -238,6 +248,15 @@ func isExistingWorkspaceMount(err error, workspaceID, mountPoint string) bool {
 	return strings.Contains(message, "overlaps existing mount") &&
 		strings.Contains(message, strings.ToLower(workspaceID)) &&
 		strings.Contains(message, strings.ToLower(filepath.Clean(mountPoint)))
+}
+
+func isEmptySkillsWorkspaceMount(err error, workspaceID string) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, strings.ToLower(workspaceID)) &&
+		strings.Contains(message, "has no attached volumes")
 }
 
 func isNotMountedError(err error) bool {

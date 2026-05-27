@@ -100,7 +100,7 @@ func (a *LocalAFSAdapter) PublishVersion(volumeID, version string, files []Skill
 		return "", "", err
 	}
 	if a.usesCLI() {
-		if err := a.Runner.Run("vol", "import", "--force", volumeID, versionRoot); err != nil {
+		if err := a.importVolumeSnapshot(volumeID, versionRoot); err != nil {
 			return "", "", err
 		}
 		if err := a.Runner.Run("cp", "create", volumeID, checkpointID, "--description", "LiveSkills "+version); err != nil {
@@ -162,6 +162,9 @@ func (a *LocalAFSAdapter) MountSkillVolume(volumeID, checkpointID, mountPoint, s
 			if isExistingAFSMount(err, volumeID, mountPoint) {
 				return nil
 			}
+			if existingPath, ok := existingMountedVolumePath(err, volumeID); ok {
+				return ensureCanonicalMountAlias(mountPoint, existingPath)
+			}
 			return err
 		}
 		return nil
@@ -184,10 +187,21 @@ func (a *LocalAFSAdapter) importStagedCheckpoint(volumeID, checkpointID string) 
 	if _, err := os.Stat(source); err != nil {
 		return err
 	}
-	if err := a.Runner.Run("vol", "import", "--force", volumeID, source); err != nil {
+	if err := a.importVolumeSnapshot(volumeID, source); err != nil {
 		return err
 	}
 	return a.Runner.Run("cp", "create", volumeID, checkpointID, "--description", "LiveSkills "+checkpointID)
+}
+
+func (a *LocalAFSAdapter) importVolumeSnapshot(volumeID, source string) error {
+	err := a.Runner.Run("vol", "import", volumeID, source)
+	if err == nil {
+		return nil
+	}
+	if !isExistingVolumeImportError(err) {
+		return err
+	}
+	return a.Runner.Run("vol", "import", "--force", volumeID, source)
 }
 
 func needsStagedCheckpointImport(err error) bool {
@@ -198,6 +212,16 @@ func needsStagedCheckpointImport(err error) bool {
 	return strings.Contains(message, "does not exist") || strings.Contains(message, "not found")
 }
 
+func isExistingVolumeImportError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "already exists") ||
+		strings.Contains(message, "rerun with --force") ||
+		strings.Contains(message, "re-run with --force")
+}
+
 func isExistingAFSMount(err error, volumeID, mountPoint string) bool {
 	if err == nil {
 		return false
@@ -206,6 +230,32 @@ func isExistingAFSMount(err error, volumeID, mountPoint string) bool {
 	return strings.Contains(message, "overlaps existing mount") &&
 		strings.Contains(message, strings.ToLower(volumeID)) &&
 		strings.Contains(message, strings.ToLower(filepath.Clean(mountPoint)))
+}
+
+func isMountedVolumeAtDifferentPath(err error, volumeID string) bool {
+	_, ok := existingMountedVolumePath(err, volumeID)
+	return ok
+}
+
+func existingMountedVolumePath(err error, volumeID string) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	message := err.Error()
+	lower := strings.ToLower(message)
+	if !strings.Contains(lower, strings.ToLower(volumeID)) || !strings.Contains(lower, "already mounted at ") {
+		return "", false
+	}
+	index := strings.LastIndex(lower, "already mounted at ")
+	if index < 0 {
+		return "", false
+	}
+	path := strings.TrimSpace(message[index+len("already mounted at "):])
+	path = strings.TrimRight(path, ". \t\r\n")
+	if path == "" {
+		return "", false
+	}
+	return filepath.Clean(path), true
 }
 
 func afsMode(env map[string]string) string {

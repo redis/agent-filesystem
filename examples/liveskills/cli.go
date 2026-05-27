@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -69,13 +69,9 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 	if command == "find" {
 		query := parsed.Flag("query")
 		if query == "" {
-			query = parsed.Pos(1)
+			query = strings.Join(parsed.Positionals[1:], " ")
 		}
-		searchQuery := query
-		if parsed.Bool("interactive") {
-			searchQuery = ""
-		}
-		result, err := app.List(searchQuery, false)
+		result, err := app.List(query, false)
 		if err != nil {
 			return writeError(err, stderr)
 		}
@@ -85,13 +81,24 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 			}
 			return 0
 		}
-		if parsed.Bool("interactive") {
+		runInteractive := parsed.Bool("interactive")
+		if !runInteractive && query == "" {
+			runInteractive = canRunInteractiveFind(stdin, stdout)
+		}
+		if runInteractive {
+			promptRows := result
+			if query != "" {
+				promptRows, err = app.List("", false)
+				if err != nil {
+					return writeError(err, stderr)
+				}
+			}
 			tty, cleanup, ok := interactiveFindTTY(stdin, stdout)
 			if !ok {
 				return writeError(fail("Interactive find requires a terminal. Run `liveskills find [query]` to print results."), stderr)
 			}
 			defer cleanup()
-			selected, ok, err := runInteractiveFind(tty, stdout, result, query, style)
+			selected, ok, err := runInteractiveFind(tty, stdout, promptRows, query, style)
 			if err != nil {
 				if errors.Is(err, errInteractiveInputUnavailable) {
 					printAvailableSkillList(stdout, result, query, style)
@@ -104,8 +111,19 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 				return 0
 			}
 			fmt.Fprintln(stdout)
+			options := installOptions(parsed)
+			if !parsed.Bool("yes") {
+				ok, err := confirmInteractiveFindInstall(tty, stdout, selected, options, hasExplicitAgents(parsed), parsed.Bool("global") || parsed.Bool("project"), homeForScan(app.Env), app.Env, style)
+				if err != nil {
+					return writeError(err, stderr)
+				}
+				if !ok {
+					fmt.Fprintln(stdout, "Installation cancelled")
+					return 0
+				}
+			}
 			fmt.Fprintf(stdout, "Installing %s from %s...\n\n", style.bold(skillSearchName(selected)), style.dim(selected.Name))
-			installResult, err := app.Add(selected.Name, installOptions(parsed))
+			installResult, err := app.Add(selected.Name, options)
 			return writeResult(err, false, installResult, stdout, stderr, func() {
 				title := "Skill added"
 				if installResult.Status == "unchanged" {
@@ -168,11 +186,13 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 		if err := validateAddSourceBeforePrompt(app.CWD, parsed.Pos(1)); err != nil {
 			return writeError(err, stderr)
 		}
-		if !parsed.Bool("json") {
+		options := installOptions(parsed)
+		interactiveConfirm := !parsed.Bool("yes") && shouldPromptForConfirmation(stdin, stdout)
+		if !parsed.Bool("json") && !interactiveConfirm {
 			printSecurityAssessment(stdout, parsed.Pos(1))
 		}
-		if !parsed.Bool("yes") && shouldPromptForConfirmation(stdin, stdout) {
-			ok, err := confirmInstall(stdin, stdout)
+		if interactiveConfirm {
+			ok, err := confirmInteractiveInstall(stdin, stdout, parsed.Pos(1), options, hasExplicitAgents(parsed), parsed.Bool("global") || parsed.Bool("project"), homeForScan(app.Env), app.Env, style)
 			if err != nil {
 				return writeError(err, stderr)
 			}
@@ -181,7 +201,7 @@ func runCLIWithInput(argv []string, cwd string, env map[string]string, stdin *os
 				return 0
 			}
 		}
-		results, err := app.AddMany(parsed.Pos(1), installOptions(parsed))
+		results, err := app.AddMany(parsed.Pos(1), options)
 		if err != nil {
 			return writeError(err, stderr)
 		}
@@ -259,6 +279,10 @@ func installOptions(parsed ParsedArgs) map[string]string {
 	}
 }
 
+func hasExplicitAgents(parsed ParsedArgs) bool {
+	return parsed.Flag("agent") != "" || len(parsed.Values("agent")) > 0
+}
+
 func installationRows(result *InstallResult) [][2]string {
 	return [][2]string{
 		{"Skill", result.Name},
@@ -315,12 +339,291 @@ func shouldPromptForConfirmation(stdin *os.File, stdout io.Writer) bool {
 
 func confirmInstall(stdin *os.File, stdout io.Writer) (bool, error) {
 	fmt.Fprint(stdout, "Proceed with installation? [Y/n] ")
-	line, err := bufio.NewReader(stdin).ReadString('\n')
-	if err != nil && err != io.EOF {
+	line, err := readPromptLine(stdin)
+	if err != nil {
 		return false, err
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	return answer == "" || answer == "y" || answer == "yes", nil
+}
+
+func confirmInteractiveFindInstall(stdin *os.File, stdout io.Writer, row SkillListItem, options map[string]string, agentsAlreadyChosen bool, scopeAlreadyChosen bool, home string, env map[string]string, style outputStyle) (bool, error) {
+	fmt.Fprintln(stdout, "Install Skill")
+	fmt.Fprintf(stdout, "%-12s %s\n", "Skill", row.Name)
+	if row.Version != "" && row.Version != "-" {
+		fmt.Fprintf(stdout, "%-12s %s\n", "Version", row.Version)
+	}
+	if strings.TrimSpace(row.Description) != "" {
+		fmt.Fprintf(stdout, "%-12s %s\n", "Does", row.Description)
+	}
+	fmt.Fprintln(stdout)
+	fmt.Fprintln(stdout, style.dim("Project installs are written under this project and can be shared with the repo."))
+	fmt.Fprintln(stdout, style.dim("Global installs are written under your home directory and are available across projects."))
+	fmt.Fprintln(stdout)
+
+	return confirmInteractiveInstall(stdin, stdout, row.Name, options, agentsAlreadyChosen, scopeAlreadyChosen, home, env, style)
+}
+
+func confirmInteractiveInstall(stdin *os.File, stdout io.Writer, assessmentSource string, options map[string]string, agentsAlreadyChosen bool, scopeAlreadyChosen bool, home string, env map[string]string, style outputStyle) (bool, error) {
+	if !agentsAlreadyChosen {
+		agents, ok, err := promptInstallAgents(stdin, stdout, home, env, style)
+		if err != nil || !ok {
+			return ok, err
+		}
+		options["agent"] = ""
+		options["agents"] = strings.Join(agents, "\n")
+	}
+	if !scopeAlreadyChosen {
+		scope, ok, err := promptInstallScope(stdin, stdout)
+		if err != nil || !ok {
+			return ok, err
+		}
+		if scope == scopeGlobal {
+			options["global"] = "true"
+		} else {
+			options["global"] = ""
+		}
+	}
+	if options["copy"] != "true" && installTargetsUseMultipleRoots(options, home, env) {
+		mode, ok, err := promptInstallMode(stdin, stdout)
+		if err != nil || !ok {
+			return ok, err
+		}
+		if mode == installModeCopy {
+			options["copy"] = "true"
+		}
+	}
+	printInteractiveInstallSummary(stdout, options, home, env)
+	printSecurityAssessment(stdout, assessmentSource)
+	return confirmInstall(stdin, stdout)
+}
+
+func promptInstallAgents(stdin *os.File, stdout io.Writer, home string, env map[string]string, style outputStyle) ([]string, bool, error) {
+	choices := commonAgentChoices(home, env)
+	for {
+		fmt.Fprintln(stdout, "Target agents")
+		for index, agent := range choices {
+			fmt.Fprintf(stdout, "  %d. %-12s %s\n", index+1, agent.DisplayName, style.dim(agentInstallHint(agent)))
+		}
+		fmt.Fprintln(stdout, "  all. All supported agents")
+		fmt.Fprint(stdout, "Which agents do you want to install to? [1] ")
+		line, err := readPromptLine(stdin)
+		if err != nil {
+			return nil, false, err
+		}
+		selectors, ok, parseErr := parseAgentPromptSelection(line, choices, home, env)
+		if parseErr == nil {
+			return selectors, ok, nil
+		}
+		fmt.Fprintln(stdout, parseErr.Error())
+	}
+}
+
+func commonAgentChoices(home string, env map[string]string) []AgentDefinition {
+	preferred := []string{"codex", "claude-code", "cursor", "gemini-cli", "opencode"}
+	choices := make([]AgentDefinition, 0, len(preferred))
+	for _, name := range preferred {
+		if agent, ok := AgentDefinitionByName(home, env, name); ok {
+			choices = append(choices, agent)
+		}
+	}
+	return choices
+}
+
+func agentInstallHint(agent AgentDefinition) string {
+	project := defaultString(agent.ProjectDir, "no project target")
+	global := "no global target"
+	if agent.GlobalDir != "" {
+		global = homeRelative(agent.GlobalDir)
+	}
+	return project + " / " + global
+}
+
+func parseAgentPromptSelection(input string, choices []AgentDefinition, home string, env map[string]string) ([]string, bool, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return []string{"codex"}, true, nil
+	}
+	lower := strings.ToLower(input)
+	switch lower {
+	case "q", "quit", "cancel", "n", "no":
+		return nil, false, nil
+	case "*", "all":
+		return []string{"*"}, true, nil
+	}
+	parts := strings.FieldsFunc(input, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t'
+	})
+	if len(parts) == 0 {
+		return []string{"codex"}, true, nil
+	}
+	selectors := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if index, err := strconv.Atoi(part); err == nil {
+			if index < 1 || index > len(choices) {
+				return nil, false, fail("Agent choice %d is not listed.", index)
+			}
+			name := choices[index-1].Name
+			if !seen[name] {
+				seen[name] = true
+				selectors = append(selectors, name)
+			}
+			continue
+		}
+		agent, ok := AgentDefinitionByName(home, env, part)
+		if !ok {
+			return nil, false, fail("Unsupported agent %q. Choose numbers, names, all, or quit.", part)
+		}
+		if !seen[agent.Name] {
+			seen[agent.Name] = true
+			selectors = append(selectors, agent.Name)
+		}
+	}
+	if len(selectors) == 0 {
+		return nil, false, fail("Choose at least one agent, all, or quit.")
+	}
+	return selectors, true, nil
+}
+
+func printInteractiveInstallSummary(stdout io.Writer, options map[string]string, home string, env map[string]string) {
+	scope := installScope(options)
+	selectors := installAgentSelectors(options)
+	agents, err := AgentDefinitionsForSelectors(home, env, selectors)
+	names := selectors
+	if err == nil {
+		names = make([]string, 0, len(agents))
+		for _, agent := range agents {
+			names = append(names, agent.DisplayName)
+		}
+	}
+	mode := "Symlink"
+	if options["copy"] == "true" {
+		mode = "Copy"
+	}
+	fmt.Fprintln(stdout, "Installation Summary")
+	fmt.Fprintf(stdout, "%-12s %s\n", "Scope", scope)
+	fmt.Fprintf(stdout, "%-12s %s\n", "Agents", formatPromptList(names, 5))
+	fmt.Fprintf(stdout, "%-12s %s\n", "Mode", mode)
+	fmt.Fprintln(stdout)
+}
+
+func installTargetsUseMultipleRoots(options map[string]string, home string, env map[string]string) bool {
+	selectors := installAgentSelectors(options)
+	agents, err := AgentDefinitionsForSelectors(home, env, selectors)
+	if err != nil {
+		return false
+	}
+	scope := installScope(options)
+	roots := map[string]bool{}
+	for _, agent := range agents {
+		root := agent.ProjectDir
+		if scope == scopeGlobal {
+			root = agent.GlobalDir
+		}
+		if root == "" {
+			continue
+		}
+		roots[root] = true
+		if len(roots) > 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func installAgentSelectors(options map[string]string) []string {
+	selectors := optionList(options, "agents")
+	if len(selectors) == 0 && options["agent"] != "" {
+		selectors = append(selectors, options["agent"])
+	}
+	if len(selectors) == 0 {
+		selectors = []string{"codex"}
+	}
+	return selectors
+}
+
+func formatPromptList(values []string, maxShow int) string {
+	if len(values) == 0 {
+		return "none"
+	}
+	if len(values) <= maxShow {
+		return strings.Join(values, ", ")
+	}
+	return strings.Join(values[:maxShow], ", ") + fmt.Sprintf(" +%d more", len(values)-maxShow)
+}
+
+func promptInstallMode(stdin *os.File, stdout io.Writer) (string, bool, error) {
+	for {
+		fmt.Fprintln(stdout, "Installation method")
+		fmt.Fprintln(stdout, "  s. Symlink (recommended) - one canonical copy, easy updates")
+		fmt.Fprintln(stdout, "  c. Copy - independent copies in each agent folder")
+		fmt.Fprint(stdout, "Installation method? [S]ymlink/[c]opy/[q]uit: ")
+		line, err := readPromptLine(stdin)
+		if err != nil {
+			return "", false, err
+		}
+		answer := strings.ToLower(strings.TrimSpace(line))
+		switch answer {
+		case "", "s", "symlink":
+			return installModeSymlink, true, nil
+		case "c", "copy":
+			return installModeCopy, true, nil
+		case "q", "quit", "cancel", "n", "no":
+			return "", false, nil
+		default:
+			fmt.Fprintln(stdout, "Choose symlink, copy, or quit.")
+		}
+	}
+}
+
+func promptInstallScope(stdin *os.File, stdout io.Writer) (string, bool, error) {
+	for {
+		fmt.Fprint(stdout, "Installation scope? [P]roject/[g]lobal/[q]uit: ")
+		line, err := readPromptLine(stdin)
+		if err != nil {
+			return "", false, err
+		}
+		answer := strings.ToLower(strings.TrimSpace(line))
+		switch answer {
+		case "", "p", "project":
+			return scopeProject, true, nil
+		case "g", "global":
+			return scopeGlobal, true, nil
+		case "q", "quit", "cancel", "n", "no":
+			return "", false, nil
+		default:
+			fmt.Fprintln(stdout, "Choose project, global, or quit.")
+		}
+	}
+}
+
+func readPromptLine(stdin *os.File) (string, error) {
+	var builder strings.Builder
+	buffer := make([]byte, 1)
+	for {
+		n, err := stdin.Read(buffer)
+		if n > 0 {
+			switch buffer[0] {
+			case '\n':
+				return builder.String(), nil
+			case '\r':
+				continue
+			default:
+				builder.WriteByte(buffer[0])
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return builder.String(), nil
+			}
+			return "", err
+		}
+	}
 }
 
 func writeResult(err error, asJSON bool, result any, stdout io.Writer, stderr io.Writer, render func()) int {

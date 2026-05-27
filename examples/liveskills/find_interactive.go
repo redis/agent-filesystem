@@ -27,11 +27,11 @@ func interactiveFindTTY(stdin *os.File, stdout io.Writer) (*os.File, func(), boo
 	if !ok || !isTerminalFile(out) {
 		return nil, nil, false
 	}
-	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil && isTerminalFile(tty) {
-		return tty, func() { _ = tty.Close() }, true
-	}
 	if stdin != nil && isTerminalFile(stdin) {
 		return stdin, func() {}, true
+	}
+	if tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil && isTerminalFile(tty) {
+		return tty, func() { _ = tty.Close() }, true
 	}
 	return nil, nil, false
 }
@@ -48,8 +48,9 @@ func runInteractiveFind(stdin *os.File, stdout io.Writer, rows []SkillListItem, 
 	lastLines := 0
 	render := func() []SkillListItem {
 		matches := filterSkillRows(rows, query)
-		if selected >= len(matches) {
-			selected = len(matches) - 1
+		visible := visibleSkillRows(matches)
+		if selected >= len(visible) {
+			selected = len(visible) - 1
 		}
 		if selected < 0 {
 			selected = 0
@@ -59,52 +60,27 @@ func runInteractiveFind(stdin *os.File, stdout io.Writer, rows []SkillListItem, 
 	}
 
 	buffer := make([]byte, 1)
-	n, readErr := stdin.Read(buffer)
-	hasPending := false
-	var pending byte
-	if readErr != nil {
-		if readErr == io.EOF {
-			return SkillListItem{}, false, errInteractiveInputUnavailable
-		}
-		return SkillListItem{}, false, readErr
-	}
-	if n > 0 {
-		hasPending = true
-		pending = buffer[0]
-	}
-
 	fmt.Fprint(stdout, "\x1b[?25l")
 	defer fmt.Fprint(stdout, "\x1b[?25h")
 
 	matches := render()
-	receivedInput := false
 	for {
 		var input byte
-		if hasPending {
-			input = pending
-			hasPending = false
-		} else {
-			n, readErr := stdin.Read(buffer)
-			if readErr != nil {
-				if readErr == io.EOF {
-					if !receivedInput {
-						return SkillListItem{}, false, errInteractiveInputUnavailable
-					}
-					fmt.Fprint(stdout, "\r\n")
-					return SkillListItem{}, false, nil
-				}
-				return SkillListItem{}, false, readErr
-			}
-			if n == 0 {
+		n, readErr := stdin.Read(buffer)
+		if readErr != nil {
+			if readErr == io.EOF {
 				continue
 			}
-			input = buffer[0]
+			return SkillListItem{}, false, readErr
 		}
-		receivedInput = true
+		if n == 0 {
+			continue
+		}
+		input = buffer[0]
 		switch input {
-		case 3, 27:
+		case 3, 4, 27:
 			if input == 27 {
-				if handled := readEscapeSequence(stdin, &selected, len(matches)); handled {
+				if handled := readEscapeSequence(stdin, &selected, len(visibleSkillRows(matches))); handled {
 					matches = render()
 					continue
 				}
@@ -113,10 +89,11 @@ func runInteractiveFind(stdin *os.File, stdout io.Writer, rows []SkillListItem, 
 			return SkillListItem{}, false, nil
 		case '\r', '\n':
 			fmt.Fprint(stdout, "\r\n")
-			if len(matches) == 0 {
+			selectable := visibleSkillRows(matches)
+			if len(selectable) == 0 {
 				return SkillListItem{}, false, nil
 			}
-			return matches[selected], true, nil
+			return selectable[selected], true, nil
 		case 127, 8:
 			if query != "" {
 				query = query[:len(query)-1]
@@ -223,8 +200,8 @@ func findPromptLines(query string, rows []SkillListItem, selected int, style out
 
 func filterSkillRows(rows []SkillListItem, query string) []SkillListItem {
 	query = strings.ToLower(strings.TrimSpace(query))
-	if query == "" {
-		return append([]SkillListItem(nil), rows...)
+	if len(query) < 2 {
+		return nil
 	}
 	filtered := []SkillListItem{}
 	for _, row := range rows {

@@ -173,6 +173,136 @@ func TestInteractiveFindPromptFiltersAndMarksSelection(t *testing.T) {
 	}
 }
 
+func TestInteractiveFindWaitsForSearchAndShowsTopTen(t *testing.T) {
+	rows := make([]SkillListItem, 12)
+	for index := range rows {
+		name := "Skill " + string(rune('a'+index))
+		rows[index] = SkillListItem{Name: "acme/" + slugify(name), DisplayName: name, Version: "0.1.0"}
+	}
+
+	if filtered := filterSkillRows(rows, "s"); len(filtered) != 0 {
+		t.Fatalf("expected short query to withhold results, got %#v", filtered)
+	}
+	filtered := filterSkillRows(rows, "skill")
+	lines := findPromptLines("skill", filtered, 0, outputStyle{})
+	output := strings.Join(lines, "\n")
+	if !strings.Contains(output, "skill-j") {
+		t.Fatalf("expected tenth match in prompt:\n%s", output)
+	}
+	if strings.Contains(output, "skill-k") || strings.Contains(output, "skill-l") {
+		t.Fatalf("expected prompt to cap visible results at ten:\n%s", output)
+	}
+}
+
+func TestInteractiveFindInstallConfirmationSelectsScope(t *testing.T) {
+	input := promptInput(t, "\ng\ny\n")
+	var output bytes.Buffer
+	options := map[string]string{}
+	home := t.TempDir()
+	row := SkillListItem{
+		Name:        "acme/review-skill",
+		DisplayName: "Review Skill",
+		Description: "Reviews code for maintainability before handoff.",
+		Version:     "0.1.0",
+	}
+
+	ok, err := confirmInteractiveFindInstall(input, &output, row, options, false, false, home, map[string]string{"HOME": home}, outputStyle{})
+	must(t, err)
+	if !ok {
+		t.Fatalf("expected confirmation")
+	}
+	if options["global"] != "true" {
+		t.Fatalf("expected global scope option, got %#v", options)
+	}
+	if options["agents"] != "codex" {
+		t.Fatalf("expected default codex agent, got %#v", options)
+	}
+	for _, expected := range []string{
+		"Install Skill",
+		"Skill        acme/review-skill",
+		"Does         Reviews code for maintainability before handoff.",
+		"Which agents do you want to install to?",
+		"Installation scope?",
+		"Agents       Codex",
+		"Security Risk Assessments",
+		"Proceed with installation?",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("expected confirmation output to contain %q\noutput:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestInteractiveFindInstallConfirmationCanCancelAtScope(t *testing.T) {
+	input := promptInput(t, "\nq\n")
+	var output bytes.Buffer
+	options := map[string]string{}
+	home := t.TempDir()
+
+	ok, err := confirmInteractiveFindInstall(input, &output, SkillListItem{Name: "acme/nope"}, options, false, false, home, map[string]string{"HOME": home}, outputStyle{})
+	must(t, err)
+	if ok {
+		t.Fatalf("expected cancelled install")
+	}
+	if _, exists := options["global"]; exists {
+		t.Fatalf("cancelled scope should not set options: %#v", options)
+	}
+	if strings.Contains(output.String(), "Security Risk Assessments") {
+		t.Fatalf("cancelled scope should not continue to security confirmation:\n%s", output.String())
+	}
+}
+
+func TestPromptInstallAgentsAcceptsMultipleChoices(t *testing.T) {
+	home := t.TempDir()
+	input := promptInput(t, "1,2\n")
+	var output bytes.Buffer
+
+	agents, ok, err := promptInstallAgents(input, &output, home, map[string]string{"HOME": home}, outputStyle{})
+	must(t, err)
+	if !ok {
+		t.Fatalf("expected agent selection")
+	}
+	if strings.Join(agents, ",") != "codex,claude-code" {
+		t.Fatalf("unexpected agents: %#v", agents)
+	}
+	for _, expected := range []string{
+		"Target agents",
+		"Codex",
+		"Claude Code",
+		"Which agents do you want to install to?",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("expected agent prompt to contain %q\noutput:\n%s", expected, output.String())
+		}
+	}
+}
+
+func TestInteractiveInstallPromptsForModeWithMultipleAgentRoots(t *testing.T) {
+	home := t.TempDir()
+	input := promptInput(t, "p\nc\ny\n")
+	var output bytes.Buffer
+	options := map[string]string{"agents": "codex\nclaude-code"}
+
+	ok, err := confirmInteractiveInstall(input, &output, "acme/review-skill", options, true, false, home, map[string]string{"HOME": home}, outputStyle{})
+	must(t, err)
+	if !ok {
+		t.Fatalf("expected confirmation")
+	}
+	if options["copy"] != "true" {
+		t.Fatalf("expected copy mode option, got %#v", options)
+	}
+	for _, expected := range []string{
+		"Installation method",
+		"Installation method? [S]ymlink/[c]opy/[q]uit:",
+		"Mode         Copy",
+		"Agents       Codex, Claude Code",
+	} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("expected mode prompt to contain %q\noutput:\n%s", expected, output.String())
+		}
+	}
+}
+
 func TestInteractiveFindRequiresTerminal(t *testing.T) {
 	fixture := newFixture(t)
 	requireStatus(t, fixture.run("publish", fixture.skill("React Skill"), "--owner", "acme"), 0)
@@ -755,7 +885,7 @@ func TestAFSCLIAdapterImportsCheckpointsAndMountsVolumes(t *testing.T) {
 	if len(runner.calls) != 4 {
 		t.Fatalf("unexpected calls: %#v", runner.calls)
 	}
-	requireAFSCall(t, runner.calls[0], "vol", "import", "--force", "skill_acme_demo")
+	requireAFSCall(t, runner.calls[0], "vol", "import", "skill_acme_demo")
 	requireAFSCall(t, runner.calls[1], "cp", "create", "skill_acme_demo", checkpoint, "--description", "LiveSkills 0.1.0")
 	requireAFSCall(t, runner.calls[2], "cp", "restore", "skill_acme_demo", checkpoint)
 	requireAFSCall(t, runner.calls[3], "vol", "mount", "--yes", "--session")
@@ -791,10 +921,41 @@ func TestAFSCLIAdapterImportsStagedCheckpointWhenVolumeIsMissing(t *testing.T) {
 		t.Fatalf("unexpected calls: %#v", runner.calls)
 	}
 	requireAFSCall(t, runner.calls[0], "cp", "restore", "skill_acme_demo", "chk_demo")
-	requireAFSCall(t, runner.calls[1], "vol", "import", "--force", "skill_acme_demo", staged)
+	requireAFSCall(t, runner.calls[1], "vol", "import", "skill_acme_demo", staged)
 	requireAFSCall(t, runner.calls[2], "cp", "create", "skill_acme_demo", "chk_demo", "--description", "LiveSkills chk_demo")
 	requireAFSCall(t, runner.calls[3], "cp", "restore", "skill_acme_demo", "chk_demo")
 	requireAFSCall(t, runner.calls[4], "vol", "mount", "--yes", "--session")
+}
+
+func TestAFSCLIAdapterRetriesImportWithForceWhenVolumeExists(t *testing.T) {
+	root := t.TempDir()
+	runner := &scriptedAFSRunner{
+		failures: map[int]error{
+			0: fail("afs vol import skill_acme_demo /tmp/staged failed: volume \"skill_acme_demo\" already exists; rerun with --force to replace it"),
+		},
+	}
+	adapter := &LocalAFSAdapter{
+		Home:   filepath.Join(root, "home"),
+		Root:   filepath.Join(root, "home", "afs"),
+		Mode:   afsModeCLI,
+		Runner: runner,
+	}
+	files := []SkillFile{{
+		Path:    "SKILL.md",
+		Content: []byte("# Demo\n"),
+		Hash:    hashText("# Demo\n"),
+	}}
+
+	checkpoint, _, err := adapter.PublishVersion("skill_acme_demo", "0.2.0", files)
+	must(t, err)
+
+	if len(runner.calls) != 3 {
+		t.Fatalf("unexpected calls: %#v", runner.calls)
+	}
+	staged := adapter.versionPath("skill_acme_demo", checkpoint)
+	requireAFSCall(t, runner.calls[0], "vol", "import", "skill_acme_demo", staged)
+	requireAFSCall(t, runner.calls[1], "vol", "import", "--force", "skill_acme_demo", staged)
+	requireAFSCall(t, runner.calls[2], "cp", "create", "skill_acme_demo", checkpoint, "--description", "LiveSkills 0.2.0")
 }
 
 func TestEnsureRelativeSkillSymlinkCreatesRelativeLink(t *testing.T) {
@@ -933,6 +1094,77 @@ func TestCLIWorkspaceHelpersUseAFSWorkspaceAndVolumeCalls(t *testing.T) {
 		t.Fatalf("unexpected attach call: %#v", runner.calls[2])
 	}
 	requireAFSCall(t, runner.calls[3], "vol", "unmount", canonical)
+}
+
+func TestCLIWorkspaceMountAllowsEmptyHelperWorkspace(t *testing.T) {
+	root := t.TempDir()
+	mountPoint := filepath.Join(root, "skills-workspace")
+	runner := &scriptedAFSRunner{
+		failures: map[int]error{
+			1: fail("afs ws mount liveskills_project_demo %s failed: Error\n\nWorkspace liveskills_project_demo has no attached volumes.", mountPoint),
+		},
+	}
+	adapter := &LocalAFSAdapter{
+		Home:   filepath.Join(root, "home"),
+		Root:   filepath.Join(root, "home", "afs"),
+		Mode:   afsModeCLI,
+		Runner: runner,
+	}
+
+	workspace, err := adapter.EnsureSkillsWorkspace(scopeProject, "demo")
+	must(t, err)
+	workspace, err = adapter.MountSkillsWorkspace(workspace, mountPoint)
+	must(t, err)
+
+	if workspace.Root != mountPoint {
+		t.Fatalf("unexpected workspace root: %s", workspace.Root)
+	}
+	if len(runner.calls) != 2 {
+		t.Fatalf("unexpected calls: %#v", runner.calls)
+	}
+	requireAFSCall(t, runner.calls[0], "ws", "create", "liveskills_project_demo")
+	requireAFSCall(t, runner.calls[1], "ws", "mount", "liveskills_project_demo", mountPoint)
+}
+
+func TestCLIWorkspaceAttachAliasesVolumeMountedAtOtherCanonicalPath(t *testing.T) {
+	root := t.TempDir()
+	existingMount := filepath.Join(root, "project", ".liveskills", "mount", "skills", "demo")
+	writeLocalSkill(t, existingMount, "Demo")
+	workspace := SkillsWorkspace{
+		ID:    "liveskills_global_global",
+		Name:  "global",
+		Scope: scopeGlobal,
+		Root:  filepath.Join(root, "home", ".liveskills", "mount"),
+	}
+	canonical := canonicalSkillPath(workspace.Root, "demo")
+	runner := &scriptedAFSRunner{
+		failures: map[int]error{
+			0: fail("afs vol mount --yes --session liveskills-ws-demo skill_acme_demo %s failed: Error\n\nWorkspace skill_acme_demo is already mounted at %s.", canonical, existingMount),
+		},
+	}
+	adapter := &LocalAFSAdapter{
+		Home:   filepath.Join(root, "home"),
+		Root:   filepath.Join(root, "home", "afs"),
+		Mode:   afsModeCLI,
+		Runner: runner,
+	}
+
+	resolved, err := adapter.AttachSkillVolume(workspace, "skill_acme_demo", "", "demo")
+	must(t, err)
+
+	if resolved != canonical {
+		t.Fatalf("unexpected canonical path: %s", resolved)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("unexpected calls: %#v", runner.calls)
+	}
+	requireAFSCall(t, runner.calls[0], "vol", "mount", "--yes", "--session")
+	if !SkillSymlinkPointsTo(canonical, existingMount) {
+		t.Fatalf("expected canonical alias %s to point at %s", canonical, existingMount)
+	}
+	if readFile(t, filepath.Join(canonical, "SKILL.md")) == "" {
+		t.Fatalf("expected canonical alias to expose skill files")
+	}
 }
 
 func TestScanFindsSkillsAcrossAgentLocations(t *testing.T) {
@@ -1079,6 +1311,18 @@ func (f *fixture) run(args ...string) cliResult {
 	var stderr bytes.Buffer
 	status := runCLI(args, f.cwd, f.env, &stdout, &stderr)
 	return cliResult{status: status, stdout: stdout.String(), stderr: stderr.String()}
+}
+
+func promptInput(t *testing.T, text string) *os.File {
+	t.Helper()
+	file, err := os.CreateTemp(t.TempDir(), "prompt-input-*")
+	must(t, err)
+	_, err = file.WriteString(text)
+	must(t, err)
+	_, err = file.Seek(0, 0)
+	must(t, err)
+	t.Cleanup(func() { _ = file.Close() })
+	return file
 }
 
 func (f *fixture) skill(name string) string {
