@@ -40,6 +40,7 @@ make clean          # remove compiled artifacts
 make web-install    # install UI dependencies into ui/
 make web-build      # build the Vite UI
 make web-dev        # run the control plane and UI together
+make templates-generate  # regenerate UI template data from templates/
 
 # CLI lifecycle helpers
 ./afs status
@@ -63,6 +64,9 @@ cd ui && npm run lint
 - Control-plane/backend changes: run `make test` or targeted tests under `./internal/...` and `./deploy/...`.
 - Mount changes: run `cd mount && go test ./...`.
 - UI changes: run `cd ui && npm run build` and the most relevant `npm run test` scope you can.
+- Template changes: run `make templates-generate`, then the relevant UI build/test command if generated template data changes.
+- TypeScript SDK changes: run `npm --prefix sdk/typescript run check` and `npm --prefix sdk/typescript test`.
+- Python SDK changes: run `PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests`.
 - Cross-surface web changes: prefer `make web-dev` to verify the control plane and Vite UI together.
 - If you touch embedded UI behavior, verify with a path that rebuilds the UI assets, not just raw Go compilation.
 - Use `./scripts/test_harness.py` when you need to discover the current runnable suites, package tests, benchmarks, or smoke scripts before picking a validation command.
@@ -142,10 +146,15 @@ This repo has two active product layers:
 Useful supporting areas:
 
 - `deploy/`: deployment-specific notes and helpers.
+- `examples/`: live examples, sample configs, and reference plugin packages.
+- `plugins/`: installable client plugin packages, including the baseline AFS plugin.
 - `sandbox/`: isolated process runner.
+- `sdk/`: TypeScript and Python SDKs for the control plane and agent filesystem mounts.
 - `scripts/`: helper scripts for local development and benchmarks.
 - `skills/`: installable skill docs for agent use.
+- `templates/`: workspace templates, seed files, skills, commands, and manifests that feed generated UI template data.
 - `tests/`: benchmark helpers and fixtures for the active workspace-first surfaces.
+- `third_party/go-nfs/`: vendored NFS library used by the NFS server binary.
 
 Future work and active plans live under root `plans/`. Raw benchmark outputs
 should stay outside the repo.
@@ -162,8 +171,13 @@ The most important implementation seams are:
 - `cmd/afs/`: CLI command surface, setup flow, sync lifecycle, local UX.
 - `cmd/afs-control-plane/`: HTTP control plane binary.
 - `internal/controlplane/`: workspace, checkpoint, session, catalog, and HTTP service logic.
+- `internal/mcptools/` and `internal/mcpproto/`: shared MCP contracts and stdio/hosted tool support.
+- `internal/queryindex/`, `internal/querysearch/`, `internal/queryvector/`, and
+  `internal/queryembedding/`: keyword query projection, fallback ranking,
+  semantic retrieval, and embedding provider/runtime logic.
 - `internal/worktree/`: manifest scanning and local materialization helpers.
 - `mount/internal/client/`: Redis-backed filesystem client used by FUSE/NFS.
+- `sdk/`: TypeScript and Python agent-facing SDKs.
 - `ui/`: TanStack Router + React control-plane UI.
 
 ## Lessons Learned
@@ -282,10 +296,12 @@ The most important implementation seams are:
   metadata lookup by display name; cloud session Redis may expose the live root
   while metadata lives behind the control plane.
 - Preserve the two-command search UX: `grep` is exact text evidence and `query`
-  is the powerful ranked retrieval command. `query` defaults to hybrid + rerank,
-  supports `lex:`, `vec:`, `hyde:`, and `intent:` documents, and uses
-  `--keyword` / `--semantic` for narrower modes. Do not reintroduce public
-  `search` or `vsearch` commands unless the product direction changes again.
+  is the powerful ranked retrieval command. Plain `query` sends hybrid mode
+  with rerank auto, currently falls back to keyword-ranked results until hybrid
+  vector/rerank is complete, supports `lex:`, `vec:`, `hyde:`, and `intent:`
+  documents, and uses `--keyword` / `--semantic` for narrower modes. Do not
+  reintroduce public `search` or `vsearch` commands unless the product direction
+  changes again.
 - On the Volume details page, the merged file/lifecycle timeline is titled
   `History`. Do not expose `Changelog` as a peer tab or section title there.
 - Semantic query embeddings must use a real provider. QMD uses a local GGUF
@@ -308,9 +324,9 @@ The most important implementation seams are:
 - Semantic embedding backfill must batch provider requests. Query chunks are
   individually capped, but a large workspace can still exceed OpenAI's total
   tokens-per-request limit if every pending chunk is embedded at once.
-- Semantic query can take longer than normal control-plane calls on first
-  provider backfill. Keep query HTTP client timeouts separate from quick
-  metadata/status calls so first-run embedding work does not fail at 30s.
+- Semantic index creation/backfill can take longer than normal control-plane
+  calls. Keep query HTTP client timeouts separate from quick metadata/status
+  calls so explicit embedding work does not fail at 30s.
 - Semantic query must not backfill embeddings as a side effect. Imports should
   start embedding creation in the control plane when the global provider is
   available, and existing workspaces should use an explicit query index create

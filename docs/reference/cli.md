@@ -484,12 +484,13 @@ model cache for the local provider path. Redis vector KNN is used when
 available, with a direct vector-ranking fallback. Use `grep` when you know the
 exact text.
 
-Existing workspaces are backfilled automatically on first query when Redis
-Search is available. `query index status --json` can also catch up pending work
-while it inspects files, ready chunks, pending work, skipped files, and
-unindexed files. Use `query index rebuild --wait` to force an immediate
-backfill. Use `query index clean --yes` to clear generated query chunks and
-restart indexing from scratch without changing workspace files.
+Semantic queries read existing embedding indexes. Imports start embedding
+creation in the background, and existing workspaces can be prepared with
+`query index create --embeddings --wait`. `query index status --json` inspects
+files, ready chunks, pending work, skipped files, and unindexed files. Use
+`query index rebuild --wait` to force an immediate keyword backfill. Use
+`query index clean --yes` to clear generated query chunks and restart indexing
+from scratch without changing workspace files.
 
 Flags:
 

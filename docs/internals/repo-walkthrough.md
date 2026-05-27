@@ -1,6 +1,6 @@
 # Agent Filesystem Repo Walkthrough
 
-This guide is the "what lives where" map for the current `agent-filesystem` working tree as of 2026-05-05.
+This guide is the "what lives where" map for the current `agent-filesystem` working tree as of 2026-05-27.
 
 ## Scope
 
@@ -19,9 +19,13 @@ AFS currently has two active implementation layers:
 Supporting areas:
 
 - `deploy/`: deployment-specific notes and helpers.
+- `examples/`: live examples, sample configs, and reference plugin packages.
+- `plugins/`: installable client plugin packages, including the baseline AFS plugin.
 - `sandbox/`: isolated process runner service.
+- `sdk/`: TypeScript and Python SDKs for the control plane and agent filesystem mounts.
 - `scripts/`: local development and benchmark helpers.
 - `skills/`: agent-facing skill docs.
+- `templates/`: workspace templates, seed files, skills, commands, and manifests.
 - `tests/`: benchmark helpers and fixtures for active workspace-first flows.
 - `third_party/go-nfs/`: vendored upstream NFS library used by the NFS server binary.
 
@@ -31,13 +35,16 @@ Supporting areas:
 - `deploy/`: deployment helpers and platform-specific notes.
 - `docs/`: current user docs, API contracts, architecture notes, operations
   notes, and repo reference material.
-- `examples/`: example configs and migration guides.
+- `examples/`: live examples, sample configs, and reference plugin packages.
 - `internal/`: shared workspace/control-plane packages used by the top-level commands.
 - `mount/`: Go mount and NFS serving stack.
 - `plans/`: active implementation plans, future-work notes, and archived plans.
+- `plugins/`: installable client plugin packages.
 - `sandbox/`: HTTP and MCP process sandbox.
 - `scripts/`: helper scripts for web-dev and benchmarks.
+- `sdk/`: TypeScript and Python SDK packages.
 - `skills/`: installable agent skill docs and assets.
+- `templates/`: workspace template manifests, seed content, skills, and commands.
 - `tests/`: benchmark tools and fixtures.
 - `third_party/`: vendored dependencies, currently `go-nfs`.
 - `ui/`: React/TanStack control-plane UI.
@@ -80,9 +87,19 @@ Supporting areas:
 
 - RediSearch index helpers used by grep and workspace catalog.
 
+### `internal/queryindex/`, `internal/querysearch/`, `internal/queryvector/`, `internal/queryembedding/`
+
+- Keyword query projection, direct keyword fallback ranking, semantic retrieval,
+  and embedding provider/runtime logic.
+
 ### `internal/mcpproto/`
 
 - Shared MCP protocol types used by both the CLI and hosted MCP surfaces.
+
+### `internal/mcptools/`
+
+- Shared MCP tool contracts and helpers used by the CLI MCP server and hosted
+  control-plane MCP surfaces.
 
 ### `internal/version/`
 
@@ -103,6 +120,11 @@ Supporting areas:
 ### `sandbox/`
 
 - Isolated process runner service and CLI.
+
+### `sdk/`
+
+- TypeScript and Python SDKs for hosted control-plane APIs and agent filesystem
+  mounts.
 
 ## Notes And Working Material
 
@@ -127,6 +149,12 @@ Supporting areas:
 - `tests/bench_afs_grep.py`: benchmark comparing `afs fs grep` against mounted GNU `grep`.
 - `tests/create-test-memories`: shell helper that generates realistic markdown-memory trees.
 - `tests/bench/` and `tests/bench_md_workloads/`: synthetic workload and benchmark programs.
+
+### `plugins/` and `templates/`
+
+- `plugins/agent-filesystem/`: baseline installable AFS client plugin.
+- `templates/<template-id>/`: workspace template manifests, seed files, skills,
+  and commands used by the UI template install flow.
 
 ## What I Would Read First
 
