@@ -17,6 +17,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/agent-filesystem/internal/controlplane"
 	"github.com/redis/agent-filesystem/internal/mcptools"
+	mountclient "github.com/redis/agent-filesystem/mount/client"
 )
 
 func TestAFSMCPServerInitializeAndToolsList(t *testing.T) {
@@ -71,14 +72,22 @@ func TestAFSMCPServerInitializeAndToolsList(t *testing.T) {
 	if len(tools) == 0 {
 		t.Fatal("tools/list returned no tools")
 	}
+	foundFileDelete := false
 	for _, rawTool := range tools {
 		tool, ok := rawTool.(map[string]any)
 		if !ok {
 			continue
 		}
-		if name, _ := tool["name"].(string); name == "file_delete_version" {
+		name, _ := tool["name"].(string)
+		if name == "file_delete" {
+			foundFileDelete = true
+		}
+		if name == "file_delete_version" {
 			t.Fatalf("tools/list unexpectedly exposes %q", name)
 		}
+	}
+	if !foundFileDelete {
+		t.Fatal("tools/list did not expose file_delete")
 	}
 }
 
@@ -623,6 +632,114 @@ func TestAFSMCPFilePatchAppliesStructuredEdits(t *testing.T) {
 	want := "package main\n\nimport \"fmt\"\nfunc main() {\n\tprintln(\"hello, world\")\n}\n"
 	if got := payload["content"]; got != want {
 		t.Fatalf("file_read content = %#v, want %q", got, want)
+	}
+}
+
+func TestAFSMCPFileDeleteRemovesFile(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/remove-me.md",
+		"content": "delete me\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(remove-me.md) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if result.IsError {
+		t.Fatalf("file_delete returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := payload["operation"].(string); got != "delete" {
+		t.Fatalf("operation = %#v, want %q", payload["operation"], "delete")
+	}
+
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if !readResult.IsError {
+		t.Fatalf("file_read after delete succeeded: %+v", readResult)
+	}
+}
+
+func TestAFSMCPFileDeleteRemovesEmptyDirectory(t *testing.T) {
+	t.Helper()
+
+	ctx := context.Background()
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	fsKey, _, _, err := server.store.ensureWorkspaceRoot(ctx, "repo")
+	if err != nil {
+		t.Fatalf("ensureWorkspaceRoot() returned error: %v", err)
+	}
+	fsClient := mountclient.New(server.store.rdb, fsKey)
+	if err := fsClient.Mkdir(ctx, "/docs/empty"); err != nil {
+		t.Fatalf("Mkdir(/docs/empty) returned error: %v", err)
+	}
+
+	result := server.callTool(ctx, "file_delete", map[string]any{
+		"path": "/docs/empty",
+	})
+	if result.IsError {
+		t.Fatalf("file_delete returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := payload["kind"].(string); got != "dir" {
+		t.Fatalf("kind = %#v, want %q", payload["kind"], "dir")
+	}
+	if stat, err := mountclient.New(server.store.rdb, fsKey).Stat(ctx, "/docs/empty"); err != nil {
+		t.Fatalf("Stat(/docs/empty) returned error after delete: %v", err)
+	} else if stat != nil {
+		t.Fatalf("Stat(/docs/empty) after delete = %#v, want nil", stat)
+	}
+}
+
+func TestAFSMCPFileDeleteRefusesNonEmptyDirectory(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/keep/file.md",
+		"content": "still here\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(file.md) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/keep",
+	})
+	if !result.IsError {
+		t.Fatal("file_delete should refuse a non-empty directory")
+	}
+}
+
+func TestAFSMCPFileDeleteRefusesRoot(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	result := server.callTool(context.Background(), "file_delete", map[string]any{
+		"path": "/",
+	})
+	if !result.IsError {
+		t.Fatal("file_delete should refuse root")
 	}
 }
 

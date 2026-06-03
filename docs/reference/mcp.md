@@ -71,7 +71,7 @@ use a workspace-scoped hosted token.
 | Status/admin | `afs_status`, `workspace_list`, `workspace_create`, `workspace_fork` |
 | Checkpoints | `checkpoint_list`, `checkpoint_create`, `checkpoint_restore` |
 | File reads | `file_read`, `file_lines`, `file_list`, `file_glob`, `file_grep`, `file_query` |
-| File writes | `file_write`, `file_create_exclusive`, `file_replace`, `file_insert`, `file_delete_lines`, `file_patch` |
+| File writes | `file_write`, `file_create_exclusive`, `file_replace`, `file_insert`, `file_delete`, `file_delete_lines`, `file_patch` |
 | Hosted token administration | `mcp_token_issue`, `mcp_token_revoke` |
 
 Hosted workspace-scoped MCP exposes the workspace file and checkpoint tools.
@@ -394,6 +394,17 @@ Arguments:
 | `path` | Yes | Absolute file path. |
 | `start` | Yes | Start line, 1-indexed. |
 | `end` | Yes | End line, inclusive. |
+
+### `file_delete`
+
+Deletes one file, symlink, or empty directory. Non-empty directories are refused.
+
+Arguments:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `workspace` | No | Local MCP workspace override. |
+| `path` | Yes | Absolute file, symlink, or empty directory path. |
 
 ### `file_patch`
 

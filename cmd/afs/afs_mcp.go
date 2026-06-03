@@ -383,6 +383,18 @@ func (s *afsMCPServer) Tools(_ context.Context) []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "file_delete",
+			Description: "Delete one file, symlink, or empty directory from a workspace. Refuses root and non-empty directories.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"workspace": map[string]string{"type": "string", "description": "Workspace name (defaults to current workspace)"},
+					"path":      map[string]string{"type": "string", "description": "Absolute workspace path, for example /src/main.go"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
 			Name:        "file_lines",
 			Description: "Read a specific line range from a text file. Use this instead of file_read when the file is large or you only need a slice. This is for text files only. Do not use it for directory listing or cross-file search. Paths must be absolute inside the workspace, for example /src/main.go.",
 			InputSchema: map[string]any{
@@ -637,6 +649,8 @@ func (s *afsMCPServer) CallTool(ctx context.Context, name string, args map[strin
 		value, err = s.toolFileRestoreVersion(ctx, args)
 	case "file_undelete":
 		value, err = s.toolFileUndelete(ctx, args)
+	case "file_delete":
+		value, err = s.toolFileDelete(ctx, args)
 	case "file_lines":
 		value, err = s.toolFileLines(ctx, args)
 	case "file_list":
@@ -1505,6 +1519,21 @@ func (s *afsMCPServer) toolFileDeleteLines(ctx context.Context, args map[string]
 		return map[string]any{
 			"operation":     "delete_lines",
 			"deleted_lines": int(deleted),
+		}, nil
+	})
+}
+
+func (s *afsMCPServer) toolFileDelete(ctx context.Context, args map[string]any) (any, error) {
+	return s.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient client.Client, normalizedPath string, stat *client.StatResult) (map[string]any, error) {
+		if stat == nil {
+			return nil, os.ErrNotExist
+		}
+		if err := fsClient.Rm(ctx, normalizedPath); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation": "delete",
+			"kind":      stat.Type,
 		}, nil
 	})
 }

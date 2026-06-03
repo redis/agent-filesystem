@@ -396,6 +396,17 @@ func (p *hostedMCPProvider) workspaceTools() []mcpproto.Tool {
 			},
 		},
 		{
+			Name:        "file_delete",
+			Description: "Delete one file, symlink, or empty directory from the current workspace. Refuses root and non-empty directories.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path": map[string]string{"type": "string", "description": "Absolute path inside the workspace"},
+				},
+				"required": []string{"path"},
+			},
+		},
+		{
 			Name:        "file_lines",
 			Description: "Read a specific line range from a text file",
 			InputSchema: map[string]any{
@@ -709,6 +720,11 @@ func (origProvider *hostedMCPProvider) callWorkspaceTool(ctx context.Context, na
 		err = p.ensureWritable()
 		if err == nil {
 			value, err = p.toolFileUndelete(ctx, args)
+		}
+	case "file_delete":
+		err = p.ensureWritable()
+		if err == nil {
+			value, err = p.toolFileDelete(ctx, args)
 		}
 	case "file_lines":
 		value, err = p.toolFileLines(ctx, args)
@@ -1443,6 +1459,21 @@ func (p *hostedMCPProvider) toolFileDeleteLines(ctx context.Context, args map[st
 	})
 }
 
+func (p *hostedMCPProvider) toolFileDelete(ctx context.Context, args map[string]any) (any, error) {
+	return p.mutateWorkspaceFile(ctx, args, func(ctx context.Context, fsClient afsclient.Client, normalizedPath string, stat *afsclient.StatResult) (map[string]any, error) {
+		if stat == nil {
+			return nil, os.ErrNotExist
+		}
+		if err := fsClient.Rm(ctx, normalizedPath); err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"operation": "delete",
+			"kind":      stat.Type,
+		}, nil
+	})
+}
+
 func (p *hostedMCPProvider) toolFilePatch(ctx context.Context, args map[string]any) (any, error) {
 	var input mcpFilePatchInput
 	if err := decodeMCPArgs(args, &input); err != nil {
@@ -1761,7 +1792,7 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	}
 	entry := template
 	entry.Path = normalizedPath
-	entry.Op = ChangeOpPut
+	entry.Op = hostedMCPMutationChangeOp(stat, updatedStat, beforeSnapshot, afterSnapshot)
 	entry.PrevHash = beforeSnapshot.ContentHash
 	entry.DeltaBytes = -beforeSnapshot.SizeBytes
 	if afterSnapshot.Exists {
@@ -1778,6 +1809,19 @@ func (p *hostedMCPProvider) mutateWorkspaceFile(ctx context.Context, args map[st
 	}
 	WriteChangeEntries(ctx, resolved.service.store.rdb, resolved.storageID, []ChangeEntry{entry})
 	return payload, nil
+}
+
+func hostedMCPMutationChangeOp(beforeStat, afterStat *afsclient.StatResult, beforeSnapshot, afterSnapshot VersionedFileSnapshot) string {
+	if afterStat == nil && beforeStat != nil {
+		return deleteOpFor(beforeStat.Type)
+	}
+	if afterStat != nil {
+		return modifyOpFor(afterStat.Type)
+	}
+	if !afterSnapshot.Exists && beforeSnapshot.Exists {
+		return deleteOpFor(beforeSnapshot.Kind)
+	}
+	return ChangeOpPut
 }
 
 func ensureHostedWorkspaceParentDirs(ctx context.Context, fsClient afsclient.Client, normalizedPath string) error {

@@ -81,6 +81,156 @@ func TestHostedMCPFileCreateExclusiveFailsWhenFileExists(t *testing.T) {
 	}
 }
 
+func TestHostedMCPFileDeleteRemovesFile(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+		profile:    MCPProfileWorkspaceRW,
+	}
+
+	writeResult := provider.CallTool(context.Background(), "file_write", map[string]any{
+		"path":    "/docs/remove-me.md",
+		"content": "delete me\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	deleteResult := provider.CallTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if deleteResult.IsError {
+		t.Fatalf("file_delete returned error result: %+v", deleteResult)
+	}
+	var deletePayload map[string]any
+	if err := decodeHostedStructuredContent(deleteResult.StructuredContent, &deletePayload); err != nil {
+		t.Fatalf("decodeHostedStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := deletePayload["operation"].(string); got != "delete" {
+		t.Fatalf("operation = %#v, want %q", deletePayload["operation"], "delete")
+	}
+	readResult := provider.CallTool(context.Background(), "file_read", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if !readResult.IsError {
+		t.Fatalf("file_read after delete succeeded: %+v", readResult)
+	}
+
+	changelog, err := manager.ListChangelog(context.Background(), databaseID, "repo", ChangelogListRequest{Limit: 5})
+	if err != nil {
+		t.Fatalf("ListChangelog() returned error: %v", err)
+	}
+	if len(changelog.Entries) == 0 {
+		t.Fatal("len(changelog.Entries) = 0, want at least one row")
+	}
+	foundDelete := false
+	for _, entry := range changelog.Entries {
+		if entry.Path == "/docs/remove-me.md" && entry.Op == ChangeOpDelete {
+			foundDelete = true
+			break
+		}
+	}
+	if !foundDelete {
+		t.Fatalf("changelog entries missing delete for /docs/remove-me.md: %+v", changelog.Entries)
+	}
+}
+
+func TestHostedMCPFileDeleteRemovesEmptyDirectoryWithRmdirChangelog(t *testing.T) {
+	t.Helper()
+
+	ctx := context.Background()
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+		profile:    MCPProfileWorkspaceRW,
+	}
+
+	resolved, err := provider.resolveWorkspaceContext(ctx)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceContext() returned error: %v", err)
+	}
+	if err := resolved.fsClient.Mkdir(ctx, "/docs/empty"); err != nil {
+		t.Fatalf("Mkdir(/docs/empty) returned error: %v", err)
+	}
+
+	deleteResult := provider.CallTool(ctx, "file_delete", map[string]any{
+		"path": "/docs/empty",
+	})
+	if deleteResult.IsError {
+		t.Fatalf("file_delete returned error result: %+v", deleteResult)
+	}
+	var deletePayload map[string]any
+	if err := decodeHostedStructuredContent(deleteResult.StructuredContent, &deletePayload); err != nil {
+		t.Fatalf("decodeHostedStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := deletePayload["kind"].(string); got != "dir" {
+		t.Fatalf("kind = %#v, want %q", deletePayload["kind"], "dir")
+	}
+
+	changelog, err := manager.ListChangelog(ctx, databaseID, "repo", ChangelogListRequest{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListChangelog() returned error: %v", err)
+	}
+	foundRmdir := false
+	for _, entry := range changelog.Entries {
+		if entry.Path == "/docs/empty" && entry.Op == ChangeOpRmdir {
+			foundRmdir = true
+			break
+		}
+	}
+	if !foundRmdir {
+		t.Fatalf("changelog entries missing rmdir for /docs/empty: %+v", changelog.Entries)
+	}
+}
+
+func TestHostedMCPFileDeleteRefusesRootAndNonEmptyDirectory(t *testing.T) {
+	t.Helper()
+
+	ctx := context.Background()
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+		profile:    MCPProfileWorkspaceRW,
+	}
+
+	writeResult := provider.CallTool(ctx, "file_write", map[string]any{
+		"path":    "/docs/keep/file.md",
+		"content": "still here\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	rootResult := provider.CallTool(ctx, "file_delete", map[string]any{
+		"path": "/",
+	})
+	if !rootResult.IsError {
+		t.Fatal("file_delete should refuse root")
+	}
+
+	dirResult := provider.CallTool(ctx, "file_delete", map[string]any{
+		"path": "/docs/keep",
+	})
+	if !dirResult.IsError {
+		t.Fatal("file_delete should refuse a non-empty directory")
+	}
+
+	readResult := provider.CallTool(ctx, "file_read", map[string]any{
+		"path": "/docs/keep/file.md",
+	})
+	if readResult.IsError {
+		t.Fatalf("file_read after refused directory delete returned error result: %+v", readResult)
+	}
+}
+
 func TestHostedMCPFileQueryRanksWorkspaceContent(t *testing.T) {
 	t.Helper()
 
