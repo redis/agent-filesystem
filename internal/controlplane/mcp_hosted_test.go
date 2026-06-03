@@ -81,6 +81,64 @@ func TestHostedMCPFileCreateExclusiveFailsWhenFileExists(t *testing.T) {
 	}
 }
 
+func TestHostedMCPFileDeleteRemovesFile(t *testing.T) {
+	t.Helper()
+
+	manager, databaseID := newTestManager(t)
+	provider := &hostedMCPProvider{
+		manager:    manager,
+		databaseID: databaseID,
+		workspace:  "repo",
+		profile:    MCPProfileWorkspaceRW,
+	}
+
+	writeResult := provider.CallTool(context.Background(), "file_write", map[string]any{
+		"path":    "/docs/remove-me.md",
+		"content": "delete me\n",
+	})
+	if writeResult.IsError {
+		t.Fatalf("file_write returned error result: %+v", writeResult)
+	}
+
+	deleteResult := provider.CallTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if deleteResult.IsError {
+		t.Fatalf("file_delete returned error result: %+v", deleteResult)
+	}
+	var deletePayload map[string]any
+	if err := decodeHostedStructuredContent(deleteResult.StructuredContent, &deletePayload); err != nil {
+		t.Fatalf("decodeHostedStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := deletePayload["operation"].(string); got != "delete" {
+		t.Fatalf("operation = %#v, want %q", deletePayload["operation"], "delete")
+	}
+	readResult := provider.CallTool(context.Background(), "file_read", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if !readResult.IsError {
+		t.Fatalf("file_read after delete succeeded: %+v", readResult)
+	}
+
+	changelog, err := manager.ListChangelog(context.Background(), databaseID, "repo", ChangelogListRequest{Limit: 5})
+	if err != nil {
+		t.Fatalf("ListChangelog() returned error: %v", err)
+	}
+	if len(changelog.Entries) == 0 {
+		t.Fatal("len(changelog.Entries) = 0, want at least one row")
+	}
+	foundDelete := false
+	for _, entry := range changelog.Entries {
+		if entry.Path == "/docs/remove-me.md" && entry.Op == ChangeOpDelete {
+			foundDelete = true
+			break
+		}
+	}
+	if !foundDelete {
+		t.Fatalf("changelog entries missing delete for /docs/remove-me.md: %+v", changelog.Entries)
+	}
+}
+
 func TestHostedMCPFileQueryRanksWorkspaceContent(t *testing.T) {
 	t.Helper()
 

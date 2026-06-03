@@ -38,6 +38,7 @@ var (
 		"file_create_exclusive":           {},
 		"file_replace":                    {},
 		"file_insert":                     {},
+		"file_delete":                     {},
 		"file_delete_lines":               {},
 		"file_patch":                      {},
 		"file_restore_version":            {},

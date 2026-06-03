@@ -626,6 +626,63 @@ func TestAFSMCPFilePatchAppliesStructuredEdits(t *testing.T) {
 	}
 }
 
+func TestAFSMCPFileDeleteRemovesFile(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/remove-me.md",
+		"content": "delete me\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(remove-me.md) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if result.IsError {
+		t.Fatalf("file_delete returned error result: %+v", result)
+	}
+
+	var payload map[string]any
+	if err := decodeStructuredContent(result.StructuredContent, &payload); err != nil {
+		t.Fatalf("decodeStructuredContent(delete) returned error: %v", err)
+	}
+	if got, _ := payload["operation"].(string); got != "delete" {
+		t.Fatalf("operation = %#v, want %q", payload["operation"], "delete")
+	}
+
+	readResult := server.callTool(context.Background(), "file_read", map[string]any{
+		"path": "/docs/remove-me.md",
+	})
+	if !readResult.IsError {
+		t.Fatalf("file_read after delete succeeded: %+v", readResult)
+	}
+}
+
+func TestAFSMCPFileDeleteRefusesNonEmptyDirectory(t *testing.T) {
+	t.Helper()
+
+	server, closeFn := setupAFSMCPTestServer(t)
+	defer closeFn()
+
+	if _, err := server.toolFileWrite(context.Background(), map[string]any{
+		"path":    "/docs/keep/file.md",
+		"content": "still here\n",
+	}); err != nil {
+		t.Fatalf("toolFileWrite(file.md) returned error: %v", err)
+	}
+
+	result := server.callTool(context.Background(), "file_delete", map[string]any{
+		"path": "/docs/keep",
+	})
+	if !result.IsError {
+		t.Fatal("file_delete should refuse a non-empty directory")
+	}
+}
+
 func TestAFSMCPStatusAndWorkspaceCurrentPreferActiveSyncWorkspace(t *testing.T) {
 	t.Helper()
 
