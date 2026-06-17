@@ -52,6 +52,71 @@ fs.bash().exec(command, ...)    # run a shell command against the mount
 | Self-managed endpoint | `AFS_API_BASE_URL` or `AFS(base_url=...)` |
 | Available since | `redis-afs` `0.1.0` |
 
+## Async API
+
+The async client mirrors the sync surface as coroutines, backed by an
+`httpx.AsyncClient`. It requires the optional `async` extra
+(`pip install 'redis-afs[async]'`). Importing `redis_afs` works without
+`httpx`, but constructing an async client without it raises `AFSError` with an
+install hint.
+
+### Syntax
+
+```python
+from redis_afs import AsyncAFS
+
+afs = AsyncAFS(
+    api_key=None,
+    base_url=None,
+    timeout=30.0,
+    headers=None,
+)
+```
+
+`AsyncAFS` takes the same parameters as `AFS`, with the same `AFS_API_KEY` and
+`AFS_API_BASE_URL` environment fallbacks.
+
+### API Methods
+
+```python
+await afs.workspace.create(...)       # create a workspace
+await afs.workspace.list()            # list workspaces
+await afs.workspace.get(workspace)    # get one workspace
+await afs.workspace.fork(...)         # fork a workspace
+await afs.workspace.delete(workspace) # delete a workspace
+
+await afs.checkpoint.list(workspace)  # list checkpoints
+await afs.checkpoint.create(...)      # create a checkpoint
+await afs.checkpoint.restore(...)     # restore a checkpoint
+
+fs = await afs.fs.mount(...)          # create an isolated SDK mount (async)
+await fs.read_file(path)              # read a text file
+await fs.write_file(path, content)    # write a text file
+await fs.list_files(path, depth)      # list a directory
+await fs.glob(pattern, ...)           # match paths
+await fs.grep(pattern, **options)     # search file contents
+await fs.checkpoint(name)             # checkpoint mounted workspaces
+await fs.sync_from_remote()           # materialize workspaces locally
+await fs.sync_to_remote()             # write modified local files back
+await fs.bash().exec(command, ...)    # run a shell command against the mount
+```
+
+`afs.fs.mount(...)` is a coroutine, so the mounted filesystem is entered with
+`async with await afs.fs.mount(...)`. Both `AsyncAFS` and `AsyncMountedFS` are
+async context managers and expose `await afs.aclose()` / `await fs.aclose()`;
+prefer `async with` (or call `aclose()`) so the underlying `httpx` connection
+pools are closed. `await afs.fs.mount(..., concurrency=16)` bounds the number of
+in-flight network requests during file sync (default 16).
+
+### Async At A Glance
+
+| Field | Value |
+| --- | --- |
+| Import | `from redis_afs import AsyncAFS` |
+| Requires | `redis-afs[async]` (installs `httpx`) |
+| Transport | `httpx.AsyncClient` (MCP over HTTP) |
+| Available since | `redis-afs` `0.1.0` |
+
 ## Examples
 
 Create a workspace, write a file, run a command, and clean up the temporary
@@ -461,3 +526,17 @@ fs.map_absolute_repo_paths(command)
   currently propagate local file deletion.
 - `MountedFS` does not yet expose `mkdir`, `rename`, `delete`, `stat`, streams,
   or binary file helpers.
+
+### Async Client
+
+- `AsyncMountedFS` bounds *in-flight network requests* during file sync with
+  the `concurrency` kwarg (default 16), but the number of pending coroutine
+  objects is not bounded, so memory scales with tree size. This is acceptable
+  for typical workspaces; a worker-pool design is a possible future
+  improvement.
+- A failed `sync_from_remote()` (for example a mid-sync error) can leave a
+  partially-materialized local root, the same behavior as the sync client.
+- Local disk I/O during sync stays synchronous; only network calls are async.
+  Using `aiofiles` is a possible future enhancement.
+- `bash().exec(...)` raises `asyncio.TimeoutError` on timeout, whereas the sync
+  client raises `subprocess.TimeoutExpired`.

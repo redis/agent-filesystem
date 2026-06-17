@@ -32,6 +32,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+async = ["httpx>=0.27"]
+
 [project.urls]
 Homepage = "https://github.com/redis/agent-filesystem/tree/main/sdk/python"
 Repository = "https://github.com/redis/agent-filesystem"

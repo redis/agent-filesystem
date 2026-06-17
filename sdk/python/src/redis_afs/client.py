@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import posixpath
 import re
@@ -13,31 +12,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
 
-DEFAULT_BASE_URL = "https://afs.cloud"
-
-
-class AFSError(RuntimeError):
-    def __init__(
-        self,
-        message: str,
-        *,
-        status: int | None = None,
-        code: int | None = None,
-        payload: Any | None = None,
-    ) -> None:
-        super().__init__(message)
-        self.status = status
-        self.code = code
-        self.payload = payload
-
-
-@dataclass(frozen=True)
-class BashResult:
-    stdout: str
-    stderr: str
-    exit_code: int
-    command: str
-    mapped_command: str
+from .errors import AFSError
+from .models import (
+    DEFAULT_BASE_URL,
+    BashResult,
+    MountMode,
+    as_workspace_name as _workspace_name,
+)
+from ._mcp import (
+    build_rpc_body,
+    normalize_mcp_endpoint as _normalize_mcp_endpoint,
+    parse_rpc_payload,
+    strip_none as _strip_none,
+    unwrap_tool_result,
+)
+from ._paths import normalize_remote_path as _normalize_remote_path
 
 
 class AFS:
@@ -152,13 +141,13 @@ class FSClient:
         *,
         workspaces: Sequence[Mapping[str, Any]] | None = None,
         repos: Sequence[Mapping[str, Any]] | None = None,
-        mode: str = "rw",
+        mode: MountMode | str = MountMode.RW,
         token_name: str | None = None,
     ) -> "MountedFS":
         workspace_refs = list(workspaces if workspaces is not None else repos or [])
         if not workspace_refs:
             raise AFSError("fs.mount requires at least one workspace")
-        profile = _profile_for_mode(mode)
+        profile = MountMode.coerce(mode).profile
         mounted: list[_MountedWorkspace] = []
         for workspace in workspace_refs:
             name = _workspace_name(workspace)
@@ -432,20 +421,10 @@ class MCPHttpClient:
                 "arguments": _strip_none(dict(arguments or {})),
             },
         )
-        if result.get("isError"):
-            content = "\n".join(item.get("text", "") for item in result.get("content", []))
-            raise AFSError(content or f"MCP tool {name} failed", payload=result)
-        return result.get("structuredContent", result)
+        return unwrap_tool_result(result, name)
 
     def request(self, method: str, params: Mapping[str, Any] | None = None) -> Any:
-        body = json.dumps(
-            {
-                "jsonrpc": "2.0",
-                "id": self._next_id,
-                "method": method,
-                "params": dict(params or {}),
-            }
-        ).encode("utf-8")
+        body = build_rpc_body(self._next_id, method, params)
         self._next_id += 1
         headers = {
             "content-type": "application/json",
@@ -455,54 +434,8 @@ class MCPHttpClient:
         request = urllib.request.Request(self.endpoint, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8") or "{}")
+                text = response.read().decode("utf-8")
         except urllib.error.HTTPError as exc:
             text = exc.read().decode("utf-8", errors="replace")
             raise AFSError(f"MCP request failed with HTTP {exc.code}: {text}", status=exc.code, payload=text) from exc
-        if payload.get("error"):
-            error = payload["error"]
-            raise AFSError(str(error.get("message", "MCP request failed")), code=error.get("code"), payload=payload)
-        return payload.get("result")
-
-
-def _workspace_name(workspace: str | Mapping[str, Any] | None) -> str:
-    if isinstance(workspace, str):
-        return workspace
-    if workspace is None:
-        raise AFSError("workspace name is required")
-    name = str(workspace.get("name", "")).strip()
-    if not name:
-        raise AFSError("workspace name is required")
-    return name
-
-
-def _profile_for_mode(mode: str) -> str:
-    if mode == "ro":
-        return "workspace-ro"
-    if mode == "rw":
-        return "workspace-rw"
-    if mode == "rw-checkpoint":
-        return "workspace-rw-checkpoint"
-    raise AFSError('mode must be "ro", "rw", or "rw-checkpoint"')
-
-
-def _normalize_mcp_endpoint(base_url: str) -> str:
-    trimmed = base_url.strip().rstrip("/")
-    if not trimmed:
-        raise AFSError("base_url is required")
-    return trimmed if trimmed.endswith("/mcp") else f"{trimmed}/mcp"
-
-
-def _normalize_remote_path(path: str) -> str:
-    raw = path.strip()
-    if not raw:
-        return "/"
-    parts = [part for part in raw.split("/") if part]
-    if ".." in parts:
-        raise AFSError(f"path {path} must not contain '..'")
-    normalized = posixpath.normpath(raw if raw.startswith("/") else f"/{raw}")
-    return "/" if normalized == "." else normalized
-
-
-def _strip_none(values: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in values.items() if value is not None}
+        return parse_rpc_payload(text)
