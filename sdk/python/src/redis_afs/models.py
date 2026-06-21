@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 from .errors import AFSError
 
@@ -28,7 +29,7 @@ class MountMode(str, Enum):
         return f"workspace-{self.value}"
 
     @classmethod
-    def coerce(cls, value: "MountMode | str") -> "MountMode":
+    def coerce(cls, value: MountMode | str) -> MountMode:
         try:
             return cls(value)
         except ValueError:

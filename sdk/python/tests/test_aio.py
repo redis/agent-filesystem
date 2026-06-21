@@ -13,7 +13,6 @@ except ImportError:  # pragma: no cover
 
 import redis_afs.aio as aio
 from redis_afs.aio import (
-    AsyncAFS,
     AsyncCheckpointClient,
     AsyncFSClient,
     AsyncMCPHttpClient,
@@ -51,7 +50,11 @@ class FakeAsyncMCP:
         if name == "checkpoint_list":
             return {"checkpoints": [{"id": "1", "name": "head"}]}
         if name == "checkpoint_create":
-            return {"workspace": arguments.get("workspace"), "checkpoint": arguments.get("checkpoint") or "auto", "created": True}
+            return {
+                "workspace": arguments.get("workspace"),
+                "checkpoint": arguments.get("checkpoint") or "auto",
+                "created": True,
+            }
         if name == "checkpoint_restore":
             return {"workspace": arguments.get("workspace"), "checkpoint": arguments["checkpoint"], "restored": True}
         # file ops reused by later tasks
@@ -76,7 +79,7 @@ def _fake_entries(files, symlinks, path):
         if path == "/" and "/" not in p.strip("/"):
             entries.append({"path": p, "name": p.strip("/"), "kind": "file"})
         elif p.startswith(path.rstrip("/") + "/"):
-            rem = p[len(path.rstrip("/")) + 1:]
+            rem = p[len(path.rstrip("/")) + 1 :]
             if "/" not in rem:
                 entries.append({"path": p, "name": rem, "kind": "file"})
     for lp, target in sorted(symlinks.items()):
@@ -123,9 +126,17 @@ class AsyncClientsTest(unittest.IsolatedAsyncioTestCase):
 class ExportsTest(unittest.TestCase):
     def test_async_names_importable_from_package_root(self):
         import redis_afs
-        for name in ["AsyncAFS", "AsyncWorkspaceClient", "AsyncRepoClient",
-                     "AsyncCheckpointClient", "AsyncFSClient", "AsyncMountedFS",
-                     "AsyncBashRunner", "AsyncMCPHttpClient"]:
+
+        for name in [
+            "AsyncAFS",
+            "AsyncWorkspaceClient",
+            "AsyncRepoClient",
+            "AsyncCheckpointClient",
+            "AsyncFSClient",
+            "AsyncMountedFS",
+            "AsyncBashRunner",
+            "AsyncMCPHttpClient",
+        ]:
             self.assertTrue(hasattr(redis_afs, name), name)
 
 
@@ -215,10 +226,12 @@ class AsyncMountedFSTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(fs.workspace_names, ["foobar"])
 
     async def test_multi_workspace_requires_prefix(self):
-        fs = AsyncMountedFS([
-            _AsyncMountedWorkspace(name="api", token="t", client=FakeAsyncMCP()),
-            _AsyncMountedWorkspace(name="web", token="t", client=FakeAsyncMCP()),
-        ])
+        fs = AsyncMountedFS(
+            [
+                _AsyncMountedWorkspace(name="api", token="t", client=FakeAsyncMCP()),
+                _AsyncMountedWorkspace(name="web", token="t", client=FakeAsyncMCP()),
+            ]
+        )
         with self.assertRaises(AFSError):
             await fs.write_file("/README.md", "hello")
 
@@ -226,17 +239,20 @@ class AsyncMountedFSTest(unittest.IsolatedAsyncioTestCase):
 class MountTableTest(unittest.TestCase):
     def test_single_workspace_fallback(self):
         from redis_afs._paths import MountTable
+
         table = MountTable(["only"])
         self.assertEqual(table.resolve("/src/app.py"), ("only", "/src/app.py"))
 
     def test_exact_prefix_match(self):
         from redis_afs._paths import MountTable
+
         table = MountTable(["api", "web"])
         self.assertEqual(table.resolve("/api"), ("api", "/"))
         self.assertEqual(table.resolve("/web/index.html"), ("web", "/index.html"))
 
     def test_multi_workspace_requires_prefix(self):
         from redis_afs._paths import MountTable
+
         table = MountTable(["api", "web"])
         with self.assertRaises(AFSError) as ctx:
             table.resolve("/README.md")
@@ -316,9 +332,7 @@ class AsyncFSMountTest(unittest.IsolatedAsyncioTestCase):
         FakeAsyncMountedClient.files_by_token = {}
 
         with patch("redis_afs.aio._resources.AsyncMCPHttpClient", FakeAsyncMountedClient):
-            fs = await AsyncFSClient(control_plane).mount(
-                workspaces=[{"name": "api"}, {"name": "web"}], mode="rw"
-            )
+            fs = await AsyncFSClient(control_plane).mount(workspaces=[{"name": "api"}, {"name": "web"}], mode="rw")
             try:
                 self.assertEqual(fs.workspace_names, ["api", "web"])
                 self.assertEqual(len(control_plane.issued), 2)
@@ -351,9 +365,7 @@ class AsyncFSMountTest(unittest.IsolatedAsyncioTestCase):
         FakeAsyncMountedClient.files_by_token = {}
 
         with patch("redis_afs.aio._resources.AsyncMCPHttpClient", FakeAsyncMountedClient):
-            fs = await AsyncFSClient(control_plane).mount(
-                workspaces=[{"name": "repo"}], concurrency=3
-            )
+            fs = await AsyncFSClient(control_plane).mount(workspaces=[{"name": "repo"}], concurrency=3)
             try:
                 self.assertEqual(fs._concurrency, 3)
             finally:
@@ -455,6 +467,7 @@ class AsyncBashTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_exec_timeout_raises_and_reaps(self):
         import asyncio
+
         fake = FakeAsyncMCP()
         fs = AsyncMountedFS([_AsyncMountedWorkspace(name="repo", token="t", client=fake)])
         self.addAsyncCleanup(fs.aclose)

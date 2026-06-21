@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
-  lstat,
   mkdir,
   mkdtemp,
   readFile as nodeReadFile,
@@ -196,7 +195,7 @@ export class WorkspaceClient {
 
   async list(): Promise<Workspace[]> {
     const response = await this.mcp.callTool<{ items?: Workspace[] } | Workspace[]>("workspace_list");
-    return Array.isArray(response) ? response : response.items ?? [];
+    return Array.isArray(response) ? response : (response.items ?? []);
   }
 
   async get(workspace: string | WorkspaceRef): Promise<Workspace> {
@@ -364,7 +363,10 @@ export class MountedFS {
     return response.entries ?? [];
   }
 
-  async glob(pattern: string, options: { path?: string; kind?: "file" | "dir" | "symlink" | "any"; limit?: number } = {}) {
+  async glob(
+    pattern: string,
+    options: { path?: string; kind?: "file" | "dir" | "symlink" | "any"; limit?: number } = {},
+  ) {
     const resolved = this.resolvePath(options.path ?? "/");
     return resolved.workspace.client.callTool("file_glob", {
       path: resolved.remotePath,

@@ -14,38 +14,38 @@ const afs = new AFS(options);
 ## API Methods
 
 ```ts
-afs.workspace.create(input)        // create a workspace
-afs.workspace.list()               // list workspaces
-afs.workspace.get(workspace)       // get one workspace
-afs.workspace.fork(input)          // fork a workspace
-afs.workspace.delete(workspace)    // delete a workspace
+afs.workspace.create(input); // create a workspace
+afs.workspace.list(); // list workspaces
+afs.workspace.get(workspace); // get one workspace
+afs.workspace.fork(input); // fork a workspace
+afs.workspace.delete(workspace); // delete a workspace
 
-afs.checkpoint.list(workspace)     // list checkpoints
-afs.checkpoint.create(input)       // create a checkpoint
-afs.checkpoint.restore(input)      // restore a checkpoint
+afs.checkpoint.list(workspace); // list checkpoints
+afs.checkpoint.create(input); // create a checkpoint
+afs.checkpoint.restore(input); // restore a checkpoint
 
-afs.fs.mount(input)                // create an isolated SDK mount
-fs.readFile(path)                  // read a text file
-fs.writeFile(path, content)        // write a text file
-fs.listFiles(path, depth)          // list a directory
-fs.glob(pattern, options)          // match paths
-fs.grep(pattern, options)          // search file contents
-fs.checkpoint(name)                // checkpoint mounted workspaces
-fs.bash().exec(command, options)   // run a shell command against the mount
+afs.fs.mount(input); // create an isolated SDK mount
+fs.readFile(path); // read a text file
+fs.writeFile(path, content); // write a text file
+fs.listFiles(path, depth); // list a directory
+fs.glob(pattern, options); // match paths
+fs.grep(pattern, options); // search file contents
+fs.checkpoint(name); // checkpoint mounted workspaces
+fs.bash().exec(command, options); // run a shell command against the mount
 ```
 
 ## At A Glance
 
-| Field | Value |
-| --- | --- |
-| Package | `redis-afs` |
-| Import | `import { AFS } from "redis-afs"` |
-| Runtime | Node.js 18 or newer |
-| Transport | MCP over HTTP |
-| Default endpoint | `https://afs.cloud/mcp` |
-| Auth | `AFS_API_KEY` or `new AFS({ apiKey })` |
+| Field                 | Value                                        |
+| --------------------- | -------------------------------------------- |
+| Package               | `redis-afs`                                  |
+| Import                | `import { AFS } from "redis-afs"`            |
+| Runtime               | Node.js 18 or newer                          |
+| Transport             | MCP over HTTP                                |
+| Default endpoint      | `https://afs.cloud/mcp`                      |
+| Auth                  | `AFS_API_KEY` or `new AFS({ apiKey })`       |
 | Self-managed endpoint | `AFS_API_BASE_URL` or `new AFS({ baseUrl })` |
-| Available since | `redis-afs` `0.1.0` |
+| Available since       | `redis-afs` `0.1.0`                          |
 
 ## Examples
 
@@ -99,29 +99,29 @@ const afs = new AFS({
 
 ### Options
 
-| Option | Default | Description |
-| --- | --- | --- |
-| `apiKey` | `process.env.AFS_API_KEY` | Bearer token for AFS Cloud or a Self-managed control plane. |
-| `baseUrl` | `process.env.AFS_API_BASE_URL` or `https://afs.cloud` | Control-plane base URL or direct `/mcp` endpoint. |
-| `fetch` | `globalThis.fetch` | Fetch implementation. Required when the runtime does not provide global fetch. |
-| `timeoutMs` | `30000` | HTTP request timeout in milliseconds. |
-| `headers` | `{}` | Extra headers sent with each MCP request. |
+| Option      | Default                                               | Description                                                                    |
+| ----------- | ----------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `apiKey`    | `process.env.AFS_API_KEY`                             | Bearer token for AFS Cloud or a Self-managed control plane.                    |
+| `baseUrl`   | `process.env.AFS_API_BASE_URL` or `https://afs.cloud` | Control-plane base URL or direct `/mcp` endpoint.                              |
+| `fetch`     | `globalThis.fetch`                                    | Fetch implementation. Required when the runtime does not provide global fetch. |
+| `timeoutMs` | `30000`                                               | HTTP request timeout in milliseconds.                                          |
+| `headers`   | `{}`                                                  | Extra headers sent with each MCP request.                                      |
 
 ### Clients
 
 ```ts
-afs.workspace
-afs.workspaces
-afs.checkpoint
-afs.checkpoints
-afs.fs
+afs.workspace;
+afs.workspaces;
+afs.checkpoint;
+afs.checkpoints;
+afs.fs;
 ```
 
 Compatibility aliases from the first SDK preview remain available:
 
 ```ts
-afs.repo
-afs.repos
+afs.repo;
+afs.repos;
 ```
 
 ## Workspace API
@@ -268,10 +268,10 @@ The preview `repos` mount option still works, but new code should use
 
 ### Modes
 
-| Mode | Token profile | Use |
-| --- | --- | --- |
-| `ro` | `workspace-ro` | Read-only workspace access. |
-| `rw` | `workspace-rw` | Read and write workspace access. |
+| Mode            | Token profile             | Use                                           |
+| --------------- | ------------------------- | --------------------------------------------- |
+| `ro`            | `workspace-ro`            | Read-only workspace access.                   |
+| `rw`            | `workspace-rw`            | Read and write workspace access.              |
 | `rw-checkpoint` | `workspace-rw-checkpoint` | Read/write access with checkpoint permission. |
 
 ### Path Rules
@@ -441,9 +441,9 @@ The SDK throws `AFSError` for API, validation, binary-read, and command wrapper
 errors.
 
 ```ts
-error.status  // HTTP status, when available
-error.code    // JSON-RPC error code, when available
-error.payload // raw server or command payload, when available
+error.status; // HTTP status, when available
+error.code; // JSON-RPC error code, when available
+error.payload; // raw server or command payload, when available
 ```
 
 ## Compatibility
@@ -452,10 +452,10 @@ The first SDK preview used `repo` language. These aliases remain available, but
 new code should use `workspace` language:
 
 ```ts
-afs.repo
-afs.repos
-fs.repoNames
-fs.mapAbsoluteRepoPaths(command)
+afs.repo;
+afs.repos;
+fs.repoNames;
+fs.mapAbsoluteRepoPaths(command);
 ```
 
 ## Current Limits

@@ -2,7 +2,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from redis_afs.client import AFSError, CheckpointClient, FSClient, MCPHttpClient, MountedFS, _MountedWorkspace, _normalize_mcp_endpoint
+from redis_afs.client import (
+    AFSError,
+    CheckpointClient,
+    FSClient,
+    MountedFS,
+    _MountedWorkspace,
+    _normalize_mcp_endpoint,
+)
 
 
 class FakeMCP:
@@ -41,14 +48,20 @@ class FakeMCP:
                         entries.append({"path": file_path, "name": remainder, "kind": "file"})
             for link_path, target in sorted(self.symlinks.items()):
                 if path == "/" and "/" not in link_path.strip("/"):
-                    entries.append({"path": link_path, "name": link_path.strip("/"), "kind": "symlink", "target": target})
+                    entries.append(
+                        {"path": link_path, "name": link_path.strip("/"), "kind": "symlink", "target": target}
+                    )
                 elif link_path.startswith(path.rstrip("/") + "/"):
                     remainder = link_path[len(path.rstrip("/")) + 1 :]
                     if "/" not in remainder:
                         entries.append({"path": link_path, "name": remainder, "kind": "symlink", "target": target})
             return {"entries": entries}
         if name == "checkpoint_create":
-            return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "save-20260508-000000.000", "created": True}
+            return {
+                "workspace": "workspace",
+                "checkpoint": arguments.get("checkpoint") or "save-20260508-000000.000",
+                "created": True,
+            }
         if name == "checkpoint_restore":
             return {"workspace": "workspace", "checkpoint": arguments["checkpoint"], "restored": True}
         raise AssertionError(f"unexpected tool {name}")

@@ -34,6 +34,12 @@ dependencies = []
 
 [project.optional-dependencies]
 async = ["httpx>=0.27"]
+# Development tooling (lint + format + git hooks). Pinned to match
+# .pre-commit-config.yaml and the CI lint job.
+dev = [
+  "ruff==0.15.18",
+  "pre-commit>=3.5",
+]
 
 [project.urls]
 Homepage = "https://github.com/redis/agent-filesystem/tree/main/sdk/python"
@@ -42,3 +48,16 @@ Issues = "https://github.com/redis/agent-filesystem/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# pycodestyle errors, pyflakes, isort, pyupgrade.
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Re-export modules intentionally import names without using them.
+"__init__.py" = ["F401"]
