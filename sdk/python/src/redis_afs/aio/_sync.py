@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import posixpath
+from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from .._paths import normalize_remote_path as _normalize_remote_path
 
@@ -38,9 +39,7 @@ class _TreeSync:
             return await coro_factory()
 
     async def _copy_remote_directory(self, remote_path: str, local_path: Path) -> None:
-        response = await self._guarded(
-            lambda: self._client.call_tool("file_list", {"path": remote_path, "depth": 1})
-        )
+        response = await self._guarded(lambda: self._client.call_tool("file_list", {"path": remote_path, "depth": 1}))
         tasks: list[Awaitable[None]] = []
         for entry in response.get("entries", []):
             target = local_path / entry["name"]
@@ -60,9 +59,7 @@ class _TreeSync:
             await asyncio.gather(*tasks)
 
     async def _copy_remote_file(self, remote_path: str, target: Path) -> None:
-        file_response = await self._guarded(
-            lambda: self._client.call_tool("file_read", {"path": remote_path})
-        )
+        file_response = await self._guarded(lambda: self._client.call_tool("file_read", {"path": remote_path}))
         if not file_response.get("binary"):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(file_response.get("content", "")), encoding="utf-8")
@@ -82,6 +79,4 @@ class _TreeSync:
 
     async def _copy_local_file(self, child: Path, remote_path: str) -> None:
         content = child.read_text(encoding="utf-8")
-        await self._guarded(
-            lambda: self._client.call_tool("file_write", {"path": remote_path, "content": content})
-        )
+        await self._guarded(lambda: self._client.call_tool("file_write", {"path": remote_path, "content": content}))

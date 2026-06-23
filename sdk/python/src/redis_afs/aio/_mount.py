@@ -6,13 +6,15 @@ import asyncio
 import os
 import shutil
 import tempfile
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any
 
+from .._paths import MountTable
+from .._paths import normalize_remote_path as _normalize_remote_path
 from ..errors import AFSError
 from ..models import BashResult
-from .._paths import MountTable, normalize_remote_path as _normalize_remote_path
 from ._sync import _TreeSync
 
 
@@ -114,7 +116,7 @@ class AsyncMountedFS:
             for workspace in self._workspaces
         ]
 
-    def bash(self) -> "AsyncBashRunner":
+    def bash(self) -> AsyncBashRunner:
         return AsyncBashRunner(self)
 
     async def sync_from_remote(self) -> str:
@@ -146,7 +148,7 @@ class AsyncMountedFS:
             if isinstance(result, BaseException):
                 raise result
 
-    async def __aenter__(self) -> "AsyncMountedFS":
+    async def __aenter__(self) -> AsyncMountedFS:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

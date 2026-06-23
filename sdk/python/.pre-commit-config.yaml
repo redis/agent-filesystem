@@ -1,0 +1,35 @@
+# Pre-commit hooks for the redis-afs Python SDK (sdk/python).
+#
+# Scoped to sdk/python so it stays decoupled from the TypeScript SDK, which
+# uses husky + lint-staged. pre-commit anchors at the repository root, so run
+# it from there and point at this config:
+#
+#   pre-commit run --all-files --config sdk/python/.pre-commit-config.yaml
+#
+# To install it as your local git hook while working on the Python SDK:
+#
+#   pre-commit install --config sdk/python/.pre-commit-config.yaml
+#
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.18
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^sdk/python/.*\.py$
+      - id: ruff-format
+        files: ^sdk/python/.*\.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+        files: ^sdk/python/
+      - id: trailing-whitespace
+        files: ^sdk/python/
+      - id: check-toml
+        files: ^sdk/python/
+      - id: check-yaml
+        files: ^sdk/python/

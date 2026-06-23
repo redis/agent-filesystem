@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
-from ..errors import AFSError
-from ..models import DEFAULT_BASE_URL
 from .._mcp import (
     build_rpc_body,
     normalize_mcp_endpoint,
@@ -14,6 +13,8 @@ from .._mcp import (
     strip_none,
     unwrap_tool_result,
 )
+from ..errors import AFSError
+from ..models import DEFAULT_BASE_URL
 
 try:
     import httpx
@@ -76,7 +77,7 @@ class AsyncMCPHttpClient:
     async def aclose(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "AsyncMCPHttpClient":
+    async def __aenter__(self) -> AsyncMCPHttpClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:

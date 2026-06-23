@@ -8,25 +8,32 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any
 
+from ._mcp import (
+    build_rpc_body,
+    parse_rpc_payload,
+    unwrap_tool_result,
+)
+from ._mcp import (
+    normalize_mcp_endpoint as _normalize_mcp_endpoint,
+)
+from ._mcp import (
+    strip_none as _strip_none,
+)
+from ._paths import normalize_remote_path as _normalize_remote_path
 from .errors import AFSError
 from .models import (
     DEFAULT_BASE_URL,
     BashResult,
     MountMode,
+)
+from .models import (
     as_workspace_name as _workspace_name,
 )
-from ._mcp import (
-    build_rpc_body,
-    normalize_mcp_endpoint as _normalize_mcp_endpoint,
-    parse_rpc_payload,
-    strip_none as _strip_none,
-    unwrap_tool_result,
-)
-from ._paths import normalize_remote_path as _normalize_remote_path
 
 
 class AFS:
@@ -57,7 +64,7 @@ class AFS:
 
 
 class WorkspaceClient:
-    def __init__(self, mcp: "MCPHttpClient") -> None:
+    def __init__(self, mcp: MCPHttpClient) -> None:
         self._mcp = mcp
 
     def create(self, *, name: str, description: str | None = None, template_slug: str | None = None) -> dict[str, Any]:
@@ -106,7 +113,7 @@ RepoClient = WorkspaceClient
 
 
 class CheckpointClient:
-    def __init__(self, mcp: "MCPHttpClient") -> None:
+    def __init__(self, mcp: MCPHttpClient) -> None:
         self._mcp = mcp
 
     def list(self, workspace: str | Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -133,7 +140,7 @@ class CheckpointClient:
 
 
 class FSClient:
-    def __init__(self, control_plane: "MCPHttpClient") -> None:
+    def __init__(self, control_plane: MCPHttpClient) -> None:
         self._control_plane = control_plane
 
     def mount(
@@ -143,7 +150,7 @@ class FSClient:
         repos: Sequence[Mapping[str, Any]] | None = None,
         mode: MountMode | str = MountMode.RW,
         token_name: str | None = None,
-    ) -> "MountedFS":
+    ) -> MountedFS:
         workspace_refs = list(workspaces if workspaces is not None else repos or [])
         if not workspace_refs:
             raise AFSError("fs.mount requires at least one workspace")
@@ -180,7 +187,7 @@ class FSClient:
 class _MountedWorkspace:
     name: str
     token: str
-    client: "MCPHttpClient"
+    client: MCPHttpClient
 
 
 class MountedFS:
@@ -262,7 +269,7 @@ class MountedFS:
     def checkpoint(self, name: str | None = None) -> list[dict[str, Any]]:
         return [workspace.client.call_tool("checkpoint_create", {"checkpoint": name}) for workspace in self._workspaces]
 
-    def bash(self) -> "BashRunner":
+    def bash(self) -> BashRunner:
         return BashRunner(self)
 
     def sync_from_remote(self) -> str:
@@ -287,7 +294,7 @@ class MountedFS:
             self._local_root.cleanup()
             self._local_root = None
 
-    def __enter__(self) -> "MountedFS":
+    def __enter__(self) -> MountedFS:
         return self
 
     def __exit__(self, exc_type: object, exc: object, tb: object) -> None:

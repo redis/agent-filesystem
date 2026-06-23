@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from ..errors import AFSError
 from ..models import (
     MountMode,
+)
+from ..models import (
     as_workspace_name as _workspace_name,
 )
 from ._http import AsyncMCPHttpClient
@@ -31,7 +34,7 @@ def _require_checkpoint_workspace(workspace: str | None, repo: str | None, *, ac
 
 
 class AsyncWorkspaceClient:
-    def __init__(self, mcp: "AsyncMCPHttpClient") -> None:
+    def __init__(self, mcp: AsyncMCPHttpClient) -> None:
         self._mcp = mcp
 
     async def create(
@@ -82,7 +85,7 @@ AsyncRepoClient = AsyncWorkspaceClient
 
 
 class AsyncCheckpointClient:
-    def __init__(self, mcp: "AsyncMCPHttpClient") -> None:
+    def __init__(self, mcp: AsyncMCPHttpClient) -> None:
         self._mcp = mcp
 
     async def list(self, workspace: str | Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -107,7 +110,7 @@ class AsyncCheckpointClient:
 
 
 class AsyncFSClient:
-    def __init__(self, control_plane: "AsyncMCPHttpClient") -> None:
+    def __init__(self, control_plane: AsyncMCPHttpClient) -> None:
         self._control_plane = control_plane
 
     async def _mount_one(
@@ -147,7 +150,7 @@ class AsyncFSClient:
         mode: MountMode | str = MountMode.RW,
         token_name: str | None = None,
         concurrency: int = 16,
-    ) -> "AsyncMountedFS":
+    ) -> AsyncMountedFS:
         workspace_refs = list(workspaces if workspaces is not None else repos or [])
         if not workspace_refs:
             raise AFSError("fs.mount requires at least one workspace")
@@ -195,7 +198,7 @@ class AsyncAFS:
     async def aclose(self) -> None:
         await self._control_plane.aclose()
 
-    async def __aenter__(self) -> "AsyncAFS":
+    async def __aenter__(self) -> AsyncAFS:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
