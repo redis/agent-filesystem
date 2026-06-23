@@ -33,6 +33,7 @@ afs.fs.mount(...)               # create an isolated SDK mount
 fs.read_file(path)              # read a text file
 fs.write_file(path, content)    # write a text file
 fs.list_files(path, depth)      # list a directory
+fs.delete(path)                 # delete a file, symlink, or empty directory
 fs.glob(pattern, ...)           # match paths
 fs.grep(pattern, **options)     # search file contents
 fs.checkpoint(name)             # checkpoint mounted workspaces
@@ -310,11 +311,16 @@ The preview `repo_names` property still works.
 fs.read_file(path: str) -> str
 fs.write_file(path: str, content: str | bytes) -> None
 fs.list_files(path: str = "/", depth: int = 1) -> list[dict[str, Any]]
+fs.delete(path: str) -> dict[str, Any]
 ```
 
 `read_file()` returns text. It raises if the path is a directory or if the
 control plane marks the file as binary. `write_file()` sends text content
-through the workspace MCP token.
+through the workspace MCP token. `delete()` removes a single file, symlink, or
+empty directory through the hosted `file_delete` MCP tool and returns its
+`{"operation": "delete", "kind": ...}` result; it refuses the workspace root and
+non-empty directories. When the mount has been materialized locally, the
+matching local path is removed too.
 
 ### Search Methods
 
@@ -459,5 +465,5 @@ fs.map_absolute_repo_paths(command)
 - `write_file()` treats `bytes` content as UTF-8 text.
 - `sync_to_remote()` writes created and modified text files, but does not
   currently propagate local file deletion.
-- `MountedFS` does not yet expose `mkdir`, `rename`, `delete`, `stat`, streams,
-  or binary file helpers.
+- `MountedFS` does not yet expose `mkdir`, `rename`, `stat`, streams, or binary
+  file helpers.

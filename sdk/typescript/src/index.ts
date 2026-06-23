@@ -142,6 +142,11 @@ export type FileReadResponse = {
   target?: string;
 };
 
+export type FileDeleteResponse = {
+  operation: "delete";
+  kind: "file" | "dir" | "symlink" | string;
+};
+
 export class AFSError extends Error {
   readonly status?: number;
   readonly code?: number;
@@ -381,6 +386,18 @@ export class MountedFS {
       path: resolved.remotePath,
       pattern,
     });
+  }
+
+  async delete(path: string): Promise<FileDeleteResponse> {
+    const resolved = this.resolvePath(path);
+    const response = await resolved.workspace.client.callTool<FileDeleteResponse>("file_delete", {
+      path: resolved.remotePath,
+    });
+    if (this.localRootPath) {
+      const localPath = this.localPathFor(resolved.workspace.name, resolved.remotePath);
+      await rm(localPath, { recursive: true, force: true });
+    }
+    return response;
   }
 
   async checkpoint(name?: string): Promise<{ workspace: string; checkpoint: string; created: boolean }[]> {

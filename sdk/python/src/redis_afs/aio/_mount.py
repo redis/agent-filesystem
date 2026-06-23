@@ -94,6 +94,20 @@ class AsyncMountedFS:
         workspace, remote_path = self._resolve(str(options.pop("path", "/")))
         return await workspace.client.call_tool("file_grep", {"path": remote_path, "pattern": pattern, **options})
 
+    async def delete(self, path: str) -> dict[str, Any]:
+        workspace, remote_path = self._resolve(path)
+        response = await workspace.client.call_tool("file_delete", {"path": remote_path})
+        if self.local_root:
+            local_path = self._local_path_for(workspace.name, remote_path)
+            if local_path.is_dir() and not local_path.is_symlink():
+                shutil.rmtree(local_path, ignore_errors=True)
+            else:
+                try:
+                    local_path.unlink()
+                except FileNotFoundError:
+                    pass
+        return response
+
     async def checkpoint(self, name: str | None = None) -> list[dict[str, Any]]:
         return [
             await workspace.client.call_tool("checkpoint_create", {"checkpoint": name})

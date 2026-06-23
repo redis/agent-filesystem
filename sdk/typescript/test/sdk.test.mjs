@@ -57,6 +57,37 @@ test("single-workspace mounts allow workspace-relative paths", async () => {
   assert.deepEqual(fs.workspaceNames, ["foobar"]);
 });
 
+test("delete removes a file and calls file_delete", async () => {
+  const files = new Map();
+  const calls = [];
+  const fakeClient = {
+    async callTool(name, args = {}) {
+      calls.push([name, args]);
+      if (name === "file_write") {
+        files.set(args.path, args.content);
+        return { operation: "write" };
+      }
+      if (name === "file_delete") {
+        if (!files.has(args.path)) {
+          throw new Error(`delete of missing path ${args.path}`);
+        }
+        files.delete(args.path);
+        return { operation: "delete", kind: "file" };
+      }
+      throw new Error(`unexpected tool ${name}`);
+    },
+  };
+  const fs = new MountedFS([{ name: "foobar", token: "token", client: fakeClient }], { mode: "rw" });
+
+  await fs.writeFile("/src/README.md", "hello");
+  const result = await fs.delete("/foobar/src/README.md");
+
+  assert.deepEqual(result, { operation: "delete", kind: "file" });
+  assert.equal(files.has("/src/README.md"), false);
+  const deletePaths = calls.filter(([name]) => name === "file_delete").map(([, args]) => args.path);
+  assert.deepEqual(deletePaths, ["/src/README.md"]);
+});
+
 test("checkpoint.create and checkpoint.restore round-trip through MCP", async () => {
   const calls = [];
   const afs = new AFS({

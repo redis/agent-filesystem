@@ -28,6 +28,7 @@ afs.fs.mount(input)                // create an isolated SDK mount
 fs.readFile(path)                  // read a text file
 fs.writeFile(path, content)        // write a text file
 fs.listFiles(path, depth)          // list a directory
+fs.delete(path)                    // delete a file, symlink, or empty directory
 fs.glob(pattern, options)          // match paths
 fs.grep(pattern, options)          // search file contents
 fs.checkpoint(name)                // checkpoint mounted workspaces
@@ -301,11 +302,16 @@ The preview `repoNames` property still works.
 await fs.readFile(path: string): Promise<string>
 await fs.writeFile(path: string, content: string | Uint8Array): Promise<void>
 await fs.listFiles(path = "/", depth = 1): Promise<FileListItem[]>
+await fs.delete(path: string): Promise<FileDeleteResponse>
 ```
 
 `readFile()` returns text. It throws if the path is a directory or if the
 control plane marks the file as binary. `writeFile()` sends text content through
-the workspace MCP token.
+the workspace MCP token. `delete()` removes a single file, symlink, or empty
+directory through the hosted `file_delete` MCP tool and returns its
+`{ operation: "delete", kind }` result; it throws on the workspace root and
+non-empty directories. When the mount has been materialized locally, the
+matching local path is removed too.
 
 ```typescript
 type FileListItem = {
@@ -464,5 +470,5 @@ fs.mapAbsoluteRepoPaths(command)
 - `writeFile()` treats `Uint8Array` content as UTF-8 text.
 - `syncToRemote()` writes created and modified text files, but does not
   currently propagate local file deletion.
-- `MountedFS` does not yet expose `mkdir`, `rename`, `delete`, `stat`, streams,
-  or binary file helpers.
+- `MountedFS` does not yet expose `mkdir`, `rename`, `stat`, streams, or binary
+  file helpers.

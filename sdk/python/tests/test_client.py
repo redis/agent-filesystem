@@ -47,6 +47,15 @@ class FakeMCP:
                     if "/" not in remainder:
                         entries.append({"path": link_path, "name": remainder, "kind": "symlink", "target": target})
             return {"entries": entries}
+        if name == "file_delete":
+            path = arguments["path"]
+            if path in self.files:
+                del self.files[path]
+                return {"operation": "delete", "kind": "file"}
+            if path in self.symlinks:
+                del self.symlinks[path]
+                return {"operation": "delete", "kind": "symlink"}
+            raise AssertionError(f"delete of missing path {path}")
         if name == "checkpoint_create":
             return {"workspace": "workspace", "checkpoint": arguments.get("checkpoint") or "save-20260508-000000.000", "created": True}
         if name == "checkpoint_restore":
@@ -124,6 +133,18 @@ class MountedFSTest(unittest.TestCase):
         self.assertEqual(fake.files["/src/README.md"], "hello")
         self.assertEqual(fs.read_file("/foobar/src/README.md"), "hello")
         self.assertEqual(fs.workspace_names, ["foobar"])
+
+    def test_delete_removes_file_and_calls_file_delete(self):
+        fake = FakeMCP()
+        fs = MountedFS([_MountedWorkspace(name="foobar", token="token", client=fake)])
+
+        fs.write_file("/src/README.md", "hello")
+        result = fs.delete("/foobar/src/README.md")
+
+        self.assertEqual(result, {"operation": "delete", "kind": "file"})
+        self.assertNotIn("/src/README.md", fake.files)
+        delete_paths = [args["path"] for name, args in fake.calls if name == "file_delete"]
+        self.assertEqual(delete_paths, ["/src/README.md"])
 
     def test_multi_workspace_requires_workspace_prefix(self):
         fs = MountedFS(

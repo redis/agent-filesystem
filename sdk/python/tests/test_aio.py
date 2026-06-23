@@ -64,6 +64,15 @@ class FakeAsyncMCP:
             return {"path": arguments["path"], "kind": "file", "content": self.files.get(arguments["path"], "")}
         if name == "file_list":
             return {"entries": _fake_entries(self.files, self.symlinks, arguments.get("path", "/"))}
+        if name == "file_delete":
+            path = arguments["path"]
+            if path in self.files:
+                del self.files[path]
+                return {"operation": "delete", "kind": "file"}
+            if path in self.symlinks:
+                del self.symlinks[path]
+                return {"operation": "delete", "kind": "symlink"}
+            raise AssertionError(f"delete of missing path {path}")
         raise AssertionError(f"unexpected tool {name}")
 
     async def aclose(self):
@@ -86,6 +95,18 @@ def _fake_entries(files, symlinks, path):
 
 
 class AsyncClientsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_delete_removes_file_and_calls_file_delete(self):
+        fake = FakeAsyncMCP()
+        fs = AsyncMountedFS([_AsyncMountedWorkspace(name="foobar", token="token", client=fake)])
+
+        await fs.write_file("/src/README.md", "hello")
+        result = await fs.delete("/foobar/src/README.md")
+
+        self.assertEqual(result, {"operation": "delete", "kind": "file"})
+        self.assertNotIn("/src/README.md", fake.files)
+        delete_paths = [args["path"] for name, args in fake.calls if name == "file_delete"]
+        self.assertEqual(delete_paths, ["/src/README.md"])
+
     async def test_workspace_list_normalizes_items(self):
         ws = AsyncWorkspaceClient(FakeAsyncMCP())
         self.assertEqual(await ws.list(), [{"name": "a"}, {"name": "b"}])
