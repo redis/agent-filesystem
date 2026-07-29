@@ -35,6 +35,8 @@ func main() {
 	attrTimeout := flag.Float64("attr-timeout", 1.0, "Attribute cache TTL in seconds")
 	readOnly := flag.Bool("readonly", false, "Mount read-only")
 	allowOther := flag.Bool("allow-other", false, "Allow other users to access mount")
+	mountUID := flag.Int("uid", -1, "Owner uid for files in the mount (default: the mount process's uid)")
+	mountGID := flag.Int("gid", -1, "Owner gid for files in the mount (default: the mount process's gid)")
 	foreground := flag.Bool("foreground", true, "Run in foreground")
 	debug := flag.Bool("debug", false, "Enable FUSE debug logging")
 	disableInvalidation := flag.Bool("disable-cross-client-invalidation", false, "Disable Redis pub/sub cache invalidation between clients. Falls back to TTL-based staleness.")
@@ -116,7 +118,17 @@ func main() {
 
 	c := client.NewWithObserver(rdb, redisKey, controlplane.NewMountVersionObserver(rdb))
 
+	// Ownership defaults to the mount process's own uid/gid. The flags let a
+	// privileged mounter present the files as another user, which is what
+	// container and CSI callers need: without them the only way to hand a mount
+	// to a non-root workload is to run the mount process as that user.
 	uid, gid := afsfs.GetOwnership()
+	if *mountUID >= 0 {
+		uid = uint32(*mountUID)
+	}
+	if *mountGID >= 0 {
+		gid = uint32(*mountGID)
+	}
 
 	opts := &afsfs.Options{
 		AttrTimeout:                    time.Duration(*attrTimeout * float64(time.Second)),
