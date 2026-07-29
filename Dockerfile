@@ -6,6 +6,12 @@ WORKDIR /build/ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci
 
+# The UI's prebuild step runs ../scripts/generate-template-data.mjs, which reads
+# the repo-root templates/ tree. Both live outside ui/, so they have to be copied
+# in or `npm run build` fails before vite starts.
+COPY scripts/ /build/scripts/
+COPY templates/ /build/templates/
+
 COPY ui/ ./
 RUN npm run build
 
