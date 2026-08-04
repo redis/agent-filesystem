@@ -384,7 +384,9 @@ func (n *FSNode) Setattr(ctx context.Context, fh fs.FileHandle, in *fuse.SetAttr
 	return n.Getattr(ctx, fh, out)
 }
 
-// GetOwnership returns the uid/gid to use. Defaults come from opts.
+// GetOwnership returns the calling process's uid/gid, the default owner for
+// files in a mount. Callers that need a different owner set Options.UID and
+// Options.GID instead.
 func GetOwnership() (uint32, uint32) {
 	return uint32(os.Getuid()), uint32(os.Getgid())
 }
