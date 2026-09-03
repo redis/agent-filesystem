@@ -13,3 +13,10 @@ func TestIsVectorUnavailableTreatsNonZeroDBAsUnavailable(t *testing.T) {
 		t.Fatalf("isVectorUnavailable(%q) = false, want true", err)
 	}
 }
+
+func TestIsUnknownSearchIndexRecognizesRedisSearch810Error(t *testing.T) {
+	err := errors.New("SEARCH_INDEX_NOT_FOUND Index not found: afs:qvec:{workspace}:v1")
+	if !isUnknownSearchIndex(err) {
+		t.Fatalf("isUnknownSearchIndex(%q) = false, want true", err)
+	}
+}

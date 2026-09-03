@@ -1287,6 +1287,7 @@ func isUnknownSearchIndex(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "unknown index") ||
 		strings.Contains(msg, "no such index") ||
+		strings.Contains(msg, "index not found") ||
 		strings.Contains(msg, "index does not exist")
 }
 
