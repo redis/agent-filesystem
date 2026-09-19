@@ -168,7 +168,13 @@ func (d *downloader) processFile(ctx context.Context, op downloadOp) {
 		return
 	}
 
-	data, err := d.fs.Cat(ctx, remotePath)
+	snapshot, err := client.ReadFileSnapshot(ctx, d.fs, remotePath)
+	if err == nil && snapshot.Stat == nil {
+		d.send(downloadResult{Op: op, Skipped: true})
+		return
+	}
+	data := snapshot.Content
+	stat = snapshot.Stat
 	if err != nil {
 		d.send(downloadResult{Op: op, Err: fmt.Errorf("read remote %s: %w", op.Path, err)})
 		return
@@ -269,6 +275,35 @@ func (d *downloader) processChunkedFile(ctx context.Context, op downloadOp) {
 		return
 	}
 
+	d.fs.InvalidateCache()
+	stat, err = d.fs.Stat(ctx, remotePath)
+	if err != nil {
+		d.send(downloadResult{Op: op, Err: err})
+		return
+	}
+	if stat == nil {
+		d.send(downloadResult{Op: op, Skipped: true})
+		return
+	}
+	chunkSize, hashes, err := d.fs.ChunkMeta(ctx, remotePath)
+	if err != nil {
+		d.send(downloadResult{Op: op, Err: err})
+		return
+	}
+	if chunkSize != op.ChunkSize || compositeHash(hashes) != compositeHash(op.ChunkHashes) {
+		// Whole-file/API writers may have cleared the optional chunk manifest.
+		// Derive it from a stable snapshot instead of trusting stale invalidations.
+		snapshot, err := client.ReadFileSnapshot(ctx, d.fs, remotePath)
+		if err != nil {
+			d.send(downloadResult{Op: op, Err: err})
+			return
+		}
+		if snapshot.Stat == nil || compositeHash(uploadChunkHashes(snapshot.Content, op.ChunkSize)) != compositeHash(op.ChunkHashes) {
+			d.send(downloadResult{Op: op, Skipped: true})
+			return
+		}
+		stat = snapshot.Stat
+	}
 	// Fetch dirty chunks from remote.
 	chunkData, err := d.fs.ReadChunks(ctx, remotePath, op.DirtyChunks, op.ChunkSize)
 	if err != nil {
@@ -277,6 +312,16 @@ func (d *downloader) processChunkedFile(ctx context.Context, op downloadOp) {
 	}
 
 	if d.cancelled(ctx, op) {
+		return
+	}
+	d.fs.InvalidateCache()
+	after, err := d.fs.Stat(ctx, remotePath)
+	if err != nil {
+		d.send(downloadResult{Op: op, Err: err})
+		return
+	}
+	if !client.SameFileRevision(stat, after) {
+		d.send(downloadResult{Op: op, Skipped: true})
 		return
 	}
 	if !local.unchanged(op.AbsPath) {

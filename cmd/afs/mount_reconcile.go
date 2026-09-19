@@ -425,7 +425,7 @@ func observedChangedFromStored(meta observedMeta, stored SyncEntry, localSide bo
 		if localSide {
 			return stored.LocalMtimeMs != 0 && meta.mtimeMs != stored.LocalMtimeMs
 		}
-		return stored.RemoteMtimeMs != 0 && meta.mtimeMs != stored.RemoteMtimeMs
+		return stored.RemoteRevision != "" && meta.revision != "" && (meta.revision != stored.RemoteRevision || meta.inode != stored.RemoteInode) || stored.RemoteMtimeMs != 0 && meta.mtimeMs != stored.RemoteMtimeMs
 	default:
 		return true
 	}

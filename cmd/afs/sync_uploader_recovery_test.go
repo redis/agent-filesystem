@@ -348,7 +348,7 @@ func assertRecoveryUploadOutcome(t *testing.T, env *syncTestEnv, fs *recoveryUpl
 			t.Fatal(err)
 		}
 		want = string(data)
-		if res.RemoteStat == nil || res.RemoteStat.Mode != op.Mode || res.RemoteHashSeen != op.LocalHash || fs.chmods != 1 {
+		if res.RemoteStat == nil || res.RemoteStat.Mode != op.Mode || res.RemoteHashSeen != op.LocalHash || fs.chmods > 1 {
 			t.Fatalf("successful upload did not preserve mode/hash result: stat=%+v hash=%s chmod=%d", res.RemoteStat, res.RemoteHashSeen, fs.chmods)
 		}
 	} else if fs.chmods != 0 {

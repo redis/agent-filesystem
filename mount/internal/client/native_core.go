@@ -63,21 +63,22 @@ type nativeClient struct {
 const markRootDirtyThrottle = 100 * time.Millisecond
 
 type inodeData struct {
-	Revision   string
-	ID         string
-	Parent     string
-	Name       string
-	Type       string
-	Mode       uint32
-	UID        uint32
-	GID        uint32
-	Size       int64
-	CtimeMs    int64
-	MtimeMs    int64
-	AtimeMs    int64
-	Target     string
-	Content    string
-	ContentRef string // "ext"/"array" use afs:{fs}:content:{id}; empty means legacy inline content
+	committedSnapshot *VersionedSnapshot
+	Revision          string
+	ID                string
+	Parent            string
+	Name              string
+	Type              string
+	Mode              uint32
+	UID               uint32
+	GID               uint32
+	Size              int64
+	CtimeMs           int64
+	MtimeMs           int64
+	AtimeMs           int64
+	Target            string
+	Content           string
+	ContentRef        string // "ext"/"array" use afs:{fs}:content:{id}; empty means legacy inline content
 }
 
 func newNativeClient(rdb *redis.Client, key string, observer MutationObserver) Client {
@@ -182,7 +183,13 @@ func (c *nativeClient) publishInvalidate(ctx context.Context, op string, paths .
 		Op:     op,
 		Paths:  cleaned,
 	}
-	if err := PublishInvalidation(ctx, c.rdb, c.key, ev); err != nil {
+	// Mutation scripts/transactions already appended their durable event.
+	// Supplemental invalidations are wakeup hints, not additional mutations.
+	payload, err := encodeInvalidate(ev)
+	if err == nil {
+		err = c.rdb.Publish(ctx, c.keys.invalidateChannel(), payload).Err()
+	}
+	if err != nil {
 		log.Printf("afs: invalidate publish failed op=%s paths=%v: %v", op, cleaned, err)
 	}
 }
@@ -636,14 +643,15 @@ func (c *nativeClient) LsLong(ctx context.Context, p string) ([]LsEntry, error) 
 	out := make([]LsEntry, 0, len(children))
 	for _, child := range children {
 		out = append(out, LsEntry{
-			Inode: inodeUint64(child.Inode.ID),
-			Name:  child.Name,
-			Type:  child.Inode.Type,
-			Mode:  child.Inode.Mode,
-			UID:   child.Inode.UID,
-			GID:   child.Inode.GID,
-			Size:  child.Inode.Size,
-			Mtime: child.Inode.MtimeMs,
+			Revision: child.Inode.Revision,
+			Inode:    inodeUint64(child.Inode.ID),
+			Name:     child.Name,
+			Type:     child.Inode.Type,
+			Mode:     child.Inode.Mode,
+			UID:      child.Inode.UID,
+			GID:      child.Inode.GID,
+			Size:     child.Inode.Size,
+			Mtime:    child.Inode.MtimeMs,
 		})
 	}
 	return out, nil

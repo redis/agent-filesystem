@@ -21,14 +21,15 @@ type StatResult struct {
 
 // LsEntry holds one entry from a long directory listing.
 type LsEntry struct {
-	Inode uint64
-	Name  string
-	Type  string
-	Mode  uint32
-	UID   uint32
-	GID   uint32
-	Size  int64
-	Mtime int64
+	Revision string
+	Inode    uint64
+	Name     string
+	Type     string
+	Mode     uint32
+	UID      uint32
+	GID      uint32
+	Size     int64
+	Mtime    int64
 }
 
 // InfoResult holds a parsed filesystem info response.

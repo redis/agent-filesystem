@@ -53,12 +53,14 @@ func (f *fullReconciler) checkRunning(ctx context.Context) error {
 // content or hashes — those are deferred to the execution phase where they're
 // actually needed (and can be parallelized).
 type observedMeta struct {
-	kind    string // "file" | "dir" | "symlink"
-	mode    uint32
-	size    int64
-	mtimeMs int64
-	mtimeNs int64  // local observation, used to reject changes during a scan
-	target  string // symlink target (local) or readlink result (remote)
+	revision string
+	inode    uint64
+	kind     string // "file" | "dir" | "symlink"
+	mode     uint32
+	size     int64
+	mtimeMs  int64
+	mtimeNs  int64  // local observation, used to reject changes during a scan
+	target   string // symlink target (local) or readlink result (remote)
 }
 
 // syncAction is one entry in the plan the reconciler builds during the diff
@@ -548,7 +550,7 @@ func (f *fullReconciler) scanRemoteDirMeta(ctx context.Context, dir string, out 
 			}
 			out[rel] = observedMeta{kind: "symlink", target: target, mtimeMs: e.Mtime}
 		case "file":
-			out[rel] = observedMeta{kind: "file", mode: e.Mode, size: e.Size, mtimeMs: e.Mtime}
+			out[rel] = observedMeta{kind: "file", mode: e.Mode, size: e.Size, mtimeMs: e.Mtime, revision: e.Revision, inode: e.Inode}
 		}
 	}
 	return nil
@@ -694,6 +696,10 @@ func (f *fullReconciler) planDownload(path, abs string, r observedMeta, stored S
 // sides match the stored state. For cold start (no stored state) where both
 // sides have matching size+mtime, we assume they're in sync.
 func metaMatch(l, r observedMeta, stored SyncEntry, hasStored bool) bool {
+	if hasStored && stored.RemoteRevision != "" && r.revision != "" && (r.revision != stored.RemoteRevision || r.inode != stored.RemoteInode) {
+		return false
+	}
+
 	if l.kind != r.kind {
 		return false
 	}
@@ -708,7 +714,7 @@ func metaMatch(l, r observedMeta, stored SyncEntry, hasStored bool) bool {
 		}
 		// If we have stored state and both sides match it, they're in sync.
 		if hasStored && stored.Size == l.size {
-			if l.mtimeMs == stored.LocalMtimeMs && r.mtimeMs == stored.RemoteMtimeMs {
+			if l.mtimeMs == stored.LocalMtimeMs && r.mtimeMs == stored.RemoteMtimeMs && (stored.RemoteRevision == "" || r.revision == stored.RemoteRevision && r.inode == stored.RemoteInode) {
 				return true
 			}
 		}
@@ -951,7 +957,11 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 	// file (even multi-MB on WAN).
 	catCtx, catCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer catCancel()
-	data, err := f.r.fs.Cat(catCtx, remotePath)
+	snapshot, err := client.ReadFileSnapshot(catCtx, f.r.fs, remotePath)
+	if err == nil && snapshot.Stat == nil {
+		return nil
+	}
+	data := snapshot.Content
 	if err != nil {
 		if isClientNotFound(err) {
 			return nil // vanished between scan and download
@@ -959,6 +969,7 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 		return fmt.Errorf("download %s: %w", a.path, err)
 	}
 	hash := sha256Hex(data)
+	a.mode = snapshot.Stat.Mode
 	if err := f.checkRunning(ctx); err != nil {
 		return err
 	}
@@ -997,18 +1008,20 @@ func (f *fullReconciler) execDownload(ctx context.Context, a syncAction) error {
 	if fi, err := os.Stat(a.absPath); err == nil {
 		localMtimeMs = fi.ModTime().UnixMilli()
 	}
-	if a.remoteMeta != nil {
-		remoteMtimeMs = a.remoteMeta.mtimeMs
+	if snapshot.Stat != nil {
+		remoteMtimeMs = snapshot.Stat.Mtime
 	}
 	f.updateActionState(a, SyncEntry{
-		Type:          "file",
-		Mode:          mode,
-		Size:          int64(len(data)),
-		LocalHash:     hash,
-		RemoteHash:    hash,
-		LocalMtimeMs:  localMtimeMs,
-		RemoteMtimeMs: remoteMtimeMs,
-		LastSyncedAt:  time.Now().UTC(),
+		Type:           "file",
+		Mode:           mode,
+		Size:           int64(len(data)),
+		LocalHash:      hash,
+		RemoteHash:     hash,
+		LocalMtimeMs:   localMtimeMs,
+		RemoteMtimeMs:  remoteMtimeMs,
+		RemoteRevision: snapshot.Stat.Revision,
+		RemoteInode:    snapshot.Stat.Inode,
+		LastSyncedAt:   time.Now().UTC(),
 	})
 	return nil
 }
@@ -1104,34 +1117,49 @@ func (f *fullReconciler) execUpload(ctx context.Context, a syncAction) error {
 		return err
 	}
 	remotePath := absoluteRemotePath(a.path)
-	if err := f.checkRunning(ctx); err != nil {
+	snapshot, err := client.ReadFileSnapshot(ctx, f.r.fs, remotePath)
+	if err != nil {
 		return err
 	}
-	if err := f.r.fs.Echo(ctx, remotePath, data); err != nil {
-		return fmt.Errorf("upload %s: %w", a.path, err)
+	if a.checkState && (snapshot.Stat == nil) != (a.remoteMeta == nil) {
+		f.r.requestFullSweep()
+		return nil
+	}
+	if a.remoteMeta != nil && a.remoteMeta.revision != "" && (snapshot.Stat == nil || snapshot.Stat.Revision != a.remoteMeta.revision || snapshot.Stat.Inode != a.remoteMeta.inode) {
+		f.r.requestFullSweep()
+		return nil
+	}
+	if err := f.checkRunning(ctx); err != nil {
+		return err
 	}
 	mode := a.mode
 	if mode == 0 {
 		mode = 0o644
 	}
-	_ = f.r.fs.Chmod(ctx, remotePath, mode)
-	remoteStat, err := f.r.fs.Stat(ctx, remotePath)
-	if err != nil {
-		return fmt.Errorf("stat uploaded %s: %w", a.path, err)
+	var result client.MutationResult
+	writeCtx := client.WithMutationResult(client.WithFileMode(snapshot.WriteContext(ctx), mode), &result)
+	if err := f.r.fs.Echo(writeCtx, remotePath, data); err != nil {
+		if errors.Is(err, client.ErrWriteConflict) {
+			f.r.requestFullSweep()
+		}
+		return fmt.Errorf("upload %s: %w", a.path, err)
 	}
+	remoteStat := result.Stat
 	if remoteStat == nil {
-		return fmt.Errorf("uploaded file %s is missing remotely", a.path)
+		return fmt.Errorf("upload %s: client did not return a commit result", a.path)
 	}
 
 	f.updateActionState(a, SyncEntry{
-		Type:          "file",
-		Mode:          mode,
-		Size:          int64(len(data)),
-		LocalHash:     hash,
-		RemoteHash:    hash,
-		LocalMtimeMs:  localInfo.ModTime().UnixMilli(),
-		RemoteMtimeMs: remoteStat.Mtime,
-		LastSyncedAt:  time.Now().UTC(),
+		Type:           "file",
+		Mode:           mode,
+		Size:           int64(len(data)),
+		LocalHash:      hash,
+		RemoteHash:     hash,
+		LocalMtimeMs:   localInfo.ModTime().UnixMilli(),
+		RemoteMtimeMs:  remoteStat.Mtime,
+		RemoteRevision: remoteStat.Revision,
+		RemoteInode:    remoteStat.Inode,
+		LastSyncedAt:   time.Now().UTC(),
 	})
 	return nil
 }

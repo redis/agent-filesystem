@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"path/filepath"
+
+	"github.com/redis/agent-filesystem/mount/client"
 )
 
 // Record each successful mutation immediately, even if a later save operation
@@ -25,7 +27,7 @@ func removeSyncSaveEntry(ctx context.Context, r *reconciler, rel string, previou
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := r.fs.Rm(ctx, absoluteRemotePath(rel)); err != nil {
+	if err := r.fs.Rm(client.WithExpectedStat(ctx, previous.stat), absoluteRemotePath(rel)); err != nil {
 		return err
 	}
 	recordSyncSaveChange(ctx, r, uploadOp{Kind: opUploadDelete, Path: rel}, previous)
@@ -63,7 +65,7 @@ func writeSyncSaveEntry(ctx context.Context, r *reconciler, rel string, entry, p
 		if err != nil {
 			return err
 		}
-		if err := r.fs.EchoCreate(ctx, remotePath, data, entry.Mode); err != nil {
+		if err := r.fs.EchoCreate(client.WithExpectedStat(ctx, previous.stat), remotePath, data, entry.Mode); err != nil {
 			return err
 		}
 		op.Kind, op.Content = opUploadFile, data
@@ -76,7 +78,7 @@ func chmodSyncSaveEntry(ctx context.Context, r *reconciler, rel string, mode uin
 	if previous.Mode == mode {
 		return nil
 	}
-	if err := r.fs.Chmod(ctx, absoluteRemotePath(rel), mode); err != nil {
+	if err := r.fs.Chmod(client.WithExpectedStat(ctx, previous.stat), absoluteRemotePath(rel), mode); err != nil {
 		return err
 	}
 	recordSyncSaveChange(ctx, r, uploadOp{Kind: opUploadChmod, Path: rel, Mode: mode, LocalHash: previous.Hash}, previous)
@@ -87,6 +89,7 @@ func chmodSyncSaveEntry(ctx context.Context, r *reconciler, rel string, mode uin
 // creation's actual mode as the baseline so recovery/retry recognizes our own
 // partial write, while still detecting an intervening remote change.
 func finishSyncSaveCreate(ctx context.Context, r *reconciler, rel string, mode uint32, created syncSaveEntry) error {
+	created.stat, _ = r.fs.Stat(ctx, absoluteRemotePath(rel))
 	err := chmodSyncSaveEntry(ctx, r, rel, mode, created)
 	if err != nil {
 		r.state.mu.Lock()

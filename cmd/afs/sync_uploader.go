@@ -253,7 +253,14 @@ func versionedSnapshotFromUploadResult(r uploadResult) (controlplane.VersionedFi
 			BlobID:      r.Op.LocalHash,
 		}
 		if r.Op.Chunked {
-			data, err := os.ReadFile(r.Op.AbsPath)
+			data := r.Op.Content
+			var err error
+			if data == nil {
+				data, err = os.ReadFile(r.Op.AbsPath)
+			}
+			if err == nil && compositeHash(uploadChunkHashes(data, r.Op.ChunkSize)) != r.Op.LocalHash {
+				err = errors.New("chunked history source changed after upload")
+			}
 			if err != nil {
 				return controlplane.VersionedFileSnapshot{}, true, fmt.Errorf("read chunked upload %s: %w", r.Op.AbsPath, err)
 			}
@@ -358,119 +365,102 @@ func (u *uploader) processFile(ctx context.Context, op uploadOp) {
 		u.send(uploadResult{Op: op, Err: fmt.Errorf("file %s is %d bytes, exceeds sync size cap of %d bytes", op.Path, len(op.Content), u.maxFileBytes)})
 		return
 	}
-
+	snapshot, ok := u.uploadSnapshot(ctx, op)
+	if !ok {
+		return
+	}
+	if snapshot.Stat != nil {
+		remoteHash := sha256Hex(snapshot.Content)
+		if remoteHash == op.LocalHash {
+			u.finishMatchingSnapshot(ctx, op, snapshot)
+			return
+		}
+		matches := remoteHash == op.StoredEntry.RemoteHash
+		if !matches && op.StoredEntry.ChunkSize > 0 {
+			matches = compositeHash(uploadChunkHashes(snapshot.Content, op.StoredEntry.ChunkSize)) == op.StoredEntry.RemoteHash
+		}
+		if op.HasStored && op.StoredEntry.RemoteHash != "" && !matches {
+			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: remoteHash, RemoteStat: snapshot.Stat})
+			return
+		}
+	}
+	if !u.queuedFileCurrent(op) {
+		return
+	}
 	mode := op.Mode
 	if mode == 0 {
 		mode = 0o644
 	}
-	// Recovery may have uploaded this content while the operation waited.
-	// Only divergent remote content is a conflict with the stored baseline.
-	remotePath := absoluteRemotePath(op.Path)
-	stat, statErr := u.fs.Stat(ctx, remotePath)
-	if statErr != nil && !isClientNotFound(statErr) {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("stat remote %s: %w", op.Path, statErr)})
+	var result client.MutationResult
+	writeCtx := client.WithMutationResult(client.WithFileMode(snapshot.WriteContext(ctx), mode), &result)
+	if err := u.fs.Echo(writeCtx, snapshot.Path, op.Content); err != nil {
+		u.uploadWriteError(op, err)
 		return
 	}
-	if stat != nil {
-		remoteData, err := u.fs.Cat(ctx, remotePath)
-		if err != nil {
-			u.send(uploadResult{Op: op, Err: fmt.Errorf("read remote %s: %w", op.Path, err)})
-			return
-		}
-		if !u.queuedFileCurrent(op) {
-			return
-		}
-		remoteHash := sha256Hex(remoteData)
-		if remoteHash == op.LocalHash {
-			u.finishMatchingFileUpload(ctx, op, remotePath, mode)
-			return
-		}
-		matchesBaseline := remoteHash == op.StoredEntry.RemoteHash
-		if !matchesBaseline && op.StoredEntry.ChunkSize > 0 {
-			matchesBaseline = compositeHash(uploadChunkHashes(remoteData, op.StoredEntry.ChunkSize)) == op.StoredEntry.RemoteHash
-		}
-		if op.HasStored && op.StoredEntry.RemoteHash != "" && !matchesBaseline {
-			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: remoteHash, RemoteStat: stat})
-			return
-		}
-	}
+	u.finishCommittedUpload(ctx, op, mode, result)
+}
 
-	if !u.queuedFileCurrent(op) {
+func (u *uploader) uploadSnapshot(ctx context.Context, op uploadOp) (client.FileSnapshot, bool) {
+	snapshot, err := client.ReadFileSnapshot(ctx, u.fs, absoluteRemotePath(op.Path))
+	if err != nil {
+		u.uploadWriteError(op, err)
+		return snapshot, false
+	}
+	return snapshot, u.queuedFileCurrent(op)
+}
+
+func (u *uploader) uploadWriteError(op uploadOp, err error) {
+	if errors.Is(err, client.ErrWriteConflict) {
+		u.send(uploadResult{Op: op, Conflict: true})
 		return
 	}
-	// Echo handles both create-and-write and write-existing in a single
-	// round trip; the native client falls back to createFile when the
-	// path is missing. We don't pre-create with CreateFile because that
-	// leaves the inode briefly empty and other watchers can race against
-	// the empty state.
-	if err := u.fs.Echo(ctx, remotePath, op.Content); err != nil {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("write remote %s: %w", op.Path, err)})
-		return
-	}
-	u.finishFileUpload(ctx, op, remotePath, mode)
+	u.send(uploadResult{Op: op, Err: fmt.Errorf("publish remote %s: %w", op.Path, err)})
 }
 
 func (u *uploader) processChunkedFile(ctx context.Context, op uploadOp) {
 	if !u.queuedFileCurrent(op) {
 		return
 	}
-	remotePath := absoluteRemotePath(op.Path)
-
-	// Drift check: compare remote chunk manifest against what we stored.
-	_, remoteHashes, err := u.fs.ChunkMeta(ctx, remotePath)
-	remoteMissing := errors.Is(err, redis.Nil) || isClientNotFound(err)
-	if err != nil && !remoteMissing {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("chunk meta %s: %w", op.Path, err)})
+	snapshot, ok := u.uploadSnapshot(ctx, op)
+	if !ok {
 		return
 	}
-	// Echo uploads can leave absent or stale chunk metadata. Derive hashes
-	// from current bytes and accept either representation of the baseline.
-	if err == nil {
-		remoteData, readErr := u.fs.Cat(ctx, remotePath)
-		if readErr != nil {
-			u.send(uploadResult{Op: op, Err: fmt.Errorf("read remote %s: %w", op.Path, readErr)})
-			return
-		}
-		if !u.queuedFileCurrent(op) {
-			return
-		}
-		remoteHash := sha256Hex(remoteData)
-		remoteHashes = uploadChunkHashes(remoteData, op.ChunkSize)
-		remoteComposite := compositeHash(remoteHashes)
+	if snapshot.Stat != nil {
+		remoteHash := sha256Hex(snapshot.Content)
+		remoteComposite := compositeHash(uploadChunkHashes(snapshot.Content, op.ChunkSize))
 		if remoteComposite == op.LocalHash {
-			u.finishMatchingFileUpload(ctx, op, remotePath, op.Mode)
+			u.finishMatchingSnapshot(ctx, op, snapshot)
 			return
 		}
 		baselineComposite := remoteComposite
 		if op.StoredEntry.ChunkSize > 0 && op.StoredEntry.ChunkSize != op.ChunkSize {
-			baselineComposite = compositeHash(uploadChunkHashes(remoteData, op.StoredEntry.ChunkSize))
+			baselineComposite = compositeHash(uploadChunkHashes(snapshot.Content, op.StoredEntry.ChunkSize))
 		}
 		if op.HasStored && op.StoredEntry.RemoteHash != "" && remoteHash != op.StoredEntry.RemoteHash && baselineComposite != op.StoredEntry.RemoteHash {
-			stat, _ := u.fs.Stat(ctx, remotePath)
-			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: remoteComposite, RemoteStat: stat})
+			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: remoteComposite, RemoteStat: snapshot.Stat})
 			return
 		}
 	}
-
-	// A missing remote file has no unchanged chunks to preserve. Recreate
-	// its complete contents even if this operation was planned as a delta.
 	dirtyChunks := op.DirtyChunks
-	if remoteMissing {
+	if snapshot.Stat == nil {
 		dirtyChunks = make([]int, len(op.ChunkHashes))
 		for i := range dirtyChunks {
 			dirtyChunks[i] = i
 		}
 	}
-
-	// Upload dirty chunks in batches.
 	chunks := make(map[int][]byte, len(dirtyChunks))
 	for _, idx := range dirtyChunks {
-		data, err := readChunkFromDisk(op.AbsPath, idx, op.ChunkSize)
-		if err != nil {
-			u.send(uploadResult{Op: op, Err: fmt.Errorf("read chunk %d of %s: %w", idx, op.Path, err)})
+		if idx < 0 || idx >= len(op.ChunkHashes) {
+			u.send(uploadResult{Op: op, Err: errors.New("invalid dirty chunk index")})
 			return
 		}
-		if idx >= len(op.ChunkHashes) || sha256Hex(data) != op.ChunkHashes[idx] {
+		data, err := readChunkFromDisk(op.AbsPath, idx, op.ChunkSize)
+		if err != nil {
+			u.uploadWriteError(op, err)
+			return
+		}
+		// These frozen buffers, not another disk read, are the publication payload.
+		if sha256Hex(data) != op.ChunkHashes[idx] {
 			u.send(uploadResult{Op: op, Skipped: true})
 			return
 		}
@@ -479,58 +469,118 @@ func (u *uploader) processChunkedFile(ctx context.Context, op uploadOp) {
 	if !u.queuedFileCurrent(op) {
 		return
 	}
-
-	// If file doesn't exist remotely yet, create it first.
-	stat, _ := u.fs.Stat(ctx, remotePath)
-	if stat == nil {
-		if _, _, err := u.fs.CreateFile(ctx, remotePath, op.Mode, false); err != nil && !isClientAlreadyExists(err) {
-			u.send(uploadResult{Op: op, Err: fmt.Errorf("create %s: %w", op.Path, err)})
+	// Retain the exact full candidate for history. Unchanged chunks come from
+	// the verified snapshot; changed chunks are the frozen buffers just checked.
+	if op.FileSize < 0 || op.FileSize > u.maxFileBytes {
+		u.uploadWriteError(op, errors.New("chunked file exceeds size cap"))
+		return
+	}
+	candidate := make([]byte, op.FileSize)
+	copy(candidate, snapshot.Content)
+	for idx, data := range chunks {
+		off := int64(idx) * int64(op.ChunkSize)
+		if off < 0 || off+int64(len(data)) > op.FileSize {
+			u.uploadWriteError(op, errors.New("chunk outside file"))
 			return
 		}
+		copy(candidate[off:], data)
 	}
-
-	if err := u.fs.WriteChunks(ctx, remotePath, chunks, op.ChunkSize, op.FileSize, op.ChunkHashes); err != nil {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("write chunks %s: %w", op.Path, err)})
+	if compositeHash(uploadChunkHashes(candidate, op.ChunkSize)) != op.LocalHash {
+		u.send(uploadResult{Op: op, Skipped: true})
 		return
 	}
-
-	u.finishFileUpload(ctx, op, remotePath, op.Mode)
+	op.Content = candidate
+	mode := op.Mode
+	if mode == 0 {
+		mode = 0o644
+	}
+	var result client.MutationResult
+	writeCtx := client.WithMutationResult(client.WithFileMode(snapshot.WriteContext(ctx), mode), &result)
+	// WriteChunks stages and claims an absent file in a single publication.
+	// Pre-creating an empty inode would expose partial state and lose ExpectAbsent.
+	if err := u.fs.WriteChunks(writeCtx, snapshot.Path, chunks, op.ChunkSize, op.FileSize, op.ChunkHashes); err != nil {
+		u.uploadWriteError(op, err)
+		return
+	}
+	u.finishCommittedUpload(ctx, op, mode, result)
 }
 
-func (u *uploader) finishFileUpload(ctx context.Context, op uploadOp, remotePath string, mode uint32) {
-	// Retain mode propagation even when recovery already uploaded the bytes.
-	_ = u.fs.Chmod(ctx, remotePath, mode)
-	newStat, err := u.fs.Stat(ctx, remotePath)
-	if err != nil {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("post-write stat %s: %w", op.Path, err)})
+func (u *uploader) finishCommittedUpload(ctx context.Context, op uploadOp, mode uint32, result client.MutationResult) {
+	if result.Stat != nil {
+		// Never attach a later Stat to our older content hash. It may be a peer's write.
+		u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: result.Stat})
 		return
 	}
-	u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: newStat})
+	// Alternate Client implementations can omit result capture. Verify their
+	// content before attempting a revision-guarded mode update.
+	snapshot, err := client.ReadFileSnapshot(ctx, u.fs, absoluteRemotePath(op.Path))
+	if err != nil {
+		u.uploadWriteError(op, err)
+		return
+	}
+	hash := sha256Hex(snapshot.Content)
+	if op.Chunked {
+		hash = compositeHash(uploadChunkHashes(snapshot.Content, op.ChunkSize))
+	}
+	if snapshot.Stat == nil || hash != op.LocalHash {
+		u.send(uploadResult{Op: op, Conflict: true})
+		return
+	}
+	op.Mode = mode
+	u.finishMatchingSnapshot(ctx, op, snapshot)
 }
 
-func (u *uploader) finishMatchingFileUpload(ctx context.Context, op uploadOp, remotePath string, mode uint32) {
-	stat, err := u.fs.Stat(ctx, remotePath)
-	if err != nil {
-		u.send(uploadResult{Op: op, Err: fmt.Errorf("stat matching remote %s: %w", op.Path, err)})
-		return
+func (u *uploader) finishMatchingSnapshot(ctx context.Context, op uploadOp, snapshot client.FileSnapshot) {
+	stat := snapshot.Stat
+	mode := op.Mode
+	if mode == 0 {
+		mode = 0o644
 	}
 	if !u.queuedFileCurrent(op) {
 		return
 	}
-	if stat == nil || stat.Type != "file" {
+	if op.HasStored && op.StoredEntry.Mode != 0 && stat.Mode != op.StoredEntry.Mode && stat.Mode != mode {
+		u.send(uploadResult{Op: op, Skipped: mode == op.StoredEntry.Mode, Conflict: mode != op.StoredEntry.Mode})
+		return
+	}
+	if stat.Mode == mode {
+		u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: stat})
+		return
+	}
+	var result client.MutationResult
+	writeCtx := client.WithMutationResult(snapshot.WriteContext(ctx), &result)
+	if err := u.fs.Chmod(writeCtx, snapshot.Path, mode); err != nil {
+		u.uploadWriteError(op, err)
+		return
+	}
+	if result.Stat != nil {
+		u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: result.Stat})
+		return
+	}
+	after, err := client.ReadFileSnapshot(ctx, u.fs, snapshot.Path)
+	if err != nil {
+		u.uploadWriteError(op, err)
+		return
+	}
+	if after.Stat == nil || after.Stat.Mode != mode || !bytes.Equal(after.Content, snapshot.Content) {
+		u.send(uploadResult{Op: op, Conflict: true})
+		return
+	}
+	u.send(uploadResult{Op: op, RemoteHashSeen: op.LocalHash, RemoteStat: after.Stat})
+}
+
+func (u *uploader) finishMatchingFileUpload(ctx context.Context, op uploadOp, remotePath string, mode uint32) {
+	snapshot, err := client.ReadFileSnapshot(ctx, u.fs, remotePath)
+	if err != nil {
+		u.uploadWriteError(op, err)
+		return
+	}
+	if snapshot.Stat == nil {
 		u.send(uploadResult{Op: op, Skipped: true})
 		return
 	}
-	if op.HasStored && op.StoredEntry.Mode != 0 && stat.Mode != op.StoredEntry.Mode && stat.Mode != mode {
-		if mode == op.StoredEntry.Mode {
-			// Only the remote mode changed. A rescan can apply that change.
-			u.send(uploadResult{Op: op, Skipped: true})
-		} else {
-			u.send(uploadResult{Op: op, Conflict: true, RemoteHashSeen: op.LocalHash, RemoteStat: stat})
-		}
-		return
-	}
-	u.finishFileUpload(ctx, op, remotePath, mode)
+	op.Mode = mode
+	u.finishMatchingSnapshot(ctx, op, snapshot)
 }
 
 func (u *uploader) queuedFileCurrent(op uploadOp) bool {

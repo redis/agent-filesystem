@@ -13,7 +13,9 @@ import (
 // syncStateVersion is bumped whenever the on-disk SyncState format changes in
 // an incompatible way. v2 adds ChunkSize/ChunkHashes to SyncEntry for
 // chunk-level delta sync. v1 entries have zero-value ChunkSize (= inline).
-const syncStateVersion = 3
+// v4 persists the exact remote inode/revision returned by atomic commits; old
+// baselines are adopted only after verifying their content against a snapshot.
+const syncStateVersion = 4
 
 // SyncEntry is the per-path record the reconciler maintains. It records what
 // the daemon last knew about both sides — local hash/mtime and the corresponding
@@ -21,16 +23,18 @@ const syncStateVersion = 3
 // as no-op (matches stored hash), upload (local diverged from stored), download
 // (remote diverged from stored), or conflict (both sides moved off stored).
 type SyncEntry struct {
-	Type          string    `json:"type"` // "file" | "dir" | "symlink"
-	Mode          uint32    `json:"mode"`
-	Size          int64     `json:"size"`
-	LocalHash     string    `json:"local_hash,omitempty"`
-	LocalIdentity string    `json:"local_identity,omitempty"`
-	LocalMtimeMs  int64     `json:"local_mtime_ms"`
-	RemoteHash    string    `json:"remote_hash,omitempty"`
-	RemoteMtimeMs int64     `json:"remote_mtime_ms"`
-	Target        string    `json:"target,omitempty"`
-	LastSyncedAt  time.Time `json:"last_synced_at"`
+	Type           string    `json:"type"` // "file" | "dir" | "symlink"
+	Mode           uint32    `json:"mode"`
+	Size           int64     `json:"size"`
+	LocalHash      string    `json:"local_hash,omitempty"`
+	LocalIdentity  string    `json:"local_identity,omitempty"`
+	LocalMtimeMs   int64     `json:"local_mtime_ms"`
+	RemoteRevision string    `json:"remote_revision,omitempty"`
+	RemoteInode    uint64    `json:"remote_inode,omitempty"`
+	RemoteHash     string    `json:"remote_hash,omitempty"`
+	RemoteMtimeMs  int64     `json:"remote_mtime_ms"`
+	Target         string    `json:"target,omitempty"`
+	LastSyncedAt   time.Time `json:"last_synced_at"`
 	// Chunked sync fields (v2). ChunkSize==0 means inline (not chunked).
 	ChunkSize   int      `json:"chunk_size,omitempty"`
 	ChunkHashes []string `json:"chunk_hashes,omitempty"`

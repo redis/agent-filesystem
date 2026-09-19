@@ -9,29 +9,10 @@ import (
 	"time"
 )
 
-type syncSaveFullDrainClient struct {
-	*syncSaveInflightClient
-	chmodDone chan error
-}
-
-func (c *syncSaveFullDrainClient) Chmod(ctx context.Context, path string, mode uint32) error {
-	err := c.Client.Chmod(ctx, path, mode)
-	if path == "/old" {
-		select {
-		case c.chmodDone <- err:
-		default:
-		}
-	}
-	return err
-}
-
 func TestSyncSaveJoinsInflightFullReconciliation(t *testing.T) {
 	env := newSyncTestEnv(t)
-	gate := &syncSaveFullDrainClient{
-		syncSaveInflightClient: &syncSaveInflightClient{
-			Client: env.fsClient, stored: make(chan struct{}), release: make(chan struct{}), postStat: make(chan error, 1),
-		},
-		chmodDone: make(chan error, 1),
+	gate := &syncSaveInflightClient{
+		Client: env.fsClient, stored: make(chan struct{}), release: make(chan struct{}), postStat: make(chan error, 1),
 	}
 	var release sync.Once
 	defer release.Do(func() { close(gate.release) })
@@ -46,8 +27,7 @@ func TestSyncSaveJoinsInflightFullReconciliation(t *testing.T) {
 		}
 	})
 	old := env.writeLocalFile(t, "old", "full reconciliation intent")
-	// Echo creates at 0644. Cancelling the following Chmod leaves a remote
-	// file that cannot be proved equal to the full reconciler's 0751 baseline.
+	// The non-default mode must commit with content before the upload returns.
 	if err := os.Chmod(old, 0o751); err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +59,10 @@ func TestSyncSaveJoinsInflightFullReconciliation(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("save did not join the full reconciliation")
 	}
-	var chmodErr error
-	select {
-	case chmodErr = <-gate.chmodDone:
-	default:
-		t.Fatal("full reconciliation did not finish its permission update")
-	}
-	if !result.Success || chmodErr != nil {
-		t.Fatalf("in-flight full reconciliation lost its result: save=%+v, Chmod error=%v", result, chmodErr)
+	// Content and permission now commit together before Echo returns. There
+	// is no separate chmod to drain; the save still joins the in-flight operation.
+	if !result.Success {
+		t.Fatalf("in-flight full reconciliation lost its result: %+v", result)
 	}
 	if env.remoteExists(t, "old") {
 		t.Fatal("save retained the offline rename's old path")

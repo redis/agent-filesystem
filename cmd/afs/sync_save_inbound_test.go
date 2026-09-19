@@ -124,6 +124,11 @@ type syncSaveChunkReadClient struct {
 	cancel context.CancelFunc
 }
 
+func (c *syncSaveChunkReadClient) InvalidateCache() {}
+func (c *syncSaveChunkReadClient) ChunkMeta(context.Context, string) (int, []string, error) {
+	return 4, []string{sha256Hex([]byte("abcd")), sha256Hex([]byte("EDIT"))}, nil
+}
+
 func (c *syncSaveChunkReadClient) Stat(context.Context, string) (*client.StatResult, error) {
 	return &client.StatResult{Type: "file", Size: 8, Mode: 0o644}, nil
 }

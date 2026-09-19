@@ -40,6 +40,8 @@ const (
 // InvalidateEvent is the payload broadcast on the per-FS-key pub/sub channel
 // whenever a client mutates state that other clients may be caching.
 type InvalidateEvent struct {
+	// OperationID identifies a committed file publication for replay/deduplication.
+	OperationID string `json:"operation_id,omitempty"`
 	// Origin is the publisher's opaque client ID. Subscribers skip messages
 	// whose Origin matches their own ID (local state is already correct).
 	Origin string `json:"origin"`

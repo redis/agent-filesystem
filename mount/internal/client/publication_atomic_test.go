@@ -142,13 +142,10 @@ func TestLostPublicationAcknowledgementDoesNotReplayOverNewerFile(t *testing.T) 
 			if !hook.fired {
 				t.Fatal("lost acknowledgement was not injected")
 			}
-			if !newer && err != nil {
+			if err != nil {
 				t.Fatalf("committed publication not recognized: %v", err)
 			}
 			if newer {
-				if err == nil {
-					t.Fatal("uncertain superseded write should not claim current publication")
-				}
 				if err := writer.Echo(writeCtx, "/file", []byte("mine")); !errors.Is(err, ErrWriteConflict) {
 					t.Fatalf("stale retry error=%v", err)
 				}
@@ -374,8 +371,8 @@ func TestCreatePublicationRetryPreservesConcurrentDeletion(t *testing.T) {
 					if stat != nil {
 						t.Fatalf("publication retry recreated a deleted file: %+v", stat)
 					}
-					if err == nil {
-						t.Fatal("superseded publication claimed success")
+					if err != nil {
+						t.Fatalf("committed operation was not acknowledged: %v", err)
 					}
 				} else {
 					if err != nil || stat == nil {

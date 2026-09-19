@@ -1360,6 +1360,8 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
+			entry.RemoteRevision = res.RemoteStat.Revision
+			entry.RemoteInode = res.RemoteStat.Inode
 			entry.LocalMtimeMs = res.Op.LocalMtimeMs
 		}
 		r.state.state.Entries[res.Op.Path] = entry
@@ -1375,6 +1377,8 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 		}
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
+			entry.RemoteRevision = res.RemoteStat.Revision
+			entry.RemoteInode = res.RemoteStat.Inode
 			entry.LocalMtimeMs = res.RemoteStat.Mtime
 		}
 		r.state.state.Entries[res.Op.Path] = entry
@@ -1402,6 +1406,8 @@ func (r *reconciler) handleUploadResult(ctx context.Context, res uploadResult) {
 		entry.Version = r.state.nextVersion()
 		if res.RemoteStat != nil {
 			entry.RemoteMtimeMs = res.RemoteStat.Mtime
+			entry.RemoteRevision = res.RemoteStat.Revision
+			entry.RemoteInode = res.RemoteStat.Inode
 			entry.LocalMtimeMs = res.RemoteStat.Mtime
 		}
 		r.state.state.Entries[res.Op.Path] = entry
@@ -1473,6 +1479,10 @@ func (r *reconciler) handleDownloadResult(ctx context.Context, res downloadResul
 			ChunkSize:     res.Op.ChunkSize,
 			ChunkHashes:   res.Op.ChunkHashes,
 			Version:       r.state.nextVersion(),
+		}
+		if res.RemoteStat != nil {
+			entry.RemoteRevision = res.RemoteStat.Revision
+			entry.RemoteInode = res.RemoteStat.Inode
 		}
 		r.state.state.Entries[res.Op.Path] = entry
 	case opDownloadSymlink:
