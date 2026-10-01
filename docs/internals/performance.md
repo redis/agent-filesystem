@@ -116,3 +116,26 @@ scripts/bench_compare.sh 5 /tmp/afs-perf-run-$(date +%Y%m%d-%H%M%S)
 
 After a meaningful rerun, summarize the stable result here rather than
 committing the generated CSV/JSON output.
+
+
+## Atomic publication receipts (2026-09-19)
+
+A local Redis 7.4.2 String-storage microbenchmark on an Apple M4 Pro compared
+`origin/main` at `1ff1fa0` with the atomic sync publication changes. Each size ran
+three one-second samples, using `BenchmarkAtomicFilePublication` in the mount
+client package. Median direct publication latency was 281 → 293 microseconds
+for 1 KiB (+4.3%) and 552 → 529 microseconds for 1 MiB (-4.2%). The latter should
+be treated as local measurement variation, not an established speedup. The
+receipt adds roughly 1–3 KiB of Go allocation per operation in these samples.
+
+This benchmark measures direct file publication, not end-to-end sync. Stable
+sync snapshot verification adds Redis reads; private staging temporarily needs
+both the old and new content, and seven-day receipts consume server memory in
+proportion to write rate. Remote-network and large-workspace latency need
+workload-specific measurement.
+
+Rerun from `mount/` with a String-capable Redis server on PATH:
+
+```bash
+go test ./internal/client -run '^$' -bench '^BenchmarkAtomicFilePublication$' -benchtime=1s -count=3
+```

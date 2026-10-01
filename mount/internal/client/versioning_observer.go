@@ -30,11 +30,21 @@ func (c *nativeClient) versionedSnapshotFromResolved(ctx context.Context, resolv
 	if inode == nil {
 		return snapshot, nil
 	}
+	if inode.committedSnapshot != nil {
+		return *inode.committedSnapshot, nil
+	}
 	switch inode.Type {
 	case "file":
 		content, err := c.loadContentExternal(ctx, inode.ID, inode.ContentRef)
 		if err != nil {
 			return VersionedSnapshot{}, err
+		}
+		current, readErr := c.loadInodeByID(ctx, inode.ID)
+		if readErr != nil {
+			return VersionedSnapshot{}, readErr
+		}
+		if current == nil || current.Revision != inode.Revision {
+			return VersionedSnapshot{}, ErrWriteConflict
 		}
 		snapshot.Exists = true
 		snapshot.Kind = "file"

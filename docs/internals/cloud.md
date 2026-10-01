@@ -117,3 +117,6 @@ Open:
 - The catalog is routing metadata. Workspace contents remain in Redis.
 - External database credentials should move behind a secret-store boundary
   before managed provisioning or enterprise BYODB hardening.
+
+See [atomic file commits](atomic-file-commits.md) for direct Redis client
+coordination, conditional sync writes, retries, and client upgrade requirements.

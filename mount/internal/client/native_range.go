@@ -246,7 +246,7 @@ func (c *nativeClient) stageInodeRange(ctx context.Context, inode *inodeData, pa
 	}
 	pipe := c.rdb.TxPipeline()
 	if isExternalContentRef(originalRef) && originalRef == inode.ContentRef && inode.Size > 0 {
-		copy := pipe.Copy(ctx, c.keys.content(inode.ID), stage, 0, true)
+		copy := pipe.Copy(ctx, c.keys.content(inode.ID), stage, c.rdb.Options().DB, true)
 		pipe.Expire(ctx, stage, publicationTTL)
 		if _, err := pipe.Exec(ctx); err != nil {
 			return stage, err

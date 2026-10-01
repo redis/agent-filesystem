@@ -20,6 +20,22 @@ type AttrUpdate = internal.AttrUpdate
 type ChangeStreamEntry = internal.ChangeStreamEntry
 type VersionedSnapshot = internal.VersionedSnapshot
 type MutationObserver = internal.MutationObserver
+type FileSnapshot = internal.FileSnapshot
+type MutationResult = internal.MutationResult
+
+func ReadFileSnapshot(ctx context.Context, fs Client, path string) (FileSnapshot, error) {
+	return internal.ReadFileSnapshot(ctx, fs, path)
+}
+
+func SameFileRevision(a, b *StatResult) bool { return internal.SameFileRevision(a, b) }
+
+func WithMutationResult(ctx context.Context, result *MutationResult) context.Context {
+	return internal.WithMutationResult(ctx, result)
+}
+
+func WithFileMode(ctx context.Context, mode uint32) context.Context {
+	return internal.WithFileMode(ctx, mode)
+}
 
 var ErrStreamTrimmed = internal.ErrStreamTrimmed
 

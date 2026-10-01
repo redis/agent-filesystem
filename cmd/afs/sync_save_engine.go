@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/redis/agent-filesystem/mount/client"
 	"io"
 	"io/fs"
 	"os"
@@ -37,6 +38,7 @@ type syncSaveEntry struct {
 	Hash   string `json:"sha256,omitempty"`
 	Target string `json:"target,omitempty"`
 
+	stat          *client.StatResult
 	mtimeMs       int64
 	identity      string
 	baselineHash  string
@@ -107,7 +109,14 @@ func saveSyncTree(ctx context.Context, r *reconciler, local syncSaveTree) (syncS
 			return receipt, err
 		}
 		chunkSize, hashes := syncSaveChunks(data, r)
-		if err := r.fs.WriteChunks(ctx, absoluteRemotePath(rel), nil, chunkSize, entry.Size, hashes); err != nil {
+		snapshot, err := client.ReadFileSnapshot(ctx, r.fs, absoluteRemotePath(rel))
+		if err != nil {
+			return receipt, err
+		}
+		if snapshot.Stat == nil || sha256Hex(snapshot.Content) != entry.Hash {
+			return receipt, fmt.Errorf("save chunk metadata %s: remote file changed", rel)
+		}
+		if err := r.fs.WriteChunks(snapshot.WriteContext(ctx), absoluteRemotePath(rel), nil, chunkSize, entry.Size, hashes); err != nil {
 			return receipt, fmt.Errorf("save chunk metadata %s: %w", rel, err)
 		}
 	}
@@ -144,6 +153,10 @@ func saveSyncTree(ctx context.Context, r *reconciler, local syncSaveTree) (syncS
 			LocalIdentity: entry.identity, LocalMtimeMs: entry.mtimeMs,
 			RemoteMtimeMs: verifiedRemote[rel].mtimeMs, LastSyncedAt: now,
 			Version: next.NextVersion,
+		}
+		if observed.stat != nil {
+			saved.RemoteRevision = observed.stat.Revision
+			saved.RemoteInode = observed.stat.Inode
 		}
 		if observed.chunkSize > 0 {
 			saved.ChunkSize, saved.ChunkHashes = observed.chunkSize, observed.chunkHashes
@@ -386,18 +399,36 @@ func scanSyncSaveRemote(ctx context.Context, r *reconciler, baseline *SyncState)
 			entry := syncSaveEntry{Type: item.Type, Mode: item.Mode, mtimeMs: item.Mtime}
 			switch item.Type {
 			case "dir":
+				entry.stat, err = r.fs.Stat(ctx, absoluteRemotePath(rel))
+				if err != nil {
+					return err
+				}
 				tree[rel] = entry
 				if err := walk(absoluteRemotePath(rel)); err != nil {
 					return err
 				}
 			case "symlink":
+				entry.stat, err = r.fs.Stat(ctx, absoluteRemotePath(rel))
+				if err != nil {
+					return err
+				}
 				entry.Target, err = r.fs.Readlink(ctx, absoluteRemotePath(rel))
 			case "file":
 				if item.Size < 0 || item.Size > r.maxFileBytes {
 					return fmt.Errorf("Redis file %s exceeds %d byte cap", rel, r.maxFileBytes)
 				}
 				var data []byte
-				data, err = r.fs.Cat(ctx, absoluteRemotePath(rel))
+				var snapshot client.FileSnapshot
+				snapshot, err = client.ReadFileSnapshot(ctx, r.fs, absoluteRemotePath(rel))
+				if err == nil && snapshot.Stat == nil {
+					return fmt.Errorf("Redis file %s vanished during scan", rel)
+				}
+				data = snapshot.Content
+				entry.stat = snapshot.Stat
+				if snapshot.Stat != nil {
+					entry.Mode = snapshot.Stat.Mode
+					entry.mtimeMs = snapshot.Stat.Mtime
+				}
 				if err == nil {
 					if int64(len(data)) != item.Size {
 						return fmt.Errorf("Redis file %s changed during scan", rel)

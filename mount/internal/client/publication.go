@@ -2,6 +2,9 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -87,8 +90,33 @@ func checkWriteCondition(ctx context.Context, inode *inodeData, creating bool) e
 // replacing a live content key. Redis executes publication as one command;
 // operation identity makes its automatic network retries safe.
 const publicationTTL = time.Hour
+const commitReceiptTTL = 7 * 24 * time.Hour
 
 var publishFileScript = redis.NewScript(`
+local receipttype=redis.call('TYPE',KEYS[13]).ok
+if receipttype~='none' and receipttype~='string' then return -4 end
+local receipt=redis.call('GET',KEYS[13])
+if receipt then
+ if receipt~=ARGV[10] then return -6 end
+ return 2
+end
+-- Redis scripts do not roll back runtime errors. Reject malformed metadata
+-- and bookkeeping before consuming staging or changing live content.
+for _,i in ipairs({1,3,5,6}) do
+ local t=redis.call('TYPE',KEYS[i]).ok
+ if t~='none' and t~='hash' then return -4 end
+end
+if redis.call('EXISTS',KEYS[14])~=0 then return -4 end
+local size=tonumber(ARGV[8])
+local old=tonumber(redis.call('HGET',KEYS[1],'size') or '0')
+local total=redis.call('HGET',KEYS[5],'total_data_bytes') or '0'
+local files=redis.call('HGET',KEYS[5],'files') or '0'
+local function integer(s)
+ return string.match(s,'^%-?%d+$') and tonumber(s) and math.abs(tonumber(s))<4503599627370496
+end
+if not integer(total) or not integer(files) or not size or size<0 or size>=4503599627370496 or not old or old<0 or old>=4503599627370496 then return -4 end
+if math.abs(tonumber(total)+size-old)>=4503599627370496 then return -4 end
+if (#ARGV-10)%2~=0 then return -4 end
 if ARGV[7] ~= '' and redis.call('GET', KEYS[7]) ~= ARGV[7] then return -2 end
 if KEYS[11] ~= KEYS[7] and redis.call('EXISTS',KEYS[11]) == 0 then return -5 end
 local current = redis.call('HGET', KEYS[1], 'revision') or ''
@@ -109,13 +137,17 @@ end
 -- stage after a concurrent delete must never let a transport retry recreate it.
 if redis.call('EXISTS', KEYS[2]) == 0 then return -3 end
 local previous = tonumber(redis.call('HGET', KEYS[1], 'size') or '0')
+if redis.call('EXISTS',KEYS[4])~=0 then
+ redis.call('RENAME',KEYS[4],KEYS[14])
+ redis.call('EXPIRE',KEYS[14],3600)
+end
 if ARGV[8] == '0' then
- redis.call('DEL', KEYS[2], KEYS[4])
+ redis.call('UNLINK', KEYS[2])
 else
  redis.call('RENAME', KEYS[2], KEYS[4])
  redis.call('PERSIST', KEYS[4])
 end
-for i=10,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
+for i=11,#ARGV,2 do redis.call('HSET',KEYS[1],ARGV[i],ARGV[i+1]) end
 redis.call('HSET',KEYS[1],'revision',ARGV[4])
 redis.call('HDEL',KEYS[1],'content')
 if ARGV[5] == '1' then
@@ -130,6 +162,7 @@ if ARGV[9] ~= '' then
  redis.call('XADD',KEYS[9],'MAXLEN','~',10000,'*','payload',ARGV[9])
  if KEYS[10]~=KEYS[7] then redis.call('PUBLISH',KEYS[10],ARGV[9]) end
 end
+redis.call('SET',KEYS[13],ARGV[10],'EX',604800)
 return 1
 `)
 
@@ -141,6 +174,9 @@ func (c *nativeClient) publishStagedFile(ctx context.Context, p string, inode *i
 		return err
 	}
 	revision := newOriginID()
+	if mode, ok := ctx.Value(fileModeKey{}).(uint32); ok {
+		inode.Mode = mode
+	}
 	generation, _ := ctx.Value(workspaceGenerationKey{}).(string)
 	create := "0"
 	if creating {
@@ -157,6 +193,19 @@ func (c *nativeClient) publishStagedFile(ctx context.Context, p string, inode *i
 		}
 		extra = mergeFieldMaps(extra, searchFields)
 	}
+	// Preserve this operation's exact published bytes for history. Reading the
+	// live key after commit can attribute another writer's content to our event.
+	var committed *VersionedSnapshot
+	if c.observer != nil {
+		data, err := rediscontent.Load(ctx, c.rdb, stage, inode.ContentRef, inode.Size)
+		if inode.Size == 0 {
+			data, err = []byte{}, nil
+		}
+		if err != nil {
+			return err
+		}
+		committed = &VersionedSnapshot{Path: normalizePath(p), Exists: true, Kind: "file", Mode: inode.Mode, Content: data, SizeBytes: inode.Size}
+	}
 	fields := mergeFieldMaps(c.inodeFieldsAtPath(inode, p, false), queryindex.StaleFields(), extra)
 	if _, ranged := ctx.Value(nativeRangeKey{}).(bool); ranged {
 		// An open handle's path is only an invalidation hint. A concurrent
@@ -169,18 +218,37 @@ func (c *nativeClient) publishStagedFile(ctx context.Context, p string, inode *i
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	args := []interface{}{inode.ID, inode.Name, inode.Revision, revision, create, inode.MtimeMs, generation, inode.Size, c.invalidationPayload(InvalidateOpInode, p)}
+	payload, err := encodeInvalidate(InvalidateEvent{Origin: c.originID, Op: InvalidateOpInode, Paths: []string{p}, OperationID: revision})
+	if err != nil {
+		return err
+	}
+	args := []interface{}{inode.ID, inode.Name, inode.Revision, revision, create, inode.MtimeMs, generation, inode.Size, string(payload), ""}
 	for _, key := range keys {
 		args = append(args, key, fields[key])
 	}
+	// Bind the receipt to this exact stage and request. An operation ID is
+	// allocated once, and go-redis transport retries reuse the same script args.
+	encoded, err := json.Marshal(struct {
+		Stage string
+		Args  []interface{}
+	}{stage, args})
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(encoded)
+	requestDigest := hex.EncodeToString(digest[:])
+	args[9] = requestDigest
+	receiptKey := "afs:{" + c.key + "}:commit:" + revision
+	retiredKey := "afs:{" + c.key + "}:retired:" + revision
+	defer c.discardStage(retiredKey)
 	result, err := c.runMutationScript(ctx, publishFileScript, false, []string{
-		c.keys.inode(inode.ID), stage, c.keys.dirents(inode.Parent), c.keys.content(inode.ID), c.keys.info(), c.keys.inode(inode.Parent), c.keys.generation(), c.keys.rootDirty(), c.keys.changesStream(), c.notificationChannel(), c.leaseGuardKey(ctx), queryindex.DirtySetKey(c.key),
+		c.keys.inode(inode.ID), stage, c.keys.dirents(inode.Parent), c.keys.content(inode.ID), c.keys.info(), c.keys.inode(inode.Parent), c.keys.generation(), c.keys.rootDirty(), c.keys.changesStream(), c.notificationChannel(), c.leaseGuardKey(ctx), queryindex.DirtySetKey(c.key), receiptKey, retiredKey,
 	}, args...)
 	if err != nil {
 		// A response can be lost after Redis committed. Resolve that uncertainty
 		// from the operation token, without replaying the candidate over new data.
-		token, readErr := c.rdb.HGet(ctx, c.keys.inode(inode.ID), "revision").Result()
-		if readErr != nil || token != revision {
+		token, readErr := c.rdb.Get(ctx, receiptKey).Result()
+		if readErr != nil || token != requestDigest {
 			return err
 		}
 	} else {
@@ -195,9 +263,13 @@ func (c *nativeClient) publishStagedFile(ctx context.Context, p string, inode *i
 			return errors.New("workspace change journal has wrong Redis type")
 		case -5:
 			return ErrNativeSessionLost
+		case -6:
+			return errors.New("publication operation ID reused with a different request")
 		}
 	}
 	inode.Revision = revision
+	inode.committedSnapshot = committed
+	captureMutationResult(ctx, inode, revision)
 	if _, ranged := ctx.Value(nativeRangeKey{}).(bool); !ranged {
 		c.cachePath(p, inode)
 	}
@@ -221,7 +293,7 @@ func (c *nativeClient) stageFullFile(ctx context.Context, inode *inodeData) (str
 func (c *nativeClient) discardStage(stage string) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	_ = c.rdb.Del(ctx, stage).Err()
+	_ = c.rdb.Unlink(ctx, stage).Err()
 }
 
 func (c *nativeClient) publishChunks(ctx context.Context, p string, chunks map[int][]byte, chunkSize int, newSize int64, hashes []string) error {
@@ -284,10 +356,13 @@ func (c *nativeClient) publishChunks(ctx context.Context, p string, chunks map[i
 	if !creating && isExternalContentRef(originalRef) && originalRef == inode.ContentRef {
 		// COPY stays inside Redis, preserving delta upload bandwidth.
 		pipe := c.rdb.TxPipeline()
-		pipe.Copy(ctx, c.keys.content(inode.ID), stage, 0, true)
+		copied := pipe.Copy(ctx, c.keys.content(inode.ID), stage, c.rdb.Options().DB, true)
 		pipe.Expire(ctx, stage, publicationTTL)
 		if _, err := pipe.Exec(ctx); err != nil {
 			return err
+		}
+		if copied.Val() == 0 && inode.Size > 0 {
+			return ErrWriteConflict
 		}
 	} else {
 		if !creating {
@@ -502,5 +577,6 @@ func (c *nativeClient) updatePublishedInode(ctx context.Context, p string, inode
 		return ErrNativeSessionLost
 	}
 	inode.Revision = revision
+	captureMutationResult(ctx, inode, revision)
 	return nil
 }

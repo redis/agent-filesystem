@@ -186,6 +186,13 @@ The most important implementation seams are:
 
 ## Lessons Learned
 
+- Sync must carry the revision from its verified remote snapshot through the
+  Redis mutation and record the returned commit stat. A post-write Stat can
+  belong to a peer, and a separate unguarded chmod can modify that peer's edit.
+  Compare stored revisions as well as timestamps during recovery scans.
+- Redis COPY must use the client's selected database; hard-coding database zero
+  can move staging outside the workspace and leave a partial delta candidate.
+
 - Read-time materialization and MCP refresh must not clear the live dirty
   marker or rewrite a previously fetched metadata record. Peer checkpoints
   and writes may have moved the tree; only the guarded live checkpoint save

@@ -1174,6 +1174,7 @@ func cloneInodeMeta(inode *inodeData) *inodeData {
 	}
 	clone := *inode
 	clone.Content = ""
+	clone.committedSnapshot = nil
 	return &clone
 }
 
